@@ -1,0 +1,32 @@
+{
+  "cli_version": "0.4.2",
+  "checkpoint_id": "66f3b493ea85",
+  "session_id": "291bb1f1-6d26-4aab-87e8-43d5a2776a56",
+  "strategy": "manual-commit",
+  "created_at": "2026-02-26T11:18:33.521054Z",
+  "branch": "feature/polymarket",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "cli/commands/polymarket.mjs",
+    "cli/polygon-agent.mjs",
+    "lib/polymarket.mjs",
+    "package.json"
+  ],
+  "agent": "Claude Code",
+  "token_usage": {
+    "input_tokens": 139,
+    "cache_creation_tokens": 257554,
+    "cache_read_tokens": 11134099,
+    "output_tokens": 1508,
+    "api_call_count": 115
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-02-26T11:18:33.251214Z",
+    "agent_lines": 502,
+    "human_added": 1341,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 1843,
+    "agent_percentage": 27.238198589256648
+  }
+}
