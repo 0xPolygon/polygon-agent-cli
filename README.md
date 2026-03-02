@@ -1,7 +1,7 @@
 # Polygon Agent CLI
 
 <p align="center">
-  <img src="assets/architecture.png" alt="Polygon Agent CLI Architecture" width="700" />
+  <img src="assets/agents-cli-image.png" alt="Polygon Agent CLI" width="700" />
 </p>
 
 <p align="center">
