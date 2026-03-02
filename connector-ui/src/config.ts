@@ -1,3 +1,4 @@
+// Configured via VITE_WALLET_URL secret
 const walletUrlRaw = import.meta.env.VITE_WALLET_URL as string
 // Avoid double slashes in wallet routing (walletUrl should not end with /)
 export const walletUrl = walletUrlRaw.replace(/\/+$/, '')
