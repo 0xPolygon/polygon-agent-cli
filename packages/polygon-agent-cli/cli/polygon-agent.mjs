@@ -6,6 +6,16 @@
 const cmd = process.argv[2];
 const subCmd = process.argv[3];
 
+if (cmd === '--version' || cmd === '-v') {
+  const { readFileSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const { dirname, join } = await import('node:path');
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const { version } = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8'));
+  console.log(version);
+  process.exit(0);
+}
+
 async function main() {
   try {
     // === SETUP ===
