@@ -1,11 +1,16 @@
 {
   "name": "@polygonlabs/agent-cli",
-  "version": "0.1.2",
+  "version": "0.1.3-dev.1",
   "description": "CLI + Agent Skills for building on-chain agents on Polygon",
   "type": "module",
   "bin": {
-    "polygon-agent": "./cli/polygon-agent.mjs"
+    "polygon-agent": "cli/polygon-agent.mjs"
   },
+  "files": [
+    "cli",
+    "contracts",
+    "lib"
+  ],
   "dependencies": {
     "@0xsequence/abi": "3.0.0-beta.16",
     "@0xsequence/api": "3.0.0-beta.16",
