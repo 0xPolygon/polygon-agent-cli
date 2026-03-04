@@ -2,7 +2,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import type { CliState } from '@0xsequence/dapp-client-cli/state';
+
 import { DappClient, TransportMode, jsonRevivers } from '@0xsequence/dapp-client';
+import { isNativeFeeOption } from '@0xsequence/dapp-client-cli/fee-utils';
+import { StateManager } from '@0xsequence/dapp-client-cli/state';
+import { FileSequenceStorage, FileSessionStorage } from '@0xsequence/dapp-client-cli/storage';
 
 import { loadWalletSession } from './storage.ts';
 
@@ -115,7 +120,7 @@ async function syncStateAndGetStorage({
     throw new Error(`Wallet not found: ${walletName}`);
   }
 
-  const walletAddress = session.walletAddress;
+  const walletAddress = session.walletAddress as `0x${string}`;
 
   const explicitRaw = session.explicitSession;
   if (!explicitRaw) {
@@ -141,10 +146,6 @@ async function syncStateAndGetStorage({
   const passphrase = getPassphrase();
   const statePath = statePathFor(walletName);
 
-  const { StateManager } = await import('@0xsequence/dapp-client-cli/dist/state.js');
-  const { FileSequenceStorage, FileSessionStorage } =
-    await import('@0xsequence/dapp-client-cli/dist/storage.js');
-
   const stateManager = new StateManager(statePath, passphrase);
   const storage = new FileSequenceStorage(stateManager, {
     suppressPendingRedirect: true
@@ -161,8 +162,7 @@ async function syncStateAndGetStorage({
   const nodesUrl = process.env.SEQUENCE_NODES_URL || 'https://nodes.sequence.app/{network}';
   const relayerUrl = process.env.SEQUENCE_RELAYER_URL || 'https://{network}-relayer.sequence.app';
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await stateManager.update((state: any) => {
+  await stateManager.update((state: CliState) => {
     state.config.walletUrl = walletUrl;
     state.config.origin = origin;
     state.config.projectAccessKey = projectAccessKey;
@@ -184,7 +184,7 @@ async function syncStateAndGetStorage({
   const implicitMeta = session.implicitMeta ? JSON.parse(session.implicitMeta, jsonRevivers) : {};
 
   await storage.saveExplicitSession({
-    pk: explicitSession.pk,
+    pk: explicitSession.pk as `0x${string}`,
     walletAddress,
     chainId,
     loginMethod: implicitMeta.loginMethod ?? explicitSession.loginMethod,
@@ -192,8 +192,7 @@ async function syncStateAndGetStorage({
     guard: implicitMeta.guard
   });
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await stateManager.update((state: any) => {
+  await stateManager.update((state: CliState) => {
     state.storage.sessionlessConnection = {
       walletAddress,
       loginMethod: implicitMeta.loginMethod ?? explicitSession.loginMethod,
@@ -212,7 +211,7 @@ async function syncStateAndGetStorage({
     const implicitAttestation = JSON.parse(session.implicitAttestation, jsonRevivers);
     const implicitIdentitySignature = JSON.parse(session.implicitIdentitySig, jsonRevivers);
     await storage.saveImplicitSession({
-      pk: session.implicitPk,
+      pk: session.implicitPk as `0x${string}`,
       walletAddress,
       chainId,
       attestation: implicitAttestation,
@@ -221,8 +220,8 @@ async function syncStateAndGetStorage({
   }
 
   await storage.setPendingRedirectRequest(false);
-  await storage.savePendingRequest(null);
-  await storage.saveTempSessionPk(null);
+  await storage.getAndClearPendingRequest();
+  await storage.getAndClearTempSessionPk();
 
   await sessionStorage.removeItem('');
 
@@ -271,10 +270,8 @@ export async function runDappClientTx({
     keymachineUrl,
     nodesUrl,
     relayerUrl,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    sequenceStorage: storage as any,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    sequenceSessionStorage: sessionStorage as any,
+    sequenceStorage: storage,
+    sequenceSessionStorage: sessionStorage,
     canUseIndexedDb: false
   });
 
@@ -307,12 +304,7 @@ export async function runDappClientTx({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const feeOptions = await client.getFeeOptions(chainId, transactions as any);
       if (debugFee) console.error(JSON.stringify({ debug: 'feeOptions', feeOptions }, null, 2));
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const isNativeOpt = (o: any) => {
-        const ca = o?.token?.contractAddress || '';
-        return !ca || ca === '0x0000000000000000000000000000000000000000';
-      };
-      const nativeOpt = (feeOptions || []).find(isNativeOpt);
+      const nativeOpt = (feeOptions || []).find(isNativeFeeOption);
       if (nativeOpt) feeOpt = nativeOpt;
     } catch {
       // Fall through to ERC20 fee path

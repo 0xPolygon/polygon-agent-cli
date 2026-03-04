@@ -118,8 +118,8 @@ importers:
         specifier: 3.0.0-beta.16
         version: 3.0.0-beta.16(typescript@5.9.3)(zod@3.25.76)
       '@0xsequence/dapp-client-cli':
-        specifier: 0.1.2
-        version: 0.1.2(typescript@5.9.3)(zod@3.25.76)
+        specifier: 0.1.5
+        version: 0.1.5(typescript@5.9.3)(zod@3.25.76)
       '@0xsequence/indexer':
         specifier: ^2.3.40
         version: 2.3.41
@@ -192,12 +192,18 @@ packages:
     peerDependencies:
       ethers: '>=6'
 
-  '@0xsequence/dapp-client-cli@0.1.2':
-    resolution: {integrity: sha512-eVcsVjbRjv1sKCUna7Dz4frQ+zRMiXk2kxBXVnSmiaatEVAFDnOyeK8idWtTmuJTYQc4uSolRdAI32q/V+r5Tg==}
+  '@0xsequence/dapp-client-cli@0.1.5':
+    resolution: {integrity: sha512-9vQsypf9mNUCOEb4oKfQW+7gmP5N2Tunf0Bm1dSY9FTPTqcvNHE/6vYFKgigVxYg5/favHxIiB8a61dqo1O1ew==}
     hasBin: true
 
   '@0xsequence/dapp-client@3.0.0-beta.16':
     resolution: {integrity: sha512-lo3ZNncrirvZEVpiUUfts/Skp6kmqJlKxUpEHj/1n+LO/L53dyqMUx9ti2qMIJGkAyKzZ66NdiqYqJoRKNNBIw==}
+
+  '@0xsequence/dapp-client@3.0.0-beta.17':
+    resolution: {integrity: sha512-Nb3ym/T1SNuyu6Y4cHBkPiZkNrFYyKEnl8CRpllmEJDnfAYAaGTvOhmeCqESDYLVNJe976UgxhQnkhxn5IpqNA==}
+
+  '@0xsequence/guard@3.0.0':
+    resolution: {integrity: sha512-3GAC7LM/o8nesW60UmqUPfY7DFNXFKzJ8rCEbkWwpC7ugycbtHNTWJUCDnQzVqVW8TXHKOFhHyxYpLQ0w8xJLQ==}
 
   '@0xsequence/guard@3.0.0-beta.19':
     resolution: {integrity: sha512-4A+LjH+uCywX9JD+O76D6o2ZkoIvym7LEVo5bxAcRV8zFyuwy7yiQHdiVvNcNaGayApn0Y7vt6mfZKdALoXqSA==}
@@ -218,6 +224,9 @@ packages:
     peerDependencies:
       ethers: '>=6'
 
+  '@0xsequence/relayer@3.0.0':
+    resolution: {integrity: sha512-hMMAKGVeOqEdHO9/BqtSde1XpI6gc2V9ERXazuylYzly+eKnfLt2Ne/Tu0bGvfGgMU1+yvhGrtDabSxBRU5NMA==}
+
   '@0xsequence/relayer@3.0.0-beta.16':
     resolution: {integrity: sha512-AThyuMWuvAJv64I2o38hJKtlRxzj51x8pYLWr70yqHkRi2CasHAEK5xEDhVJA9XCQ2g+XiKiBSezwsfNbStDVg==}
 
@@ -229,8 +238,14 @@ packages:
     peerDependencies:
       ethers: '>=6'
 
+  '@0xsequence/wallet-core@3.0.0':
+    resolution: {integrity: sha512-8A2UVY3lYPjo3/OxtVSGY4QJk34HEZKU8heMspoE563wyglwKP8Q0uxzFwQVMLc8mMV0qBIOMku3bdNEhI3FZw==}
+
   '@0xsequence/wallet-core@3.0.0-beta.16':
     resolution: {integrity: sha512-Vi34/n5FPVXfbz6ykoiATXaG/CAYyMbo3f01/t3NuyZc2DkgzZ7/fIlN6G2i2PEi2aV3gTt/ENVapOsJVRD/xw==}
+
+  '@0xsequence/wallet-primitives@3.0.0':
+    resolution: {integrity: sha512-V43rz82YoRjOMRBRz8FRcXldyzdUtvhLaCwuqu2zW61SZhag/QVNEHNxGg8EGtqIt6e8xKHx8PfXPRWeUiEzpQ==}
 
   '@0xsequence/wallet-primitives@3.0.0-beta.16':
     resolution: {integrity: sha512-iwweQtEo/6sA6VBSVTQggdwKRvYoJOaRBrB+1trp05ULq4+rtvS+BG4mPfZQN86RWy93MYwCF1znsDon69u6wQ==}
@@ -4894,9 +4909,9 @@ snapshots:
       '@0xsequence/utils': 2.3.41(ethers@6.16.0)
       ethers: 6.16.0
 
-  '@0xsequence/dapp-client-cli@0.1.2(typescript@5.9.3)(zod@3.25.76)':
+  '@0xsequence/dapp-client-cli@0.1.5(typescript@5.9.3)(zod@3.25.76)':
     dependencies:
-      '@0xsequence/dapp-client': 3.0.0-beta.16(typescript@5.9.3)(zod@3.25.76)
+      '@0xsequence/dapp-client': 3.0.0-beta.17(typescript@5.9.3)(zod@3.25.76)
       dotenv: 17.3.1
       ox: 0.9.17(typescript@5.9.3)(zod@3.25.76)
       undici: 7.22.0
@@ -4918,6 +4933,26 @@ snapshots:
       - bufferutil
       - typescript
       - utf-8-validate
+      - zod
+
+  '@0xsequence/dapp-client@3.0.0-beta.17(typescript@5.9.3)(zod@3.25.76)':
+    dependencies:
+      '@0xsequence/guard': 3.0.0(typescript@5.9.3)(zod@3.25.76)
+      '@0xsequence/relayer': 3.0.0(typescript@5.9.3)(zod@3.25.76)
+      '@0xsequence/wallet-core': 3.0.0(typescript@5.9.3)(zod@3.25.76)
+      '@0xsequence/wallet-primitives': 3.0.0(typescript@5.9.3)(zod@3.25.76)
+      ox: 0.9.17(typescript@5.9.3)(zod@3.25.76)
+    transitivePeerDependencies:
+      - bufferutil
+      - typescript
+      - utf-8-validate
+      - zod
+
+  '@0xsequence/guard@3.0.0(typescript@5.9.3)(zod@3.25.76)':
+    dependencies:
+      ox: 0.9.17(typescript@5.9.3)(zod@3.25.76)
+    transitivePeerDependencies:
+      - typescript
       - zod
 
   '@0xsequence/guard@3.0.0-beta.19(typescript@5.9.3)(zod@3.25.76)':
@@ -4953,6 +4988,18 @@ snapshots:
       '@0xsequence/utils': 2.3.41(ethers@6.16.0)
       ethers: 6.16.0
 
+  '@0xsequence/relayer@3.0.0(typescript@5.9.3)(zod@3.25.76)':
+    dependencies:
+      '@0xsequence/wallet-primitives': 3.0.0(typescript@5.9.3)(zod@3.25.76)
+      mipd: 0.0.7(typescript@5.9.3)
+      ox: 0.9.17(typescript@5.9.3)(zod@3.25.76)
+      viem: 2.46.3(typescript@5.9.3)(zod@3.25.76)
+    transitivePeerDependencies:
+      - bufferutil
+      - typescript
+      - utf-8-validate
+      - zod
+
   '@0xsequence/relayer@3.0.0-beta.16(typescript@5.9.3)(zod@3.25.76)':
     dependencies:
       '@0xsequence/wallet-primitives': 3.0.0-beta.16(typescript@5.9.3)(zod@3.25.76)
@@ -4975,6 +5022,20 @@ snapshots:
       ethers: 6.16.0
       js-base64: 3.7.8
 
+  '@0xsequence/wallet-core@3.0.0(typescript@5.9.3)(zod@3.25.76)':
+    dependencies:
+      '@0xsequence/guard': 3.0.0(typescript@5.9.3)(zod@3.25.76)
+      '@0xsequence/relayer': 3.0.0(typescript@5.9.3)(zod@3.25.76)
+      '@0xsequence/wallet-primitives': 3.0.0(typescript@5.9.3)(zod@3.25.76)
+      mipd: 0.0.7(typescript@5.9.3)
+      ox: 0.9.17(typescript@5.9.3)(zod@3.25.76)
+      viem: 2.46.3(typescript@5.9.3)(zod@3.25.76)
+    transitivePeerDependencies:
+      - bufferutil
+      - typescript
+      - utf-8-validate
+      - zod
+
   '@0xsequence/wallet-core@3.0.0-beta.16(typescript@5.9.3)(zod@3.25.76)':
     dependencies:
       '@0xsequence/guard': 3.0.0-beta.19(typescript@5.9.3)(zod@3.25.76)
@@ -4987,6 +5048,13 @@ snapshots:
       - bufferutil
       - typescript
       - utf-8-validate
+      - zod
+
+  '@0xsequence/wallet-primitives@3.0.0(typescript@5.9.3)(zod@3.25.76)':
+    dependencies:
+      ox: 0.9.17(typescript@5.9.3)(zod@3.25.76)
+    transitivePeerDependencies:
+      - typescript
       - zod
 
   '@0xsequence/wallet-primitives@3.0.0-beta.16(typescript@5.9.3)(zod@3.25.76)':

@@ -22,7 +22,7 @@
     "@0xsequence/api": "3.0.0-beta.16",
     "@0xsequence/builder": "3.0.0-beta.16",
     "@0xsequence/dapp-client": "3.0.0-beta.16",
-    "@0xsequence/dapp-client-cli": "0.1.2",
+    "@0xsequence/dapp-client-cli": "0.1.5",
     "@0xsequence/indexer": "^2.3.40",
     "@0xsequence/network": "^2.3.40",
     "@0xsequence/relayer": "3.0.0-beta.16",
