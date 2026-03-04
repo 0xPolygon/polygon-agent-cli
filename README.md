@@ -37,7 +37,7 @@ pnpm install
 pnpm polygon-agent --help
 ```
 
-Requirements: Node.js 22+, pnpm
+Requirements: Node.js 20+, pnpm
 
 ## License
 

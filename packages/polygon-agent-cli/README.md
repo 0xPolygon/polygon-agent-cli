@@ -256,18 +256,19 @@ cd packages/connector-ui && pnpm dev
 polygon-agent-cli/
 ├── packages/
 │   ├── polygon-agent-cli/  # CLI package (@polygonlabs/agent-cli)
-│   │   ├── cli/            # Entry point + commands
-│   │   │   ├── polygon-agent.mjs
-│   │   │   └── commands/
+│   │   ├── src/            # TypeScript source
+│   │   │   ├── index.ts    # yargs entry point
+│   │   │   ├── commands/   # Command modules (setup, wallet, operations, agent)
+│   │   │   ├── lib/        # Shared utils (storage, ethauth, tokens, dapp-client)
+│   │   │   └── types.d.ts  # Ambient declarations for untyped deps
 │   │   ├── contracts/      # ERC-8004 ABIs
-│   │   ├── lib/            # Shared utils (storage, ethauth, tokens)
 │   │   └── skills/         # Agent-friendly docs (SKILL.md, QUICKSTART.md)
 │   └── connector-ui/       # React app, wallet connect bridge
 ├── pnpm-workspace.yaml
 └── package.json
 ```
 
-**Requirements:** Node.js 22+, pnpm
+**Requirements:** Node.js 20+
 
 ---
 

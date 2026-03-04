@@ -7,7 +7,7 @@ description: Complete Polygon agent CLI. Session-based smart contract wallets (S
 
 ## Prerequisites
 
-- Node.js 22+
+- Node.js 20+
 - Run via npx: `npx @polygonlabs/agent-cli <command>`
 - Storage: `~/.polygon-agent/` (AES-256-GCM encrypted)
 

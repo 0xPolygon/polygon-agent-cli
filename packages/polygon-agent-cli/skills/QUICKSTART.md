@@ -9,7 +9,7 @@ description: Quick start guide for Polygon Agent CLI. Get project access key, cr
 
 ## Prerequisites
 
-- Node.js 22+
+- Node.js 20+
 - Run via npx: `npx @polygonlabs/agent-cli <command>`
 - Or install globally for the shorter `polygon-agent` command: `npm install -g @polygonlabs/agent-cli`
 

@@ -1,10 +1,17 @@
-import polygonConfig from './eslint.config.polygon.js';
+import globals from 'globals';
+
+import { frontend, recommended, javascript, typescript } from '@polygonlabs/apps-team-lint';
 
 export default [
-  ...polygonConfig,
-
-  // --- Repo-specific overrides below ---
+  ...recommended(),
+  ...javascript({ globals: 'node' }),
+  ...typescript({ tsconfigRootDir: import.meta.dirname }),
+  ...frontend(),
   {
-    ignores: ['test-smart-wallet-polymarket.mjs', 'x402-test-server/**']
+    files: ['packages/polygon-agent-cli/**/*.ts'],
+    languageOptions: { globals: { ...globals.node } }
+  },
+  {
+    ignores: ['.claude/**', '**/dist/**']
   }
 ];
