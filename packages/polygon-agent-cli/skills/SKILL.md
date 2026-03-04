@@ -11,6 +11,18 @@ description: Complete Polygon agent CLI. Session-based smart contract wallets (S
 - Run via npx: `npx @polygonlabs/agent-cli <command>`
 - Storage: `~/.polygon-agent/` (AES-256-GCM encrypted)
 
+## Session Initialization
+
+**Before running any commands**, use the Read tool to check `~/.polygon-agent/builder.json`:
+
+- **If it exists** — extract `accessKey` from the JSON and export as plain shell vars (no `$()` subshells):
+  ```bash
+  export SEQUENCE_PROJECT_ACCESS_KEY=<accessKey>
+  export SEQUENCE_INDEXER_ACCESS_KEY=$SEQUENCE_PROJECT_ACCESS_KEY
+  export TRAILS_API_KEY=$SEQUENCE_PROJECT_ACCESS_KEY
+  ```
+- **If it doesn't exist** — the user hasn't completed setup yet. Proceed to Phase 1 (`setup`) which will create the file.
+
 ## Architecture
 
 | Wallet           | Created by      | Purpose                    | Fund? |
