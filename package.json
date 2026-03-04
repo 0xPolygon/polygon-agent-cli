@@ -6,9 +6,10 @@
   "packageManager": "pnpm@10.30.3",
   "scripts": {
     "prepare": "husky",
-    "lint": "eslint . && prettier --check .",
-    "format": "eslint . --fix && prettier --write .",
-    "format:check": "prettier --check .",
+    "lint": "pnpm run lint:ts && prettier --check .",
+    "lint:ts": "eslint .",
+    "format": "pnpm run format:ts && prettier --write .",
+    "format:ts": "eslint . --fix",
     "build": "pnpm -r run build",
     "typecheck": "pnpm -r run typecheck",
     "polygon-agent": "node packages/polygon-agent-cli/src/index.ts"
@@ -25,6 +26,7 @@
     "eslint": "^9.39.3",
     "globals": "^17.4.0",
     "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
     "lerna": "^9.0.5",
     "prettier": "^3.0.0",
     "@types/node": "^22.15.0",
