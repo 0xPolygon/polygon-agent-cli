@@ -30,6 +30,8 @@ declare module '@0xsequence/dapp-client-cli/dist/storage.js' {
     setPendingRedirectRequest(value: boolean): Promise<void>;
     savePendingRequest(value: unknown): Promise<void>;
     saveTempSessionPk(value: unknown): Promise<void>;
+    getAndClearPendingRequest(): Promise<unknown>;
+    getAndClearTempSessionPk(): Promise<unknown>;
   }
 
   export class FileSessionStorage {

@@ -221,8 +221,8 @@ async function syncStateAndGetStorage({
   }
 
   await storage.setPendingRedirectRequest(false);
-  await storage.savePendingRequest(null);
-  await storage.saveTempSessionPk(null);
+  await storage.getAndClearPendingRequest();
+  await storage.getAndClearTempSessionPk();
 
   await sessionStorage.removeItem('');
 
