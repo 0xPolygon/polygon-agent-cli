@@ -41,10 +41,15 @@ function randomId(bytes = 16) {
   return b64urlEncode(nacl.randomBytes(bytes));
 }
 
-// ERC-8004 contracts — always whitelisted in sessions
-const ERC8004_CONTRACTS = [
-  '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432', // IdentityRegistry
-  '0x8004BAa17C55a88189AE136b182e5fdA19dE9b63' // ReputationRegistry
+// Contracts always whitelisted in sessions.
+// Spending limits (nativeLimit, usdcLimit, etc.) are enforced independently —
+// whitelisting only permits the contract to be called, it does not grant token spend.
+const AUTO_WHITELISTED_CONTRACTS = [
+  '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432', // ERC-8004 IdentityRegistry
+  '0x8004BAa17C55a88189AE136b182e5fdA19dE9b63', // ERC-8004 ReputationRegistry
+  '0xABAAd93EeE2a569cF0632f39B10A9f5D734777ca', // ValueForwarder (required for send native POL)
+  '0x9c62f831c73c55deca97a2be8e6379336f8e0514', // Trails deposit contract (required for swap --from POL)
+  '0x7e08701cc9194ef4ffd82421dd0d986d1b43d521'  // Trails swap router 
 ];
 
 // Parse session permission args and append them to a URL
@@ -79,7 +84,7 @@ function applySessionPermissionParams(url, args) {
   const userContracts = getArgs(args, '--contract')
     .map((s) => String(s || '').trim())
     .filter(Boolean);
-  const allContracts = [...new Set([...ERC8004_CONTRACTS, ...userContracts])];
+  const allContracts = [...new Set([...AUTO_WHITELISTED_CONTRACTS, ...userContracts])];
   url.searchParams.set('contracts', allContracts.join(','));
 }
 
