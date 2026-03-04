@@ -1,15 +1,14 @@
 ---
 name: polygon-agent-cli
-description: Complete Polygon agent toolkit. Session-based smart contract wallets (Sequence), token ops (send/swap/bridge/deposit via Trails), ERC-8004 on-chain identity + reputation, x402 micropayments. Single CLI entry point, AES-256-GCM encrypted storage.
+description: Complete Polygon agent CLI. Session-based smart contract wallets (Sequence), token ops (send/swap/bridge/deposit via Trails), ERC-8004 on-chain identity + reputation, x402 micropayments. Single CLI entry point, AES-256-GCM encrypted storage.
 ---
 
-# Polygon Agent Kit
+# Polygon Agent CLI
 
 ## Prerequisites
 
 - Node.js 22+
-- Install globally: `npm install -g @polygonlabs/agent-cli`
-- Entry point: `polygon-agent <command>`
+- Run via npx: `npx @polygonlabs/agent-cli <command>`
 - Storage: `~/.polygon-agent/` (AES-256-GCM encrypted)
 
 ## Architecture
