@@ -96,6 +96,16 @@ polygon-agent wallet create \
 | `--usdc-amount <amt>`     | USDC amount for `--usdc-to` recipient                      |
 | `--contract <addr>`       | Whitelist contract address (repeatable)                    |
 
+> **Deposit / DeFi note**: `--usdc-limit` restricts the session to USDC `transfer` calls only — this blocks the `approve` call that `deposit` (Aave/Morpho) requires. If you plan to use `deposit`, **omit `--usdc-limit`** and whitelist USDC and the protocol pool via `--contract` instead:
+>
+> ```bash
+> polygon-agent wallet create \
+>   --native-limit 5 \
+>   --contract 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359 \
+>   --contract 0x794a61358d6845594f94dc1db02a252b5b4814ad
+> # ^ USDC (unrestricted, allows approve)   ^ Aave V3 pool (Polygon mainnet)
+> ```
+
 **After approval**: Fund `walletAddress` with POL + tokens.
 
 ### Fund wallet via Trails
@@ -201,6 +211,7 @@ export TRAILS_API_KEY=$SEQUENCE_PROJECT_ACCESS_KEY
 | `callbackMode: manual` shown     | cloudflared unavailable — paste blob from browser when prompted                                             |
 | 404 on `*.trycloudflare.com` URL | CLI timed out before you approved — re-run `wallet create` and open the new URL immediately                 |
 | "Auto-send failed" in browser    | Ciphertext is shown below the message — copy it and run `polygon-agent wallet import --ciphertext '<blob>'` |
+| Deposit fails (`approve` blocked) | `--usdc-limit` allows `transfer` only — omit it and use `--contract 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359 --contract <poolAddress>` |
 
 ---
 
