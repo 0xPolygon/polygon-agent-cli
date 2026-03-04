@@ -13,6 +13,18 @@ description: Quick start guide for Polygon Agent CLI. Get project access key, cr
 - Run via npx: `npx @polygonlabs/agent-cli <command>`
 - Or install globally for the shorter `polygon-agent` command: `npm install -g @polygonlabs/agent-cli`
 
+## Session Initialization
+
+**Before running any commands**, use the Read tool to check `~/.polygon-agent/builder.json`:
+
+- **If it exists** — extract `accessKey` from the JSON and export as plain shell vars (no `$()` subshells):
+  ```bash
+  export SEQUENCE_PROJECT_ACCESS_KEY=<accessKey>
+  export SEQUENCE_INDEXER_ACCESS_KEY=$SEQUENCE_PROJECT_ACCESS_KEY
+  export TRAILS_API_KEY=$SEQUENCE_PROJECT_ACCESS_KEY
+  ```
+- **If it doesn't exist** — the user hasn't completed setup yet. Proceed to Phase 1 (`setup`) which will create the file.
+
 ## Phase 1: Setup
 
 ```bash
