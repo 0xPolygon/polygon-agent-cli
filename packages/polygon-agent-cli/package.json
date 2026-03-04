@@ -4,14 +4,18 @@
   "description": "CLI + Agent Skills for building on-chain agents on Polygon",
   "type": "module",
   "bin": {
-    "polygon-agent": "cli/polygon-agent.mjs"
+    "polygon-agent": "dist/index.js"
   },
   "files": [
-    "cli",
+    "dist",
     "contracts",
-    "lib",
     "skills"
   ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "node src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": {
     "@0xsequence/abi": "3.0.0-beta.16",
     "@0xsequence/api": "3.0.0-beta.16",
@@ -32,7 +36,11 @@
     "ethers": "^6.13.0",
     "tweetnacl": "^1.0.3",
     "tweetnacl-sealedbox-js": "^1.2.0",
-    "viem": "^2.45.3"
+    "viem": "^2.45.3",
+    "yargs": "^17.7.2"
+  },
+  "devDependencies": {
+    "@types/yargs": "^17.0.33"
   },
   "engines": {
     "node": ">=20.0.0"

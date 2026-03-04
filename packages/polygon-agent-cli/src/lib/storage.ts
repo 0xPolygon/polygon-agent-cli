@@ -1,7 +1,3 @@
-// Storage module for polygon-agent-cli
-// Simple file-based storage with AES-256-GCM encryption
-// ~/.polygon-agent/ structure
-
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -10,12 +6,37 @@ import path from 'node:path';
 const STORAGE_DIR = path.join(os.homedir(), '.polygon-agent');
 const ENCRYPTION_KEY_FILE = path.join(STORAGE_DIR, '.encryption-key');
 
-// Ensure storage directory exists
-function ensureStorageDir() {
+interface CipherData {
+  iv: string;
+  encrypted: string;
+  authTag: string;
+}
+
+export interface BuilderConfig {
+  privateKey: string;
+  eoaAddress: string;
+  accessKey: string;
+  projectId: number;
+}
+
+export interface WalletSession {
+  walletAddress: string;
+  chainId: number;
+  chain: string;
+  projectAccessKey: string | null;
+  explicitSession: string;
+  sessionPk: string;
+  implicitPk: string;
+  implicitMeta: string;
+  implicitAttestation: string;
+  implicitIdentitySig: string;
+  createdAt: string;
+}
+
+function ensureStorageDir(): void {
   if (!fs.existsSync(STORAGE_DIR)) {
     fs.mkdirSync(STORAGE_DIR, { recursive: true, mode: 0o700 });
   }
-  // Create subdirectories
   const subdirs = ['wallets', 'requests', 'state/dapp-client-cli'];
   for (const dir of subdirs) {
     const fullPath = path.join(STORAGE_DIR, dir);
@@ -25,22 +46,19 @@ function ensureStorageDir() {
   }
 }
 
-// Get or create encryption key
-function getEncryptionKey() {
+function getEncryptionKey(): Buffer {
   ensureStorageDir();
 
   if (fs.existsSync(ENCRYPTION_KEY_FILE)) {
     return fs.readFileSync(ENCRYPTION_KEY_FILE);
   }
 
-  // Generate new 256-bit key
   const key = randomBytes(32);
   fs.writeFileSync(ENCRYPTION_KEY_FILE, key, { mode: 0o600 });
   return key;
 }
 
-// Encrypt data with AES-256-GCM
-function encrypt(plaintext) {
+function encrypt(plaintext: string): CipherData {
   const key = getEncryptionKey();
   const iv = randomBytes(16);
   const cipher = createCipheriv('aes-256-gcm', key, iv);
@@ -57,8 +75,7 @@ function encrypt(plaintext) {
   };
 }
 
-// Decrypt data with AES-256-GCM
-function decrypt(cipherData) {
+function decrypt(cipherData: CipherData): string {
   const key = getEncryptionKey();
   const iv = Buffer.from(cipherData.iv, 'hex');
   const authTag = Buffer.from(cipherData.authTag, 'hex');
@@ -72,13 +89,10 @@ function decrypt(cipherData) {
   return decrypted;
 }
 
-// Save builder config (encrypted private key)
-export async function saveBuilderConfig(config) {
+export async function saveBuilderConfig(config: BuilderConfig): Promise<void> {
   ensureStorageDir();
 
   const configPath = path.join(STORAGE_DIR, 'builder.json');
-
-  // Encrypt private key
   const encryptedKey = encrypt(config.privateKey);
 
   const data = {
@@ -88,11 +102,12 @@ export async function saveBuilderConfig(config) {
     projectId: config.projectId
   };
 
-  fs.writeFileSync(configPath, JSON.stringify(data, null, 2), { mode: 0o600 });
+  fs.writeFileSync(configPath, JSON.stringify(data, null, 2), {
+    mode: 0o600
+  });
 }
 
-// Load builder config (decrypt private key)
-export async function loadBuilderConfig() {
+export async function loadBuilderConfig(): Promise<BuilderConfig | null> {
   const configPath = path.join(STORAGE_DIR, 'builder.json');
 
   if (!fs.existsSync(configPath)) {
@@ -100,8 +115,6 @@ export async function loadBuilderConfig() {
   }
 
   const data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-
-  // Decrypt private key
   const privateKey = decrypt(data.privateKey);
 
   return {
@@ -112,16 +125,16 @@ export async function loadBuilderConfig() {
   };
 }
 
-// Save wallet session
-export async function saveWalletSession(name, session) {
+export async function saveWalletSession(name: string, session: WalletSession): Promise<void> {
   ensureStorageDir();
 
   const walletPath = path.join(STORAGE_DIR, 'wallets', `${name}.json`);
-  fs.writeFileSync(walletPath, JSON.stringify(session, null, 2), { mode: 0o600 });
+  fs.writeFileSync(walletPath, JSON.stringify(session, null, 2), {
+    mode: 0o600
+  });
 }
 
-// Load wallet session
-export async function loadWalletSession(name) {
+export async function loadWalletSession(name: string): Promise<WalletSession | null> {
   const walletPath = path.join(STORAGE_DIR, 'wallets', `${name}.json`);
 
   if (!fs.existsSync(walletPath)) {
@@ -131,16 +144,27 @@ export async function loadWalletSession(name) {
   return JSON.parse(fs.readFileSync(walletPath, 'utf8'));
 }
 
-// Save wallet request (for create-request flow)
-export async function saveWalletRequest(rid, request) {
+export interface WalletRequest {
+  rid: string;
+  walletName: string;
+  chain: string;
+  createdAt: string;
+  expiresAt: string;
+  publicKeyB64u: string;
+  privateKeyB64u: string;
+  projectAccessKey: string | null;
+}
+
+export async function saveWalletRequest(rid: string, request: WalletRequest): Promise<void> {
   ensureStorageDir();
 
   const requestPath = path.join(STORAGE_DIR, 'requests', `${rid}.json`);
-  fs.writeFileSync(requestPath, JSON.stringify(request, null, 2), { mode: 0o600 });
+  fs.writeFileSync(requestPath, JSON.stringify(request, null, 2), {
+    mode: 0o600
+  });
 }
 
-// Load wallet request
-export async function loadWalletRequest(rid) {
+export async function loadWalletRequest(rid: string): Promise<WalletRequest | null> {
   const requestPath = path.join(STORAGE_DIR, 'requests', `${rid}.json`);
 
   if (!fs.existsSync(requestPath)) {
@@ -150,8 +174,7 @@ export async function loadWalletRequest(rid) {
   return JSON.parse(fs.readFileSync(requestPath, 'utf8'));
 }
 
-// List all wallets
-export async function listWallets() {
+export async function listWallets(): Promise<string[]> {
   ensureStorageDir();
 
   const walletsDir = path.join(STORAGE_DIR, 'wallets');
@@ -160,8 +183,7 @@ export async function listWallets() {
   return files.filter((f) => f.endsWith('.json')).map((f) => f.replace('.json', ''));
 }
 
-// Delete wallet
-export async function deleteWallet(name) {
+export async function deleteWallet(name: string): Promise<boolean> {
   const walletPath = path.join(STORAGE_DIR, 'wallets', `${name}.json`);
 
   if (fs.existsSync(walletPath)) {

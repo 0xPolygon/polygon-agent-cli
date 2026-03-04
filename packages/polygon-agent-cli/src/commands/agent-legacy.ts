@@ -1,52 +1,60 @@
-// Registry commands - ERC-8004 Agent Registration and Reputation
-// IdentityRegistry: 0x8004A169FB4a3325136EB29fA0ceB6D2e539a432
-// ReputationRegistry: 0x8004BAa17C55a88189AE136b182e5fdA19dE9b63
+// Legacy aliases for backward compatibility with the old flat command structure.
+// These re-use process.argv parsing since they're invoked as top-level commands
+// (e.g. `polygon-agent register` instead of `polygon-agent agent register`).
+// They delegate to the same underlying logic via yargs programmatic invocation.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { Contract, Interface } from 'ethers';
+import { Contract, Interface, JsonRpcProvider } from 'ethers';
 
-import { runDappClientTx } from '../../lib/dapp-client.mjs';
+import { runDappClientTx } from '../lib/dapp-client.ts';
 import {
-  getArg,
-  hasFlag,
   resolveNetwork,
   formatUnits,
   getExplorerUrl,
-  getRpcUrl
-} from '../../lib/utils.mjs';
+  getRpcUrl,
+  fileCoerce
+} from '../lib/utils.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Contract addresses on Polygon
 const IDENTITY_REGISTRY = '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432';
 const REPUTATION_REGISTRY = '0x8004BAa17C55a88189AE136b182e5fdA19dE9b63';
 
-// Load ABIs
+const contractsDir = path.resolve(__dirname, '..', '..', 'contracts');
 const IDENTITY_ABI = JSON.parse(
-  fs.readFileSync(path.join(__dirname, '../../contracts/IdentityRegistry.json'), 'utf8')
+  fs.readFileSync(path.join(contractsDir, 'IdentityRegistry.json'), 'utf8')
 );
 const REPUTATION_ABI = JSON.parse(
-  fs.readFileSync(path.join(__dirname, '../../contracts/ReputationRegistry.json'), 'utf8')
+  fs.readFileSync(path.join(contractsDir, 'ReputationRegistry.json'), 'utf8')
 );
 
-// Register agent on IdentityRegistry
-export async function registerAgent() {
+// Simple arg parser for legacy commands (reads from process.argv)
+function getArg(flag: string): string | null {
   const args = process.argv.slice(2);
-  const walletName = getArg(args, '--wallet') || 'main';
-  const agentName = getArg(args, '--name');
-  const agentURI = getArg(args, '--agent-uri') || getArg(args, '--uri');
-  const metadataStr = getArg(args, '--metadata');
-  const broadcast = hasFlag(args, '--broadcast');
+  const idx = args.indexOf(flag);
+  if (idx === -1 || idx === args.length - 1) return null;
+  return fileCoerce(args[idx + 1]);
+}
+
+function hasFlag(flag: string): boolean {
+  return process.argv.slice(2).includes(flag);
+}
+
+export async function registerAgent(): Promise<void> {
+  const walletName = getArg('--wallet') || 'main';
+  const agentName = getArg('--name');
+  const agentURI = getArg('--agent-uri') || getArg('--uri');
+  const metadataStr = getArg('--metadata');
+  const broadcast = hasFlag('--broadcast');
 
   try {
     const iface = new Interface(IDENTITY_ABI);
-    let data;
+    let data: string;
 
-    // Parse metadata if provided
-    const metadata = [];
+    const metadata: { metadataKey: string; metadataValue: Uint8Array }[] = [];
     if (metadataStr) {
       const pairs = metadataStr.split(',');
       for (const pair of pairs) {
@@ -60,7 +68,6 @@ export async function registerAgent() {
       }
     }
 
-    // Add agent name to metadata if provided
     if (agentName) {
       metadata.push({
         metadataKey: 'name',
@@ -68,7 +75,6 @@ export async function registerAgent() {
       });
     }
 
-    // Choose registration method based on parameters
     if (agentURI && metadata.length > 0) {
       data = iface.encodeFunctionData('register(string,(string,bytes)[])', [agentURI, metadata]);
     } else if (metadata.length > 0) {
@@ -89,7 +95,7 @@ export async function registerAgent() {
     if (dryRun) return;
 
     const network = resolveNetwork('polygon');
-    const explorerUrl = getExplorerUrl(network, txHash);
+    const explorerUrl = getExplorerUrl(network, txHash ?? '');
 
     console.log(
       JSON.stringify(
@@ -115,8 +121,8 @@ export async function registerAgent() {
       JSON.stringify(
         {
           ok: false,
-          error: error.message,
-          stack: error.stack
+          error: (error as Error).message,
+          stack: (error as Error).stack
         },
         null,
         2
@@ -126,11 +132,8 @@ export async function registerAgent() {
   }
 }
 
-// Get agent wallet address
-export async function getAgentWallet() {
-  const args = process.argv.slice(2);
-  const agentId = getArg(args, '--agent-id');
-
+export async function getAgentWallet(): Promise<void> {
+  const agentId = getArg('--agent-id');
   if (!agentId) {
     console.error(JSON.stringify({ ok: false, error: 'Missing --agent-id parameter' }, null, 2));
     process.exit(1);
@@ -138,9 +141,7 @@ export async function getAgentWallet() {
 
   try {
     const network = resolveNetwork('polygon');
-    const { JsonRpcProvider } = await import('ethers');
     const provider = new JsonRpcProvider(getRpcUrl(network));
-
     const contract = new Contract(IDENTITY_REGISTRY, IDENTITY_ABI, provider);
     const walletAddress = await contract.getAgentWallet(agentId);
 
@@ -157,25 +158,14 @@ export async function getAgentWallet() {
       )
     );
   } catch (error) {
-    console.error(
-      JSON.stringify(
-        {
-          ok: false,
-          error: error.message
-        },
-        null,
-        2
-      )
-    );
+    console.error(JSON.stringify({ ok: false, error: (error as Error).message }, null, 2));
     process.exit(1);
   }
 }
 
-// Get agent metadata
-export async function getMetadata() {
-  const args = process.argv.slice(2);
-  const agentId = getArg(args, '--agent-id');
-  const key = getArg(args, '--key');
+export async function getMetadata(): Promise<void> {
+  const agentId = getArg('--agent-id');
+  const key = getArg('--key');
 
   if (!agentId || !key) {
     console.error(
@@ -186,46 +176,22 @@ export async function getMetadata() {
 
   try {
     const network = resolveNetwork('polygon');
-    const { JsonRpcProvider } = await import('ethers');
     const provider = new JsonRpcProvider(getRpcUrl(network));
-
     const contract = new Contract(IDENTITY_REGISTRY, IDENTITY_ABI, provider);
     const valueBytes = await contract.getMetadata(agentId, key);
     const value = Buffer.from(valueBytes.slice(2), 'hex').toString('utf8');
 
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
-          agentId,
-          key,
-          value
-        },
-        null,
-        2
-      )
-    );
+    console.log(JSON.stringify({ ok: true, agentId, key, value }, null, 2));
   } catch (error) {
-    console.error(
-      JSON.stringify(
-        {
-          ok: false,
-          error: error.message
-        },
-        null,
-        2
-      )
-    );
+    console.error(JSON.stringify({ ok: false, error: (error as Error).message }, null, 2));
     process.exit(1);
   }
 }
 
-// Get agent reputation summary
-export async function getReputation() {
-  const args = process.argv.slice(2);
-  const agentId = getArg(args, '--agent-id');
-  const tag1 = getArg(args, '--tag1') || '';
-  const tag2 = getArg(args, '--tag2') || '';
+export async function getReputation(): Promise<void> {
+  const agentId = getArg('--agent-id');
+  const tag1 = getArg('--tag1') || '';
+  const tag2 = getArg('--tag2') || '';
 
   if (!agentId) {
     console.error(JSON.stringify({ ok: false, error: 'Missing --agent-id parameter' }, null, 2));
@@ -234,15 +200,10 @@ export async function getReputation() {
 
   try {
     const network = resolveNetwork('polygon');
-    const { JsonRpcProvider } = await import('ethers');
     const provider = new JsonRpcProvider(getRpcUrl(network));
-
     const contract = new Contract(REPUTATION_REGISTRY, REPUTATION_ABI, provider);
 
-    // Get all clients first
     const clients = await contract.getClients(agentId);
-
-    // Get summary
     const [count, summaryValue, summaryValueDecimals] = await contract.getSummary(
       agentId,
       clients,
@@ -269,31 +230,20 @@ export async function getReputation() {
       )
     );
   } catch (error) {
-    console.error(
-      JSON.stringify(
-        {
-          ok: false,
-          error: error.message
-        },
-        null,
-        2
-      )
-    );
+    console.error(JSON.stringify({ ok: false, error: (error as Error).message }, null, 2));
     process.exit(1);
   }
 }
 
-// Give feedback to an agent
-export async function giveFeedback() {
-  const args = process.argv.slice(2);
-  const walletName = getArg(args, '--wallet') || 'main';
-  const agentId = getArg(args, '--agent-id');
-  const value = getArg(args, '--value');
-  const tag1 = getArg(args, '--tag1') || '';
-  const tag2 = getArg(args, '--tag2') || '';
-  const endpoint = getArg(args, '--endpoint') || '';
-  const feedbackURI = getArg(args, '--feedback-uri') || '';
-  const broadcast = hasFlag(args, '--broadcast');
+export async function giveFeedback(): Promise<void> {
+  const walletName = getArg('--wallet') || 'main';
+  const agentId = getArg('--agent-id');
+  const value = getArg('--value');
+  const tag1 = getArg('--tag1') || '';
+  const tag2 = getArg('--tag2') || '';
+  const endpoint = getArg('--endpoint') || '';
+  const feedbackURI = getArg('--feedback-uri') || '';
+  const broadcast = hasFlag('--broadcast');
 
   if (!agentId || !value) {
     console.error(
@@ -310,7 +260,6 @@ export async function giveFeedback() {
   }
 
   try {
-    // Parse value (support decimals like 4.5 = 450 with 2 decimals)
     const valueFloat = parseFloat(value);
     const decimals = 2;
     const valueInt = BigInt(Math.round(valueFloat * Math.pow(10, decimals)));
@@ -324,7 +273,7 @@ export async function giveFeedback() {
       tag2,
       endpoint,
       feedbackURI,
-      '0x0000000000000000000000000000000000000000000000000000000000000000' // feedbackHash
+      '0x0000000000000000000000000000000000000000000000000000000000000000'
     ]);
 
     const { walletAddress, txHash, dryRun } = await runDappClientTx({
@@ -337,7 +286,7 @@ export async function giveFeedback() {
     if (dryRun) return;
 
     const network = resolveNetwork('polygon');
-    const explorerUrl = getExplorerUrl(network, txHash);
+    const explorerUrl = getExplorerUrl(network, txHash ?? '');
 
     console.log(
       JSON.stringify(
@@ -363,8 +312,8 @@ export async function giveFeedback() {
       JSON.stringify(
         {
           ok: false,
-          error: error.message,
-          stack: error.stack
+          error: (error as Error).message,
+          stack: (error as Error).stack
         },
         null,
         2
@@ -374,13 +323,11 @@ export async function giveFeedback() {
   }
 }
 
-// Read all feedback for an agent
-export async function readAllFeedback() {
-  const args = process.argv.slice(2);
-  const agentId = getArg(args, '--agent-id');
-  const tag1 = getArg(args, '--tag1') || '';
-  const tag2 = getArg(args, '--tag2') || '';
-  const includeRevoked = hasFlag(args, '--include-revoked');
+export async function readAllFeedback(): Promise<void> {
+  const agentId = getArg('--agent-id');
+  const tag1 = getArg('--tag1') || '';
+  const tag2 = getArg('--tag2') || '';
+  const includeRevoked = hasFlag('--include-revoked');
 
   if (!agentId) {
     console.error(JSON.stringify({ ok: false, error: 'Missing --agent-id parameter' }, null, 2));
@@ -389,15 +336,10 @@ export async function readAllFeedback() {
 
   try {
     const network = resolveNetwork('polygon');
-    const { JsonRpcProvider } = await import('ethers');
     const provider = new JsonRpcProvider(getRpcUrl(network));
-
     const contract = new Contract(REPUTATION_REGISTRY, REPUTATION_ABI, provider);
 
-    // Get all clients
     const clients = await contract.getClients(agentId);
-
-    // Read all feedback
     const [clientsList, indexes, values, decimals, tag1s, tag2s, revoked] =
       await contract.readAllFeedback(agentId, clients, tag1, tag2, includeRevoked);
 
@@ -426,16 +368,7 @@ export async function readAllFeedback() {
       )
     );
   } catch (error) {
-    console.error(
-      JSON.stringify(
-        {
-          ok: false,
-          error: error.message
-        },
-        null,
-        2
-      )
-    );
+    console.error(JSON.stringify({ ok: false, error: (error as Error).message }, null, 2));
     process.exit(1);
   }
 }

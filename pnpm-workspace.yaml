@@ -1,2 +1,13 @@
 packages:
-  - 'packages/*'
+  - packages/*
+
+overrides:
+  '@polygonlabs/apps-team-lint': link:../apps-team-lint
+
+blockExoticSubdeps: true
+minimumReleaseAge: 1440
+minimumReleaseAgeExclude:
+  - '@polygonlabs/*'
+  - '@maticnetwork/*'
+  - '@agglayer/*'
+trustPolicy: no-downgrade
