@@ -140,7 +140,7 @@ polygon-agent agent feedback --agent-id <id> --value <score> [--tag1 <t>] [--tag
 - **Smart defaults** — `--wallet main`, `--chain polygon`, auto-wait on `wallet create`
 - **Fee preference** — auto-selects USDC over native POL when both available
 - **`fund`** — reads `walletAddress` from the wallet session and sets it as `toAddress` in the Trails widget URL. Always run `polygon-agent fund` to get the correct URL — never construct it manually or hardcode any address. The returned JSON contains `fundingUrl` and `walletAddress` so you can confirm the pre-filled recipient before sharing.
-- **`deposit`** — picks highest-TVL pool via Trails `getEarnPools`. If session rejects, re-create wallet with `--contract <depositAddress>`
+- **`deposit`** — picks highest-TVL pool via Trails `getEarnPools`. **Important**: `--usdc-limit` restricts the USDC session to `transfer` calls only, which blocks the `approve` call that deposit requires. To use `deposit`, omit `--usdc-limit` and instead whitelist USDC via `--contract 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359` (unrestricted). Also add the protocol pool address via `--contract <depositAddress>`.
 - **`x402-pay`** — probes endpoint for 402, smart wallet funds builder EOA with exact token amount, EOA signs EIP-3009 payment. Chain auto-detected from 402 response
 - **`send-native --direct`** — bypasses ValueForwarder contract for direct EOA transfer
 - **Session permissions** — without `--usdc-limit` etc., session gets bare-bones defaults and may not transact
@@ -186,7 +186,7 @@ polygon-agent wallet import --ciphertext @/tmp/polygon-session-<rid>.txt
 | `callbackMode: manual` (no tunnel)    | cloudflared unavailable — paste blob from browser when prompted; blob saved to `/tmp/polygon-session-<rid>.txt`                 |
 | `404` on `*.trycloudflare.com`        | CLI timed out and tunnel is gone — re-run `wallet create`, open the new `approvalUrl` immediately                               |
 | `"Auto-send failed"` in browser       | Copy the ciphertext shown below that message; run `wallet import --ciphertext '<blob>'`                                         |
-| Deposit session rejected              | Re-create wallet with `--contract <depositAddress>`                                                                             |
+| Deposit session rejected              | `--usdc-limit` blocks `approve` calls — omit it and use `--contract 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359 --contract <depositAddress>` instead |
 | Wrong recipient in Trails widget      | Run `polygon-agent fund` (do not construct the URL manually); `walletAddress` in the output confirms the pre-filled `toAddress` |
 
 ## File Structure
