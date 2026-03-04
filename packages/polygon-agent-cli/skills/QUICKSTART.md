@@ -3,9 +3,15 @@ name: polygon-agent-cli-quickstart
 description: Quick start guide for Polygon Agent CLI. Get project access key, create wallet with session permissions, register agent onchain, perform token operations. Context-efficient workflow for autonomous agents.
 ---
 
-# Polygon Agent Kit - Quick Start
+# Polygon Agent CLI - Quick Start
 
 **Goal**: Zero to operational agent in 4 phases.
+
+## Prerequisites
+
+- Node.js 22+
+- Run via npx: `npx @polygonlabs/agent-cli <command>`
+- Or install globally for the shorter `polygon-agent` command: `npm install -g @polygonlabs/agent-cli`
 
 ## Phase 1: Setup
 
