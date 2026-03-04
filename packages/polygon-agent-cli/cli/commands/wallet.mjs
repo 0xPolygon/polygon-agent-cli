@@ -47,9 +47,9 @@ function randomId(bytes = 16) {
 const AUTO_WHITELISTED_CONTRACTS = [
   '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432', // ERC-8004 IdentityRegistry
   '0x8004BAa17C55a88189AE136b182e5fdA19dE9b63', // ERC-8004 ReputationRegistry
-  '0xABAAd93EeE2a569cF0632f39B10A9f5D734777ca', // ValueForwarder (required for send native POL)
-  '0x9c62f831c73c55deca97a2be8e6379336f8e0514', // Trails deposit contract (required for swap --from POL)
-  '0x7e08701cc9194ef4ffd82421dd0d986d1b43d521'  // Trails swap router 
+  '0xABAAd93EeE2a569cF0632f39B10A9f5D734777ca'  // ValueForwarder (required for send native POL)
+  // NOTE: Trails deposit contract for swap --from POL is dynamic (changes per route/quote)
+  // and cannot be reliably pre-whitelisted here.
 ];
 
 // Parse session permission args and append them to a URL
