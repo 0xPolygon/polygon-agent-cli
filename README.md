@@ -1,10 +1,10 @@
-# Polygon Agent Kit
+# Polygon Agent CLI
 
 <p align="center">
-  <img src="assets/agents-cli-image.png" alt="Polygon Agent Kit" width="700" />
+  <img src="assets/agents-cli-image.png" alt="Polygon Agent CLI" width="700" />
 </p>
 
-Monorepo for the Polygon Agent Kit — everything AI agents need to operate onchain.
+Monorepo for the Polygon Agent CLI — everything AI agents need to operate onchain.
 
 ## Polygon Agent CLI
 

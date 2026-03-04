@@ -1,6 +1,6 @@
-# Polygon Agent Kit - Wallet Connector
+# Polygon Agent CLI - Wallet Connector
 
-Session-based wallet connector for Polygon Agent Kit agents. Creates secure encrypted wallet sessions for CLI and autonomous agent operations.
+Session-based wallet connector for Polygon Agent CLI agents. Creates secure encrypted wallet sessions for CLI and autonomous agent operations.
 
 ## Features
 
@@ -28,7 +28,7 @@ The app will start on `localhost:4444`
 
 To provide your own keys from [Sequence Builder](https://sequence.build/), edit the `.env` file with your `VITE_PROJECT_ACCESS_KEY`.
 
-## Usage with Polygon Agent Kit CLI
+## Usage with Polygon Agent CLI
 
 ### Auto-Wait (Default — zero copy/paste)
 
