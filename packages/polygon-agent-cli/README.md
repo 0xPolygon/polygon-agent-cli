@@ -42,31 +42,31 @@ Polygon Agent CLI gives AI agents everything they need to operate onchain:
 
 ## Quickstart
 
-### Option A: Clawhub (Openclaw)
+### Recommended: Install on your agent
+
+Install the Polygon Agent CLI as a skill your agent can use — works with your favorite agent harness (Claude, Codex, etc.):
+
+```bash
+npx skills add https://github.com/0xPolygon/polygon-agent-cli
+```
+
+Or install via Clawhub:
 
 ```bash
 npx clawhub@latest install polygon-agent-cli
 ```
 
-This installs the Polygon Agent CLI as a skill your agent can use. Once installed, your agent has access to wallet management, token operations, DEX swaps, and on-chain identity, all through the `polygon-agent` CLI.
+Once installed, your agent has access to wallet management, token operations, DEX swaps, and on-chain identity, all through the `polygon-agent` CLI.
 
-### Coming soon: Option B: Claude
+### Manual Install
 
-Add the skill to your Claude project from the repo:
-
-```bash
-claude skill add --url https://github.com/0xPolygon/polygon-agent-cli
-```
-
-### Option C: npm
+**npm (global):**
 
 ```bash
 npm install -g @polygonlabs/agent-cli
 ```
 
-### Option D: From Source
-
-For contributors or local development. Use `pnpm polygon-agent` instead of `polygon-agent` for all commands.
+**From source** — for contributors or local development. Use `pnpm polygon-agent` instead of `polygon-agent` for all commands.
 
 ```bash
 git clone https://github.com/0xPolygon/polygon-agent-cli.git
@@ -77,7 +77,7 @@ pnpm polygon-agent --help
 
 ### After install: get your agent running
 
-Once installed (via Options A–C), run the following. If running from source (Option D), prefix `polygon-agent` commands with `pnpm` and run them from the root of the repository (e.g., `pnpm polygon-agent setup --name "MyAgent"`).
+Once installed via skills or npm, run the following. If running from source, prefix `polygon-agent` commands with `pnpm` and run them from the root of the repository (e.g., `pnpm polygon-agent setup --name "MyAgent"`).
 
 ```bash
 # 1. Setup: creates EOA, authenticates, gets project access key
@@ -153,10 +153,10 @@ Native contracts for agent identity, reputation, and emerging payment standards.
 
 The CLI ships with agent-friendly documentation designed to be consumed directly by AI agents.
 
-| Distribution | How to install                                                          |
-| ------------ | ----------------------------------------------------------------------- |
-| **Openclaw** | `npx clawhub@latest install polygon-agent-cli`                          |
-| **Claude**   | `claude skill add --url https://github.com/0xPolygon/polygon-agent-cli` |
+| Distribution                                | How to install                                              |
+| ------------------------------------------- | ----------------------------------------------------------- |
+| **Skills** (Claude, Codex, etc.) — recommended | `npx skills add https://github.com/0xPolygon/polygon-agent-cli` |
+| **Clawhub**                                 | `npx clawhub@latest install polygon-agent-cli`              |
 
 Once installed, the agent receives the full skill context — including wallet setup, token operations, and ERC-8004 registration, and can execute autonomously.
 

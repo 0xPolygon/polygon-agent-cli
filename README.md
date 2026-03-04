@@ -12,7 +12,13 @@ You're probably looking for the CLI. Head to the package for full documentation:
 
 **[`packages/polygon-agent-cli/`](packages/polygon-agent-cli/)** — `@polygonlabs/agent-cli` on npm
 
-Quick install:
+Install on your agent:
+
+```bash
+npx skills add https://github.com/0xPolygon/polygon-agent-cli
+```
+
+Or install the CLI directly:
 
 ```bash
 npx @polygonlabs/agent-cli --help
