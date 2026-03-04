@@ -478,8 +478,32 @@ export async function swap() {
       depositTransactionHash: txHash
     });
 
-    // Wait for receipt
-    const receipt = await trails.waitIntentReceipt({ intentId });
+    // Poll for receipt until done or timeout (120s)
+    const POLL_INTERVAL_MS = 3000;
+    const POLL_TIMEOUT_MS = 120000;
+    const pollStart = Date.now();
+    let receipt;
+    while (true) {
+      receipt = await trails.waitIntentReceipt({ intentId });
+      if (receipt?.done) break;
+      if (Date.now() - pollStart >= POLL_TIMEOUT_MS) {
+        console.error(
+          JSON.stringify(
+            {
+              ok: false,
+              error: 'Swap intent timed out waiting for completion',
+              intentId,
+              intentStatus: receipt?.intentStatus ?? null,
+              hint: `Check status manually with intentId: ${intentId}`
+            },
+            null,
+            2
+          )
+        );
+        process.exit(1);
+      }
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    }
 
     const explorerUrl = getExplorerUrl(originNetwork, txHash);
     console.log(
