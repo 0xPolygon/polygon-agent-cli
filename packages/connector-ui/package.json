@@ -4,6 +4,11 @@
   "version": "1.0.1",
   "type": "module",
   "description": "Wallet connector UI for Polygon Agent Kit - creates secure encrypted wallet sessions",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0xPolygon/polygon-agent-cli",
+    "directory": "packages/connector-ui"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

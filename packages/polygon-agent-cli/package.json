@@ -2,6 +2,11 @@
   "name": "@polygonlabs/agent-cli",
   "version": "0.2.0",
   "description": "CLI + Agent Skills for building on-chain agents on Polygon",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0xPolygon/polygon-agent-cli",
+    "directory": "packages/polygon-agent-cli"
+  },
   "type": "module",
   "bin": {
     "polygon-agent": "dist/index.js"
