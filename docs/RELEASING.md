@@ -6,10 +6,9 @@ versioning, changelog generation, GitHub releases, and npm publishing.
 
 ## Triggering a release
 
-1. Open the [repository page](https://github.com/0xPolygon/polygon-agent-cli)
-   in your browser
-2. Click **Actions** (tab at the top)
-3. Click **Publish / Release NPM Packages** (left sidebar)
+1. Open the [**Actions** tab](https://github.com/0xPolygon/polygon-agent-cli/actions)
+2. Click [**Publish / Release NPM Packages**](https://github.com/0xPolygon/polygon-agent-cli/actions/workflows/release.yml)
+   (left sidebar)
 4. Click **Run workflow** (top-right button, next to "This workflow has a
    workflow\_dispatch event trigger")
 5. Select the **channel**: `latest` (stable), `beta`, or `dev` (prerelease)
