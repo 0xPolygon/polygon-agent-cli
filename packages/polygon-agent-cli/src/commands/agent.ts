@@ -222,6 +222,26 @@ async function handleReputation(argv: {
 
     const clients = await contract.getClients(agentId);
 
+    if (clients.length === 0) {
+      console.log(
+        JSON.stringify(
+          {
+            ok: true,
+            agentId,
+            feedbackCount: 0,
+            reputationScore: '0',
+            clientCount: 0,
+            tag1: tag1 || 'all',
+            tag2: tag2 || 'all',
+            message: 'No feedback received yet'
+          },
+          null,
+          2
+        )
+      );
+      return;
+    }
+
     const [count, summaryValue, summaryValueDecimals] = await contract.getSummary(
       agentId,
       clients,
