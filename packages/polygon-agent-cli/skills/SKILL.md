@@ -66,6 +66,10 @@ polygon-agent setup --name "MyAgent"
 # Phase 2: Create ecosystem wallet (auto-waits for browser approval)
 export SEQUENCE_PROJECT_ACCESS_KEY=<accessKey>
 polygon-agent wallet create --usdc-limit 100 --native-limit 5
+# → IMPORTANT: The command outputs an `approvalUrl`. You MUST send the COMPLETE,
+#   UNTRUNCATED URL to the user and wait for them to open it in a browser and approve.
+#   Do NOT proceed to the next step until the user confirms approval (or the CLI
+#   automatically detects the callback). The wallet address is only available after approval.
 
 # Phase 3: Fund wallet
 polygon-agent fund
