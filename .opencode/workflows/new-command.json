@@ -1,0 +1,6 @@
+{
+  "name": "new-command",
+  "description": "Create a new CLI command following project conventions",
+  "prompt": "Create a new CLI command in packages/polygon-agent-cli/src/commands/ following the existing pattern. The command should:\n1. Export a yargs CommandModule with command, describe, builder, and handler\n2. Follow the existing code style (TypeScript, strict types)\n3. Include proper error handling\n4. Be registered in src/index.ts\n\nAsk the user for the command name and functionality before creating it.",
+  "variables": ["commandName", "commandDescription"]
+}

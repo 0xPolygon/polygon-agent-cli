@@ -1,0 +1,7 @@
+{
+  "name": "typecheck",
+  "description": "Run TypeScript type checking across all packages",
+  "command": "pnpm run typecheck",
+  "cwd": "${workspaceRoot}",
+  "group": "quality"
+}

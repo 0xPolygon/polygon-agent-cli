@@ -1,0 +1,7 @@
+{
+  "name": "lint",
+  "description": "Run linting and formatting checks",
+  "command": "pnpm run lint",
+  "cwd": "${workspaceRoot}",
+  "group": "quality"
+}
