@@ -12,6 +12,8 @@
     "format:ts": "eslint . --fix",
     "build": "pnpm -r run build",
     "typecheck": "pnpm -r run typecheck",
+    "test": "node .opencode/__tests__/config.test.js",
+    "test:opencode": "node .opencode/__tests__/config.test.js",
     "polygon-agent": "node packages/polygon-agent-cli/src/index.ts"
   },
   "engines": {
