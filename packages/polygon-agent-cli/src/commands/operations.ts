@@ -107,6 +107,17 @@ async function getTokenConfig({
 
 const bigintReplacer = (_k: string, v: unknown) => (typeof v === 'bigint' ? v.toString() : v);
 
+// Helper: resolve indexer key from session + env
+function getIndexerKey(session: { projectAccessKey?: string | null }): string {
+  const key =
+    process.env.SEQUENCE_INDEXER_ACCESS_KEY ||
+    session.projectAccessKey ||
+    process.env.SEQUENCE_PROJECT_ACCESS_KEY ||
+    '';
+  if (!key) throw new Error('Missing project access key (not in wallet session or environment)');
+  return key;
+}
+
 // --- balances ---
 export const balancesCommand: CommandModule = {
   command: 'balances',
@@ -1049,6 +1060,439 @@ export const depositCommand: CommandModule = {
             error: (error as Error).message,
             stack: (error as Error).stack
           },
+          null,
+          2
+        )
+      );
+      process.exit(1);
+    }
+  }
+};
+
+// --- tx-history ---
+export const txHistoryCommand: CommandModule = {
+  command: 'tx-history',
+  describe: 'Fetch transaction history for the agent wallet',
+  builder: (yargs) =>
+    withWalletAndChain(yargs)
+      .option('limit', {
+        type: 'number',
+        default: 20,
+        describe: 'Max number of transactions to return'
+      })
+      .option('contract', {
+        type: 'string',
+        describe: 'Filter by contract address'
+      })
+      .option('token-id', {
+        type: 'string',
+        describe: 'Filter by token ID (for NFTs)'
+      }),
+  handler: async (argv) => {
+    const walletName = (argv.wallet as string) || 'main';
+    try {
+      const session = await loadWalletSession(walletName);
+      if (!session) throw new Error(`Wallet not found: ${walletName}`);
+
+      const network = resolveNetwork((argv.chain as string) || session.chain || 'polygon');
+      const indexerKey = getIndexerKey(session);
+
+      const { SequenceIndexer } = await import('@0xsequence/indexer');
+      const indexer = new SequenceIndexer(getChainIndexerUrl(network.chainId), indexerKey);
+
+      const filter: Record<string, unknown> = {
+        accountAddress: session.walletAddress
+      };
+      if (argv.contract) filter.contractAddress = argv.contract as string;
+      if (argv['token-id']) filter.tokenID = argv['token-id'] as string;
+
+      const res = await indexer.getTransactionHistory({
+        filter,
+        includeMetadata: true,
+        page: { pageSize: argv.limit as number }
+      });
+
+      const txns = (res?.transactions || []).map(
+        (tx: {
+          txnHash: string;
+          blockNumber: number;
+          timestamp: string;
+          transfers?: Array<{
+            transferType: string;
+            contractAddress: string;
+            contractType: string;
+            from: string;
+            to: string;
+            amounts?: string[];
+            tokenIds?: string[];
+            contractInfo?: { symbol?: string; name?: string };
+          }>;
+        }) => ({
+          txnHash: tx.txnHash,
+          blockNumber: tx.blockNumber,
+          timestamp: tx.timestamp,
+          transfers: (tx.transfers || []).map((t) => ({
+            type: t.transferType,
+            contractAddress: t.contractAddress,
+            contractType: t.contractType,
+            from: t.from,
+            to: t.to,
+            amounts: t.amounts,
+            tokenIds: t.tokenIds,
+            symbol: t.contractInfo?.symbol,
+            name: t.contractInfo?.name
+          }))
+        })
+      );
+
+      console.log(
+        JSON.stringify(
+          {
+            ok: true,
+            walletName,
+            walletAddress: session.walletAddress,
+            chain: network.name,
+            chainId: network.chainId,
+            count: txns.length,
+            transactions: txns
+          },
+          null,
+          2
+        )
+      );
+    } catch (error) {
+      console.error(
+        JSON.stringify(
+          { ok: false, error: (error as Error).message, stack: (error as Error).stack },
+          null,
+          2
+        )
+      );
+      process.exit(1);
+    }
+  }
+};
+
+// --- nfts ---
+export const nftsCommand: CommandModule = {
+  command: 'nfts',
+  describe: 'Fetch NFT balances (ERC-721 and ERC-1155) for the agent wallet',
+  builder: (yargs) =>
+    withWalletAndChain(yargs)
+      .option('contract', {
+        type: 'string',
+        describe: 'Filter by contract address'
+      })
+      .option('verified-only', {
+        type: 'boolean',
+        default: false,
+        describe: 'Only show verified collections'
+      }),
+  handler: async (argv) => {
+    const walletName = (argv.wallet as string) || 'main';
+    try {
+      const session = await loadWalletSession(walletName);
+      if (!session) throw new Error(`Wallet not found: ${walletName}`);
+
+      const network = resolveNetwork((argv.chain as string) || session.chain || 'polygon');
+      const indexerKey = getIndexerKey(session);
+
+      const { SequenceIndexer } = await import('@0xsequence/indexer');
+      const indexer = new SequenceIndexer(getChainIndexerUrl(network.chainId), indexerKey);
+
+      const req: Record<string, unknown> = {
+        accountAddress: session.walletAddress,
+        includeMetadata: true,
+        metadataOptions: { verifiedOnly: argv['verified-only'] as boolean }
+      };
+      if (argv.contract) req.contractAddress = argv.contract as string;
+
+      const res = await indexer.getTokenBalances(req);
+
+      const nfts = (res?.balances || [])
+        .filter(
+          (b: { contractType?: string }) =>
+            b.contractType === 'ERC721' || b.contractType === 'ERC1155'
+        )
+        .map(
+          (b: {
+            contractType: string;
+            contractAddress: string;
+            tokenID?: string;
+            balance?: string;
+            contractInfo?: { name?: string; symbol?: string; logoURI?: string };
+            tokenMetadata?: {
+              name?: string;
+              description?: string;
+              image?: string;
+              attributes?: unknown;
+            };
+          }) => ({
+            contractType: b.contractType,
+            contractAddress: b.contractAddress,
+            tokenId: b.tokenID,
+            balance: b.balance,
+            collection: b.contractInfo?.name,
+            symbol: b.contractInfo?.symbol,
+            logo: b.contractInfo?.logoURI,
+            name: b.tokenMetadata?.name,
+            description: b.tokenMetadata?.description,
+            image: b.tokenMetadata?.image,
+            attributes: b.tokenMetadata?.attributes
+          })
+        );
+
+      console.log(
+        JSON.stringify(
+          {
+            ok: true,
+            walletName,
+            walletAddress: session.walletAddress,
+            chain: network.name,
+            chainId: network.chainId,
+            count: nfts.length,
+            nfts
+          },
+          null,
+          2
+        )
+      );
+    } catch (error) {
+      console.error(
+        JSON.stringify(
+          { ok: false, error: (error as Error).message, stack: (error as Error).stack },
+          null,
+          2
+        )
+      );
+      process.exit(1);
+    }
+  }
+};
+
+// --- receipt ---
+export const receiptCommand: CommandModule = {
+  command: 'receipt <txHash>',
+  describe: 'Fetch transaction receipt by hash',
+  builder: (yargs) =>
+    withWalletAndChain(
+      yargs.positional('txHash', {
+        type: 'string',
+        describe: 'Transaction hash',
+        demandOption: true
+      })
+    ).option('wait', {
+      type: 'number',
+      default: 0,
+      describe: 'Max blocks to wait for confirmation (0 = no wait)'
+    }),
+  handler: async (argv) => {
+    const walletName = (argv.wallet as string) || 'main';
+    const txHash = argv.txHash as string;
+    try {
+      const session = await loadWalletSession(walletName);
+      if (!session) throw new Error(`Wallet not found: ${walletName}`);
+
+      const network = resolveNetwork((argv.chain as string) || session.chain || 'polygon');
+      const indexerKey = getIndexerKey(session);
+
+      const { SequenceIndexer } = await import('@0xsequence/indexer');
+      const indexer = new SequenceIndexer(getChainIndexerUrl(network.chainId), indexerKey);
+
+      const res = await indexer.fetchTransactionReceipt({
+        txnHash: txHash,
+        maxBlockWait: argv.wait as number
+      });
+
+      const r = res?.receipt;
+      console.log(
+        JSON.stringify(
+          {
+            ok: true,
+            chain: network.name,
+            chainId: network.chainId,
+            txnHash: r?.txnHash,
+            status: r?.txnStatus,
+            blockNumber: r?.blockNumber,
+            blockHash: r?.blockHash,
+            gasUsed: r?.gasUsed,
+            effectiveGasPrice: r?.effectiveGasPrice,
+            from: r?.from,
+            to: r?.to,
+            final: r?.final,
+            reorged: r?.reorged,
+            logs: r?.logs
+          },
+          null,
+          2
+        )
+      );
+    } catch (error) {
+      console.error(
+        JSON.stringify(
+          { ok: false, error: (error as Error).message, stack: (error as Error).stack },
+          null,
+          2
+        )
+      );
+      process.exit(1);
+    }
+  }
+};
+
+// --- watch ---
+export const watchCommand: CommandModule = {
+  command: 'watch',
+  describe: 'Stream real-time balance updates for the agent wallet',
+  builder: (yargs) =>
+    withWalletAndChain(yargs).option('contract', {
+      type: 'string',
+      demandOption: true,
+      describe: 'Contract address to watch for balance changes'
+    }),
+  handler: async (argv) => {
+    const walletName = (argv.wallet as string) || 'main';
+    const contractAddress = argv.contract as string;
+    try {
+      const session = await loadWalletSession(walletName);
+      if (!session) throw new Error(`Wallet not found: ${walletName}`);
+
+      const network = resolveNetwork((argv.chain as string) || session.chain || 'polygon');
+      const indexerKey = getIndexerKey(session);
+
+      const { SequenceIndexer } = await import('@0xsequence/indexer');
+      const indexer = new SequenceIndexer(getChainIndexerUrl(network.chainId), indexerKey);
+
+      process.stderr.write(
+        `Watching balance updates for contract ${contractAddress} on ${network.name}...\nPress Ctrl+C to stop.\n`
+      );
+
+      await new Promise<void>((resolve, reject) => {
+        const controller = indexer.subscribeBalanceUpdates(
+          { contractAddress },
+          {
+            onMessage: (update: unknown) => {
+              console.log(
+                JSON.stringify(
+                  { event: 'balance_update', ...(update as object) },
+                  bigintReplacer,
+                  2
+                )
+              );
+            },
+            onError: (err: unknown) => reject(err),
+            onClose: () => resolve()
+          }
+        );
+        process.on('SIGINT', () => {
+          controller.abort();
+          resolve();
+        });
+      });
+    } catch (error) {
+      console.error(
+        JSON.stringify(
+          { ok: false, error: (error as Error).message, stack: (error as Error).stack },
+          null,
+          2
+        )
+      );
+      process.exit(1);
+    }
+  }
+};
+
+// --- webhooks ---
+export const webhooksCommand: CommandModule = {
+  command: 'webhooks <action>',
+  describe: 'Manage Sequence indexer webhooks (list, add, remove, toggle)',
+  builder: (yargs) =>
+    withWalletAndChain(yargs)
+      .positional('action', {
+        type: 'string',
+        choices: ['list', 'add', 'remove', 'toggle'],
+        describe: 'Action to perform',
+        demandOption: true
+      })
+      .option('url', {
+        type: 'string',
+        describe: 'Webhook destination URL (required for add)'
+      })
+      .option('id', {
+        type: 'string',
+        describe: 'Webhook listener ID (required for remove/toggle)'
+      })
+      .option('contracts', {
+        type: 'string',
+        array: true,
+        describe: 'Contract addresses to watch (for add)'
+      })
+      .option('events', {
+        type: 'string',
+        array: true,
+        describe: 'Event signatures to filter (for add, e.g. Transfer(address,address,uint256))'
+      })
+      .option('accounts', {
+        type: 'string',
+        array: true,
+        describe: 'Account addresses to filter (for add)'
+      }),
+  handler: async (argv) => {
+    const walletName = (argv.wallet as string) || 'main';
+    const action = argv.action as string;
+    try {
+      const session = await loadWalletSession(walletName);
+      if (!session) throw new Error(`Wallet not found: ${walletName}`);
+
+      const network = resolveNetwork((argv.chain as string) || session.chain || 'polygon');
+      const indexerKey = getIndexerKey(session);
+
+      const { SequenceIndexer } = await import('@0xsequence/indexer');
+      const indexer = new SequenceIndexer(getChainIndexerUrl(network.chainId), indexerKey);
+
+      const projectId: number = parseInt(process.env.SEQUENCE_PROJECT_ID || '0', 10);
+
+      if (action === 'list') {
+        const res = await indexer.getAllWebhookListeners({ projectId });
+        console.log(JSON.stringify({ ok: true, listeners: res?.listeners || [] }, null, 2));
+        return;
+      }
+
+      if (action === 'add') {
+        if (!argv.url) throw new Error('--url is required for add');
+        const filters = {
+          contractAddresses: (argv.contracts as string[]) || [],
+          events: (argv.events as string[]) || [],
+          accounts: (argv.accounts as string[]) || []
+        };
+        const res = await indexer.addWebhookListener({
+          url: argv.url as string,
+          filters
+        });
+        console.log(JSON.stringify({ ok: true, listener: res?.listener }, null, 2));
+        return;
+      }
+
+      if (action === 'remove') {
+        if (!argv.id) throw new Error('--id is required for remove');
+        await indexer.removeWebhookListener({ id: Number(argv.id as string), projectId });
+        console.log(JSON.stringify({ ok: true, removed: argv.id }, null, 2));
+        return;
+      }
+
+      if (action === 'toggle') {
+        if (!argv.id) throw new Error('--id is required for toggle');
+        const res = await indexer.toggleWebhookListener({
+          id: Number(argv.id as string),
+          projectId
+        });
+        console.log(JSON.stringify({ ok: true, listener: res?.webhookListener }, null, 2));
+        return;
+      }
+    } catch (error) {
+      console.error(
+        JSON.stringify(
+          { ok: false, error: (error as Error).message, stack: (error as Error).stack },
           null,
           2
         )

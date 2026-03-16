@@ -12,10 +12,15 @@ import {
   balancesCommand,
   depositCommand,
   fundCommand,
+  nftsCommand,
+  receiptCommand,
   sendCommand,
   sendNativeCommand,
   sendTokenCommand,
   swapCommand,
+  txHistoryCommand,
+  watchCommand,
+  webhooksCommand,
   x402PayCommand
 } from './commands/operations.ts';
 import { setupCommand } from './commands/setup.ts';
@@ -88,6 +93,11 @@ const parser = yargs(hideBin(process.argv))
   .command(sendTokenCommand)
   .command(swapCommand)
   .command(depositCommand)
+  .command(txHistoryCommand)
+  .command(nftsCommand)
+  .command(receiptCommand)
+  .command(watchCommand)
+  .command(webhooksCommand)
   .command(x402PayCommand)
   .command(agentCommand);
 
