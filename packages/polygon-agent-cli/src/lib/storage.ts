@@ -198,8 +198,10 @@ export async function savePolymarketKey(privateKey: string): Promise<void> {
   ensureStorageDir();
   const configPath = path.join(STORAGE_DIR, 'builder.json');
   let data: Record<string, unknown> = {};
-  if (fs.existsSync(configPath)) {
+  try {
     data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  } catch {
+    // File doesn't exist yet — start with empty object
   }
   data.polymarketPrivateKey = encrypt(privateKey);
   fs.writeFileSync(configPath, JSON.stringify(data, null, 2), { mode: 0o600 });
@@ -207,10 +209,12 @@ export async function savePolymarketKey(privateKey: string): Promise<void> {
 
 export async function loadPolymarketKey(): Promise<string> {
   const configPath = path.join(STORAGE_DIR, 'builder.json');
-  if (!fs.existsSync(configPath)) {
+  let data: Record<string, unknown>;
+  try {
+    data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  } catch {
     throw new Error('No builder config found. Run: polygon-agent setup');
   }
-  const data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   if (data.polymarketPrivateKey) return decrypt(data.polymarketPrivateKey as CipherData);
   if (data.privateKey) return decrypt(data.privateKey as CipherData);
   throw new Error(
