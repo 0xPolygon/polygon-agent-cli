@@ -178,16 +178,20 @@ Example output:
 
 ```javascript
 import { submit } from '@bankr/cli';
+import { encodeFunctionData } from 'viem';
 
-// ERC-20 approve calldata: approve(spender, amount)
-const APPROVE_SELECTOR = '0x095ea7b3';
-const spender = depositAddress.replace('0x', '').padStart(64, '0');
-const amount = BigInt('50000000').toString(16).padStart(64, '0'); // 50 USDC
-const approveData = APPROVE_SELECTOR + spender + amount;
+const USDC_ADDRESS = '0x3c499c542cef5e3811e1192ce70d8cC03d5c3359';
+const DEPOSIT_AMOUNT = 50_000_000n; // 50 USDC (6 decimals)
+
+const approveData = encodeFunctionData({
+  abi: [{ name: 'approve', type: 'function', inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ type: 'bool' }] }],
+  functionName: 'approve',
+  args: [depositAddress, DEPOSIT_AMOUNT],
+});
 
 await submit({
   transaction: {
-    to: '0x3c499c542cef5e3811e1192ce70d8cC03d5c3359', // USDC on Polygon
+    to: USDC_ADDRESS,
     chainId: 137,
     data: approveData,
     value: '0',
@@ -200,19 +204,17 @@ await submit({
 ### Step 3: Deposit into the vault
 
 ```javascript
-// Aave v3 supply(asset, amount, onBehalfOf, referralCode) selector: 0x617ba037
-const SUPPLY_SELECTOR = '0x617ba037';
-const asset = USDC_ADDRESS.replace('0x', '').padStart(64, '0');
-const amt  = BigInt('50000000').toString(16).padStart(64, '0');
-const onBehalfOf = BANKR_WALLET.replace('0x', '').padStart(64, '0');
-const referral = '0'.padStart(64, '0');
-const depositData = SUPPLY_SELECTOR + asset + amt + onBehalfOf + referral;
+const supplyData = encodeFunctionData({
+  abi: [{ name: 'supply', type: 'function', inputs: [{ name: 'asset', type: 'address' }, { name: 'amount', type: 'uint256' }, { name: 'onBehalfOf', type: 'address' }, { name: 'referralCode', type: 'uint16' }], outputs: [] }],
+  functionName: 'supply',
+  args: [USDC_ADDRESS, DEPOSIT_AMOUNT, BANKR_WALLET, 0],
+});
 
 const result = await submit({
   transaction: {
     to: depositAddress, // pool.depositAddress from GetEarnPools
     chainId: 137,
-    data: depositData,
+    data: supplyData,
     value: '0',
   },
   description: 'Deposit 50 USDC into Aave v3',
@@ -221,7 +223,7 @@ const result = await submit({
 console.log('txHash:', result.transactionHash);
 ```
 
-> For Morpho vaults, the deposit selector is `0x6e553f65` — `deposit(uint256 assets, address receiver)`. `depositAddress` from `GetEarnPools` is always the correct contract to call.
+> For Morpho vaults, use `encodeFunctionData` with the `deposit(uint256 assets, address receiver)` ABI. `depositAddress` from `GetEarnPools` is always the correct contract to call.
 
 ---
 
