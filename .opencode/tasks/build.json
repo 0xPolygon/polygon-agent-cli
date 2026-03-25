@@ -1,0 +1,7 @@
+{
+  "name": "build",
+  "description": "Build all packages in the monorepo",
+  "command": "pnpm run build",
+  "cwd": "${workspaceRoot}",
+  "group": "build"
+}
