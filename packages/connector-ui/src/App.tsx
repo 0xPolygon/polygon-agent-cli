@@ -590,7 +590,7 @@ function App() {
 
           {/* Footer */}
           <div className="px-6 py-3 border-t border-border flex items-center justify-center">
-            <span className="text-xs text-text-muted">Powered by Sequence &middot; Polygon</span>
+            <span className="text-xs text-text-muted">Powered by Polygon</span>
           </div>
         </div>
       </div>
