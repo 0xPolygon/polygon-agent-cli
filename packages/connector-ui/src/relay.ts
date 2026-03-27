@@ -1,5 +1,15 @@
 import { MAX_CODE_ATTEMPTS, REQUEST_TTL_SECONDS } from '@polygonlabs/agent-shared';
 
+/**
+ * Relay module for v2 session handoff.
+ *
+ * Two exports:
+ *  - `SessionRelay` — Cloudflare Durable Object that stores the encrypted session
+ *    payload for one 5-minute window. Internal-only; accessed via `SESSION_RELAY` binding.
+ *  - `handleRelayRequest` — Route dispatcher called from the main Worker for all
+ *    `/api/relay/*` requests from browsers and the CLI.
+ */
+
 // --- Validation helpers ---
 
 function isHex(s: unknown, len: number): s is string {
@@ -74,6 +84,9 @@ export class SessionRelay {
     }
     const { cli_pk_hex } = body as Record<string, unknown>;
     if (!isHex(cli_pk_hex, 64)) return err('cli_pk_hex must be 64 hex chars', 400);
+
+    const existing = await this.state.storage.get<string>('status');
+    if (existing) return err('Already initialized', 409);
 
     await this.state.storage.put('cli_pk_hex', cli_pk_hex);
     await this.state.storage.put('status', 'pending');
@@ -217,18 +230,20 @@ export async function handleRelayRequest(
       .join('');
 
     const stub = env.SESSION_RELAY.get(env.SESSION_RELAY.idFromName(request_id));
-    await stub.fetch(
+    const initRes = await stub.fetch(
       new Request('https://do/init', {
         method: 'POST',
         body: JSON.stringify({ cli_pk_hex }),
         headers: { 'Content-Type': 'application/json' }
       })
     );
+    if (!initRes.ok) return err('Failed to initialize relay session', 500);
 
     return json({ request_id });
   }
 
   if (!rid) return err('Missing request ID', 400);
+  if (!/^[a-z0-9]{8}$/.test(rid)) return err('Invalid request ID', 400);
 
   const stub = env.SESSION_RELAY.get(env.SESSION_RELAY.idFromName(rid));
 
@@ -242,6 +257,7 @@ export async function handleRelayRequest(
   // POST /api/relay/session/:rid  → browser posts encrypted payload
   if (request.method === 'POST' && action === 'session') {
     const body = await request.text();
+    if (body.length > 4096) return err('Payload too large', 413);
     const res = await stub.fetch(
       new Request('https://do/session', {
         method: 'POST',
