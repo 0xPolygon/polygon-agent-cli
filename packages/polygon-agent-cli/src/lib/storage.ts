@@ -162,6 +162,9 @@ export interface WalletRequest {
 export async function saveWalletRequest(rid: string, request: WalletRequest): Promise<void> {
   ensureStorageDir();
 
+  // cliSkHex (v2 X25519 secret key) is stored as plaintext here intentionally:
+  // the file has 0o600 permissions and the key is ephemeral — it is only useful
+  // during the ~5-minute request window and is deleted after successful import.
   const requestPath = path.join(STORAGE_DIR, 'requests', `${rid}.json`);
   fs.writeFileSync(requestPath, JSON.stringify(request, null, 2), {
     mode: 0o600

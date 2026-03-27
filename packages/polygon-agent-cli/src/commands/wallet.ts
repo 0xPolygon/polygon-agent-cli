@@ -366,7 +366,7 @@ async function handleCreateAndWait(argv: CreateArgs): Promise<void> {
 
     // Poll relay until browser posts the encrypted session
     process.stderr.write('Waiting for wallet approval in browser...\n');
-    await relay.waitForReady(rid, 300_000, 2_000);
+    await relay.waitForReady(rid, argv.timeout * 1000, 2_000);
     process.stderr.write('Wallet approved.\n');
 
     // Prompt for 6-digit code (retry up to 3 times)
