@@ -19,7 +19,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "prepublishOnly": "pnpm run build",
-    "dev": "node src/index.ts",
+    "dev": "tsx src/index.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },
