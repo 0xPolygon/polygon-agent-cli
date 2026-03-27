@@ -24,7 +24,7 @@ export function CodeDisplay({ code, walletAddress, walletName }: CodeDisplayProp
       <div className="flex flex-col items-center gap-2">
         <h2 className="text-xl font-semibold text-text-primary">Session approved</h2>
         <p className="text-sm text-text-secondary">
-          Enter this code in your terminal to complete setup
+          Enter this code in your terminal or agent to complete setup
         </p>
       </div>
 
