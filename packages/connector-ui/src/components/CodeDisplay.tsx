@@ -1,15 +1,26 @@
-// packages/connector-ui/src/components/CodeDisplay.tsx
 import { Copy, Check } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 interface CodeDisplayProps {
   code: string;
-  walletAddress: string;
-  walletName: string;
+  onContinue: () => void;
 }
 
-export function CodeDisplay({ code, walletAddress, walletName }: CodeDisplayProps) {
+export function CodeDisplay({ code, onContinue }: CodeDisplayProps) {
   const [copied, setCopied] = useState(false);
+  const [seconds, setSeconds] = useState(300); // matches relay 5-min TTL
+
+  // Display as "XXX - XXX"
+  const displayCode = `${code.slice(0, 3)} - ${code.slice(3)}`;
+
+  useEffect(() => {
+    const id = setInterval(() => setSeconds((s) => Math.max(0, s - 1)), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
 
   function handleCopy() {
     navigator.clipboard.writeText(code).catch(() => {});
@@ -17,50 +28,34 @@ export function CodeDisplay({ code, walletAddress, walletName }: CodeDisplayProp
     setTimeout(() => setCopied(false), 2000);
   }
 
-  const digits = code.split('');
-
   return (
-    <div className="flex flex-col items-center gap-6 text-center">
-      <div className="flex flex-col items-center gap-2">
-        <h2 className="text-xl font-semibold text-text-primary">Session approved</h2>
-        <p className="text-sm text-text-secondary">
-          Enter this code in your terminal or agent to complete setup
-        </p>
+    <div className="bg-white rounded-2xl border border-[#e5e5f0] p-6 animate-slide-up">
+      <p className="text-center text-[#374151] font-medium mb-5">
+        Enter this code in your terminal or agent:
+      </p>
+
+      {/* Code box */}
+      <div className="flex items-center gap-3 bg-[#f3f4f8] rounded-xl px-5 py-4 mb-3">
+        <span className="flex-1 text-center text-2xl font-mono font-bold tracking-[0.2em] text-[#0f0f1a] select-all">
+          {displayCode}
+        </span>
+        <button
+          onClick={handleCopy}
+          className="text-[#9ca3af] hover:text-[#6b7280] transition-colors cursor-pointer border-0 bg-transparent p-1"
+        >
+          {copied ? <Check className="w-5 h-5 text-green-600" /> : <Copy className="w-5 h-5" />}
+        </button>
       </div>
 
-      <div className="flex gap-2">
-        {digits.map((d, i) => (
-          <div
-            key={i}
-            className="w-10 h-12 flex items-center justify-center rounded-lg bg-surface-elevated border border-border text-2xl font-mono font-bold text-text-primary"
-          >
-            {d}
-          </div>
-        ))}
-      </div>
+      <p className="text-center text-sm text-[#9ca3af] mb-5">Expires in {timeStr}</p>
 
+      {/* Fallback continue button */}
       <button
-        onClick={handleCopy}
-        className="flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary transition-colors cursor-pointer border-0 bg-transparent"
+        onClick={onContinue}
+        className="btn-press w-full h-10 rounded-xl bg-[#8247e5] text-white text-sm font-semibold hover:bg-[#7139d4] transition-colors cursor-pointer border-0"
       >
-        {copied ? <Check className="w-4 h-4 text-success" /> : <Copy className="w-4 h-4" />}
-        {copied ? 'Copied' : 'Copy code'}
+        Continue to fund wallet →
       </button>
-
-      <div className="w-full rounded-xl bg-surface-elevated border border-border p-3 text-left space-y-1">
-        <div className="flex justify-between text-xs">
-          <span className="text-text-muted">Wallet</span>
-          <span className="text-text-secondary font-mono">{walletName}</span>
-        </div>
-        <div className="flex justify-between text-xs">
-          <span className="text-text-muted">Address</span>
-          <span className="text-text-secondary font-mono text-right break-all">
-            {walletAddress}
-          </span>
-        </div>
-      </div>
-
-      <p className="text-xs text-text-muted">This code expires in 5 minutes. Do not share it.</p>
     </div>
   );
 }
