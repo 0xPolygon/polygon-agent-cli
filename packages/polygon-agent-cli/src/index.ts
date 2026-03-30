@@ -21,9 +21,13 @@ import {
 import { polymarketCommand } from './commands/polymarket.ts';
 import { setupCommand } from './commands/setup.ts';
 import { walletCommand } from './commands/wallet.ts';
+import { bootstrapAccessKey } from './lib/storage.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8'));
+
+// Auto-load access key from ~/.polygon-agent/builder.json if not already in env
+bootstrapAccessKey();
 
 // Legacy aliases — hidden commands that map to the new structure
 const legacyAliases = [
@@ -105,7 +109,7 @@ parser
   .help()
   .fail((msg, err, yargs) => {
     if (err) {
-      console.error(JSON.stringify({ ok: false, error: err.message, stack: err.stack }, null, 2));
+      console.error(JSON.stringify({ ok: false, error: err.message, stack: err.stack }));
     } else {
       yargs.showHelp('error');
       if (msg) console.error(`\n${msg}`);

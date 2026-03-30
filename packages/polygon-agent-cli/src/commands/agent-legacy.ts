@@ -135,7 +135,7 @@ export async function registerAgent(): Promise<void> {
 export async function getAgentWallet(): Promise<void> {
   const agentId = getArg('--agent-id');
   if (!agentId) {
-    console.error(JSON.stringify({ ok: false, error: 'Missing --agent-id parameter' }, null, 2));
+    console.error(JSON.stringify({ ok: false, error: 'Missing --agent-id parameter' }));
     process.exit(1);
   }
 
@@ -158,7 +158,7 @@ export async function getAgentWallet(): Promise<void> {
       )
     );
   } catch (error) {
-    console.error(JSON.stringify({ ok: false, error: (error as Error).message }, null, 2));
+    console.error(JSON.stringify({ ok: false, error: (error as Error).message }));
     process.exit(1);
   }
 }
@@ -168,9 +168,7 @@ export async function getMetadata(): Promise<void> {
   const key = getArg('--key');
 
   if (!agentId || !key) {
-    console.error(
-      JSON.stringify({ ok: false, error: 'Missing --agent-id or --key parameter' }, null, 2)
-    );
+    console.error(JSON.stringify({ ok: false, error: 'Missing --agent-id or --key parameter' }));
     process.exit(1);
   }
 
@@ -181,9 +179,9 @@ export async function getMetadata(): Promise<void> {
     const valueBytes = await contract.getMetadata(agentId, key);
     const value = Buffer.from(valueBytes.slice(2), 'hex').toString('utf8');
 
-    console.log(JSON.stringify({ ok: true, agentId, key, value }, null, 2));
+    console.log(JSON.stringify({ ok: true, agentId, key, value }));
   } catch (error) {
-    console.error(JSON.stringify({ ok: false, error: (error as Error).message }, null, 2));
+    console.error(JSON.stringify({ ok: false, error: (error as Error).message }));
     process.exit(1);
   }
 }
@@ -194,7 +192,7 @@ export async function getReputation(): Promise<void> {
   const tag2 = getArg('--tag2') || '';
 
   if (!agentId) {
-    console.error(JSON.stringify({ ok: false, error: 'Missing --agent-id parameter' }, null, 2));
+    console.error(JSON.stringify({ ok: false, error: 'Missing --agent-id parameter' }));
     process.exit(1);
   }
 
@@ -230,7 +228,7 @@ export async function getReputation(): Promise<void> {
       )
     );
   } catch (error) {
-    console.error(JSON.stringify({ ok: false, error: (error as Error).message }, null, 2));
+    console.error(JSON.stringify({ ok: false, error: (error as Error).message }));
     process.exit(1);
   }
 }
@@ -330,7 +328,7 @@ export async function readAllFeedback(): Promise<void> {
   const includeRevoked = hasFlag('--include-revoked');
 
   if (!agentId) {
-    console.error(JSON.stringify({ ok: false, error: 'Missing --agent-id parameter' }, null, 2));
+    console.error(JSON.stringify({ ok: false, error: 'Missing --agent-id parameter' }));
     process.exit(1);
   }
 
@@ -368,7 +366,7 @@ export async function readAllFeedback(): Promise<void> {
       )
     );
   } catch (error) {
-    console.error(JSON.stringify({ ok: false, error: (error as Error).message }, null, 2));
+    console.error(JSON.stringify({ ok: false, error: (error as Error).message }));
     process.exit(1);
   }
 }

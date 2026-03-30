@@ -127,6 +127,41 @@ export async function loadBuilderConfig(): Promise<BuilderConfig | null> {
   };
 }
 
+/**
+ * Synchronously resolve the project access key.
+ * Priority: env var → wallet session's stored key → builder.json on disk.
+ * Returns undefined if none found.
+ */
+export function resolveAccessKeySync(sessionKey?: string | null): string | undefined {
+  if (process.env.SEQUENCE_PROJECT_ACCESS_KEY) return process.env.SEQUENCE_PROJECT_ACCESS_KEY;
+  if (process.env.SEQUENCE_INDEXER_ACCESS_KEY) return process.env.SEQUENCE_INDEXER_ACCESS_KEY;
+  if (sessionKey) return sessionKey;
+  const configPath = path.join(STORAGE_DIR, 'builder.json');
+  if (fs.existsSync(configPath)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      if (data.accessKey) return data.accessKey as string;
+    } catch {
+      // ignore malformed config
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Bootstrap: populate SEQUENCE_PROJECT_ACCESS_KEY from builder.json if not already set.
+ * Call once at CLI startup so all commands can rely on the env var being present.
+ */
+export function bootstrapAccessKey(): void {
+  const key = resolveAccessKeySync();
+  if (key && !process.env.SEQUENCE_PROJECT_ACCESS_KEY) {
+    process.env.SEQUENCE_PROJECT_ACCESS_KEY = key;
+  }
+  if (key && !process.env.SEQUENCE_INDEXER_ACCESS_KEY) {
+    process.env.SEQUENCE_INDEXER_ACCESS_KEY = key;
+  }
+}
+
 export async function saveWalletSession(name: string, session: WalletSession): Promise<void> {
   ensureStorageDir();
 

@@ -3,18 +3,18 @@ import type { Argv, CommandModule } from 'yargs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import readline from 'node:readline';
+
+import React from 'react';
 
 import {
   generateX25519Keypair,
   bytesToHex,
   hexToBytes,
   computeCodeHash,
-  decryptSession,
-  MAX_CODE_ATTEMPTS
+  decryptSession
 } from '@polygonlabs/agent-shared';
 
-import { RelayClient, RelayCodeError } from '../lib/relay-client.ts';
+import { RelayClient } from '../lib/relay-client.ts';
 import {
   saveWalletSession,
   loadWalletSession,
@@ -26,6 +26,13 @@ import {
   sessionPayloadToWalletSession
 } from '../lib/storage.ts';
 import { normalizeChain, resolveNetwork, fileCoerce } from '../lib/utils.ts';
+import { isTTY, inkRender } from '../ui/render.js';
+import { WalletCreateUI, WalletListUI, WalletAddressUI } from './wallet-ui.js';
+
+// Compact JSON output for AI agent consumers (single line, no stack traces)
+function jsonOut(data: Record<string, unknown>): void {
+  console.log(JSON.stringify(data));
+}
 
 // Base64 URL decode
 function b64urlDecode(str: string): Buffer {
@@ -215,33 +222,16 @@ async function decryptAndSaveSession(
   return { walletAddress, chainId, chain };
 }
 
-async function promptCode(): Promise<string> {
-  // Loop until a valid 6-digit code is entered
-  while (true) {
-    const input = await new Promise<string>((resolve) => {
-      const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
-      rl.question('Enter the 6-digit code shown in the browser: ', (answer) => {
-        rl.close();
-        resolve(answer.trim());
-      });
-    });
-    if (/^\d{6}$/.test(input)) {
-      return input;
-    }
-    process.stderr.write('Invalid code: must be exactly 6 digits. Please try again.\n');
-  }
-}
-
 // --- Subcommand: wallet create ---
 interface CreateArgs extends SessionPermissionArgs {
   name: string;
   chain: string;
-  'no-wait': boolean;
+  'print-url': boolean;
   timeout: number;
 }
 
 async function handleCreate(argv: CreateArgs): Promise<void> {
-  if (argv['no-wait']) {
+  if (argv['print-url']) {
     await handleCreateNoWait(argv);
   } else {
     await handleCreateAndWait(argv);
@@ -263,19 +253,16 @@ async function handleCreateNoWait(argv: CreateArgs): Promise<void> {
     const cliSkHex = bytesToHex(cliSk);
 
     const relay = new RelayClient(connectorBase);
-    process.stderr.write('Registering with relay...\n');
     const rid = await relay.createRequest(cliPkHex);
 
     const projectAccessKey = argv['access-key'] || process.env.SEQUENCE_PROJECT_ACCESS_KEY;
-
-    const createdAt = new Date().toISOString();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 min (relay TTL is 5 min)
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
     await saveWalletRequest(rid, {
       rid,
       walletName: name,
       chain,
-      createdAt,
+      createdAt: new Date().toISOString(),
       expiresAt,
       publicKeyB64u: '',
       privateKeyB64u: '',
@@ -291,155 +278,47 @@ async function handleCreateNoWait(argv: CreateArgs): Promise<void> {
     applySessionPermissionParams(url, argv);
 
     const fullUrl = url.toString();
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
-          walletName: name,
-          chain,
-          rid,
-          url: fullUrl,
-          expiresAt,
-          message:
-            'IMPORTANT: Output the COMPLETE approvalUrl to the user. After they approve in the browser, they will see a 6-digit code. Run: polygon-agent wallet import --rid <rid> --code <code>',
-          approvalUrl: fullUrl
-        },
-        null,
-        2
-      )
-    );
-    console.error(`\nApprove wallet session:\n${fullUrl}\n`);
+    jsonOut({
+      ok: true,
+      rid,
+      approvalUrl: fullUrl,
+      next: `polygon-agent wallet import --rid ${rid} --code <6-digit-code>`
+    });
   } catch (error) {
-    console.error(
-      JSON.stringify(
-        { ok: false, error: (error as Error).message, stack: (error as Error).stack },
-        null,
-        2
-      )
-    );
+    jsonOut({ ok: false, error: (error as Error).message });
     process.exit(1);
   }
 }
 
 async function handleCreateAndWait(argv: CreateArgs): Promise<void> {
   const name = argv.name;
-  const chainArg = argv.chain;
-
+  const chain = argv.chain;
+  const tty = isTTY();
+  let failed = false;
   try {
-    const chain = normalizeChain(chainArg);
-    const connectorBase = (
-      process.env.SEQUENCE_ECOSYSTEM_CONNECTOR_URL || 'https://agentconnect.polygon.technology'
-    ).replace(/\/$/, '');
-
-    const { secretKey: cliSk, publicKey: cliPk } = generateX25519Keypair();
-    const cliPkHex = bytesToHex(cliPk);
-    const cliSkHex = bytesToHex(cliSk);
-
-    const relay = new RelayClient(connectorBase);
-    process.stderr.write('Registering with relay...\n');
-    const rid = await relay.createRequest(cliPkHex);
-
-    const projectAccessKey = argv['access-key'] || process.env.SEQUENCE_PROJECT_ACCESS_KEY;
-
-    const createdAt = new Date().toISOString();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 min (relay TTL is 5 min)
-
-    await saveWalletRequest(rid, {
-      rid,
-      walletName: name,
-      chain,
-      createdAt,
-      expiresAt,
-      publicKeyB64u: '',
-      privateKeyB64u: '',
-      projectAccessKey: projectAccessKey || null,
-      cliSkHex
-    });
-
-    const url = new URL(`${connectorBase}/link`);
-    url.searchParams.set('rid', rid);
-    url.searchParams.set('wallet', name);
-    url.searchParams.set('chain', chain);
-    if (projectAccessKey) url.searchParams.set('accessKey', projectAccessKey);
-    applySessionPermissionParams(url, argv);
-
-    const fullUrl = url.toString();
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
-          walletName: name,
-          chain,
-          rid,
-          url: fullUrl,
-          message: `IMPORTANT: Output the COMPLETE url to the user. They must open it in a browser, approve the session, and enter the 6-digit code that appears in the terminal prompt.`,
-          approvalUrl: fullUrl
+    // Always use Ink — renders to stdout (TTY) or stderr (non-TTY, keeps stdout clean for JSON)
+    await inkRender(
+      React.createElement(WalletCreateUI, {
+        name,
+        chain,
+        timeout: argv.timeout,
+        argv,
+        tty,
+        onComplete: (walletAddress: string, chainId: number, chainName: string) => {
+          if (!tty) {
+            jsonOut({ ok: true, walletAddress, chainId, chain: chainName });
+          }
         },
-        null,
-        2
-      )
-    );
-    console.error(`\nApprove wallet session:\n${fullUrl}\n`);
-
-    // Try to open browser automatically
-    try {
-      const { default: open } = await import('open');
-      await open(fullUrl);
-    } catch {
-      // ignore — URL already printed above
-    }
-
-    // Poll relay until browser posts the encrypted session
-    process.stderr.write('Waiting for wallet approval in browser...\n');
-    await relay.waitForReady(rid, argv.timeout * 1000, 2_000);
-    process.stderr.write('Wallet approved.\n');
-
-    // Prompt for 6-digit code (retry up to MAX_CODE_ATTEMPTS times)
-    let payload;
-    for (let attempt = 1; attempt <= MAX_CODE_ATTEMPTS; attempt++) {
-      const code = await promptCode();
-      const codeHashHex = bytesToHex(computeCodeHash(rid, code));
-      try {
-        const encrypted = await relay.retrieve(rid, codeHashHex);
-        payload = decryptSession(encrypted, cliSk, code, rid);
-        break;
-      } catch (e) {
-        if (e instanceof RelayCodeError && e.attemptsRemaining > 0) {
-          process.stderr.write(`${e.message}\n`);
-          continue;
+        onError: (message: string) => {
+          if (!tty) jsonOut({ ok: false, error: message });
         }
-        throw e;
-      }
-    }
-    if (!payload) throw new Error(`Failed to decrypt session after ${MAX_CODE_ATTEMPTS} attempts`);
-
-    const session = sessionPayloadToWalletSession(payload);
-    await saveWalletSession(name, session);
-
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
-          walletName: name,
-          walletAddress: session.walletAddress,
-          chainId: session.chainId,
-          chain: session.chain,
-          message: 'Session started successfully. Wallet ready for operations.'
-        },
-        null,
-        2
-      )
+      }),
+      { useStderr: !tty }
     );
-  } catch (error) {
-    console.error(
-      JSON.stringify(
-        { ok: false, error: (error as Error).message, stack: (error as Error).stack },
-        null,
-        2
-      )
-    );
-    process.exit(1);
+  } catch {
+    failed = true;
   }
+  if (failed) process.exit(1);
 }
 
 // --- Subcommand: wallet import (alias: start-session) ---
@@ -477,7 +356,7 @@ async function handleImport(argv: ImportArgs): Promise<void> {
         }
         if (!rid)
           throw new Error(
-            `No pending relay request for wallet '${name}'. Run: polygon-agent wallet create --no-wait`
+            `No pending relay request for wallet '${name}'. Run: polygon-agent wallet create --print-url`
           );
       }
 
@@ -498,20 +377,12 @@ async function handleImport(argv: ImportArgs): Promise<void> {
       await saveWalletSession(name, session);
       await deleteWalletRequest(rid!);
 
-      console.log(
-        JSON.stringify(
-          {
-            ok: true,
-            walletName: name,
-            walletAddress: session.walletAddress,
-            chainId: session.chainId,
-            chain: session.chain,
-            message: 'Session started successfully. Wallet ready for operations.'
-          },
-          null,
-          2
-        )
-      );
+      jsonOut({
+        ok: true,
+        walletAddress: session.walletAddress,
+        chain: session.chain,
+        chainId: session.chainId
+      });
       return;
     }
 
@@ -539,29 +410,9 @@ async function handleImport(argv: ImportArgs): Promise<void> {
     }
 
     const { walletAddress, chainId, chain } = await decryptAndSaveSession(name, ciphertext, rid);
-
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
-          walletName: name,
-          walletAddress,
-          chainId,
-          chain,
-          message: 'Session started successfully. Wallet ready for operations.'
-        },
-        null,
-        2
-      )
-    );
+    jsonOut({ ok: true, walletAddress, chainId, chain });
   } catch (error) {
-    console.error(
-      JSON.stringify(
-        { ok: false, error: (error as Error).message, stack: (error as Error).stack },
-        null,
-        2
-      )
-    );
+    jsonOut({ ok: false, error: (error as Error).message });
     process.exit(1);
   }
 }
@@ -571,7 +422,7 @@ async function handleList(): Promise<void> {
   try {
     const wallets = await listWallets();
 
-    const details = [];
+    const details: Array<{ name: string; address: string; chain: string; chainId: number }> = [];
     for (const name of wallets) {
       const session = await loadWalletSession(name);
       if (session) {
@@ -584,27 +435,13 @@ async function handleList(): Promise<void> {
       }
     }
 
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
-          wallets: details
-        },
-        null,
-        2
-      )
-    );
+    if (!isTTY()) {
+      jsonOut({ ok: true, wallets: details });
+    } else {
+      await inkRender(React.createElement(WalletListUI, { wallets: details }));
+    }
   } catch (error) {
-    console.error(
-      JSON.stringify(
-        {
-          ok: false,
-          error: (error as Error).message
-        },
-        null,
-        2
-      )
-    );
+    jsonOut({ ok: false, error: (error as Error).message });
     process.exit(1);
   }
 }
@@ -623,30 +460,25 @@ async function handleAddress(argv: AddressArgs): Promise<void> {
       throw new Error(`Wallet not found: ${name}`);
     }
 
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
-          walletName: name,
-          walletAddress: session.walletAddress,
+    if (!isTTY()) {
+      jsonOut({
+        ok: true,
+        walletAddress: session.walletAddress,
+        chain: session.chain,
+        chainId: session.chainId
+      });
+    } else {
+      await inkRender(
+        React.createElement(WalletAddressUI, {
+          name,
+          address: session.walletAddress,
           chain: session.chain,
           chainId: session.chainId
-        },
-        null,
-        2
-      )
-    );
+        })
+      );
+    }
   } catch (error) {
-    console.error(
-      JSON.stringify(
-        {
-          ok: false,
-          error: (error as Error).message
-        },
-        null,
-        2
-      )
-    );
+    jsonOut({ ok: false, error: (error as Error).message });
     process.exit(1);
   }
 }
@@ -666,28 +498,9 @@ async function handleRemove(argv: RemoveArgs): Promise<void> {
       throw new Error(`Wallet not found: ${name}`);
     }
 
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
-          walletName: name,
-          message: 'Wallet removed successfully'
-        },
-        null,
-        2
-      )
-    );
+    jsonOut({ ok: true, walletName: name });
   } catch (error) {
-    console.error(
-      JSON.stringify(
-        {
-          ok: false,
-          error: (error as Error).message
-        },
-        null,
-        2
-      )
-    );
+    jsonOut({ ok: false, error: (error as Error).message });
     process.exit(1);
   }
 }
@@ -714,10 +527,10 @@ export const walletCommand: CommandModule = {
                 default: 'polygon',
                 describe: 'Chain name or ID'
               })
-              .option('no-wait', {
+              .option('print-url', {
                 type: 'boolean',
                 default: false,
-                describe: 'Generate session URL only (manual copy-paste flow)'
+                describe: 'Print approval URL and exit (non-interactive)'
               })
               .option('timeout', {
                 type: 'number',

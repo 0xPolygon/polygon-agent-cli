@@ -1,7 +1,19 @@
-import { Wallet, Copy, AlertCircle, Plus } from 'lucide-react';
+import type { ElementType } from 'react';
 
 import './App.css';
 
+import {
+  Wallet,
+  Copy,
+  AlertCircle,
+  Plus,
+  CalendarClock,
+  Twitter,
+  BarChart2,
+  Globe,
+  ArrowLeftRight,
+  TrendingUp
+} from 'lucide-react';
 import { Hex, Signature } from 'ox';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -20,7 +32,7 @@ import { encryptSession } from '@polygonlabs/agent-shared';
 import { CodeDisplay } from './components/CodeDisplay.js';
 import { FundingScreen } from './components/FundingScreen.js';
 import { dappOrigin, projectAccessKey, walletUrl, relayerUrl, nodesUrl } from './config';
-import { resolveChainId, resolveNetwork } from './indexer';
+import { resolveChainId, fetchTotalUsdBalance } from './indexer';
 import { resolveErc20Symbol } from './tokenDirectory';
 
 async function deleteIndexedDb(dbName: string): Promise<void> {
@@ -47,34 +59,76 @@ async function resetLocalSessionStateForNewRid(rid: string): Promise<boolean> {
 
 // --- Static background: use-cases panel ---
 
-const USE_CASES = [
-  'DeFi automation',
-  'Trading agent',
-  'Prediction market agent',
-  'Pay for APIs mid-task'
+const SKILL_URL = 'https://agentconnect.polygon.technology/SKILL.md';
+
+const AGENTS: {
+  id: 'claude' | 'codex' | 'gemini';
+  label: string;
+  color: string;
+  terminalPrefix: string;
+  buildCommand: (display: string) => string;
+}[] = [
+  {
+    id: 'claude',
+    label: 'Claude',
+    color: '#D97706',
+    terminalPrefix: '$ Claude',
+    buildCommand: (display) => `$ Claude Read ${SKILL_URL} and ${display}`
+  },
+  {
+    id: 'codex',
+    label: 'Codex',
+    color: '#10A37F',
+    terminalPrefix: '$ codex',
+    buildCommand: (display) => `$ codex "Read ${SKILL_URL} and ${display}"`
+  },
+  {
+    id: 'gemini',
+    label: 'Gemini',
+    color: '#4285F4',
+    terminalPrefix: '$ gemini',
+    buildCommand: (display) => `$ gemini "Read ${SKILL_URL} and ${display}"`
+  }
 ];
 
-const SAMPLE_COMMAND = `$ Claude Read https://polygon.technology/SKILL.md and DCA $20 USDC into POL every Monday at 9am. If POL drops more than 10% in a day, double the buy. Execute autonomously, no confirmations needed.`;
-
-function PolygonLogo() {
-  return (
-    <svg width="28" height="28" viewBox="0 0 360 360" fill="none">
-      <rect width="360" height="360" rx="180" fill="#8247E5" />
-      <path
-        d="M218.804 99.5819L168.572 128.432V218.473L140.856 234.539L112.97 218.46V186.313L140.856 170.39L158.786 180.788V154.779L140.699 144.511L90.4795 173.687V231.399L140.869 260.418L191.088 231.399V141.371L218.974 125.291L246.846 141.371V173.374L218.974 189.597L200.887 179.107V204.986L218.804 215.319L269.519 186.47V128.432L218.804 99.5819Z"
-        fill="white"
-      />
-    </svg>
-  );
-}
-
-function SparkleIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-      <path d="M8 1l1.5 4.5L14 7l-4.5 1.5L8 13l-1.5-4.5L2 7l4.5-1.5L8 1z" fill="#8247e5" />
-    </svg>
-  );
-}
+const USE_CASES: { label: string; display: string; icon: ElementType }[] = [
+  {
+    label: 'DCA into POL on a schedule',
+    display:
+      'DCA a small amount of USDC into POL every Monday at 9am. If POL drops more than 10% in a day, double the buy.',
+    icon: CalendarClock
+  },
+  {
+    label: 'Read Twitter/X profiles & tweets',
+    display:
+      'Read Twitter/X profiles and tweets without API keys. Get follower counts, recent tweets, engagement metrics.',
+    icon: Twitter
+  },
+  {
+    label: 'Bet on Polymarket predictions',
+    display:
+      'Find the top 3 open Polymarket markets about crypto. Allocate a small amount of USDC to each bet you have at least 60% confidence in.',
+    icon: BarChart2
+  },
+  {
+    label: 'Purchase a domain',
+    display:
+      'Find and register an available .com domain for my project using my wallet. Check pricing, complete the purchase, and confirm registration.',
+    icon: Globe
+  },
+  {
+    label: 'Bridge assets cross-chain',
+    display:
+      'Bridge some USDC from Polygon to Base using the cheapest available route. Confirm the arrival and report the final balance on both chains.',
+    icon: ArrowLeftRight
+  },
+  {
+    label: 'Automate yield strategies',
+    display:
+      'Find the highest-yield USDC lending pool on Polygon with TVL above $10M. Deposit some USDC and report the current APY.',
+    icon: TrendingUp
+  }
+];
 
 // --- Main App ---
 
@@ -84,14 +138,19 @@ function App() {
   const walletName = params.get('wallet') || '';
 
   const chainId = useMemo(() => resolveChainId(params), [params]);
-  const network = useMemo(() => resolveNetwork(chainId), [chainId]);
 
   const [error, setError] = useState<string>('');
   const [walletAddress, setWalletAddress] = useState<string>('');
   const [cliPkHex, setCliPkHex] = useState<string>('');
   const [sessionCode, setSessionCode] = useState<string>('');
   const [showFunding, setShowFunding] = useState(false);
+  const [showDashboard, setShowDashboard] = useState(false);
   const [feeTokens, setFeeTokens] = useState<any | null>(null);
+  const [selectedUseCase, setSelectedUseCase] = useState(0);
+  const [selectedAgent, setSelectedAgent] = useState<'claude' | 'codex' | 'gemini'>('claude');
+  const [copied, setCopied] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [totalUsd, setTotalUsd] = useState<number | null>(null);
 
   // Reset local session state on new rid
   useEffect(() => {
@@ -121,6 +180,15 @@ function App() {
       })
       .catch((e: any) => setError(`Failed to load session key: ${e?.message || String(e)}`));
   }, [rid]);
+
+  // Fetch USD portfolio balance when wallet address is first known
+  useEffect(() => {
+    if (!walletAddress) return;
+    setTotalUsd(null);
+    fetchTotalUsdBalance(walletAddress, chainId)
+      .then(setTotalUsd)
+      .catch(() => setTotalUsd(null));
+  }, [walletAddress, chainId]);
 
   // Poll relay status after code shown — auto-transition to funding when CLI retrieves payload
   useEffect(() => {
@@ -171,6 +239,7 @@ function App() {
     void feeTokens;
     setError('');
     setSessionCode('');
+    setConnecting(true);
 
     if (!rid || !walletName) {
       setError('Invalid link. Missing rid or wallet.');
@@ -433,9 +502,11 @@ function App() {
       if (!relayRes.ok) throw new Error(`Failed to deliver session to relay (${relayRes.status})`);
 
       setSessionCode(code);
+      setConnecting(false);
     } catch (e: any) {
       console.error(e);
       setError(e?.message || String(e));
+      setConnecting(false);
     }
   };
 
@@ -443,160 +514,213 @@ function App() {
     ? `${walletAddress.slice(0, 6)}..${walletAddress.slice(-4)}`
     : null;
 
-  return (
-    <div className="min-h-screen bg-[#eeeef5]">
-      {/* ── Top nav ── */}
-      <nav className="bg-white border-b border-[#e5e5f0] px-6 py-3.5 flex items-center justify-between">
-        {/* Logo */}
-        <div className="flex items-center gap-2.5">
-          <PolygonLogo />
-          <span className="text-base font-semibold text-[#0f0f1a]">polygon</span>
-          <span className="text-xs font-semibold bg-[#0f0f1a] text-white px-2 py-0.5 rounded-md">
-            Agent
-          </span>
-        </div>
+  // ── Screen 1: Connecting (no wallet yet, or encrypting) ──
+  if (!walletAddress || (walletAddress && !sessionCode && !showFunding && !showDashboard)) {
+    const isWaiting = connecting || (walletAddress && !sessionCode);
+    return (
+      <div className="min-h-screen bg-[#eeeef5] flex flex-col items-center justify-center px-4">
+        {/* Floating card */}
+        <div
+          className="w-full max-w-sm bg-white rounded-2xl border border-[#e5e5f0] overflow-hidden"
+          style={{ boxShadow: '0 2px 4px rgba(0,0,0,0.04), 0 12px 40px rgba(130,71,229,0.09)' }}
+        >
+          {/* Purple accent line */}
+          <div className="h-0.5 bg-gradient-to-r from-[#8247e5] via-[#a855f7] to-[#8247e5]" />
 
-        {/* Right: wallet chip or connect button */}
-        {walletAddress ? (
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 bg-[#f3f4f8] rounded-full px-3 py-1.5 text-sm text-[#374151]">
-              <div className="w-5 h-5 rounded-full bg-gradient-to-br from-[#8247e5] to-[#c084fc]" />
-              <span className="font-mono text-sm">{shortAddr}</span>
+          <div className="px-8 py-10 flex flex-col items-center">
+            {/* Logo + badge */}
+            <div className="flex items-center gap-2.5 mb-8">
+              <img src="/polygon-logo-full.webp" alt="Polygon" className="h-7 w-auto" />
+              <span className="font-mono text-xs bg-[#0f0f1a] text-white px-2 py-0.5 rounded-md tracking-tight">
+                &gt;_ agent
+              </span>
             </div>
-          </div>
-        ) : (
-          <button
-            onClick={connect}
-            className="btn-press flex items-center gap-2 bg-[#8247e5] hover:bg-[#7139d4] text-white text-sm font-semibold px-4 py-2 rounded-full transition-colors cursor-pointer border-0"
-          >
-            <Wallet className="w-4 h-4" />
-            Connect wallet
-          </button>
-        )}
-      </nav>
 
-      {/* ── Main content ── */}
-      <main className="max-w-4xl mx-auto px-6 py-8">
-        {/* Balance + Add funds (only after connect) */}
-        {walletAddress && (
-          <div className="flex items-start justify-between mb-6 animate-fade-in">
-            <div>
-              <div className="text-5xl font-bold text-[#0f0f1a] mb-2">U$0.00</div>
-              <div className="flex items-center gap-2 text-sm text-[#6b7280]">
-                <div className="w-3.5 h-3.5 rounded-full bg-[#8247e5]" />
-                <span className="font-mono">{shortAddr}</span>
-                <span className="text-[#e5e5f0]">·</span>
-                <span className="flex items-center gap-1 text-[#16a34a]">
-                  <span className="w-2 h-2 rounded-full bg-[#16a34a] inline-block" />
-                  Connected
-                </span>
+            {/* CTA / status */}
+            {isWaiting ? (
+              <div className="flex items-center gap-2.5 text-sm text-[#6b7280]">
+                <div
+                  className="w-3.5 h-3.5 rounded-full border-2 border-[#8247e5] border-t-transparent flex-shrink-0"
+                  style={{ animation: 'spin 0.8s linear infinite' }}
+                />
+                Waiting for wallet authorization
               </div>
-            </div>
-            <button
-              onClick={() => setShowFunding(true)}
-              className="btn-press flex items-center gap-2 bg-[#8247e5] hover:bg-[#7139d4] text-white font-semibold px-5 py-2.5 rounded-full transition-colors cursor-pointer border-0"
-            >
-              <Plus className="w-4 h-4" />
-              Add funds
-            </button>
-          </div>
-        )}
+            ) : (
+              <>
+                <p className="text-sm text-[#9ca3af] mb-6 text-center leading-relaxed">
+                  Create a secure session for your agent
+                </p>
+                <button
+                  onClick={connect}
+                  className="btn-press w-full flex items-center justify-center gap-2 bg-[#8247e5] hover:bg-[#7139d4] text-white text-sm font-semibold px-5 py-3 rounded-xl transition-colors cursor-pointer border-0"
+                >
+                  <Wallet className="w-4 h-4" />
+                  Sign In
+                </button>
+              </>
+            )}
 
-        {/* ── Pre-connect state: inline connect card ── */}
-        {!walletAddress && (
-          <div className="mb-6 animate-scale-in">
-            <div className="bg-white rounded-2xl border border-[#e5e5f0] p-6 max-w-md mx-auto">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-xl overflow-hidden">
-                  <PolygonLogo />
-                </div>
-                <div>
-                  <div className="font-semibold text-[#0f0f1a]">Polygon Agent Kit</div>
-                  <div className="text-sm text-[#6b7280]">{network.title} · Wallet Session</div>
-                </div>
-              </div>
-
-              <p className="text-sm text-[#6b7280] mb-5 leading-relaxed">
-                Connect your wallet to authorize an agent session. You'll receive a 6-digit code to
-                enter in your terminal or agent.
-              </p>
-
-              <button
-                onClick={connect}
-                className="btn-press w-full h-12 rounded-xl bg-[#8247e5] hover:bg-[#7139d4] text-white font-semibold text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer border-0"
-              >
-                <Wallet className="w-4 h-4" />
-                Connect Wallet
-              </button>
-
-              {error && (
-                <div className="mt-4 flex items-start gap-2 px-3.5 py-3 rounded-xl bg-red-50 border border-red-100">
-                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
-                  <p className="text-sm text-red-600">{error}</p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ── Post-connect: encrypting spinner ── */}
-        {walletAddress && !sessionCode && (
-          <div className="mb-6 animate-fade-in">
-            <div className="bg-white rounded-2xl border border-[#e5e5f0] p-5 flex items-center gap-3">
-              <div
-                className="w-4 h-4 rounded-full border-2 border-[#8247e5] border-t-transparent shrink-0"
-                style={{ animation: 'spin 0.8s linear infinite' }}
-              />
-              <p className="text-sm text-[#6b7280]">Encrypting session and sending to relay…</p>
-            </div>
+            {/* Error */}
             {error && (
-              <div className="mt-3 flex items-start gap-2 px-3.5 py-3 rounded-xl bg-red-50 border border-red-100">
+              <div className="mt-4 w-full flex items-start gap-2 px-3.5 py-3 rounded-xl bg-red-50 border border-red-100">
                 <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
-                <p className="text-sm text-red-600">{error}</p>
+                <div>
+                  <p className="text-sm text-red-600">{error}</p>
+                  <button
+                    onClick={connect}
+                    className="mt-1.5 text-xs text-[#8247e5] hover:text-[#7139d4] font-medium cursor-pointer border-0 bg-transparent transition-colors"
+                  >
+                    Try again →
+                  </button>
+                </div>
               </div>
             )}
           </div>
-        )}
+        </div>
+      </div>
+    );
+  }
 
-        {/* ── Code display ── */}
-        {sessionCode && !showFunding && (
-          <div className="mb-6">
-            <CodeDisplay code={sessionCode} onContinue={() => setShowFunding(true)} />
+  // ── Screen 2: Code confirm ──
+  if (sessionCode && !showFunding && !showDashboard) {
+    return (
+      <div className="min-h-screen bg-[#eeeef5] flex flex-col items-center justify-center px-4">
+        <div className="flex items-center gap-2.5 mb-6">
+          <img src="/polygon-logo-full.webp" alt="Polygon" className="h-8 w-auto" />
+          <span className="font-mono text-xs bg-[#0f0f1a] text-white px-2 py-0.5 rounded-md tracking-tight">
+            &gt;_ agent
+          </span>
+        </div>
+        <CodeDisplay
+          code={sessionCode}
+          walletAddress={walletAddress}
+          totalUsd={totalUsd}
+          onContinue={() => setShowFunding(true)}
+          onRegenerate={() => {
+            setSessionCode('');
+            void connect();
+          }}
+        />
+      </div>
+    );
+  }
+
+  // ── Screen 3: Funding ──
+  if (showFunding && !showDashboard) {
+    return (
+      <div className="min-h-screen bg-[#eeeef5] flex flex-col items-center justify-center px-4">
+        {/* Fixed so Trails modal overlay can never cover the logo */}
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[99999] flex items-center gap-2.5">
+          <img src="/polygon-logo-full.webp" alt="Polygon" className="h-8 w-auto" />
+          <span className="font-mono text-xs bg-[#0f0f1a] text-white px-2 py-0.5 rounded-md tracking-tight">
+            &gt;_ agent
+          </span>
+        </div>
+        <div className="w-full max-w-sm">
+          <FundingScreen
+            walletAddress={walletAddress}
+            chainId={chainId}
+            onSkip={() => {
+              setShowDashboard(true);
+              setTotalUsd(null);
+              fetchTotalUsdBalance(walletAddress, chainId)
+                .then(setTotalUsd)
+                .catch(() => setTotalUsd(null));
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // ── Screen 4: Dashboard ──
+  return (
+    <div className="min-h-screen bg-[#eeeef5]">
+      {/* Nav */}
+      <nav className="bg-white border-b border-[#e5e5f0] px-6 py-3.5 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <img src="/polygon-logo-full.webp" alt="Polygon" className="h-7 w-auto" />
+          <span className="font-mono text-xs bg-[#0f0f1a] text-white px-2 py-0.5 rounded-md tracking-tight">
+            &gt;_ agent
+          </span>
+        </div>
+        <a
+          href="https://wallet.polygon.technology"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 bg-[#f3f4f8] hover:bg-[#eeeef5] rounded-full px-3 py-1.5 transition-colors no-underline"
+        >
+          <div className="w-5 h-5 rounded-full bg-gradient-to-br from-[#8247e5] to-[#c084fc] flex-shrink-0" />
+          <span className="font-mono text-sm text-[#374151]">{shortAddr}</span>
+        </a>
+      </nav>
+
+      <main className="max-w-4xl mx-auto px-6 py-8">
+        {/* Balance row */}
+        <div className="flex items-start justify-between mb-8">
+          <div>
+            <div className="text-5xl font-bold text-[#0f0f1a] mb-2">
+              {totalUsd === null ? (
+                <span className="text-[#d1d5db]">$—</span>
+              ) : (
+                `$${totalUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              )}
+            </div>
+            <div className="flex items-center gap-2 text-sm text-[#6b7280]">
+              <div className="w-3.5 h-3.5 rounded-full bg-[#8247e5]" />
+              <span className="font-mono text-xs">{walletAddress}</span>
+            </div>
           </div>
-        )}
+          <button
+            onClick={() => {
+              setShowFunding(true);
+              setShowDashboard(false);
+            }}
+            className="btn-press flex items-center gap-2 bg-[#8247e5] hover:bg-[#7139d4] text-white font-semibold px-5 py-2.5 rounded-full transition-colors cursor-pointer border-0"
+          >
+            <Plus className="w-4 h-4" />
+            Add funds
+          </button>
+        </div>
 
-        {/* ── Funding screen ── */}
-        {showFunding && (
-          <div className="mb-6">
-            <FundingScreen
-              walletAddress={walletAddress}
-              chainId={chainId}
-              projectAccessKey={projectAccessKey}
-              onSkip={() => {
-                window.location.href = 'https://agent.polygon.technology';
-              }}
-            />
-          </div>
-        )}
+        {/* Section header */}
+        <div className="flex items-center gap-3 mb-4">
+          <h2 className="text-base font-semibold text-[#0f0f1a]">Use your wallet with agents</h2>
+          <span className="flex items-center gap-1.5 text-xs text-[#16a34a] bg-[#f0fdf4] border border-[#bbf7d0] px-2.5 py-1 rounded-full font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#16a34a] inline-block" />
+            polygon-agent connected
+          </span>
+        </div>
 
-        {/* ── Background: use cases + terminal (always visible) ── */}
+        {/* Use cases + terminal */}
         <div className="grid grid-cols-2 gap-0 bg-white rounded-2xl border border-[#e5e5f0] overflow-hidden mb-4">
           {/* Left: use cases */}
           <div className="p-5 border-r border-[#e5e5f0]">
             <div className="space-y-1">
-              {USE_CASES.map((uc, i) => (
-                <div
-                  key={uc}
-                  className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm ${
-                    i === 0 ? 'bg-[#f3f4f8] text-[#0f0f1a] font-medium' : 'text-[#374151]'
-                  }`}
-                >
-                  <SparkleIcon />
-                  {uc}
-                </div>
-              ))}
+              {USE_CASES.map((uc, i) => {
+                const Icon = uc.icon;
+                return (
+                  <button
+                    key={uc.label}
+                    onClick={() => setSelectedUseCase(i)}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-left cursor-pointer transition-colors ${
+                      i === selectedUseCase
+                        ? 'bg-[#f3f4f8] text-[#0f0f1a] font-medium'
+                        : 'text-[#374151] hover:bg-[#f9f9fc]'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5 flex-shrink-0 text-[#8247e5]" />
+                    {uc.label}
+                  </button>
+                );
+              })}
             </div>
-            <button className="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-[#e5e5f0] text-sm text-[#374151] bg-transparent cursor-pointer hover:bg-[#f9f9fc] transition-colors">
+            <a
+              href="https://github.com/0xPolygon/polygon-agent-cli"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-[#e5e5f0] text-sm text-[#374151] bg-transparent cursor-pointer hover:bg-[#f9f9fc] transition-colors no-underline"
+            >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
                 <path
                   d="M7 17L17 7M17 7H7M17 7V17"
@@ -606,60 +730,98 @@ function App() {
                   strokeLinejoin="round"
                 />
               </svg>
-              See all usecases
-            </button>
+              See all use cases
+            </a>
           </div>
 
           {/* Right: terminal */}
           <div className="p-5 flex flex-col">
             <pre className="text-xs leading-relaxed flex-1 text-[#374151] whitespace-pre-wrap font-mono">
-              <span className="text-[#16a34a] font-semibold">$ Claude</span>
-              {SAMPLE_COMMAND.slice(7)}
+              <span
+                className="font-semibold"
+                style={{ color: AGENTS.find((a) => a.id === selectedAgent)?.color }}
+              >
+                {AGENTS.find((a) => a.id === selectedAgent)?.terminalPrefix}
+              </span>
+              {' "'}
+              {USE_CASES[selectedUseCase].display}"
             </pre>
             <div className="mt-3 pt-3 border-t border-[#f0f0f5]">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-6 h-6 rounded-full bg-[#f3f4f8] flex items-center justify-center">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="#D97706">
-                    <circle cx="12" cy="12" r="10" />
-                  </svg>
-                </div>
-                <div className="w-6 h-6 rounded-full bg-[#f3f4f8] flex items-center justify-center">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="#10A37F">
-                    <circle cx="12" cy="12" r="10" />
-                  </svg>
-                </div>
-                <div className="w-6 h-6 rounded-full bg-[#f3f4f8] flex items-center justify-center">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="#4285F4">
-                    <circle cx="12" cy="12" r="10" />
-                  </svg>
-                </div>
+              {/* Agent selector chips */}
+              <div className="flex items-center gap-1.5 mb-3">
+                <span className="text-xs text-[#9ca3af] mr-0.5">Run with</span>
+                {AGENTS.map((agent) => (
+                  <button
+                    key={agent.id}
+                    onClick={() => setSelectedAgent(agent.id)}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-all cursor-pointer border ${
+                      selectedAgent === agent.id
+                        ? 'text-white border-transparent'
+                        : 'bg-white text-[#6b7280] border-[#e5e5f0] hover:border-[#d1d5db]'
+                    }`}
+                    style={
+                      selectedAgent === agent.id
+                        ? { background: agent.color, borderColor: agent.color }
+                        : {}
+                    }
+                  >
+                    <span
+                      className="w-1.5 h-1.5 rounded-full"
+                      style={{
+                        background:
+                          selectedAgent === agent.id ? 'rgba(255,255,255,0.7)' : agent.color
+                      }}
+                    />
+                    {agent.label}
+                  </button>
+                ))}
               </div>
-              <button className="w-full flex items-center justify-center gap-2 border border-[#e5e5f0] rounded-xl py-2.5 text-sm text-[#374151] hover:bg-[#f9f9fc] transition-colors cursor-pointer bg-white">
+              <button
+                onClick={() => {
+                  const agent = AGENTS.find((a) => a.id === selectedAgent)!;
+                  void navigator.clipboard
+                    .writeText(agent.buildCommand(USE_CASES[selectedUseCase].display))
+                    .then(() => {
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 2000);
+                    });
+                }}
+                className="w-full flex items-center justify-center gap-2 border border-[#e5e5f0] rounded-xl py-2.5 text-sm text-[#374151] hover:bg-[#f9f9fc] transition-colors cursor-pointer bg-white"
+              >
                 <Copy className="w-4 h-4" />
-                Copy to your terminal
+                {copied ? 'Copied!' : 'Copy to your terminal'}
               </button>
             </div>
           </div>
         </div>
 
         {/* Learn more */}
-        <h3 className="text-base font-semibold text-[#0f0f1a] mb-3">Learn more</h3>
+        <h3 className="text-base font-semibold text-[#0f0f1a] mb-3 mt-8">Learn more</h3>
         <div className="grid grid-cols-3 gap-3 mb-6">
           {[
             {
               title: 'Github',
-              desc: 'Browse the source code, open issues, and contribute to the Polygon Agent CLI.'
+              desc: 'Browse the source code, open issues, and contribute to the Polygon Agent CLI.',
+              href: 'https://github.com/0xPolygon/polygon-agent-cli'
             },
             {
-              title: 'Developer tools Docs',
-              desc: 'Full CLI reference, quickstart guide, and architecture docs to get your agent onchain fast.'
+              title: 'Docs',
+              desc: 'Full CLI reference, quickstart guide, and architecture docs to get your agent onchain fast.',
+              href: 'https://polygon-labs.mintlify.io/wallets/agentic-wallets'
             },
             {
               title: 'Services list',
-              desc: 'Explore the onchain services your agent can use: swaps, onramps, x402 payments, Polymarket, and more.'
+              desc: 'Explore the onchain services your agent can use: swaps, onramps, x402 payments, Polymarket, and more.',
+              href: 'https://github.com/0xPolygon/polygon-agent-cli'
             }
           ].map((card) => (
-            <div key={card.title} className="bg-white rounded-xl border border-[#e5e5f0] p-4">
+            <a
+              key={card.title}
+              href={card.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="bg-white rounded-xl border border-[#e5e5f0] p-4 no-underline block hover:border-[#8247e5] transition-colors"
+            >
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm font-semibold text-[#0f0f1a]">{card.title}</span>
                 <svg
@@ -679,11 +841,10 @@ function App() {
                 </svg>
               </div>
               <p className="text-xs text-[#9ca3af] leading-relaxed">{card.desc}</p>
-            </div>
+            </a>
           ))}
         </div>
 
-        {/* Footer */}
         <div className="text-center py-4 text-xs text-[#9ca3af]">Powered by Polygon</div>
       </main>
     </div>

@@ -1,118 +1,119 @@
-import { Copy, Check, CreditCard, ArrowRight } from 'lucide-react';
-import { useState } from 'react';
+import { TrailsWidget } from '0xtrails/widget';
+
+import { trailsApiKey } from '../config';
 
 interface FundingScreenProps {
   walletAddress: string;
   chainId: number;
-  projectAccessKey: string;
   onSkip: () => void;
 }
 
 const USDC_POLYGON = '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359';
-export function FundingScreen({
-  walletAddress,
-  chainId,
-  projectAccessKey,
-  onSkip
-}: FundingScreenProps) {
-  const [copiedAddr, setCopiedAddr] = useState(false);
 
-  const trailsUrl = `https://demo.trails.build/?mode=swap&toAddress=${walletAddress}&toChainId=${chainId}&toToken=${USDC_POLYGON}&apiKey=${projectAccessKey}&theme=light`;
+const trailsTheme: Record<string, string> = {
+  '--trails-font-family': 'ui-sans-serif, system-ui, sans-serif',
 
-  const shortAddr = walletAddress
-    ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
-    : '';
+  '--trails-border-radius-widget': '16px',
+  '--trails-border-radius-button': '12px',
+  '--trails-border-radius-input': '12px',
+  '--trails-border-radius-dropdown': '12px',
+  '--trails-border-radius-container': '12px',
+  '--trails-border-radius-list': '12px',
 
-  function handleCopyAddr() {
-    navigator.clipboard.writeText(walletAddress).catch(() => {});
-    setCopiedAddr(true);
-    setTimeout(() => setCopiedAddr(false), 2000);
-  }
+  '--trails-widget-border': '1px solid #e5e5f0',
+  '--trails-shadow': '0 4px 24px rgba(130,71,229,0.08)',
 
+  '--trails-primary': '#8247e5',
+  '--trails-primary-hover': '#7139d4',
+  '--trails-primary-disabled': '#c4b4f5',
+  '--trails-primary-disabled-text': 'rgba(255,255,255,0.5)',
+
+  '--trails-bg-primary': '#ffffff',
+  '--trails-bg-secondary': '#f3f4f8',
+  '--trails-bg-tertiary': '#eeeef5',
+  '--trails-bg-card': '#ffffff',
+
+  '--trails-text-primary': '#0f0f1a',
+  '--trails-text-secondary': '#374151',
+  '--trails-text-tertiary': '#6b7280',
+  '--trails-text-muted': '#9ca3af',
+
+  '--trails-border-primary': '#e5e5f0',
+  '--trails-border-secondary': '#e5e5f0',
+  '--trails-border-tertiary': '#f0f0f5',
+
+  '--trails-hover-bg': '#f3f4f8',
+  '--trails-focus-ring': 'rgba(130,71,229,0.2)',
+
+  '--trails-input-bg': '#f3f4f8',
+  '--trails-input-border': '#e5e5f0',
+  '--trails-input-text': '#0f0f1a',
+  '--trails-input-placeholder': '#9ca3af',
+  '--trails-input-focus-border': '#8247e5',
+  '--trails-input-focus-ring': 'rgba(130,71,229,0.15)',
+
+  '--trails-dropdown-bg': '#ffffff',
+  '--trails-dropdown-border': '#e5e5f0',
+  '--trails-dropdown-text': '#374151',
+  '--trails-dropdown-hover-bg': '#f3f4f8',
+  '--trails-dropdown-selected-bg': '#f3f4f8',
+  '--trails-dropdown-selected-text': '#0f0f1a',
+
+  '--trails-list-bg': '#ffffff',
+  '--trails-list-border': '#e5e5f0',
+  '--trails-list-hover-bg': '#f9f9fc'
+};
+
+export function FundingScreen({ walletAddress, chainId, onSkip }: FundingScreenProps) {
   return (
-    <div className="bg-white rounded-2xl border border-[#e5e5f0] p-6 animate-scale-in">
-      {/* Header */}
-      <div className="flex items-start justify-between mb-6">
-        <div>
-          <h2 className="text-lg font-semibold text-[#0f0f1a]">Fund your agent wallet</h2>
-          <p className="text-sm text-[#6b7280] mt-0.5">Add USDC to start running on-chain tasks</p>
-        </div>
-        <button
-          onClick={onSkip}
-          className="text-sm text-[#8247e5] hover:text-[#7139d4] font-medium transition-colors cursor-pointer border-0 bg-transparent whitespace-nowrap"
-        >
-          Skip for now →
-        </button>
-      </div>
-
-      {/* Wallet address chip */}
-      <div className="flex items-center gap-2 bg-[#f3f4f8] rounded-xl px-4 py-3 mb-5">
-        <div className="w-6 h-6 rounded-full bg-gradient-to-br from-[#8247e5] to-[#c084fc] flex-shrink-0" />
-        <span className="text-sm font-mono text-[#374151] flex-1">{shortAddr}</span>
-        <button
-          onClick={handleCopyAddr}
-          className="text-[#9ca3af] hover:text-[#6b7280] transition-colors cursor-pointer border-0 bg-transparent p-0.5"
-        >
-          {copiedAddr ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
-        </button>
-      </div>
-
-      {/* Option 1: Card */}
-      <a
-        href={trailsUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="btn-press flex items-center gap-3 w-full bg-[#8247e5] hover:bg-[#7139d4] text-white rounded-xl px-4 py-4 mb-3 transition-colors no-underline"
+    <div className="w-full max-w-sm animate-scale-in">
+      {/* Card */}
+      <div
+        className="w-full bg-white rounded-2xl border border-[#e5e5f0] overflow-hidden"
+        style={{ boxShadow: '0 2px 4px rgba(0,0,0,0.04), 0 12px 40px rgba(130,71,229,0.09)' }}
       >
-        <div className="w-9 h-9 bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0">
-          <CreditCard className="w-5 h-5" />
-        </div>
-        <div className="flex-1 text-left">
-          <div className="font-semibold text-sm">Add funds with card</div>
-          <div className="text-xs text-white/70 mt-0.5">Buy USDC instantly via Trails</div>
-        </div>
-        <ArrowRight className="w-4 h-4 opacity-70" />
-      </a>
+        {/* Purple hairline */}
+        <div className="h-0.5 bg-gradient-to-r from-[#8247e5] via-[#a855f7] to-[#8247e5]" />
 
-      {/* Option 2: Send from wallet */}
-      <div className="border border-[#e5e5f0] rounded-xl px-4 py-4 mb-5">
-        <div className="flex items-center gap-3 mb-3">
-          <div className="w-9 h-9 bg-[#f3f4f8] rounded-lg flex items-center justify-center flex-shrink-0">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" className="text-[#374151]">
-              <path
-                d="M3 6h18M3 12h18M3 18h18"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-              />
-            </svg>
-          </div>
+        <div className="px-6 pt-7 pb-6 flex flex-col gap-5">
+          {/* Headline + subtext */}
           <div>
-            <div className="font-semibold text-sm text-[#0f0f1a]">Transfer from wallet</div>
-            <div className="text-xs text-[#9ca3af]">Send USDC to your agent address</div>
+            <h2 className="text-[#0f0f1a] font-semibold text-base leading-snug mb-1">
+              Fund your agent wallet
+            </h2>
+            <p className="text-[#6b7280] text-sm leading-relaxed">
+              Deposit funds with a wallet, credit card, or exchange to access paid services.
+            </p>
           </div>
-        </div>
-        <div className="flex items-center gap-2 bg-[#f3f4f8] rounded-lg px-3 py-2.5">
-          <span className="text-xs font-mono text-[#374151] flex-1 break-all">{walletAddress}</span>
-          <button
-            onClick={handleCopyAddr}
-            className="text-[#9ca3af] hover:text-[#6b7280] transition-colors cursor-pointer border-0 bg-transparent p-0.5 flex-shrink-0"
-          >
-            {copiedAddr ? (
-              <Check className="w-3.5 h-3.5 text-green-600" />
-            ) : (
-              <Copy className="w-3.5 h-3.5" />
-            )}
-          </button>
+
+          {/* Trails widget renders its own styled button */}
+          <TrailsWidget
+            apiKey={trailsApiKey}
+            mode="fund"
+            theme="light"
+            customCss={trailsTheme}
+            toChainId={chainId}
+            toToken={USDC_POLYGON}
+            toAddress={walletAddress}
+            buttonText="Add Funds to Agent"
+            fundOptions={{ fiatAmount: '20', hideSwap: true }}
+            onDestinationConfirmation={({ txHash, chainId: confirmChainId, sessionId }) => {
+              console.log('onDestinationConfirmation:', {
+                txHash,
+                chainId: confirmChainId,
+                sessionId
+              });
+              setTimeout(onSkip, 3000);
+            }}
+          />
         </div>
       </div>
 
-      {/* Skip */}
       <button
         onClick={onSkip}
-        className="w-full text-sm text-[#9ca3af] hover:text-[#6b7280] transition-colors cursor-pointer border-0 bg-transparent py-1"
+        className="mt-4 w-full text-sm text-[#9ca3af] hover:text-[#6b7280] transition-colors cursor-pointer border-0 bg-transparent py-1"
       >
-        I'll fund it later — take me to agent.polygon.technology
+        Skip for now
       </button>
     </div>
   );

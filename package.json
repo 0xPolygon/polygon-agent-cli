@@ -15,6 +15,12 @@
   "engines": {
     "node": ">=24"
   },
+  "pnpm": {
+    "overrides": {
+      "@noble/curves": "1.9.7",
+      "@noble/hashes": "1.8.0"
+    }
+  },
   "devDependencies": {
     "@commitlint/cli": "^20.4.2",
     "@commitlint/config-conventional": "^20.4.2",

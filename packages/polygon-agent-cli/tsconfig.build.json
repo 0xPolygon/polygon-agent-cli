@@ -7,5 +7,5 @@
     // Target es2023 to match engines (>=20) in package.json. Update if engines changes.
     "target": "es2023"
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
 }

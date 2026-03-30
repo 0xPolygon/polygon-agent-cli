@@ -7,3 +7,4 @@ dist/
 /.idea/workspace.xml
 .nx/
 */**/.nx
+.gstack/
