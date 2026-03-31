@@ -1,2 +1,11 @@
+# Sync skills/SKILL.md to both package locations
+node -e "
+const fs = require('fs');
+const src = fs.readFileSync('skills/SKILL.md', 'utf8');
+fs.writeFileSync('packages/connector-ui/public/SKILL.md', src);
+fs.writeFileSync('packages/polygon-agent-cli/skills/SKILL.md', src.replace('name: polygon-agent-kit', 'name: polygon-agent-cli'));
+"
+git add packages/connector-ui/public/SKILL.md packages/polygon-agent-cli/skills/SKILL.md
+
 pnpm exec lint-staged
 pnpm run typecheck
