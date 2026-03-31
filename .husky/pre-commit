@@ -1,4 +1,23 @@
-# Sync skills/SKILL.md to both package locations
+# =============================================================================
+# SKILL.md sync
+#
+# skills/SKILL.md is the single source of truth for the agent skill definition.
+# It must be kept in sync with two other locations:
+#
+#   packages/connector-ui/public/SKILL.md
+#     Served at https://agentconnect.polygon.technology/SKILL.md — this is the
+#     URL that agents fetch at runtime (referenced in the dashboard's use-case
+#     commands as SKILL_URL). Must match the root exactly.
+#
+#   packages/polygon-agent-cli/skills/SKILL.md
+#     Bundled inside the published npm package so the skill is available
+#     locally after install. The `name` field is rewritten from
+#     `polygon-agent-kit` (monorepo name) to `polygon-agent-cli` (the
+#     installed skill identifier) to match what Claude Code registers.
+#
+# DO NOT edit the package copies directly — they will be overwritten.
+# Always edit skills/SKILL.md at the repo root.
+# =============================================================================
 node -e "
 const fs = require('fs');
 const src = fs.readFileSync('skills/SKILL.md', 'utf8');
