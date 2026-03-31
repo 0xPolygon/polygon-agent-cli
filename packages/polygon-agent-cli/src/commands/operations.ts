@@ -13,7 +13,7 @@ import {
   fileCoerce
 } from '../lib/utils.ts';
 import { isTTY, inkRender } from '../ui/render.js';
-import { BalancesUI, SendUI } from './operations-ui.js';
+import { BalancesUI, FundUI, SendUI } from './operations-ui.js';
 
 // Shared options
 function withWalletAndChain<T>(yargs: Argv<T>) {
@@ -247,20 +247,26 @@ export const fundCommand: CommandModule = {
 
       const fundingUrl = `https://demo.trails.build/?mode=swap&toAddress=${walletAddress}&toChainId=${chainId}&toToken=${toToken}&apiKey=${apiKey}&theme=light`;
 
-      console.log(
-        JSON.stringify(
-          {
-            ok: true,
-            walletName,
-            walletAddress,
-            chainId,
-            fundingUrl,
-            message: 'Open the funding URL in your browser to fund your wallet via Trails.'
-          },
-          null,
-          2
-        )
-      );
+      if (isTTY()) {
+        await inkRender(
+          React.createElement(FundUI, { walletName, walletAddress, chainId, fundingUrl })
+        );
+      } else {
+        console.log(
+          JSON.stringify(
+            {
+              ok: true,
+              walletName,
+              walletAddress,
+              chainId,
+              fundingUrl,
+              message: 'Open the funding URL in your browser to fund your wallet via Trails.'
+            },
+            null,
+            2
+          )
+        );
+      }
     } catch (error) {
       console.error(
         JSON.stringify(

@@ -346,17 +346,14 @@ export function WalletCreateUI({
         <Box flexDirection="column" marginTop={1} paddingX={1}>
           <Box
             borderStyle="round"
-            borderColor="magenta"
+            borderColor="#8247e5"
             flexDirection="column"
             paddingX={3}
             paddingY={1}
             gap={1}
           >
             <Text dimColor>Enter the 6-digit code shown in your browser</Text>
-            <Box gap={2} alignItems="center">
-              <CodeDisplay code={code} />
-              {code.length < 6 && <Text dimColor>← type to fill</Text>}
-            </Box>
+            <CodeDisplay code={code} />
             {codeError && <Text color="red">{codeError}</Text>}
           </Box>
         </Box>
@@ -385,20 +382,12 @@ export function WalletCreateUI({
           <Box gap={1}>
             <Text color="green">✓</Text>
             <Text bold>Wallet ready</Text>
-            <Text dimColor>—</Text>
+            <Text dimColor>·</Text>
             <Text color="cyan">{name}</Text>
           </Box>
-          <Box gap={1} marginTop={1}>
-            <Box width={10}>
-              <Text dimColor>Address:</Text>
-            </Box>
-            <Text>{address}</Text>
-          </Box>
-          <Box gap={1}>
-            <Box width={10}>
-              <Text dimColor>Chain:</Text>
-            </Box>
-            <Text color="cyan">{walletChain}</Text>
+          <Box flexDirection="column" marginTop={1} gap={0}>
+            <KV k="address" v={address} accent />
+            <KV k="chain" v={walletChain} />
           </Box>
           {balances.length > 0 && (
             <Box flexDirection="column" marginTop={1} gap={0}>

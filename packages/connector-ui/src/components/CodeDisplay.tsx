@@ -50,7 +50,7 @@ export function CodeDisplay({ code, walletAddress, totalUsd, onRegenerate }: Cod
       {/* Code section */}
       <div className="px-5 py-6">
         <h2 className="text-base font-semibold text-[#0f0f1a] mb-1">Confirm your code</h2>
-        <p className="text-sm text-[#9ca3af] mb-5">
+        <p className="text-sm text-[#6b7280] mb-5">
           Enter this code in your terminal or send it to your agent
         </p>
 

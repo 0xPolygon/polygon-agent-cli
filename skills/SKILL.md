@@ -154,6 +154,25 @@ When `wallet create` outputs a URL in the `url` or `approvalUrl` field, send the
 - Do NOT split the URL across multiple messages
 - Output the raw URL exactly as returned by the CLI
 
+## Presenting Results to the User
+
+CLI commands output JSON (non-TTY). After running a command, always render the result as formatted markdown — never paste raw JSON into the conversation.
+
+| Command | How to present |
+|---------|---------------|
+| `balances` | Markdown table: Token / Balance columns. Show wallet address and chain above the table. |
+| `send` / `send-token` / `send-native` | One-liner summary: amount, symbol, recipient. If broadcast, show tx hash as a code span and explorer URL as a link. |
+| `swap` | Summary: `X FROM → Y TO` with chain. If broadcast, show deposit tx hash + explorer link. |
+| `deposit` | Summary: amount, asset, protocol, pool address. If broadcast, show tx hash + explorer link. |
+| `fund` | Show the `fundingUrl` as a clickable link with a brief instruction to open it. |
+| `wallet create` / `wallet list` | Wallet name, truncated address, chain in a small table or bullet list. |
+| `agent register` | Show agent name and tx hash. Remind user to retrieve `agentId` from the Registered event. |
+| `agent reputation` | Format score and tag breakdown as a small table. |
+
+**Dry-run results** — always make it visually clear this was a simulation. Prefix with `⚡ Dry run` and show what *would* happen. Remind the user to re-run with `--broadcast` to execute.
+
+**Errors** — extract the `error` field and present it as a clear sentence, not a JSON blob. Include the relevant fix from the Troubleshooting table if applicable.
+
 ## Troubleshooting
 
 | Issue | Fix |

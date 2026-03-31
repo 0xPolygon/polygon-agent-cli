@@ -547,7 +547,7 @@ function App() {
               </div>
             ) : (
               <>
-                <p className="text-sm text-[#9ca3af] mb-6 text-center leading-relaxed">
+                <p className="text-sm text-[#6b7280] mb-6 text-center leading-relaxed">
                   Create a secure session for your agent
                 </p>
                 <button
