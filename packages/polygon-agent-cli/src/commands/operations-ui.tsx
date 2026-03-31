@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 
 import { loadWalletSession } from '../lib/storage.ts';
 import { resolveNetwork, formatUnits } from '../lib/utils.ts';
-import { Err } from '../ui/components.js';
+import { Header, KV, Err, Divider, DryRunBanner, TxResult } from '../ui/components.js';
 
 // Get per-chain indexer URL
 function getChainIndexerUrl(chainId: number): string {
@@ -29,7 +29,7 @@ function shortAddr(address: string, head = 6, tail = 4): string {
 interface BalanceEntry {
   symbol: string;
   balance: string;
-  address: string; // contract address or '(native)'
+  address: string;
 }
 
 interface BalancesUIProps {
@@ -37,8 +37,8 @@ interface BalancesUIProps {
   chainOverride?: string;
 }
 
-const COL_TOKEN = 14;
-const COL_BALANCE = 26;
+const COL_TOKEN = 10;
+const COL_BALANCE = 22;
 
 export function BalancesUI({ walletName, chainOverride }: BalancesUIProps) {
   const { exit } = useApp();
@@ -103,21 +103,13 @@ export function BalancesUI({ walletName, chainOverride }: BalancesUIProps) {
     })();
   }, []);
 
-  const addrShort = walletAddress ? shortAddr(walletAddress) : '';
-  const divider = '─'.repeat(COL_TOKEN + COL_BALANCE + 20);
-
   return (
-    <Box flexDirection="column" paddingBottom={1} paddingX={1}>
-      {/* Header: Balances — 0xd502…c419 */}
-      <Box gap={1}>
-        <Text bold>Balances</Text>
-        <Text dimColor>—</Text>
-        <Text color="cyan">{addrShort || '…'}</Text>
-      </Box>
+    <Box flexDirection="column" paddingX={1} paddingTop={1} paddingBottom={1}>
+      <Header sub={walletAddress ? `balances · ${shortAddr(walletAddress)}` : 'balances'} />
 
       {loading && (
-        <Box gap={1} marginTop={1} marginLeft={2}>
-          <Text color="cyan">
+        <Box gap={1} marginLeft={1}>
+          <Text color="#8247e5">
             <Spinner type="dots" />
           </Text>
           <Text dimColor>fetching…</Text>
@@ -125,22 +117,19 @@ export function BalancesUI({ walletName, chainOverride }: BalancesUIProps) {
       )}
 
       {!loading && !error && (
-        <Box flexDirection="column" marginTop={1}>
-          {/* Wallet / chain meta */}
-          <Box marginLeft={2} gap={1}>
-            <Text dimColor>Wallet:</Text>
-            <Text>{walletAddress}</Text>
-          </Box>
-          <Box marginLeft={2} gap={1}>
-            <Text dimColor>Chain: </Text>
-            <Text color="cyan">
-              {chainName} <Text dimColor>{chainId}</Text>
-            </Text>
+        <Box flexDirection="column">
+          <Box marginLeft={1} flexDirection="column" gap={0}>
+            <KV k="wallet" v={walletAddress} />
+            <KV k="chain" v={`${chainName}`} keyWidth={10} />
+            <Box gap={1}>
+              <Box width={10}>
+                <Text dimColor>chain id</Text>
+              </Box>
+              <Text dimColor>{chainId}</Text>
+            </Box>
           </Box>
 
-          {/* Table */}
-          <Box flexDirection="column" marginTop={1} marginLeft={2}>
-            {/* Column headers */}
+          <Box flexDirection="column" marginTop={1} marginLeft={1}>
             <Box gap={0}>
               <Box width={COL_TOKEN}>
                 <Text bold>Token</Text>
@@ -150,9 +139,8 @@ export function BalancesUI({ walletName, chainOverride }: BalancesUIProps) {
               </Box>
               <Text bold>Address</Text>
             </Box>
-            <Text dimColor>{divider}</Text>
+            <Divider width={COL_TOKEN + COL_BALANCE + 14} />
 
-            {/* Rows */}
             {balances.map((b) => (
               <Box key={b.symbol} gap={0}>
                 <Box width={COL_TOKEN}>
@@ -213,96 +201,100 @@ export function SendUI({ walletName, to, amount, symbol, broadcast, onExec }: Se
     })();
   }, []);
 
-  const toDisplay = to;
-
   return (
-    <Box flexDirection="column" paddingBottom={1} paddingX={1}>
-      {/* Header */}
-      <Box gap={1}>
-        <Text bold>Send</Text>
-        <Text dimColor>—</Text>
-        <Text color="yellow" bold>
-          {symbol}
-        </Text>
-        <Text dimColor>·</Text>
-        <Text dimColor>{walletName}</Text>
+    <Box flexDirection="column" paddingX={1} paddingTop={1} paddingBottom={1}>
+      <Header sub={`send · ${symbol}`} />
+
+      <Box flexDirection="column" marginLeft={1}>
+        <KV k="wallet" v={walletName} />
+        <KV k="to" v={to} />
+        <KV k="amount" v={`${amount} ${symbol}`} accent />
       </Box>
 
-      <Box flexDirection="column" marginTop={1} marginLeft={2}>
-        {!broadcast && (
-          <Box gap={1}>
-            <Text color="yellow">◆</Text>
-            <Text dimColor>Dry run — add --broadcast to execute</Text>
-          </Box>
-        )}
+      {!broadcast && <DryRunBanner />}
 
-        {broadcast && (
-          <Box flexDirection="column" gap={0}>
-            {/* Token resolved */}
+      {broadcast && (
+        <Box flexDirection="column" marginTop={1} marginLeft={1} gap={0}>
+          {phase === 'broadcasting' && (
+            <Box gap={1}>
+              <Text color="#8247e5">
+                <Spinner type="dots" />
+              </Text>
+              <Text dimColor>Broadcasting…</Text>
+            </Box>
+          )}
+
+          {phase === 'done' && (
             <Box gap={1}>
               <Text color="green">✓</Text>
-              <Text bold>{symbol}</Text>
-              <Text dimColor>resolved</Text>
+              <Text bold>Transaction confirmed</Text>
             </Box>
+          )}
 
-            {/* Broadcasting / confirmed */}
-            {phase === 'broadcasting' && (
-              <Box gap={1}>
-                <Text color="cyan">
-                  <Spinner type="dots" />
-                </Text>
-                <Text dimColor>Broadcasting transaction…</Text>
-              </Box>
-            )}
-
-            {(phase === 'done' || phase === 'error') && (
-              <Box gap={1}>
-                {phase === 'done' ? <Text color="green">✓</Text> : <Text color="red">✗</Text>}
-                <Text bold={phase === 'done'} color={phase === 'error' ? 'red' : undefined}>
-                  {phase === 'done' ? 'Transaction confirmed' : 'Transaction failed'}
-                </Text>
-              </Box>
-            )}
-          </Box>
-        )}
-
-        {/* Result block */}
-        {phase === 'done' && (
-          <Box flexDirection="column" marginTop={1} gap={0}>
+          {phase === 'error' && (
             <Box gap={1}>
-              <Box width={11}>
-                <Text dimColor>Amount:</Text>
-              </Box>
-              <Text color="green" bold>
-                {amount} {symbol}
-              </Text>
+              <Text color="red">✗</Text>
+              <Text color="red">Transaction failed</Text>
             </Box>
-            <Box gap={1}>
-              <Box width={11}>
-                <Text dimColor>To:</Text>
-              </Box>
-              <Text>{toDisplay}</Text>
-            </Box>
-            {txHash && (
-              <Box gap={1}>
-                <Box width={11}>
-                  <Text dimColor>Tx Hash:</Text>
-                </Box>
-                <Text dimColor>{txHash}</Text>
-              </Box>
-            )}
-            {explorerUrl && (
-              <Box gap={1}>
-                <Box width={11}>
-                  <Text dimColor>Explorer:</Text>
-                </Box>
-                <Text color="cyan">{explorerUrl}</Text>
-              </Box>
-            )}
-          </Box>
-        )}
+          )}
+        </Box>
+      )}
 
-        {phase === 'error' && <Err message={error} />}
+      {phase === 'done' && (
+        <Box marginLeft={1}>
+          <TxResult
+            amount={amount}
+            symbol={symbol}
+            to={to}
+            txHash={txHash}
+            explorerUrl={explorerUrl}
+          />
+        </Box>
+      )}
+
+      {phase === 'error' && <Err message={error} />}
+    </Box>
+  );
+}
+
+export interface FundUIProps {
+  walletName: string;
+  walletAddress: string;
+  chainId: number;
+  fundingUrl: string;
+}
+
+export function FundUI({ walletName, walletAddress, chainId, fundingUrl }: FundUIProps) {
+  const { exit } = useApp();
+
+  useEffect(() => {
+    exit();
+  }, []);
+
+  return (
+    <Box flexDirection="column" paddingX={1} paddingTop={1} paddingBottom={1}>
+      <Header sub="fund" />
+      <Box flexDirection="column" marginLeft={1} gap={0}>
+        <KV k="wallet" v={walletName} />
+        <KV k="address" v={walletAddress} keyWidth={10} />
+        <KV k="chain id" v={String(chainId)} keyWidth={10} />
+      </Box>
+      <Box
+        flexDirection="column"
+        borderStyle="round"
+        borderColor="#8247e5"
+        paddingX={2}
+        paddingY={0}
+        marginY={1}
+      >
+        <Text dimColor>open in browser to fund wallet</Text>
+        <Text color="cyan" wrap="wrap">
+          {fundingUrl}
+        </Text>
+      </Box>
+      <Box marginLeft={1} gap={1}>
+        <Text color="#8247e5">→</Text>
+        <Text dimColor>swap any token to your wallet via Trails</Text>
       </Box>
     </Box>
   );
