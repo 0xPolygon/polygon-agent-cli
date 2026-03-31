@@ -11,16 +11,24 @@ main = "worker.mjs"
 directory = "./dist"
 binding = "ASSETS"
 
+[[durable_objects.bindings]]
+name = "SESSION_RELAY"
+class_name = "SessionRelay"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["SessionRelay"]
+
 [env.staging]
-name = "agentconnect-staging" 
+name = "agentconnect-staging"
 
 routes = [
-  { pattern = "agentconnect.staging.polygon.technology", custom_domain = true }  
+  { pattern = "agentconnect.staging.polygon.technology", custom_domain = true }
 ]
 
 [env.production]
-name = "agentconnect-production" 
+name = "agentconnect-production"
 
 routes = [
-  { pattern = "agentconnect.polygon.technology", custom_domain = true }  
+  { pattern = "agentconnect.polygon.technology", custom_domain = true }
 ]

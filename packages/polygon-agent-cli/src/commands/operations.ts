@@ -1,5 +1,7 @@
 import type { CommandModule, Argv } from 'yargs';
 
+import React from 'react';
+
 import { runDappClientTx } from '../lib/dapp-client.ts';
 import { loadWalletSession, loadBuilderConfig } from '../lib/storage.ts';
 import { resolveErc20BySymbol } from '../lib/token-directory.ts';
@@ -10,6 +12,8 @@ import {
   getExplorerUrl,
   fileCoerce
 } from '../lib/utils.ts';
+import { isTTY, inkRender } from '../ui/render.js';
+import { BalancesUI, SendUI } from './operations-ui.js';
 
 // Shared options
 function withWalletAndChain<T>(yargs: Argv<T>) {
@@ -115,88 +119,105 @@ export const balancesCommand: CommandModule = {
   handler: async (argv) => {
     const walletName = argv.wallet as string;
 
-    try {
-      const session = await loadWalletSession(walletName);
-      if (!session) {
-        throw new Error(`Wallet not found: ${walletName}`);
-      }
-
-      const indexerKey =
-        process.env.SEQUENCE_INDEXER_ACCESS_KEY ||
-        session.projectAccessKey ||
-        process.env.SEQUENCE_PROJECT_ACCESS_KEY;
-      if (!indexerKey) {
-        throw new Error('Missing project access key (not in wallet session or environment)');
-      }
-
-      const network = resolveNetwork((argv.chain as string) || session.chain || 'polygon');
-      const nativeDecimals = network.nativeToken?.decimals ?? 18;
-      const nativeSymbol = network.nativeToken?.symbol || 'POL';
-
-      const { SequenceIndexer } = await import('@0xsequence/indexer');
-      const indexerUrl = getChainIndexerUrl(network.chainId);
-      const indexer = new SequenceIndexer(indexerUrl, indexerKey);
-
-      const [nativeRes, tokenRes] = await Promise.all([
-        indexer.getNativeTokenBalance({
-          accountAddress: session.walletAddress
-        }),
-        indexer.getTokenBalances({
-          accountAddress: session.walletAddress,
-          includeMetadata: true
-        })
-      ]);
-
-      const nativeWei = nativeRes?.balance?.balance || '0';
-      const native = [
-        {
-          type: 'native',
-          symbol: nativeSymbol,
-          balance: formatUnits(BigInt(nativeWei), nativeDecimals)
+    if (!isTTY()) {
+      // Non-TTY: original JSON output
+      try {
+        const session = await loadWalletSession(walletName);
+        if (!session) {
+          throw new Error(`Wallet not found: ${walletName}`);
         }
-      ];
 
-      const erc20 = (tokenRes?.balances || []).map(
-        (b: {
-          contractInfo?: { symbol?: string; name?: string; decimals?: number };
-          contractAddress: string;
-          balance?: string;
-        }) => ({
-          type: 'erc20',
-          symbol: b.contractInfo?.symbol || 'ERC20',
-          name: b.contractInfo?.name || undefined,
-          contractAddress: b.contractAddress,
-          balance: formatUnits(b.balance || '0', b.contractInfo?.decimals ?? 18)
-        })
-      );
+        const indexerKey =
+          process.env.SEQUENCE_INDEXER_ACCESS_KEY ||
+          session.projectAccessKey ||
+          process.env.SEQUENCE_PROJECT_ACCESS_KEY;
+        if (!indexerKey) {
+          throw new Error('Missing project access key (not in wallet session or environment)');
+        }
 
-      console.log(
-        JSON.stringify(
+        const network = resolveNetwork((argv.chain as string) || session.chain || 'polygon');
+        const nativeDecimals = network.nativeToken?.decimals ?? 18;
+        const nativeSymbol = network.nativeToken?.symbol || 'POL';
+
+        const { SequenceIndexer } = await import('@0xsequence/indexer');
+        const indexerUrl = getChainIndexerUrl(network.chainId);
+        const indexer = new SequenceIndexer(indexerUrl, indexerKey);
+
+        const [nativeRes, tokenRes] = await Promise.all([
+          indexer.getNativeTokenBalance({
+            accountAddress: session.walletAddress
+          }),
+          indexer.getTokenBalances({
+            accountAddress: session.walletAddress,
+            includeMetadata: true
+          })
+        ]);
+
+        const nativeWei = nativeRes?.balance?.balance || '0';
+        const native = [
           {
-            ok: true,
+            type: 'native',
+            symbol: nativeSymbol,
+            balance: formatUnits(BigInt(nativeWei), nativeDecimals)
+          }
+        ];
+
+        const erc20 = (tokenRes?.balances || []).map(
+          (b: {
+            contractInfo?: { symbol?: string; name?: string; decimals?: number };
+            contractAddress: string;
+            balance?: string;
+          }) => ({
+            type: 'erc20',
+            symbol: b.contractInfo?.symbol || 'ERC20',
+            name: b.contractInfo?.name || undefined,
+            contractAddress: b.contractAddress,
+            balance: formatUnits(b.balance || '0', b.contractInfo?.decimals ?? 18)
+          })
+        );
+
+        console.log(
+          JSON.stringify(
+            {
+              ok: true,
+              walletName,
+              walletAddress: session.walletAddress,
+              chainId: network.chainId,
+              chain: network.name,
+              balances: [...native, ...erc20]
+            },
+            null,
+            2
+          )
+        );
+      } catch (error) {
+        console.error(
+          JSON.stringify(
+            {
+              ok: false,
+              error: (error as Error).message,
+              stack: (error as Error).stack
+            },
+            null,
+            2
+          )
+        );
+        process.exit(1);
+      }
+    } else {
+      // TTY: Ink UI
+      let failed = false;
+      try {
+        await inkRender(
+          React.createElement(BalancesUI, {
             walletName,
-            walletAddress: session.walletAddress,
-            chainId: network.chainId,
-            chain: network.name,
-            balances: [...native, ...erc20]
-          },
-          null,
-          2
-        )
-      );
-    } catch (error) {
-      console.error(
-        JSON.stringify(
-          {
-            ok: false,
-            error: (error as Error).message,
-            stack: (error as Error).stack
-          },
-          null,
-          2
-        )
-      );
-      process.exit(1);
+            chainOverride: argv.chain as string | undefined
+          })
+        );
+      } catch {
+        failed = true;
+      }
+      if (failed) process.exit(1);
     }
   }
 };
@@ -343,16 +364,18 @@ async function handleSendNative(argv: {
   const walletName = (argv.wallet as string) || 'main';
   const to = argv.to as string;
   const amount = argv.amount as string;
-  const broadcast = argv.broadcast as boolean;
+  const broadcast = (argv.broadcast as boolean) || false;
 
-  try {
+  // Build transaction and execute
+  async function exec(): Promise<{
+    txHash?: string;
+    explorerUrl?: string;
+    walletAddress?: string;
+  }> {
     const session = await loadWalletSession(walletName);
-    if (!session) {
-      throw new Error(`Wallet not found: ${walletName}`);
-    }
+    if (!session) throw new Error(`Wallet not found: ${walletName}`);
 
     const network = resolveNetwork((argv.chain as string) || session.chain || 'polygon');
-
     const decimals = network.nativeToken?.decimals ?? 18;
     const value = parseUnits(amount, decimals);
 
@@ -377,39 +400,100 @@ async function handleSendNative(argv: {
       preferNativeFee: true
     });
 
-    if (!broadcast) return;
-
+    if (!broadcast) return {};
     const explorerUrl = getExplorerUrl(network, result.txHash ?? '');
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
+    return { txHash: result.txHash, explorerUrl, walletAddress: result.walletAddress };
+  }
+
+  if (!isTTY()) {
+    // Non-TTY: original JSON output
+    try {
+      const session = await loadWalletSession(walletName);
+      if (!session) throw new Error(`Wallet not found: ${walletName}`);
+
+      const network = resolveNetwork((argv.chain as string) || session.chain || 'polygon');
+      const decimals = network.nativeToken?.decimals ?? 18;
+      const value = parseUnits(amount, decimals);
+
+      const useDirectNative =
+        (argv.direct as boolean) ||
+        ['1', 'true', 'yes'].includes(
+          String(process.env.SEQ_ECO_NATIVE_DIRECT || '').toLowerCase()
+        );
+
+      const VALUE_FORWARDER = '0xABAAd93EeE2a569cF0632f39B10A9f5D734777ca';
+      const selector = '0x98f850f1';
+      const pad = (hex: string, n = 64) => String(hex).replace(/^0x/, '').padStart(n, '0');
+      const data = selector + pad(to) + pad('0x' + value.toString(16));
+
+      const transactions = useDirectNative
+        ? [{ to, value, data: '0x' }]
+        : [{ to: VALUE_FORWARDER, value, data }];
+
+      const result = await runDappClientTx({
+        walletName,
+        chainId: network.chainId,
+        transactions,
+        broadcast,
+        preferNativeFee: true
+      });
+
+      if (!broadcast) return;
+
+      const explorerUrl = getExplorerUrl(network, result.txHash ?? '');
+      console.log(
+        JSON.stringify(
+          {
+            ok: true,
+            walletName,
+            walletAddress: result.walletAddress,
+            chain: network.name,
+            chainId: network.chainId,
+            to,
+            amount,
+            txHash: result.txHash,
+            explorerUrl
+          },
+          null,
+          2
+        )
+      );
+    } catch (error) {
+      console.error(
+        JSON.stringify(
+          {
+            ok: false,
+            error: (error as Error).message,
+            stack: (error as Error).stack
+          },
+          null,
+          2
+        )
+      );
+      process.exit(1);
+    }
+  } else {
+    // TTY: Ink UI
+    let failed = false;
+    try {
+      const session = await loadWalletSession(walletName);
+      const network = resolveNetwork((argv.chain as string) || session?.chain || 'polygon');
+      const nativeSymbol = network.nativeToken?.symbol || 'POL';
+
+      await inkRender(
+        React.createElement(SendUI, {
           walletName,
-          walletAddress: result.walletAddress,
-          chain: network.name,
-          chainId: network.chainId,
           to,
           amount,
-          txHash: result.txHash,
-          explorerUrl
-        },
-        null,
-        2
-      )
-    );
-  } catch (error) {
-    console.error(
-      JSON.stringify(
-        {
-          ok: false,
-          error: (error as Error).message,
-          stack: (error as Error).stack
-        },
-        null,
-        2
-      )
-    );
-    process.exit(1);
+          symbol: nativeSymbol,
+          broadcast,
+          onExec: exec
+        })
+      );
+    } catch {
+      failed = true;
+    }
+    if (failed) process.exit(1);
   }
 }
 
@@ -462,97 +546,138 @@ async function handleSendToken(argv: {
   [key: string]: unknown;
 }): Promise<void> {
   const walletName = (argv.wallet as string) || 'main';
-  const symbol = argv.symbol as string | undefined;
+  const symbolArg = argv.symbol as string | undefined;
   const tokenAddress = argv.token as string | undefined;
   const decimalsArg = argv.decimals as number | undefined;
   const to = argv.to as string;
   const amount = argv.amount as string;
   const broadcast = (argv.broadcast as boolean) || false;
 
-  try {
+  // Resolve token info
+  async function resolveToken(): Promise<{
+    token: string;
+    decimals: number;
+    resolvedSymbol: string;
+    network: ReturnType<typeof resolveNetwork>;
+  }> {
     const session = await loadWalletSession(walletName);
-    if (!session) {
-      throw new Error(`Wallet not found: ${walletName}`);
-    }
+    if (!session) throw new Error(`Wallet not found: ${walletName}`);
 
     const network = resolveNetwork((argv.chain as string) || session.chain || 'polygon');
-
     let token = tokenAddress;
     let decimals = decimalsArg ?? null;
+    let resolvedSymbol = symbolArg || 'TOKEN';
 
-    if (symbol) {
-      const resolved = await resolveErc20BySymbol({
-        chainId: network.chainId,
-        symbol
-      });
-      if (!resolved) {
-        throw new Error(`Unknown token symbol: ${symbol} on ${network.name}`);
-      }
+    if (symbolArg) {
+      const resolved = await resolveErc20BySymbol({ chainId: network.chainId, symbol: symbolArg });
+      if (!resolved) throw new Error(`Unknown token symbol: ${symbolArg} on ${network.name}`);
       token = resolved.address;
       decimals = Number(resolved.decimals);
+      resolvedSymbol = symbolArg;
     }
 
-    if (!token || decimals === null) {
+    if (!token || decimals === null)
       throw new Error('Provide either --symbol OR (--token + --decimals)');
-    }
+    return { token, decimals, resolvedSymbol, network };
+  }
 
+  async function exec(): Promise<{
+    txHash?: string;
+    explorerUrl?: string;
+    walletAddress?: string;
+  }> {
+    const { token, decimals, network } = await resolveToken();
     const value = parseUnits(amount, decimals);
     const selector = '0xa9059cbb';
     const pad = (hex: string, n = 64) => String(hex).replace(/^0x/, '').padStart(n, '0');
     const data = selector + pad(to) + pad('0x' + value.toString(16));
 
-    const transactions = [
-      {
-        to: token,
-        value: 0n,
-        data
-      }
-    ];
-
     const result = await runDappClientTx({
       walletName,
       chainId: network.chainId,
-      transactions,
+      transactions: [{ to: token, value: 0n, data }],
       broadcast,
       preferNativeFee: false
     });
 
-    if (!broadcast) return;
-
+    if (!broadcast) return {};
     const explorerUrl = getExplorerUrl(network, result.txHash ?? '');
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
+    return { txHash: result.txHash, explorerUrl, walletAddress: result.walletAddress };
+  }
+
+  if (!isTTY()) {
+    // Non-TTY: original JSON output
+    try {
+      const { token, decimals, resolvedSymbol, network } = await resolveToken();
+      const value = parseUnits(amount, decimals);
+      const selector = '0xa9059cbb';
+      const pad = (hex: string, n = 64) => String(hex).replace(/^0x/, '').padStart(n, '0');
+      const data = selector + pad(to) + pad('0x' + value.toString(16));
+
+      const result = await runDappClientTx({
+        walletName,
+        chainId: network.chainId,
+        transactions: [{ to: token, value: 0n, data }],
+        broadcast,
+        preferNativeFee: false
+      });
+
+      if (!broadcast) return;
+
+      const explorerUrl = getExplorerUrl(network, result.txHash ?? '');
+      console.log(
+        JSON.stringify(
+          {
+            ok: true,
+            walletName,
+            walletAddress: result.walletAddress,
+            chain: network.name,
+            chainId: network.chainId,
+            symbol: resolvedSymbol,
+            tokenAddress: token,
+            decimals,
+            to,
+            amount,
+            txHash: result.txHash,
+            explorerUrl
+          },
+          null,
+          2
+        )
+      );
+    } catch (error) {
+      console.error(
+        JSON.stringify(
+          {
+            ok: false,
+            error: (error as Error).message,
+            stack: (error as Error).stack
+          },
+          null,
+          2
+        )
+      );
+      process.exit(1);
+    }
+  } else {
+    // TTY: Ink UI
+    let failed = false;
+    try {
+      const { resolvedSymbol } = await resolveToken();
+      await inkRender(
+        React.createElement(SendUI, {
           walletName,
-          walletAddress: result.walletAddress,
-          chain: network.name,
-          chainId: network.chainId,
-          symbol: symbol || 'TOKEN',
-          tokenAddress: token,
-          decimals,
           to,
           amount,
-          txHash: result.txHash,
-          explorerUrl
-        },
-        null,
-        2
-      )
-    );
-  } catch (error) {
-    console.error(
-      JSON.stringify(
-        {
-          ok: false,
-          error: (error as Error).message,
-          stack: (error as Error).stack
-        },
-        null,
-        2
-      )
-    );
-    process.exit(1);
+          symbol: resolvedSymbol,
+          broadcast,
+          onExec: exec
+        })
+      );
+    } catch {
+      failed = true;
+    }
+    if (failed) process.exit(1);
   }
 }
 
@@ -1114,7 +1239,7 @@ export const x402PayCommand: CommandModule = {
         const data = contentType.includes('application/json')
           ? await probe.json()
           : await probe.text();
-        console.log(JSON.stringify({ ok: probe.ok, status: probe.status, data }, null, 2));
+        console.log(JSON.stringify({ ok: probe.ok, status: probe.status, data }));
         return;
       }
 

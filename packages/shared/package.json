@@ -1,0 +1,21 @@
+{
+  "name": "@polygonlabs/agent-shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@noble/ciphers": "^1.2.1",
+    "@noble/curves": "^1.8.1",
+    "@noble/hashes": "^1.7.2"
+  },
+  "devDependencies": {
+    "vitest": "3.1.4"
+  }
+}

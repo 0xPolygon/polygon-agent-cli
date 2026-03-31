@@ -2,5 +2,9 @@
   "extends": ["@tsconfig/node24", "@tsconfig/node-ts"],
   "compilerOptions": { "noEmit": true },
   "files": [],
-  "references": [{ "path": "packages/polygon-agent-cli" }, { "path": "packages/connector-ui" }]
+  "references": [
+    { "path": "packages/polygon-agent-cli" },
+    { "path": "packages/connector-ui" },
+    { "path": "packages/shared" }
+  ]
 }

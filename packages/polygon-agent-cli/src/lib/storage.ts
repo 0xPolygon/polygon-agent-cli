@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import type { SessionPayload } from '@polygonlabs/agent-shared';
+
 const STORAGE_DIR = path.join(os.homedir(), '.polygon-agent');
 const ENCRYPTION_KEY_FILE = path.join(STORAGE_DIR, '.encryption-key');
 
@@ -125,6 +127,41 @@ export async function loadBuilderConfig(): Promise<BuilderConfig | null> {
   };
 }
 
+/**
+ * Synchronously resolve the project access key.
+ * Priority: env var → wallet session's stored key → builder.json on disk.
+ * Returns undefined if none found.
+ */
+export function resolveAccessKeySync(sessionKey?: string | null): string | undefined {
+  if (process.env.SEQUENCE_PROJECT_ACCESS_KEY) return process.env.SEQUENCE_PROJECT_ACCESS_KEY;
+  if (process.env.SEQUENCE_INDEXER_ACCESS_KEY) return process.env.SEQUENCE_INDEXER_ACCESS_KEY;
+  if (sessionKey) return sessionKey;
+  const configPath = path.join(STORAGE_DIR, 'builder.json');
+  if (fs.existsSync(configPath)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      if (data.accessKey) return data.accessKey as string;
+    } catch {
+      // ignore malformed config
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Bootstrap: populate SEQUENCE_PROJECT_ACCESS_KEY from builder.json if not already set.
+ * Call once at CLI startup so all commands can rely on the env var being present.
+ */
+export function bootstrapAccessKey(): void {
+  const key = resolveAccessKeySync();
+  if (key && !process.env.SEQUENCE_PROJECT_ACCESS_KEY) {
+    process.env.SEQUENCE_PROJECT_ACCESS_KEY = key;
+  }
+  if (key && !process.env.SEQUENCE_INDEXER_ACCESS_KEY) {
+    process.env.SEQUENCE_INDEXER_ACCESS_KEY = key;
+  }
+}
+
 export async function saveWalletSession(name: string, session: WalletSession): Promise<void> {
   ensureStorageDir();
 
@@ -153,11 +190,16 @@ export interface WalletRequest {
   publicKeyB64u: string;
   privateKeyB64u: string;
   projectAccessKey: string | null;
+  /** v2: X25519 secret key hex (used with relay-based code flow) */
+  cliSkHex?: string;
 }
 
 export async function saveWalletRequest(rid: string, request: WalletRequest): Promise<void> {
   ensureStorageDir();
 
+  // cliSkHex (v2 X25519 secret key) is stored as plaintext here intentionally:
+  // the file has 0o600 permissions and the key is ephemeral — it is only useful
+  // during the ~5-minute request window and is deleted after successful import.
   const requestPath = path.join(STORAGE_DIR, 'requests', `${rid}.json`);
   fs.writeFileSync(requestPath, JSON.stringify(request, null, 2), {
     mode: 0o600
@@ -172,6 +214,13 @@ export async function loadWalletRequest(rid: string): Promise<WalletRequest | nu
   }
 
   return JSON.parse(fs.readFileSync(requestPath, 'utf8'));
+}
+
+export async function deleteWalletRequest(rid: string): Promise<void> {
+  const requestPath = path.join(STORAGE_DIR, 'requests', `${rid}.json`);
+  if (fs.existsSync(requestPath)) {
+    fs.unlinkSync(requestPath);
+  }
 }
 
 export async function listWallets(): Promise<string[]> {
@@ -220,4 +269,43 @@ export async function loadPolymarketKey(): Promise<string> {
   throw new Error(
     'No EOA key found. Run: polygon-agent setup or polygon-agent polymarket set-key <privateKey>'
   );
+}
+
+/** Map a v2 SessionPayload into the WalletSession shape. */
+export function sessionPayloadToWalletSession(payload: SessionPayload): WalletSession {
+  const chainName = resolveChainNameFromId(payload.chain_id);
+  const implicit = payload.implicit_session;
+
+  const implicitMeta = {
+    guard: implicit?.guard,
+    loginMethod: implicit?.login_method,
+    userEmail: implicit?.user_email
+  };
+
+  return {
+    walletAddress: payload.wallet_address,
+    chainId: payload.chain_id,
+    chain: chainName,
+    projectAccessKey: payload.project_access_key ?? null,
+    explicitSession: payload.session_config ?? '',
+    sessionPk: payload.session_private_key,
+    implicitPk: implicit?.pk ?? '',
+    implicitMeta: JSON.stringify(implicitMeta),
+    implicitAttestation: implicit?.attestation ?? '',
+    implicitIdentitySig: implicit?.identity_sig ?? '',
+    createdAt: new Date().toISOString()
+  };
+}
+
+/** Map numeric chainId to chain name string (e.g. 137 → "polygon"). */
+function resolveChainNameFromId(chainId: number): string {
+  const map: Record<number, string> = {
+    137: 'polygon',
+    80002: 'polygon-amoy',
+    42161: 'arbitrum',
+    10: 'optimism',
+    8453: 'base',
+    1: 'mainnet'
+  };
+  return map[chainId] ?? String(chainId);
 }

@@ -1,10 +1,23 @@
-import { Wallet, Copy, Check, ExternalLink, ArrowRight, AlertCircle } from 'lucide-react';
+import type { ElementType } from 'react';
 
 import './App.css';
 
+import {
+  Wallet,
+  Copy,
+  AlertCircle,
+  Plus,
+  CalendarClock,
+  Twitter,
+  BarChart2,
+  Globe,
+  ArrowLeftRight,
+  TrendingUp
+} from 'lucide-react';
 import { Hex, Signature } from 'ox';
 import { useEffect, useMemo, useState } from 'react';
-import { seal } from 'tweetnacl-sealedbox-js';
+
+import type { SessionPayload } from '@polygonlabs/agent-shared';
 
 import {
   DappClient,
@@ -14,40 +27,13 @@ import {
   Utils,
   Permission
 } from '@0xsequence/dapp-client';
+import { encryptSession } from '@polygonlabs/agent-shared';
 
+import { CodeDisplay } from './components/CodeDisplay.js';
+import { FundingScreen } from './components/FundingScreen.js';
 import { dappOrigin, projectAccessKey, walletUrl, relayerUrl, nodesUrl } from './config';
-import {
-  fetchBalancesAllChains,
-  pickChainBalances,
-  resolveChainId,
-  resolveNetwork
-} from './indexer';
+import { resolveChainId, fetchTotalUsdBalance } from './indexer';
 import { resolveErc20Symbol } from './tokenDirectory';
-
-function b64urlDecode(str: string): Uint8Array {
-  const norm = str.replace(/-/g, '+').replace(/_/g, '/');
-  const pad = norm.length % 4 === 0 ? '' : '='.repeat(4 - (norm.length % 4));
-  const bin = atob(norm + pad);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
-function b64urlEncode(bytes: Uint8Array): string {
-  let bin = '';
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
-}
-
-function formatUnits(raw: string, decimals: number): string {
-  if (!raw) return '0';
-  const neg = raw.startsWith('-');
-  const v = neg ? raw.slice(1) : raw;
-  const padded = v.padStart(decimals + 1, '0');
-  const i = padded.slice(0, -decimals);
-  const f = padded.slice(-decimals).replace(/0+$/, '');
-  return `${neg ? '-' : ''}${i}${f ? '.' + f : ''}`;
-}
 
 async function deleteIndexedDb(dbName: string): Promise<void> {
   await new Promise<void>((resolve) => {
@@ -63,74 +49,110 @@ async function resetLocalSessionStateForNewRid(rid: string): Promise<boolean> {
   const key = 'moltbot.lastRid';
   const lastRid = window.localStorage.getItem(key);
   if (lastRid === rid) return false;
-
   window.localStorage.setItem(key, rid);
-
-  // dapp-client uses sessionStorage for pending redirect state
   try {
     sessionStorage.clear();
   } catch {}
-
-  // and IndexedDB for sessions
   await deleteIndexedDb('SequenceDappStorage');
-
-  // also clear local storage keys we might set (keep the rid marker)
-  for (const k of Object.keys(localStorage)) {
-    if (k === key) continue;
-    // keep vite keys etc? (none expected)
-  }
-
   return true;
 }
 
-type BalanceSummary = {
-  nativeBalances?: Array<{ name: string; symbol: string; balance: string }>;
-  balances?: Array<{
-    contractType: string;
-    contractAddress: string;
-    balance: string;
-    contractInfo?: { symbol?: string; name?: string; decimals?: number; logoURI?: string };
-  }>;
-};
+// --- Static background: use-cases panel ---
+
+const SKILL_URL = 'https://agentconnect.polygon.technology/SKILL.md';
+
+const AGENTS: {
+  id: 'claude' | 'codex' | 'gemini';
+  label: string;
+  color: string;
+  terminalPrefix: string;
+  buildCommand: (display: string) => string;
+}[] = [
+  {
+    id: 'claude',
+    label: 'Claude',
+    color: '#D97706',
+    terminalPrefix: '$ Claude',
+    buildCommand: (display) => `$ Claude Read ${SKILL_URL} and ${display}`
+  },
+  {
+    id: 'codex',
+    label: 'Codex',
+    color: '#10A37F',
+    terminalPrefix: '$ codex',
+    buildCommand: (display) => `$ codex "Read ${SKILL_URL} and ${display}"`
+  },
+  {
+    id: 'gemini',
+    label: 'Gemini',
+    color: '#4285F4',
+    terminalPrefix: '$ gemini',
+    buildCommand: (display) => `$ gemini "Read ${SKILL_URL} and ${display}"`
+  }
+];
+
+const USE_CASES: { label: string; display: string; icon: ElementType }[] = [
+  {
+    label: 'DCA into POL on a schedule',
+    display:
+      'DCA a small amount of USDC into POL every Monday at 9am. If POL drops more than 10% in a day, double the buy.',
+    icon: CalendarClock
+  },
+  {
+    label: 'Read Twitter/X profiles & tweets',
+    display:
+      'Read Twitter/X profiles and tweets without API keys. Get follower counts, recent tweets, engagement metrics.',
+    icon: Twitter
+  },
+  {
+    label: 'Bet on Polymarket predictions',
+    display:
+      'Find the top 3 open Polymarket markets about crypto. Allocate a small amount of USDC to each bet you have at least 60% confidence in.',
+    icon: BarChart2
+  },
+  {
+    label: 'Purchase a domain',
+    display:
+      'Find and register an available .com domain for my project using my wallet. Check pricing, complete the purchase, and confirm registration.',
+    icon: Globe
+  },
+  {
+    label: 'Bridge assets cross-chain',
+    display:
+      'Bridge some USDC from Polygon to Base using the cheapest available route. Confirm the arrival and report the final balance on both chains.',
+    icon: ArrowLeftRight
+  },
+  {
+    label: 'Automate yield strategies',
+    display:
+      'Find the highest-yield USDC lending pool on Polygon with TVL above $10M. Deposit some USDC and report the current APY.',
+    icon: TrendingUp
+  }
+];
+
+// --- Main App ---
 
 function App() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const rid = params.get('rid') || '';
   const walletName = params.get('wallet') || '';
-  const pub = params.get('pub') || '';
-  const callbackUrl = params.get('callbackUrl') || '';
 
   const chainId = useMemo(() => resolveChainId(params), [params]);
-  const network = useMemo(() => resolveNetwork(chainId), [chainId]);
 
   const [error, setError] = useState<string>('');
   const [walletAddress, setWalletAddress] = useState<string>('');
-  const [ciphertext, setCiphertext] = useState<string>('');
-  const [callbackSent, setCallbackSent] = useState<boolean>(false);
-  const [callbackFailed, setCallbackFailed] = useState<boolean>(false);
-
-  const getSafeCallbackUrl = (rawUrl: string): string | null => {
-    if (!rawUrl) return null;
-    try {
-      if (rawUrl.startsWith('/')) return rawUrl;
-      const url = new URL(rawUrl);
-      if (url.protocol === 'https:') return url.toString();
-      if (
-        url.protocol === 'http:' &&
-        (url.hostname === 'localhost' || url.hostname === '127.0.0.1')
-      ) {
-        return url.toString();
-      }
-      return null;
-    } catch {
-      return null;
-    }
-  };
-  const [balances, setBalances] = useState<BalanceSummary | null>(null);
+  const [cliPkHex, setCliPkHex] = useState<string>('');
+  const [sessionCode, setSessionCode] = useState<string>('');
+  const [showFunding, setShowFunding] = useState(false);
+  const [showDashboard, setShowDashboard] = useState(false);
   const [feeTokens, setFeeTokens] = useState<any | null>(null);
+  const [selectedUseCase, setSelectedUseCase] = useState(0);
+  const [selectedAgent, setSelectedAgent] = useState<'claude' | 'codex' | 'gemini'>('claude');
   const [copied, setCopied] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [totalUsd, setTotalUsd] = useState<number | null>(null);
 
-  // Reset local session state every time a new rid is opened.
+  // Reset local session state on new rid
   useEffect(() => {
     void (async () => {
       const didReset = await resetLocalSessionStateForNewRid(rid);
@@ -138,12 +160,62 @@ function App() {
     })();
   }, [rid]);
 
+  // Fetch CLI public key from relay
+  useEffect(() => {
+    if (!rid) return;
+    if (!/^[a-z0-9]{8}$/.test(rid)) {
+      setError('Invalid session link. Please generate a new connection URL.');
+      return;
+    }
+    fetch(`/api/relay/request/${rid}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`Relay returned ${r.status}`);
+        return r.json() as Promise<{ cli_pk_hex: string }>;
+      })
+      .then(({ cli_pk_hex }) => {
+        if (!/^[0-9a-f]{64}$/.test(cli_pk_hex)) {
+          throw new Error('Invalid cli_pk_hex format received from relay');
+        }
+        setCliPkHex(cli_pk_hex);
+      })
+      .catch((e: any) => setError(`Failed to load session key: ${e?.message || String(e)}`));
+  }, [rid]);
+
+  // Fetch USD portfolio balance when wallet address is first known
+  useEffect(() => {
+    if (!walletAddress) return;
+    setTotalUsd(null);
+    fetchTotalUsdBalance(walletAddress, chainId)
+      .then(setTotalUsd)
+      .catch(() => setTotalUsd(null));
+  }, [walletAddress, chainId]);
+
+  // Poll relay status after code shown — auto-transition to funding when CLI retrieves payload
+  useEffect(() => {
+    if (!sessionCode || !rid || showFunding) return;
+    let active = true;
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/relay/status/${rid}`);
+        if (res.status === 404 && active) {
+          setShowFunding(true);
+        }
+      } catch {
+        // network error — keep polling
+      }
+    };
+    const id = setInterval(poll, 2000);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, [sessionCode, rid, showFunding]);
+
   const dappClient = useMemo(() => {
     return new DappClient(walletUrl, dappOrigin, projectAccessKey, {
       transportMode: TransportMode.POPUP,
       relayerUrl,
       nodesUrl,
-      // default WebStorage (IndexedDB) is fine for browser
       sequenceStorage: new WebStorage()
     });
   }, []);
@@ -152,7 +224,6 @@ function App() {
     void (async () => {
       try {
         await dappClient.initialize();
-        // Prefetch fee tokens so the actual Connect click can open the popup synchronously.
         try {
           setFeeTokens(await dappClient.getFeeTokens(chainId));
         } catch {
@@ -165,49 +236,37 @@ function App() {
   }, [dappClient]);
 
   const connect = async () => {
-    // feeTokens are prefetched to keep UX snappy.
     void feeTokens;
     setError('');
-    setCiphertext('');
-    setCallbackSent(false);
-    setCallbackFailed(false);
+    setSessionCode('');
+    setConnecting(true);
 
-    if (!rid || !walletName || !pub) {
-      setError('Invalid link. Missing rid/wallet/pub.');
+    if (!rid || !walletName) {
+      setError('Invalid link. Missing rid or wallet.');
+      return;
+    }
+    if (!cliPkHex) {
+      setError('Session key not loaded yet. Please wait or refresh.');
       return;
     }
 
     try {
       const VALUE_FORWARDER = '0xABAAd93EeE2a569cF0632f39B10A9f5D734777ca';
-      // Resolve ERC20 addresses per-chain via Sequence Token Directory
       const USDC = (await resolveErc20Symbol(chainId, 'USDC'))?.address;
       const USDT = (await resolveErc20Symbol(chainId, 'USDT'))?.address;
-
-      // Base explicit session permissions:
-      // - ValueForwarder: where we route native token sends (open-ended recipient).
-      //
-      // NOTE: demo-dapp-v3 does NOT include an explicit permission for the Sessions module.
-      // The Sessions module's internal `incrementUsageLimit` call (when present) is handled by the session system
-      // itself and should not require an explicit Permission{target,rules} entry.
       const basePermissions: any[] = [{ target: VALUE_FORWARDER, rules: [] }];
-
-      const params = new URLSearchParams(window.location.search);
-
-      // Optional: one-off ERC20 permission scoped by link params (kept for backwards-compat).
-      const erc20 = params.get('erc20');
-      const erc20To = params.get('erc20To');
-      const erc20Amount = params.get('erc20Amount');
-
+      const searchParams = new URLSearchParams(window.location.search);
+      const erc20 = searchParams.get('erc20');
+      const erc20To = searchParams.get('erc20To');
+      const erc20Amount = searchParams.get('erc20Amount');
       const oneOffErc20Permissions: any[] =
         erc20 && erc20To && erc20Amount
           ? (() => {
               const tokenAddr = erc20.toLowerCase() === 'usdc' ? USDC : erc20;
               const decimals = erc20.toLowerCase() === 'usdc' ? 6 : 18;
-
               const [i, fRaw = ''] = String(erc20Amount).split('.');
               const f = (fRaw + '0'.repeat(decimals)).slice(0, decimals);
               const valueLimit = BigInt(i || '0') * 10n ** BigInt(decimals) + BigInt(f || '0');
-
               return [
                 Utils.PermissionBuilder.for(tokenAddr as any)
                   .forFunction('function transfer(address to, uint256 value)')
@@ -229,23 +288,12 @@ function App() {
             })()
           : [];
 
-      // Open-ended per-token limits (no fixed recipient), so we can operate without per-target sessions.
-      // Query params:
-      // - usdcLimit (e.g. 50)
-      // - usdtLimit (e.g. 50)
-      // - nativeLimit (e.g. 1.5)  (back-compat: polLimit)
-      const usdcLimit = params.get('usdcLimit');
-      const usdtLimit = params.get('usdtLimit');
-      const nativeLimit = params.get('nativeLimit') || params.get('polLimit');
-      const tokenLimitsRaw = params.get('tokenLimits');
-
-      // Bridged USDC (USDC.e) on Polygon — always include alongside native USDC to avoid
-      // troubleshooting when the relayer selects a different USDC variant for fee payment.
+      const usdcLimit = searchParams.get('usdcLimit');
+      const usdtLimit = searchParams.get('usdtLimit');
+      const nativeLimit = searchParams.get('nativeLimit') || searchParams.get('polLimit');
+      const tokenLimitsRaw = searchParams.get('tokenLimits');
       const USDC_E_POLYGON = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
-
       const openTokenPermissions: any[] = [];
-
-      // Generic ERC20 limits via token-directory: tokenLimits=USDC:50,WETH:0.1
       const dynamicTokenPermissions: any[] = [];
       if (tokenLimitsRaw) {
         const parts = tokenLimitsRaw
@@ -257,14 +305,12 @@ function App() {
           if (!sym || !amt) throw new Error(`Invalid tokenLimits entry: ${p}`);
           const td = await resolveErc20Symbol(chainId, sym);
           if (!td) throw new Error(`${sym} not found for this chain in token-directory`);
-          const decimals = td.decimals;
-          const valueLimit = BigInt(Math.floor(parseFloat(amt) * 10 ** decimals));
           dynamicTokenPermissions.push(
             Utils.PermissionBuilder.for(td.address as any)
               .forFunction('function transfer(address to, uint256 value)')
               .withUintNParam(
                 'value',
-                valueLimit,
+                BigInt(Math.floor(parseFloat(amt) * 10 ** td.decimals)),
                 256,
                 Permission.ParameterOperation.LESS_THAN_OR_EQUAL,
                 true
@@ -276,7 +322,6 @@ function App() {
       if (usdcLimit) {
         if (!USDC) throw new Error('USDC not found for this chain in token-directory');
         const valueLimit = BigInt(parseFloat(usdcLimit) * 1e6);
-        // Native USDC
         openTokenPermissions.push(
           Utils.PermissionBuilder.for(USDC as any)
             .forFunction('function transfer(address to, uint256 value)')
@@ -289,7 +334,6 @@ function App() {
             )
             .build()
         );
-        // Bridged USDC (USDC.e) on Polygon — same limit, covers relayer fee variant
         if (chainId === 137) {
           openTokenPermissions.push(
             Utils.PermissionBuilder.for(USDC_E_POLYGON as any)
@@ -307,13 +351,12 @@ function App() {
       }
       if (usdtLimit) {
         if (!USDT) throw new Error('USDT not found for this chain in token-directory');
-        const valueLimit = BigInt(parseFloat(usdtLimit) * 1e6);
         openTokenPermissions.push(
           Utils.PermissionBuilder.for(USDT as any)
             .forFunction('function transfer(address to, uint256 value)')
             .withUintNParam(
               'value',
-              valueLimit,
+              BigInt(parseFloat(usdtLimit) * 1e6),
               256,
               Permission.ParameterOperation.LESS_THAN_OR_EQUAL,
               true
@@ -321,14 +364,7 @@ function App() {
             .build()
         );
       }
-
-      // Fee-option permissions (pre-approvals) so the session can pay fees with ERC20s.
-      // IMPORTANT: We do NOT add a blanket permission for paymentAddress itself.
-      // Instead, we scope permissions to ERC20.transfer(to=paymentAddress, value<=limit) per fee token.
-      // Note: we include these regardless of isFeeRequired — wallets funded only with ERC20 tokens
-      // always need these, and including them when not needed is harmless.
       const nativeFeePermission: any[] = [];
-
       const feePermissions: any[] =
         (feeTokens as any)?.paymentAddress && Array.isArray((feeTokens as any)?.tokens)
           ? ((feeTokens as any).tokens as any[])
@@ -336,10 +372,7 @@ function App() {
               .map((token: any) => {
                 const decimals = typeof token.decimals === 'number' ? token.decimals : 6;
                 const valueLimit =
-                  decimals === 18
-                    ? 100000000000000000n // 0.1 * 1e18
-                    : 50n * 10n ** BigInt(decimals);
-
+                  decimals === 18 ? 100000000000000000n : 50n * 10n ** BigInt(decimals);
                 return Utils.PermissionBuilder.for(token.contractAddress as any)
                   .forFunction('function transfer(address to, uint256 value)')
                   .withUintNParam(
@@ -359,29 +392,23 @@ function App() {
               })
           : [];
 
-      // Contract whitelist (--contract 0x... repeatable): allow calls to specified contracts (e.g. ERC-8004 registries).
-      // Format: contracts=0xaddr1,0xaddr2
-      const contractsRaw = params.get('contracts');
+      const contractsRaw = searchParams.get('contracts');
       const contractWhitelistPermissions: any[] = [];
       if (contractsRaw) {
-        const addrs = contractsRaw
+        for (const addr of contractsRaw
           .split(',')
-          .map((s) => (s || '').trim())
-          .filter(Boolean);
-        for (const addr of addrs) {
-          if (/^0x[a-fA-F0-9]{40}$/.test(addr)) {
+          .map((s) => s.trim())
+          .filter(Boolean)) {
+          if (/^0x[a-fA-F0-9]{40}$/.test(addr))
             contractWhitelistPermissions.push({ target: addr as any, rules: [] });
-          }
         }
       }
 
       const polValueLimit = nativeLimit
         ? BigInt(Math.floor(parseFloat(nativeLimit) * 1e18))
         : 2000000000000000000n;
-
       const sessionConfig = {
         chainId,
-        // Native spend limit (chain native token)
         valueLimit: polValueLimit,
         deadline: BigInt(Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 183),
         permissions: [
@@ -395,16 +422,13 @@ function App() {
         ]
       };
 
-      // Connect will open the wallet UI (popup).
       await dappClient.connect(chainId, sessionConfig as any, { includeImplicitSession: true });
 
       const addr = await dappClient.getWalletAddress();
       if (!addr) throw new Error('Wallet address not available after connect');
       setWalletAddress(addr);
 
-      // Read explicit + implicit session material from dapp-client storage.
       const storage = (dappClient as any).sequenceStorage;
-
       const sessions = await storage.getExplicitSessions();
       const explicit = (sessions || []).find(
         (s: any) =>
@@ -418,440 +442,411 @@ function App() {
         throw new Error('Could not locate implicit session material after connect');
       }
 
-      // identitySignature must be a serialized 65-byte signature hex string.
-      // In some dapp-client/ox paths, this can be an object (e.g. { r, s, yParity }) or Uint8Array.
       const sigAny: any = implicit.identitySignature;
       let identitySignature: string;
-      try {
-        if (typeof sigAny === 'string') {
-          identitySignature = sigAny;
-        } else if (sigAny instanceof Uint8Array) {
-          identitySignature = Hex.from(sigAny);
-        } else if (sigAny && typeof sigAny === 'object') {
-          if (typeof sigAny.data === 'string') {
-            // jsonReplacers may have wrapped a Uint8Array as { _isUint8Array: true, data: '0x..' }
-            identitySignature = sigAny.data;
-          } else {
-            identitySignature = Signature.toHex(sigAny);
-          }
-        } else {
-          throw new Error('Unsupported identitySignature type');
-        }
-      } catch (e: any) {
-        throw new Error(`Could not serialize identitySignature: ${e?.message || String(e)}`);
+      if (typeof sigAny === 'string') {
+        identitySignature = sigAny;
+      } else if (sigAny instanceof Uint8Array) {
+        identitySignature = Hex.from(sigAny);
+      } else if (sigAny && typeof sigAny === 'object') {
+        identitySignature = typeof sigAny.data === 'string' ? sigAny.data : Signature.toHex(sigAny);
+      } else {
+        throw new Error('Unsupported identitySignature type');
       }
 
-      // Export material needed for headless v3 signing:
-      // - explicit session pk
-      // - explicit session config used during connect (permissions/valueLimit/deadline/chainId)
-      // - derived sessionAddress
-      // dapp-client storage only persists {pk,walletAddress,chainId,...}, not the permissions config.
       const { Secp256k1, Address: OxAddress, Hex: OxHex } = await import('ox');
       const sessionAddress = OxAddress.fromPublicKey(
         Secp256k1.getPublicKey({ privateKey: OxHex.toBytes(explicit.pk) })
       );
 
-      const payload = {
-        rid,
-        walletName,
-        walletAddress: addr,
-        chainId,
-        explicitSession: {
-          pk: explicit.pk,
-          sessionAddress,
-          config: sessionConfig
+      const sessionPayloadData: SessionPayload = {
+        version: 1,
+        wallet_address: addr,
+        chain_id: chainId,
+        session_private_key: explicit.pk,
+        session_address: sessionAddress,
+        permissions: {
+          native_limit: polValueLimit.toString(),
+          erc20_limits: [],
+          contract_calls: []
         },
-        implicit: {
-          pk: implicit.pk,
-          attestation: implicit.attestation,
-          identitySignature,
-          chainId: implicit.chainId,
-          // Immutable uses guard/keymachine; preserve metadata so headless can initialize correctly.
-          guard: (implicit as any).guard,
-          loginMethod: (implicit as any).loginMethod,
-          userEmail: (implicit as any).userEmail
+        expiry: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 183,
+        ecosystem_wallet_url: walletUrl,
+        dapp_origin: dappOrigin,
+        project_access_key: projectAccessKey,
+        session_config: JSON.stringify(sessionConfig, jsonReplacers),
+        implicit_session: {
+          pk:
+            typeof implicit.pk === 'string'
+              ? implicit.pk
+              : JSON.stringify(implicit.pk, jsonReplacers),
+          attestation:
+            typeof implicit.attestation === 'string'
+              ? implicit.attestation
+              : JSON.stringify(implicit.attestation, jsonReplacers),
+          identity_sig: identitySignature,
+          guard: (implicit as any).guard
+            ? JSON.stringify((implicit as any).guard, jsonReplacers)
+            : undefined,
+          login_method: (implicit as any).loginMethod ?? undefined,
+          user_email: (implicit as any).userEmail ?? undefined
         }
       };
 
-      const pubBytes = b64urlDecode(pub);
-      const msg = new TextEncoder().encode(JSON.stringify(payload, jsonReplacers));
-      const sealed = seal(msg, pubBytes);
-      const ciphertextB64u = b64urlEncode(sealed);
-      setCiphertext(ciphertextB64u);
+      const { encrypted, code } = encryptSession(sessionPayloadData, cliPkHex, rid);
+      const relayRes = await fetch(`/api/relay/session/${rid}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(encrypted)
+      });
+      if (!relayRes.ok) throw new Error(`Failed to deliver session to relay (${relayRes.status})`);
 
-      // Deliver ciphertext to the callback URL.
-      // HTTPS callbacks (cloudflared tunnel): use fetch so the page stays and can show fallback ciphertext on error.
-      // Localhost callbacks: must use form submission — fetch is blocked by mixed-content from HTTPS pages.
-      const safeCallbackUrl = getSafeCallbackUrl(callbackUrl);
-      const isHttpsCallback = !!callbackUrl && callbackUrl.startsWith('https://');
-      const isLocalCallback =
-        !!callbackUrl &&
-        (callbackUrl.startsWith('http://localhost:') ||
-          callbackUrl.startsWith('http://127.0.0.1:'));
-
-      if (isHttpsCallback && safeCallbackUrl) {
-        try {
-          const res = await fetch(safeCallbackUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ rid, ciphertext: ciphertextB64u })
-          });
-          if (res.ok) {
-            setCallbackSent(true);
-          } else {
-            setCallbackFailed(true);
-          }
-        } catch {
-          setCallbackFailed(true);
-        }
-        return;
-      }
-
-      if (isLocalCallback && safeCallbackUrl) {
-        // Form submission is a top-level navigation — browsers allow it across HTTP/HTTPS boundaries.
-        setCallbackSent(true);
-        const form = document.createElement('form');
-        form.method = 'POST';
-        form.action = safeCallbackUrl;
-        form.style.display = 'none';
-        const ridInput = document.createElement('input');
-        ridInput.type = 'hidden';
-        ridInput.name = 'rid';
-        ridInput.value = rid;
-        form.appendChild(ridInput);
-        const ctInput = document.createElement('input');
-        ctInput.type = 'hidden';
-        ctInput.name = 'ciphertext';
-        ctInput.value = ciphertextB64u;
-        form.appendChild(ctInput);
-        document.body.appendChild(form);
-        form.submit();
-        return;
-      }
-
-      if (callbackUrl && !safeCallbackUrl) {
-        // URL is set but couldn't be validated — show ciphertext for manual copy.
-        setCallbackFailed(true);
-        return;
-      }
-
-      // No callback URL — fetch balances and show ciphertext for manual copy
-      try {
-        const all = await fetchBalancesAllChains(addr);
-        const picked = pickChainBalances(all, chainId);
-        setBalances(picked);
-      } catch {
-        setBalances(null);
-      }
+      setSessionCode(code);
+      setConnecting(false);
     } catch (e: any) {
       console.error(e);
       setError(e?.message || String(e));
+      setConnecting(false);
     }
   };
 
-  const copyCiphertext = async () => {
-    if (!ciphertext) return;
-    await navigator.clipboard.writeText(ciphertext);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  const shortAddr = walletAddress
+    ? `${walletAddress.slice(0, 6)}..${walletAddress.slice(-4)}`
+    : null;
 
-  const downloadCiphertext = () => {
-    if (!ciphertext) return;
-    const blob = new Blob([ciphertext], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `session-${rid || 'blob'}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
+  // ── Screen 1: Connecting (no wallet yet, or encrypting) ──
+  if (!walletAddress || (walletAddress && !sessionCode && !showFunding && !showDashboard)) {
+    const isWaiting = connecting || (walletAddress && !sessionCode);
+    return (
+      <div className="min-h-screen bg-[#eeeef5] flex flex-col items-center justify-center px-4">
+        {/* Floating card */}
+        <div
+          className="w-full max-w-sm bg-white rounded-2xl border border-[#e5e5f0] overflow-hidden"
+          style={{ boxShadow: '0 2px 4px rgba(0,0,0,0.04), 0 12px 40px rgba(130,71,229,0.09)' }}
+        >
+          {/* Purple accent line */}
+          <div className="h-0.5 bg-gradient-to-r from-[#8247e5] via-[#a855f7] to-[#8247e5]" />
 
-  const nativeRows = (balances?.nativeBalances || []).map((b) => ({
-    key: `native:${b.symbol}`,
-    symbol: b.symbol || b.name || 'NATIVE',
-    decimals: 18,
-    balance: b.balance,
-    logoURI: undefined as string | undefined
-  }));
+          <div className="px-8 py-10 flex flex-col items-center">
+            {/* Logo + badge */}
+            <div className="flex items-center gap-2.5 mb-8">
+              <img src="/polygon-logo-full.webp" alt="Polygon" className="h-7 w-auto" />
+              <span className="font-mono text-xs bg-[#0f0f1a] text-white px-2 py-0.5 rounded-md tracking-tight">
+                &gt;_ agent
+              </span>
+            </div>
 
-  const erc20Rows = (balances?.balances || []).map((b) => ({
-    key: `erc20:${b.contractAddress}`,
-    symbol: b.contractInfo?.symbol || 'ERC20',
-    decimals: b.contractInfo?.decimals ?? 0,
-    balance: b.balance,
-    logoURI: b.contractInfo?.logoURI
-  }));
-
-  const allRows = [...nativeRows, ...erc20Rows];
-
-  return (
-    <div className="min-h-screen flex items-center justify-center p-4 sm:p-8">
-      <div className="w-full max-w-lg mx-auto animate-scale-in">
-        {/* Main Card */}
-        <div className="card-glow rounded-2xl bg-surface/80 backdrop-blur-xl border border-border shadow-2xl shadow-black/40 overflow-hidden">
-          {/* Brand Header */}
-          <div className="px-6 pt-6 pb-5 border-b border-border">
-            <div className="flex items-center gap-3">
-              <div className="relative">
-                <div className="w-10 h-10 rounded-xl overflow-hidden shadow-lg shadow-poly/20">
-                  <svg
-                    width="40"
-                    height="40"
-                    viewBox="0 0 360 360"
-                    fill="none"
-                    xmlns="http://www.w3.org/2000/svg"
-                  >
-                    <rect width="360" height="360" rx="180" fill="#6C00F6" />
-                    <path
-                      d="M218.804 99.5819L168.572 128.432V218.473L140.856 234.539L112.97 218.46V186.313L140.856 170.39L158.786 180.788V154.779L140.699 144.511L90.4795 173.687V231.399L140.869 260.418L191.088 231.399V141.371L218.974 125.291L246.846 141.371V173.374L218.974 189.597L200.887 179.107V204.986L218.804 215.319L269.519 186.47V128.432L218.804 99.5819Z"
-                      fill="white"
-                    />
-                  </svg>
-                </div>
-                <div className="absolute inset-0 rounded-xl animate-pulse-glow" />
+            {/* CTA / status */}
+            {isWaiting ? (
+              <div className="flex items-center gap-2.5 text-sm text-[#6b7280]">
+                <div
+                  className="w-3.5 h-3.5 rounded-full border-2 border-[#8247e5] border-t-transparent flex-shrink-0"
+                  style={{ animation: 'spin 0.8s linear infinite' }}
+                />
+                Waiting for wallet authorization
               </div>
-              <div>
-                <h1 className="text-lg font-semibold text-text-primary tracking-tight">
-                  Polygon Agent Kit
-                </h1>
-                <p className="text-sm text-text-secondary mt-0.5">
-                  {network.title} &middot; Wallet Session
+            ) : (
+              <>
+                <p className="text-sm text-[#9ca3af] mb-6 text-center leading-relaxed">
+                  Create a secure session for your agent
                 </p>
-              </div>
-            </div>
-          </div>
+                <button
+                  onClick={connect}
+                  className="btn-press w-full flex items-center justify-center gap-2 bg-[#8247e5] hover:bg-[#7139d4] text-white text-sm font-semibold px-5 py-3 rounded-xl transition-colors cursor-pointer border-0"
+                >
+                  <Wallet className="w-4 h-4" />
+                  Sign In
+                </button>
+              </>
+            )}
 
-          {/* ======== PRE-CONNECT STATE ======== */}
-          {!walletAddress && (
-            <div className="p-6 space-y-5 animate-fade-in">
-              {/* Instructions */}
-              <p className="text-sm text-text-secondary leading-relaxed">
-                Click connect, approve the session for your agent, then the encrypted blob will be
-                sent back to your agent to create a secure session.
-              </p>
-
-              {/* Connect Button */}
-              <button
-                className="btn-press w-full h-12 rounded-xl bg-gradient-to-r from-poly to-poly-light text-white font-semibold text-sm tracking-wide shadow-lg shadow-poly/25 hover:shadow-xl hover:shadow-poly/30 hover:brightness-110 transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer border-0"
-                onClick={connect}
-              >
-                <Wallet className="w-4 h-4" />
-                Connect Wallet
-                <ArrowRight className="w-4 h-4" />
-              </button>
-
-              {/* Error */}
-              {error && (
-                <div className="flex items-start gap-2 px-3.5 py-3 rounded-xl bg-error-glow border border-error/20 animate-slide-up">
-                  <AlertCircle className="w-4 h-4 text-error shrink-0 mt-0.5" />
-                  <p className="text-sm text-error">{error}</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ======== POST-CONNECT STATE ======== */}
-          {walletAddress && (
-            <div className="p-6 space-y-5 animate-slide-up">
-              {/* Wallet Address Badge */}
-              <div>
-                <label className="text-xs font-medium text-text-muted uppercase tracking-wider">
-                  Connected Wallet
-                </label>
-                <div className="mt-2 flex items-center gap-2.5 px-3.5 py-3 rounded-xl bg-surface-elevated border border-border">
-                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-poly/30 to-poly-dark/20 border border-poly/20 flex items-center justify-center shrink-0">
-                    <Wallet className="w-4 h-4 text-poly-light" />
-                  </div>
-                  <span className="text-sm text-text-primary font-mono truncate flex-1">
-                    {walletAddress}
-                  </span>
-                  <a
-                    href={`https://polygonscan.com/address/${walletAddress}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-text-muted hover:text-poly-light transition-colors"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
-                </div>
-              </div>
-
-              {/* Balance Table */}
-              {balances && allRows.length > 0 && (
+            {/* Error */}
+            {error && (
+              <div className="mt-4 w-full flex items-start gap-2 px-3.5 py-3 rounded-xl bg-red-50 border border-red-100">
+                <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
                 <div>
-                  <label className="text-xs font-medium text-text-muted uppercase tracking-wider">
-                    Balances
-                  </label>
-                  <div className="mt-2 rounded-xl bg-surface-elevated border border-border overflow-hidden divide-y divide-border">
-                    {allRows.map((row, i) => (
-                      <div
-                        key={row.key}
-                        className="flex items-center justify-between px-4 py-3 hover:bg-surface-hover transition-colors opacity-0 animate-slide-up"
-                        style={{ animationDelay: `${0.1 + i * 0.05}s` }}
-                      >
-                        <div className="flex items-center gap-3">
-                          {row.logoURI ? (
-                            <img
-                              src={row.logoURI}
-                              alt=""
-                              className="w-7 h-7 rounded-full ring-1 ring-border"
-                            />
-                          ) : (
-                            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-poly/40 to-poly-dark/30 ring-1 ring-border flex items-center justify-center">
-                              <span className="text-xs font-semibold text-text-secondary">
-                                {row.symbol.charAt(0)}
-                              </span>
-                            </div>
-                          )}
-                          <span className="text-sm font-medium text-text-primary">
-                            {row.symbol}
-                          </span>
-                        </div>
-                        <span className="text-sm font-semibold text-text-primary font-mono tabular-nums">
-                          {formatUnits(row.balance, row.decimals)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Divider */}
-              <div className="border-t border-border" />
-
-              {/* Next Step */}
-              <div>
-                <label className="text-xs font-medium text-text-muted uppercase tracking-wider">
-                  Next Step
-                </label>
-
-                {/* Success: callback sent */}
-                {callbackUrl && callbackSent && (
-                  <div className="mt-3 flex items-start gap-3 px-4 py-4 rounded-xl bg-success-glow border border-success/20 animate-scale-in">
-                    <div className="w-8 h-8 rounded-full bg-success/20 flex items-center justify-center shrink-0">
-                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
-                        <path
-                          className="check-circle"
-                          d="M5 13l4 4L19 7"
-                          stroke="#22c55e"
-                          strokeWidth="2.5"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-success">
-                        Session encrypted &amp; sent
-                      </p>
-                      <p className="text-xs text-text-secondary mt-1">
-                        Switch back to your agent — it will confirm once the wallet session is
-                        ingested.
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Callback failed */}
-                {callbackUrl && callbackFailed && (
-                  <div className="mt-3 flex items-start gap-2 px-3.5 py-3 rounded-xl bg-error-glow border border-error/20 animate-slide-up">
-                    <AlertCircle className="w-4 h-4 text-error shrink-0 mt-0.5" />
-                    <p className="text-sm text-text-secondary">
-                      Auto-send failed. Copy the encrypted blob manually below.
-                    </p>
-                  </div>
-                )}
-
-                {/* Callback in progress */}
-                {callbackUrl && !callbackSent && !callbackFailed && (
-                  <div className="mt-3 flex items-center gap-3 px-3.5 py-3 rounded-xl bg-surface-elevated border border-border">
-                    <div
-                      className="w-4 h-4 rounded-full border-2 border-poly border-t-transparent"
-                      style={{ animation: 'spin 0.8s linear infinite' }}
-                    />
-                    <p className="text-sm text-text-secondary">
-                      Sending encrypted session to callback...
-                    </p>
-                  </div>
-                )}
-
-                {/* No callback - manual copy */}
-                {!callbackUrl && ciphertext && (
-                  <p className="mt-3 text-sm text-text-secondary">
-                    Copy the encrypted blob and paste it to your CLI or agent.
-                  </p>
-                )}
-
-                {/* Ciphertext textarea + copy button */}
-                {ciphertext && (!callbackUrl || callbackFailed) && (
-                  <div
-                    className="mt-3 space-y-3 animate-slide-up"
-                    style={{ animationDelay: '0.15s' }}
+                  <p className="text-sm text-red-600">{error}</p>
+                  <button
+                    onClick={connect}
+                    className="mt-1.5 text-xs text-[#8247e5] hover:text-[#7139d4] font-medium cursor-pointer border-0 bg-transparent transition-colors"
                   >
-                    <textarea
-                      readOnly
-                      value={ciphertext}
-                      className="cipher-textarea w-full h-32 px-3.5 py-3 rounded-xl bg-black/30 border border-border text-text-secondary font-mono text-xs leading-relaxed focus:outline-none focus:border-poly/40 focus:ring-1 focus:ring-poly/20 transition-all"
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        className="btn-press flex-1 h-11 rounded-xl bg-surface-hover border border-border text-text-primary font-medium text-sm hover:border-border-hover transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer"
-                        onClick={copyCiphertext}
-                      >
-                        {copied ? (
-                          <>
-                            <Check className="w-4 h-4 text-success" />
-                            <span className="text-success">Copied!</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-4 h-4" />
-                            Copy
-                          </>
-                        )}
-                      </button>
-                      <button
-                        className="btn-press flex-1 h-11 rounded-xl bg-surface-hover border border-border text-text-primary font-medium text-sm hover:border-border-hover transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer"
-                        onClick={downloadCiphertext}
-                      >
-                        <ArrowRight className="w-4 h-4 rotate-90" />
-                        Download .txt
-                      </button>
-                    </div>
-                    <p className="text-xs text-text-muted">
-                      Paste to your agent or run:{' '}
-                      <code className="text-text-secondary">
-                        polygon-agent wallet import --ciphertext @session.txt
-                      </code>
-                    </p>
-                  </div>
-                )}
-
-                {/* No ciphertext yet */}
-                {!ciphertext && (
-                  <p className="mt-3 text-xs text-text-muted">No ciphertext generated yet.</p>
-                )}
-
-                {/* Error */}
-                {error && (
-                  <div className="mt-3 flex items-start gap-2 px-3.5 py-3 rounded-xl bg-error-glow border border-error/20 animate-slide-up">
-                    <AlertCircle className="w-4 h-4 text-error shrink-0 mt-0.5" />
-                    <p className="text-sm text-error">{error}</p>
-                  </div>
-                )}
+                    Try again →
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
-
-          {/* Footer */}
-          <div className="px-6 py-3 border-t border-border flex items-center justify-center">
-            <span className="text-xs text-text-muted">Powered by Sequence &middot; Polygon</span>
+            )}
           </div>
         </div>
       </div>
+    );
+  }
+
+  // ── Screen 2: Code confirm ──
+  if (sessionCode && !showFunding && !showDashboard) {
+    return (
+      <div className="min-h-screen bg-[#eeeef5] flex flex-col items-center justify-center px-4">
+        <div className="flex items-center gap-2.5 mb-6">
+          <img src="/polygon-logo-full.webp" alt="Polygon" className="h-8 w-auto" />
+          <span className="font-mono text-xs bg-[#0f0f1a] text-white px-2 py-0.5 rounded-md tracking-tight">
+            &gt;_ agent
+          </span>
+        </div>
+        <CodeDisplay
+          code={sessionCode}
+          walletAddress={walletAddress}
+          totalUsd={totalUsd}
+          onContinue={() => setShowFunding(true)}
+          onRegenerate={() => {
+            setSessionCode('');
+            void connect();
+          }}
+        />
+      </div>
+    );
+  }
+
+  // ── Screen 3: Funding ──
+  if (showFunding && !showDashboard) {
+    return (
+      <div className="min-h-screen bg-[#eeeef5] flex flex-col items-center justify-center px-4">
+        {/* Fixed so Trails modal overlay can never cover the logo */}
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[99999] flex items-center gap-2.5">
+          <img src="/polygon-logo-full.webp" alt="Polygon" className="h-8 w-auto" />
+          <span className="font-mono text-xs bg-[#0f0f1a] text-white px-2 py-0.5 rounded-md tracking-tight">
+            &gt;_ agent
+          </span>
+        </div>
+        <div className="w-full max-w-sm">
+          <FundingScreen
+            walletAddress={walletAddress}
+            chainId={chainId}
+            onSkip={() => {
+              setShowDashboard(true);
+              setTotalUsd(null);
+              fetchTotalUsdBalance(walletAddress, chainId)
+                .then(setTotalUsd)
+                .catch(() => setTotalUsd(null));
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // ── Screen 4: Dashboard ──
+  return (
+    <div className="min-h-screen bg-[#eeeef5]">
+      {/* Nav */}
+      <nav className="bg-white border-b border-[#e5e5f0] px-6 py-3.5 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <img src="/polygon-logo-full.webp" alt="Polygon" className="h-7 w-auto" />
+          <span className="font-mono text-xs bg-[#0f0f1a] text-white px-2 py-0.5 rounded-md tracking-tight">
+            &gt;_ agent
+          </span>
+        </div>
+        <a
+          href="https://wallet.polygon.technology"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 bg-[#f3f4f8] hover:bg-[#eeeef5] rounded-full px-3 py-1.5 transition-colors no-underline"
+        >
+          <div className="w-5 h-5 rounded-full bg-gradient-to-br from-[#8247e5] to-[#c084fc] flex-shrink-0" />
+          <span className="font-mono text-sm text-[#374151]">{shortAddr}</span>
+        </a>
+      </nav>
+
+      <main className="max-w-4xl mx-auto px-6 py-8">
+        {/* Balance row */}
+        <div className="flex items-start justify-between mb-8">
+          <div>
+            <div className="text-5xl font-bold text-[#0f0f1a] mb-2">
+              {totalUsd === null ? (
+                <span className="text-[#d1d5db]">$—</span>
+              ) : (
+                `$${totalUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              )}
+            </div>
+            <div className="flex items-center gap-2 text-sm text-[#6b7280]">
+              <div className="w-3.5 h-3.5 rounded-full bg-[#8247e5]" />
+              <span className="font-mono text-xs">{walletAddress}</span>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              setShowFunding(true);
+              setShowDashboard(false);
+            }}
+            className="btn-press flex items-center gap-2 bg-[#8247e5] hover:bg-[#7139d4] text-white font-semibold px-5 py-2.5 rounded-full transition-colors cursor-pointer border-0"
+          >
+            <Plus className="w-4 h-4" />
+            Add funds
+          </button>
+        </div>
+
+        {/* Section header */}
+        <div className="flex items-center gap-3 mb-4">
+          <h2 className="text-base font-semibold text-[#0f0f1a]">Use your wallet with agents</h2>
+          <span className="flex items-center gap-1.5 text-xs text-[#16a34a] bg-[#f0fdf4] border border-[#bbf7d0] px-2.5 py-1 rounded-full font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#16a34a] inline-block" />
+            polygon-agent connected
+          </span>
+        </div>
+
+        {/* Use cases + terminal */}
+        <div className="grid grid-cols-2 gap-0 bg-white rounded-2xl border border-[#e5e5f0] overflow-hidden mb-4">
+          {/* Left: use cases */}
+          <div className="p-5 border-r border-[#e5e5f0]">
+            <div className="space-y-1">
+              {USE_CASES.map((uc, i) => {
+                const Icon = uc.icon;
+                return (
+                  <button
+                    key={uc.label}
+                    onClick={() => setSelectedUseCase(i)}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-left cursor-pointer transition-colors ${
+                      i === selectedUseCase
+                        ? 'bg-[#f3f4f8] text-[#0f0f1a] font-medium'
+                        : 'text-[#374151] hover:bg-[#f9f9fc]'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5 flex-shrink-0 text-[#8247e5]" />
+                    {uc.label}
+                  </button>
+                );
+              })}
+            </div>
+            <a
+              href="https://github.com/0xPolygon/polygon-agent-cli"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-[#e5e5f0] text-sm text-[#374151] bg-transparent cursor-pointer hover:bg-[#f9f9fc] transition-colors no-underline"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M7 17L17 7M17 7H7M17 7V17"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              See all use cases
+            </a>
+          </div>
+
+          {/* Right: terminal */}
+          <div className="p-5 flex flex-col">
+            <pre className="text-xs leading-relaxed flex-1 text-[#374151] whitespace-pre-wrap font-mono">
+              <span
+                className="font-semibold"
+                style={{ color: AGENTS.find((a) => a.id === selectedAgent)?.color }}
+              >
+                {AGENTS.find((a) => a.id === selectedAgent)?.terminalPrefix}
+              </span>
+              {' "'}
+              {USE_CASES[selectedUseCase].display}"
+            </pre>
+            <div className="mt-3 pt-3 border-t border-[#f0f0f5]">
+              {/* Agent selector chips */}
+              <div className="flex items-center gap-1.5 mb-3">
+                <span className="text-xs text-[#9ca3af] mr-0.5">Run with</span>
+                {AGENTS.map((agent) => (
+                  <button
+                    key={agent.id}
+                    onClick={() => setSelectedAgent(agent.id)}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-all cursor-pointer border ${
+                      selectedAgent === agent.id
+                        ? 'text-white border-transparent'
+                        : 'bg-white text-[#6b7280] border-[#e5e5f0] hover:border-[#d1d5db]'
+                    }`}
+                    style={
+                      selectedAgent === agent.id
+                        ? { background: agent.color, borderColor: agent.color }
+                        : {}
+                    }
+                  >
+                    <span
+                      className="w-1.5 h-1.5 rounded-full"
+                      style={{
+                        background:
+                          selectedAgent === agent.id ? 'rgba(255,255,255,0.7)' : agent.color
+                      }}
+                    />
+                    {agent.label}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => {
+                  const agent = AGENTS.find((a) => a.id === selectedAgent)!;
+                  void navigator.clipboard
+                    .writeText(agent.buildCommand(USE_CASES[selectedUseCase].display))
+                    .then(() => {
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 2000);
+                    });
+                }}
+                className="w-full flex items-center justify-center gap-2 border border-[#e5e5f0] rounded-xl py-2.5 text-sm text-[#374151] hover:bg-[#f9f9fc] transition-colors cursor-pointer bg-white"
+              >
+                <Copy className="w-4 h-4" />
+                {copied ? 'Copied!' : 'Copy to your terminal'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Learn more */}
+        <h3 className="text-base font-semibold text-[#0f0f1a] mb-3 mt-8">Learn more</h3>
+        <div className="grid grid-cols-3 gap-3 mb-6">
+          {[
+            {
+              title: 'Github',
+              desc: 'Browse the source code, open issues, and contribute to the Polygon Agent CLI.',
+              href: 'https://github.com/0xPolygon/polygon-agent-cli'
+            },
+            {
+              title: 'Docs',
+              desc: 'Full CLI reference, quickstart guide, and architecture docs to get your agent onchain fast.',
+              href: 'https://polygon-labs.mintlify.io/wallets/agentic-wallets'
+            },
+            {
+              title: 'Services list',
+              desc: 'Explore the onchain services your agent can use: swaps, onramps, x402 payments, Polymarket, and more.',
+              href: 'https://github.com/0xPolygon/polygon-agent-cli'
+            }
+          ].map((card) => (
+            <a
+              key={card.title}
+              href={card.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="bg-white rounded-xl border border-[#e5e5f0] p-4 no-underline block hover:border-[#8247e5] transition-colors"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-semibold text-[#0f0f1a]">{card.title}</span>
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  className="text-[#9ca3af]"
+                >
+                  <path
+                    d="M7 17L17 7M17 7H7M17 7V17"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </div>
+              <p className="text-xs text-[#9ca3af] leading-relaxed">{card.desc}</p>
+            </a>
+          ))}
+        </div>
+
+        <div className="text-center py-4 text-xs text-[#9ca3af]">Powered by Polygon</div>
+      </main>
     </div>
   );
 }

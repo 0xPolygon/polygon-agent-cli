@@ -1,18 +1,25 @@
+// packages/connector-ui/worker.mjs
+import { handleRelayRequest, SessionRelay } from './src/relay.ts';
+
+export { SessionRelay };
+
 export default {
   async fetch(request, env) {
-    if (!env.ASSETS) {
-      return new Response('ASSETS binding is missing. Check wrangler.toml [assets].binding', {
-        status: 500
-      });
+    const url = new URL(request.url);
+
+    // Route /api/relay/* to Durable Object relay
+    if (url.pathname.startsWith('/api/relay')) {
+      return handleRelayRequest(request, env);
     }
 
-    // Wrangler static assets binding.
-    // SPA fallback: rewrite unknown paths (e.g. /link) to /index.html.
+    if (!env.ASSETS) {
+      return new Response('ASSETS binding is missing', { status: 500 });
+    }
+
+    // SPA fallback: serve index.html for non-file paths
     const res = await env.ASSETS.fetch(request);
     if (res.status !== 404) return res;
 
-    const url = new URL(request.url);
-    // If it looks like a file (has extension), keep 404.
     if (/\.[a-z0-9]+$/i.test(url.pathname)) return res;
 
     const indexUrl = new URL(request.url);

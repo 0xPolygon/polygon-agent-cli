@@ -38,9 +38,9 @@ async function handleMarkets(argv: {
       limit: argv.limit ?? 20,
       offset: argv.offset ?? 0
     });
-    console.log(JSON.stringify({ ok: true, count: markets.length, markets }, null, 2));
+    console.log(JSON.stringify({ ok: true, count: markets.length, markets }));
   } catch (err) {
-    console.error(JSON.stringify({ ok: false, error: (err as Error).message }, null, 2));
+    console.error(JSON.stringify({ ok: false, error: (err as Error).message }));
     process.exit(1);
   }
 }
@@ -48,9 +48,9 @@ async function handleMarkets(argv: {
 async function handleMarket(argv: { conditionId: string }): Promise<void> {
   try {
     const market = await getMarket(argv.conditionId);
-    console.log(JSON.stringify({ ok: true, market }, null, 2));
+    console.log(JSON.stringify({ ok: true, market }));
   } catch (err) {
-    console.error(JSON.stringify({ ok: false, error: (err as Error).message }, null, 2));
+    console.error(JSON.stringify({ ok: false, error: (err as Error).message }));
     process.exit(1);
   }
 }
@@ -89,7 +89,7 @@ async function handleSetKey(argv: { privateKey: string }): Promise<void> {
       )
     );
   } catch (err) {
-    console.error(JSON.stringify({ ok: false, error: (err as Error).message }, null, 2));
+    console.error(JSON.stringify({ ok: false, error: (err as Error).message }));
     process.exit(1);
   }
 }
@@ -114,7 +114,7 @@ async function handleProxyWallet(): Promise<void> {
       )
     );
   } catch (err) {
-    console.error(JSON.stringify({ ok: false, error: (err as Error).message }, null, 2));
+    console.error(JSON.stringify({ ok: false, error: (err as Error).message }));
     process.exit(1);
   }
 }
@@ -250,7 +250,7 @@ async function handleClobBuy(argv: {
   const broadcast = argv.broadcast ?? false;
 
   if (!['YES', 'NO'].includes(outcomeArg)) {
-    console.error(JSON.stringify({ ok: false, error: 'Outcome must be YES or NO' }, null, 2));
+    console.error(JSON.stringify({ ok: false, error: 'Outcome must be YES or NO' }));
     process.exit(1);
   }
 
@@ -410,7 +410,7 @@ async function handleSell(argv: {
   const broadcast = argv.broadcast ?? false;
 
   if (!['YES', 'NO'].includes(outcomeArg)) {
-    console.error(JSON.stringify({ ok: false, error: 'Outcome must be YES or NO' }, null, 2));
+    console.error(JSON.stringify({ ok: false, error: 'Outcome must be YES or NO' }));
     process.exit(1);
   }
 
@@ -542,7 +542,7 @@ async function handlePositions(): Promise<void> {
       )
     );
   } catch (err) {
-    console.error(JSON.stringify({ ok: false, error: (err as Error).message }, null, 2));
+    console.error(JSON.stringify({ ok: false, error: (err as Error).message }));
     process.exit(1);
   }
 }
@@ -563,7 +563,7 @@ async function handleOrders(): Promise<void> {
       )
     );
   } catch (err) {
-    console.error(JSON.stringify({ ok: false, error: (err as Error).message }, null, 2));
+    console.error(JSON.stringify({ ok: false, error: (err as Error).message }));
     process.exit(1);
   }
 }
@@ -572,9 +572,9 @@ async function handleCancel(argv: { orderId: string }): Promise<void> {
   try {
     const privateKey = await loadPolymarketKey();
     const result = await cancelOrder(argv.orderId, privateKey);
-    console.log(JSON.stringify({ ok: true, orderId: argv.orderId, result }, null, 2));
+    console.log(JSON.stringify({ ok: true, orderId: argv.orderId, result }));
   } catch (err) {
-    console.error(JSON.stringify({ ok: false, error: (err as Error).message }, null, 2));
+    console.error(JSON.stringify({ ok: false, error: (err as Error).message }));
     process.exit(1);
   }
 }
