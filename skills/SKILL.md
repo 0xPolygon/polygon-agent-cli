@@ -1,6 +1,6 @@
 ---
 name: polygon-agent-kit
-description: Complete Polygon agent toolkit. Session-based smart contract wallets (Sequence), token ops (send/swap/bridge/deposit via Trails), ERC-8004 on-chain identity + reputation, x402 micropayments. Single CLI entry point, AES-256-GCM encrypted storage.
+description: Complete Polygon agent toolkit for on-chain operations on Polygon. Use this skill whenever helping an agent set up a wallet, check balances, send or swap tokens, bridge assets, deposit to earn yield, register on-chain identity, submit or query reputation/feedback, or make x402 micropayments. Covers the full lifecycle: Sequence smart contract wallets, Trails DeFi actions, ERC-8004 identity + reputation, x402 payments. Single CLI entry point (`polygon-agent`), AES-256-GCM encrypted storage.
 ---
 
 # Polygon Agentic CLI
@@ -20,19 +20,18 @@ description: Complete Polygon agent toolkit. Session-based smart contract wallet
 
 ## Environment Variables
 
-### Required
-| Variable | When |
-|----------|------|
-| `SEQUENCE_PROJECT_ACCESS_KEY` | Wallet creation, swaps, balance checks, Trails |
+### Access key — auto-loaded, no export needed
 
-**One key, three names** — `SEQUENCE_INDEXER_ACCESS_KEY` and `TRAILS_API_KEY` are the same value as `SEQUENCE_PROJECT_ACCESS_KEY`. Set them all once:
+After `setup` runs, the access key is stored in `~/.polygon-agent/builder.json`. The CLI bootstraps it into `SEQUENCE_PROJECT_ACCESS_KEY` and `SEQUENCE_INDEXER_ACCESS_KEY` automatically on every invocation. Trails commands additionally fall back through `session.projectAccessKey` → `SEQUENCE_PROJECT_ACCESS_KEY`, so `TRAILS_API_KEY` also does not need to be exported manually.
+
+**In a fresh agent session with no environment variables set**, simply run commands — the CLI reads credentials from disk. No `export` step is required between phases.
+
+Only set these manually to override the stored value (e.g. to point at a different project):
 ```bash
-export SEQUENCE_PROJECT_ACCESS_KEY=<access-key-from-setup>
-export SEQUENCE_INDEXER_ACCESS_KEY=$SEQUENCE_PROJECT_ACCESS_KEY
-export TRAILS_API_KEY=$SEQUENCE_PROJECT_ACCESS_KEY
+export SEQUENCE_PROJECT_ACCESS_KEY=<override-key>
 ```
 
-### Optional
+### Optional overrides
 | Variable | Default |
 |----------|---------|
 | `SEQUENCE_ECOSYSTEM_CONNECTOR_URL` | `https://agentconnect.polygon.technology` |
@@ -44,12 +43,12 @@ export TRAILS_API_KEY=$SEQUENCE_PROJECT_ACCESS_KEY
 ## Complete Setup Flow
 
 ```bash
-# Phase 1: Setup (creates EOA + Sequence project, returns access key)
+# Phase 1: Setup (creates EOA + Sequence project, stores access key to disk)
 polygon-agent setup --name "MyAgent"
-# → save privateKey (not shown again), eoaAddress, accessKey
+# → saves privateKey (not shown again), eoaAddress, accessKey to ~/.polygon-agent/builder.json
+# → all subsequent commands auto-load the access key from disk — no export needed
 
 # Phase 2: Create ecosystem wallet (opens browser, waits for 6-digit code)
-export SEQUENCE_PROJECT_ACCESS_KEY=<accessKey>
 polygon-agent wallet create --usdc-limit 100 --native-limit 5
 # → opens https://agentconnect.polygon.technology/link?rid=<rid>&...
 # → user approves in browser, browser shows a 6-digit code
@@ -63,7 +62,6 @@ polygon-agent fund
 # → send the returned `fundingUrl` to the user; `walletAddress` in the output confirms the recipient
 
 # Phase 4: Verify
-export SEQUENCE_INDEXER_ACCESS_KEY=$SEQUENCE_PROJECT_ACCESS_KEY
 polygon-agent balances
 
 # Phase 5: Register agent on-chain (ERC-8004, Polygon mainnet)
@@ -81,7 +79,7 @@ polygon-agent setup --name <name> [--force]
 
 ### Wallet
 ```bash
-polygon-agent wallet create [--name <n>] [--chain polygon] [--timeout <sec>] [--no-wait]
+polygon-agent wallet create [--name <n>] [--chain polygon] [--timeout <sec>] [--print-url]
   [--native-limit <amt>] [--usdc-limit <amt>] [--usdt-limit <amt>]
   [--token-limit <SYM:amt>]  # repeatable
   [--usdc-to <addr> --usdc-amount <amt>]  # one-off scoped transfer
@@ -96,9 +94,9 @@ polygon-agent wallet remove [--name <n>]
 ### Operations
 ```bash
 polygon-agent balances [--wallet <n>] [--chain <chain>]
-polygon-agent send --to <addr> --amount <num> [--symbol <SYM>] [--broadcast]
+polygon-agent send --to <addr> --amount <num> [--symbol <SYM>] [--token <addr>] [--decimals <n>] [--broadcast]
 polygon-agent send-native --to <addr> --amount <num> [--broadcast] [--direct]
-polygon-agent send-token --symbol <SYM> --to <addr> --amount <num> [--broadcast]
+polygon-agent send-token --symbol <SYM> --to <addr> --amount <num> [--token <addr>] [--decimals <n>] [--broadcast]
 polygon-agent swap --from <SYM> --to <SYM> --amount <num> [--to-chain <chain>] [--slippage <num>] [--broadcast]
 polygon-agent deposit --asset <SYM> --amount <num> [--protocol aave|morpho] [--broadcast]
 polygon-agent fund [--wallet <n>] [--token <addr>]
@@ -110,9 +108,9 @@ polygon-agent x402-pay --url <url> --wallet <n> [--method GET] [--body <str>] [-
 polygon-agent agent register --name <n> [--agent-uri <uri>] [--metadata <k=v,k=v>] [--broadcast]
 polygon-agent agent wallet --agent-id <id>
 polygon-agent agent metadata --agent-id <id> --key <key>
-polygon-agent agent reputation --agent-id <id> [--tag1 <tag>]
-polygon-agent agent reviews --agent-id <id>
-polygon-agent agent feedback --agent-id <id> --value <score> [--tag1 <t>] [--tag2 <t>] [--endpoint <e>] [--broadcast]
+polygon-agent agent reputation --agent-id <id> [--tag1 <tag>] [--tag2 <tag>]
+polygon-agent agent reviews --agent-id <id> [--tag1 <t>] [--tag2 <t>] [--revoked]
+polygon-agent agent feedback --agent-id <id> --value <score> [--tag1 <t>] [--tag2 <t>] [--endpoint <e>] [--feedback-uri <uri>] [--broadcast]
 ```
 
 **ERC-8004 contracts (Polygon mainnet):**
@@ -143,7 +141,7 @@ polygon-agent agent feedback --agent-id <id> --value <score> [--tag1 <t>] [--tag
 6. User enters the code in the terminal when prompted
 7. CLI fetches the encrypted payload from the relay, decrypts it using the code, saves the session
 
-**`--no-wait` flow:** CLI outputs the URL without blocking. Complete later with:
+**`--print-url` flow:** CLI outputs the URL without blocking. Complete later with:
 ```bash
 polygon-agent wallet import --code <6-digit-code> --rid <rid>
 ```
@@ -167,7 +165,7 @@ When `wallet create` outputs a URL in the `url` or `approvalUrl` field, send the
 | `Fee option errors` | Set `POLYGON_AGENT_DEBUG_FEE=1`, ensure wallet has funds |
 | `Timed out waiting for wallet approval` | Add `--timeout 600` |
 | `Invalid code: hash mismatch` | Wrong 6-digit code entered — retry (3 attempts allowed) |
-| `Relay request not found` | Session expired or already used — re-run `wallet create` |
+| `Relay request not found` | Session expired or already used — re-run `wallet create` (or `wallet create --print-url`) |
 | Deposit session rejected | Re-create wallet with `--contract <depositAddress>` |
 | Wrong recipient in Trails widget | Run `polygon-agent fund` (do not construct the URL manually) |
 
