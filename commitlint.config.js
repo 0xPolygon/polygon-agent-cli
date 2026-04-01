@@ -1,1 +1,3 @@
-export default { extends: ['@commitlint/config-conventional'] };
+import { commitlint } from '@polygonlabs/apps-team-lint/commitlint';
+
+export default commitlint();

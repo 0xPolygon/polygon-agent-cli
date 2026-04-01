@@ -15,8 +15,8 @@ importers:
         specifier: ^20.4.2
         version: 20.4.2
       '@polygonlabs/apps-team-lint':
-        specifier: ^1.0.0
-        version: 1.0.0(@typescript-eslint/utils@8.56.1(eslint@10.0.3(jiti@2.6.1))(typescript@5.9.3))(eslint@10.0.3(jiti@2.6.1))(typescript@5.9.3)
+        specifier: ^2.0.0
+        version: 2.0.1(@typescript-eslint/utils@8.56.1(eslint@10.0.3(jiti@2.6.1))(typescript@5.9.3))(eslint@10.0.3(jiti@2.6.1))(typescript@5.9.3)
       '@tsconfig/node-ts':
         specifier: ^23.6.4
         version: 23.6.4
@@ -1487,9 +1487,8 @@ packages:
   '@package-json/types@0.0.12':
     resolution: {integrity: sha512-uu43FGU34B5VM9mCNjXCwLaGHYjXdNincqKLaraaCW+7S2+SmiBg1Nv8bPnmschrIfZmfKNY9f3fC376MRrObw==}
 
-  '@polygonlabs/apps-team-lint@1.0.0':
-    resolution: {integrity: sha512-gwT3TrWCwz6d0oalRvfwWxfG5cVibGy3YyilawD5DH5Lw6Rm02RDu4gl9OQcvRhDLcT+GkISx00o+NnMQ/ecdQ==}
-    engines: {node: '>=24'}
+  '@polygonlabs/apps-team-lint@2.0.1':
+    resolution: {integrity: sha512-ve15rzzPkAabmZbX75wVD5JKcZt/sUqZNwzhvd2Yt3Jx6UBA5BNVqPYbRSE20KVlAZXpVaUt601c6AV1Nfr5gQ==}
     peerDependencies:
       eslint: ^10.0.0
       typescript: ^5.0.0
@@ -6586,7 +6585,7 @@ snapshots:
 
   '@package-json/types@0.0.12': {}
 
-  '@polygonlabs/apps-team-lint@1.0.0(@typescript-eslint/utils@8.56.1(eslint@10.0.3(jiti@2.6.1))(typescript@5.9.3))(eslint@10.0.3(jiti@2.6.1))(typescript@5.9.3)':
+  '@polygonlabs/apps-team-lint@2.0.1(@typescript-eslint/utils@8.56.1(eslint@10.0.3(jiti@2.6.1))(typescript@5.9.3))(eslint@10.0.3(jiti@2.6.1))(typescript@5.9.3)':
     dependencies:
       '@commitlint/config-conventional': 19.8.1
       eslint: 10.0.3(jiti@2.6.1)
@@ -7347,7 +7346,7 @@ snapshots:
     dependencies:
       ansi-align: 3.0.1
       camelcase: 7.0.1
-      chalk: 5.0.1
+      chalk: 5.6.2
       cli-boxes: 3.0.0
       string-width: 5.1.2
       type-fest: 2.19.0
