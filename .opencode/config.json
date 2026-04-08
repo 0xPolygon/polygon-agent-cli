@@ -1,0 +1,16 @@
+{
+  "version": "1.0.0",
+  "project": {
+    "name": "polygon-agent-cli",
+    "type": "pnpm-monorepo",
+    "description": "CLI tool for on-chain agent operations on Polygon"
+  },
+  "commands": {
+    "build": "pnpm run build",
+    "test": "pnpm run lint",
+    "typecheck": "pnpm run typecheck",
+    "dev": "pnpm run polygon-agent"
+  },
+  "include": ["AGENTS.md"],
+  "exclude": ["node_modules", "dist", ".git", "*.log"]
+}

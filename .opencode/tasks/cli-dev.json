@@ -1,0 +1,7 @@
+{
+  "name": "cli-dev",
+  "description": "Run the CLI in development mode",
+  "command": "pnpm run polygon-agent",
+  "cwd": "${workspaceRoot}",
+  "group": "development"
+}

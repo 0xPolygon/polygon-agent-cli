@@ -1,0 +1,6 @@
+{
+  "name": "ci",
+  "description": "Run full CI checks (typecheck + lint + build)",
+  "tasks": ["typecheck", "lint", "build"],
+  "sequential": true
+}
