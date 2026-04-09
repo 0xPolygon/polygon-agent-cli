@@ -7,10 +7,9 @@ import {
   Copy,
   AlertCircle,
   Plus,
-  CalendarClock,
   Twitter,
-  BarChart2,
-  Globe,
+  Sparkles,
+  Code2,
   ArrowLeftRight,
   TrendingUp
 } from 'lucide-react';
@@ -93,28 +92,22 @@ const AGENTS: {
 
 const USE_CASES: { label: string; display: string; icon: ElementType }[] = [
   {
-    label: 'DCA into POL on a schedule',
-    display:
-      'DCA a small amount of USDC into POL every Monday at 9am. If POL drops more than 10% in a day, double the buy.',
-    icon: CalendarClock
-  },
-  {
     label: 'Read Twitter/X profiles & tweets',
     display:
       'Read Twitter/X profiles and tweets without API keys. Get follower counts, recent tweets, engagement metrics.',
     icon: Twitter
   },
   {
-    label: 'Bet on Polymarket predictions',
+    label: 'Generate an AI image',
     display:
-      'Find the top 3 open Polymarket markets about crypto. Allocate a small amount of USDC to each bet you have at least 60% confidence in.',
-    icon: BarChart2
+      'Describe any scene or concept and generate a high-quality image using Google Gemini AI. Pay per generation via x402 — no API key or subscription needed.',
+    icon: Sparkles
   },
   {
-    label: 'Purchase a domain',
+    label: 'Review code for bugs & security',
     display:
-      'Find and register an available .com domain for my project using my wallet. Check pricing, complete the purchase, and confirm registration.',
-    icon: Globe
+      'Submit any code snippet and get a structured GPT-4o review: bugs, security vulnerabilities, performance issues, and style suggestions — each with line numbers and severity ratings.',
+    icon: Code2
   },
   {
     label: 'Bridge assets cross-chain',
