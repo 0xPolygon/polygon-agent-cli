@@ -9,7 +9,7 @@ export const dappOrigin =
 
 export const projectAccessKey = import.meta.env.VITE_PROJECT_ACCESS_KEY as string;
 export const relayerUrl = (import.meta.env.VITE_RELAYER_URL as string | undefined) || undefined;
-export const trailsApiKey = import.meta.env.VITE_TRAILS_API_KEY as string;
+export const trailsApiKey = (import.meta.env.VITE_TRAILS_API_KEY as string | undefined) ?? '';
 
 // Pass the base gateway URL; the Sequence SDK composes the final URL with the access key.
 export const nodesUrl =
