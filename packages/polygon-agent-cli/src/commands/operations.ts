@@ -1276,118 +1276,84 @@ export const x402PayCommand: CommandModule = {
         // not JSON — fall through to standard x402
       }
 
-      if (probeBody?.payment_details) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const details = probeBody.payment_details as any;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const networks: any[] = Array.isArray(details.networks) ? details.networks : [];
-        const polygonNet = networks.find(
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (n: any) => n.network === 'polygon' || n.chainId === 137
-        );
-        if (!polygonNet) throw new Error('No Polygon payment option in 402 response');
-
-        const recipient = details.recipient as string;
-        const amountUsdc = details.amount as number;
-        const usdcContract = (polygonNet.usdc_contract ||
-          '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359') as string;
-        const amountUnits = BigInt(Math.round(amountUsdc * 1_000_000));
+      // x402 Bazaar payment format: { payment_address, amount_usdc, supported_chains, usdc_contracts }
+      // or legacy: { payment_details: { recipient, amount, networks[] } }
+      if (probeBody?.payment_address || probeBody?.payment_details) {
         const pad = (hex: string, n = 64) => String(hex).replace(/^0x/, '').padStart(n, '0');
+        let payChain: string;
+        let payChainId: number;
+        let payRecipient: string;
+        let amountUsdc: number;
+        let usdcContract: string;
 
-        let payTxHash: string;
-
-        if (polygonNet.facilitator) {
-          // Polygon facilitator path: fund EOA → sign EIP-3009 → settle via facilitator
-          const transferData =
-            '0xa9059cbb' + pad(eoaAccount.address) + pad('0x' + amountUnits.toString(16));
-          process.stderr.write(
-            `Funding EOA ${eoaAccount.address} with ${amountUsdc} USDC for facilitator payment...\n`
+        if (probeBody.payment_address) {
+          // Current x402 Bazaar format
+          const supportedChains: { chain: string; chainId: number }[] = Array.isArray(
+            probeBody.supported_chains
+          )
+            ? probeBody.supported_chains
+            : [];
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const usdcContracts: Record<string, string> = (probeBody.usdc_contracts as any) || {};
+          const polygonEntry = supportedChains.find(
+            (c) => c.chain === 'polygon' || c.chainId === 137
           );
-          await runDappClientTx({
-            walletName,
-            chainId: 137,
-            transactions: [{ to: usdcContract, value: 0n, data: transferData }],
-            broadcast: true
-          });
-
-          // x402/evm signing requires CAIP-2 format; x402-rs facilitator expects short name
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const paymentRequirements: any = {
-            scheme: 'exact',
-            network: 'eip155:137', // used by ExactEvmScheme for EIP-712 chain ID
-            amount: String(amountUnits),
-            payTo: recipient,
-            maxTimeoutSeconds: 300,
-            asset: usdcContract,
-            extra: { name: 'USD Coin', version: '2' }
-          };
-
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const evmScheme = new ExactEvmScheme(eoaAccount as any);
-          const basePayload = await evmScheme.createPaymentPayload(1, paymentRequirements);
-          // createPaymentPayload omits scheme/network at runtime despite the type — add them.
-          // Facilitator expects short name ('polygon'), not CAIP-2 ('eip155:137').
-          const paymentPayload = { ...basePayload, scheme: 'exact', network: 'polygon' };
-          // x402-rs PaymentRequirements shape (different field names/extras from TypeScript)
-          const facilitatorPaymentRequirements = {
-            scheme: 'exact',
-            network: 'polygon',
-            maxAmountRequired: String(amountUnits),
-            resource: url,
-            description: '',
-            mimeType: 'application/json',
-            payTo: recipient,
-            maxTimeoutSeconds: 300,
-            asset: usdcContract,
-            extra: { name: 'USD Coin', version: '2' }
-          };
-
-          process.stderr.write(`Settling via facilitator ${polygonNet.facilitator}...\n`);
-          const settleRes = await fetch(`${polygonNet.facilitator}/settle`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              x402Version: 1,
-              paymentPayload,
-              paymentRequirements: facilitatorPaymentRequirements
-            })
-          });
-          const settleText = await settleRes.text();
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          let settleData: any = {};
-          try {
-            settleData = JSON.parse(settleText);
-          } catch {
-            /* plain text error */
+          if (polygonEntry) {
+            payChain = 'polygon';
+            payChainId = 137;
+            usdcContract = usdcContracts['polygon'] || '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359';
+          } else if (supportedChains.length > 0) {
+            const first = supportedChains[0];
+            payChain = first.chain;
+            payChainId = first.chainId;
+            usdcContract = usdcContracts[first.chain] || '';
+            if (!usdcContract) throw new Error(`No USDC contract known for chain ${payChain}`);
+          } else {
+            throw new Error('No supported chains in 402 response');
           }
-          if (!settleRes.ok || (!settleData.txHash && !settleData.transaction)) {
-            throw new Error(`Facilitator settle failed (${settleRes.status}): ${settleText}`);
-          }
-          payTxHash = (settleData.txHash || settleData.transaction) as string;
-          process.stderr.write(`Settled via tx: ${payTxHash}\n`);
+          payRecipient = probeBody.payment_address as string;
+          amountUsdc = probeBody.amount_usdc as number;
         } else {
-          // No facilitator: direct on-chain USDC transfer to recipient, then provide tx hash
-          const transferData = '0xa9059cbb' + pad(recipient) + pad('0x' + amountUnits.toString(16));
-          process.stderr.write(`Sending ${amountUsdc} USDC to ${recipient} on Polygon...\n`);
-          const fundResult = await runDappClientTx({
-            walletName,
-            chainId: 137,
-            transactions: [{ to: usdcContract, value: 0n, data: transferData }],
-            broadcast: true
-          });
-          process.stderr.write(`Paid via tx: ${fundResult.txHash}\n`);
-          payTxHash = fundResult.txHash!;
+          // Legacy payment_details format
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const details = probeBody.payment_details as any;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const networks: any[] = Array.isArray(details.networks) ? details.networks : [];
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const polygonNet = networks.find(
+            (n: any) => n.network === 'polygon' || n.chainId === 137
+          );
+          if (!polygonNet) throw new Error('No Polygon payment option in 402 response');
+          payChain = 'polygon';
+          payChainId = 137;
+          payRecipient = details.recipient as string;
+          amountUsdc = details.amount as number;
+          usdcContract = polygonNet.usdc_contract || '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359';
         }
+
+        const amountUnits = BigInt(Math.round(amountUsdc * 1_000_000));
+        const transferData =
+          '0xa9059cbb' + pad(payRecipient) + pad('0x' + amountUnits.toString(16));
+
+        process.stderr.write(`Sending ${amountUsdc} USDC to ${payRecipient} on ${payChain}...\n`);
+        const fundResult = await runDappClientTx({
+          walletName,
+          chainId: payChainId,
+          transactions: [{ to: usdcContract, value: 0n, data: transferData }],
+          broadcast: true
+        });
+        const payTxHash = fundResult.txHash!;
+        process.stderr.write(`Paid via tx: ${payTxHash}\n`);
 
         // Wait for the transaction to be confirmed before presenting to the server
         process.stderr.write('Waiting for confirmation...\n');
-        const polygonRpc =
-          process.env.SEQUENCE_NODES_URL?.replace('{network}', 'polygon') ||
-          `https://nodes.sequence.app/polygon/${session.projectAccessKey || process.env.SEQUENCE_PROJECT_ACCESS_KEY || ''}`;
+        const rpcUrl =
+          process.env.SEQUENCE_NODES_URL?.replace('{network}', payChain) ||
+          `https://nodes.sequence.app/${payChain}/${session.projectAccessKey || process.env.SEQUENCE_PROJECT_ACCESS_KEY || ''}`;
         for (let attempt = 0; attempt < 30; attempt++) {
           await new Promise((r) => setTimeout(r, 3000));
           try {
-            const rpcRes = await fetch(polygonRpc, {
+            const rpcRes = await fetch(rpcUrl, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -1410,7 +1376,7 @@ export const x402PayCommand: CommandModule = {
         const retryHeaders: Record<string, string> = {
           ...headers,
           'X-Payment-TxHash': payTxHash,
-          'X-Payment-Chain': 'polygon'
+          'X-Payment-Chain': payChain
         };
         if (body) retryHeaders['Content-Type'] = 'application/json';
 
