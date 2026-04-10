@@ -183,13 +183,21 @@ async function syncStateAndGetStorage({
 
   const implicitMeta = session.implicitMeta ? JSON.parse(session.implicitMeta, jsonRevivers) : {};
 
+  // guard is stored as a JSON string (serialized with jsonReplacers) — parse it back
+  // so moduleAddresses is a proper Map<> rather than a plain object
+  const guardRaw = implicitMeta.guard;
+  const guard =
+    guardRaw && typeof guardRaw === 'string'
+      ? JSON.parse(guardRaw, jsonRevivers)
+      : (guardRaw ?? undefined);
+
   await storage.saveExplicitSession({
     pk: explicitSession.pk as `0x${string}`,
     walletAddress,
     chainId,
     loginMethod: implicitMeta.loginMethod ?? explicitSession.loginMethod,
     userEmail: implicitMeta.userEmail ?? explicitSession.userEmail,
-    guard: implicitMeta.guard
+    guard
   });
 
   await stateManager.update((state: CliState) => {
@@ -197,13 +205,13 @@ async function syncStateAndGetStorage({
       walletAddress,
       loginMethod: implicitMeta.loginMethod ?? explicitSession.loginMethod,
       userEmail: implicitMeta.userEmail ?? explicitSession.userEmail,
-      guard: implicitMeta.guard
+      guard
     };
     state.storage.sessionlessConnectionSnapshot = {
       walletAddress,
       loginMethod: implicitMeta.loginMethod ?? explicitSession.loginMethod,
       userEmail: implicitMeta.userEmail ?? explicitSession.userEmail,
-      guard: implicitMeta.guard
+      guard
     };
   });
 
