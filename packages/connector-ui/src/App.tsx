@@ -71,8 +71,8 @@ const AGENTS: {
     id: 'claude',
     label: 'Claude',
     color: '#D97706',
-    terminalPrefix: '$ Claude',
-    buildCommand: (display) => `Claude Read ${SKILL_URL} and ${display}`
+    terminalPrefix: '$ claude',
+    buildCommand: (display) => `claude "Read ${SKILL_URL} and ${display}"`
   },
   {
     id: 'codex',
