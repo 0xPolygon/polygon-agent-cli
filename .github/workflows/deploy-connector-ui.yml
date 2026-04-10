@@ -42,6 +42,7 @@ jobs:
           VITE_WALLET_URL: ${{ secrets.VITE_WALLET_URL }}
           VITE_DAPP_ORIGIN: ${{ secrets.VITE_DAPP_ORIGIN }}
           VITE_INDEXER_ACCESS_KEY: ${{ secrets.VITE_INDEXER_ACCESS_KEY }}
+          VITE_TRAILS_API_KEY: ${{ secrets.VITE_TRAILS_API_KEY }}
 
       - name: Deploy to staging
         run: pnpm exec wrangler deploy --env staging
@@ -79,6 +80,7 @@ jobs:
           VITE_WALLET_URL: ${{ secrets.VITE_WALLET_URL }}
           VITE_DAPP_ORIGIN: ${{ secrets.VITE_DAPP_ORIGIN }}
           VITE_INDEXER_ACCESS_KEY: ${{ secrets.VITE_INDEXER_ACCESS_KEY }}
+          VITE_TRAILS_API_KEY: ${{ secrets.VITE_TRAILS_API_KEY }}
 
       - name: Deploy to production
         run: pnpm exec wrangler deploy --env production

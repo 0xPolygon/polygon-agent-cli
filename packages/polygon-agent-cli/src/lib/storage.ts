@@ -28,6 +28,7 @@ export interface WalletSession {
   projectAccessKey: string | null;
   explicitSession: string;
   sessionPk: string;
+  sessionConfig?: string;
   implicitPk: string;
   implicitMeta: string;
   implicitAttestation: string;
@@ -287,12 +288,13 @@ export function sessionPayloadToWalletSession(payload: SessionPayload): WalletSe
     chainId: payload.chain_id,
     chain: chainName,
     projectAccessKey: payload.project_access_key ?? null,
-    explicitSession: payload.session_config ?? '',
+    explicitSession: JSON.stringify({ pk: payload.session_private_key }),
     sessionPk: payload.session_private_key,
+    sessionConfig: payload.session_config ?? undefined,
     implicitPk: implicit?.pk ?? '',
     implicitMeta: JSON.stringify(implicitMeta),
     implicitAttestation: implicit?.attestation ?? '',
-    implicitIdentitySig: implicit?.identity_sig ?? '',
+    implicitIdentitySig: implicit?.identity_sig ? JSON.stringify(implicit.identity_sig) : '',
     createdAt: new Date().toISOString()
   };
 }
