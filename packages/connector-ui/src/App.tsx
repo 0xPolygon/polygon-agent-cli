@@ -94,7 +94,7 @@ const USE_CASES: { label: string; display: string; icon: ElementType }[] = [
   {
     label: 'Read Twitter/X profiles & tweets',
     display:
-      'Read Twitter/X profiles and tweets without API keys. Get follower counts, recent tweets, engagement metrics.',
+      'Use x402 micropayments to read a Twitter/X profile and recent tweets. Pay per call via polygon-agent x402-pay — no API key needed. Get follower counts, recent tweets, and engagement metrics.',
     icon: Twitter
   },
   {
@@ -118,7 +118,7 @@ const USE_CASES: { label: string; display: string; icon: ElementType }[] = [
   {
     label: 'Automate yield strategies',
     display:
-      'Deposit USDC into the highest-TVL lending vault on Polygon with TVL above $100M and report the APY and pool address. Then set up a daily cron job to automatically re-evaluate and deposit into the best vault each morning.',
+      'Deposit USDC into the highest-TVL lending vault on Polygon or Katana with TVL above $100M and report the APY and pool address. Then set up a daily cron job to automatically re-evaluate and deposit into the best vault each morning.',
     icon: TrendingUp
   }
 ];
