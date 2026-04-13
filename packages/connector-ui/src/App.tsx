@@ -8,7 +8,7 @@ import {
   AlertCircle,
   Plus,
   Twitter,
-  Sparkles,
+  BarChart2,
   Target,
   ArrowLeftRight,
   TrendingUp
@@ -98,15 +98,15 @@ const USE_CASES: { label: string; display: string; icon: ElementType }[] = [
     icon: Twitter
   },
   {
-    label: 'Generate an AI image',
-    display:
-      'Describe any scene or concept and generate a high-quality image using Google Gemini AI. Pay per generation via x402.',
-    icon: Sparkles
-  },
-  {
     label: 'Score a sales lead',
     display:
-      'Use x402 to score any company domain as a B2B sales lead. Get a 0–100 score and A–F grade from 7 signals: domain age, email setup (MX records), SSL health, DNS configuration, GitHub presence, and tech stack.',
+      'Score any company domain as a B2B sales lead. Get a 0–100 score and A–F grade from various signals.',
+    icon: BarChart2
+  },
+  {
+    label: 'Make a bet on polymarket',
+    display:
+      'Use x402 to make a bet on a Polymarket market. Get the latest market prices and outcomes.',
     icon: Target
   },
   {
