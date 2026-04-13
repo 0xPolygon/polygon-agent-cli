@@ -1276,9 +1276,10 @@ export const x402PayCommand: CommandModule = {
         // not JSON — fall through to standard x402
       }
 
-      // x402 Bazaar payment format: { payment_address, amount_usdc, supported_chains, usdc_contracts }
-      // or legacy: { payment_details: { recipient, amount, networks[] } }
-      if (probeBody?.payment_address || probeBody?.payment_details) {
+      // x402 Bazaar payment format — specific to x402-api.onrender.com.
+      // Not a general x402 standard; do not apply to other endpoints.
+      const isX402Bazaar = new URL(url).hostname === 'x402-api.onrender.com';
+      if (isX402Bazaar && (probeBody?.payment_address || probeBody?.payment_details)) {
         const pad = (hex: string, n = 64) => String(hex).replace(/^0x/, '').padStart(n, '0');
         let payChain: string;
         let payChainId: number;
