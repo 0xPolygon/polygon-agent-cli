@@ -94,6 +94,11 @@ export function FundingScreen({ walletAddress, chainId, onSkip }: FundingScreenP
             toAddress={walletAddress}
             buttonText="Add Funds to Agent"
             fundOptions={{ fiatAmount: '20', hideSwap: true }}
+            onramp={{
+              mesh: {
+                environment: 'production'
+              }
+            }}
             onDestinationConfirmation={({ txHash, chainId: confirmChainId, sessionId }) => {
               console.log('onDestinationConfirmation:', {
                 txHash,
