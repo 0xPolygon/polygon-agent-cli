@@ -61,7 +61,7 @@ async function resetLocalSessionStateForNewRid(rid: string): Promise<boolean> {
 const SKILL_URL = 'https://agentconnect.polygon.technology/SKILL.md';
 
 const AGENTS: {
-  id: 'claude' | 'codex' | 'gemini';
+  id: string;
   label: string;
   color: string;
   terminalPrefix: string;
@@ -87,6 +87,20 @@ const AGENTS: {
     color: '#4285F4',
     terminalPrefix: 'gemini',
     buildCommand: (display) => `gemini "Read ${SKILL_URL} and ${display}"`
+  },
+  {
+    id: 'openclaw',
+    label: 'Openclaw',
+    color: '#8B5CF6',
+    terminalPrefix: 'clawhub',
+    buildCommand: (display) => `npx clawhub@latest run "Read ${SKILL_URL} and ${display}"`
+  },
+  {
+    id: 'hermes',
+    label: 'Hermes',
+    color: '#EC4899',
+    terminalPrefix: 'hermes',
+    buildCommand: (display) => `hermes "Read ${SKILL_URL} and ${display}"`
   }
 ];
 
@@ -105,8 +119,7 @@ const USE_CASES: { label: string; display: string; icon: ElementType }[] = [
   },
   {
     label: 'Make a bet on polymarket',
-    display:
-      'Use x402 to make a bet on a Polymarket market. Get the latest market prices and outcomes.',
+    display: 'Make a bet on a Polymarket market. Get the latest market prices and outcomes.',
     icon: Target
   },
   {
@@ -140,7 +153,7 @@ function App() {
   const [showDashboard, setShowDashboard] = useState(false);
   const [feeTokens, setFeeTokens] = useState<any | null>(null);
   const [selectedUseCase, setSelectedUseCase] = useState(0);
-  const [selectedAgent, setSelectedAgent] = useState<'claude' | 'codex' | 'gemini'>('claude');
+  const [selectedAgent, setSelectedAgent] = useState<string>('claude');
   const [copied, setCopied] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [totalUsd, setTotalUsd] = useState<number | null>(null);
