@@ -82,13 +82,6 @@ const AGENTS: {
     buildCommand: (display) => `codex "Read ${SKILL_URL} and ${display}"`
   },
   {
-    id: 'gemini',
-    label: 'Gemini',
-    color: '#4285F4',
-    terminalPrefix: 'gemini',
-    buildCommand: (display) => `gemini "Read ${SKILL_URL} and ${display}"`
-  },
-  {
     id: 'openclaw',
     label: 'Openclaw',
     color: '#8B5CF6',
