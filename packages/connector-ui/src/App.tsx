@@ -8,10 +8,10 @@ import {
   AlertCircle,
   Plus,
   Twitter,
+  BarChart2,
   Target,
   ArrowLeftRight,
-  TrendingUp,
-  BarChart2
+  TrendingUp
 } from 'lucide-react';
 import { Hex, Signature } from 'ox';
 import { useEffect, useMemo, useState } from 'react';
@@ -61,7 +61,7 @@ async function resetLocalSessionStateForNewRid(rid: string): Promise<boolean> {
 const SKILL_URL = 'https://agentconnect.polygon.technology/SKILL.md';
 
 const AGENTS: {
-  id: string;
+  id: 'claude' | 'codex' | 'gemini';
   label: string;
   color: string;
   terminalPrefix: string;
@@ -87,20 +87,6 @@ const AGENTS: {
     color: '#4285F4',
     terminalPrefix: 'gemini',
     buildCommand: (display) => `gemini "Read ${SKILL_URL} and ${display}"`
-  },
-  {
-    id: 'openclaw',
-    label: 'Openclaw',
-    color: '#8B5CF6',
-    terminalPrefix: 'clawhub',
-    buildCommand: (display) => `npx clawhub@latest run "Read ${SKILL_URL} and ${display}"`
-  },
-  {
-    id: 'hermes',
-    label: 'Hermes',
-    color: '#EC4899',
-    terminalPrefix: 'hermes',
-    buildCommand: (display) => `hermes "Read ${SKILL_URL} and ${display}"`
   }
 ];
 
@@ -119,7 +105,8 @@ const USE_CASES: { label: string; display: string; icon: ElementType }[] = [
   },
   {
     label: 'Make a bet on polymarket',
-    display: 'Make a bet on a Polymarket market. Get the latest market prices and outcomes.',
+    display:
+      'Use x402 to make a bet on a Polymarket market. Get the latest market prices and outcomes.',
     icon: Target
   },
   {
@@ -153,7 +140,7 @@ function App() {
   const [showDashboard, setShowDashboard] = useState(false);
   const [feeTokens, setFeeTokens] = useState<any | null>(null);
   const [selectedUseCase, setSelectedUseCase] = useState(0);
-  const [selectedAgent, setSelectedAgent] = useState<string>('claude');
+  const [selectedAgent, setSelectedAgent] = useState<'claude' | 'codex' | 'gemini'>('claude');
   const [copied, setCopied] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [totalUsd, setTotalUsd] = useState<number | null>(null);
@@ -524,62 +511,63 @@ function App() {
   if (!walletAddress || (walletAddress && !sessionCode && !showFunding && !showDashboard)) {
     const isWaiting = connecting || (walletAddress && !sessionCode);
     return (
-      <div className="min-h-screen bg-[#eeeef5] flex flex-col items-center justify-center px-4">
-        {/* Fixed logo */}
+      <div className="min-h-screen bg-[#f5f6fb] flex flex-col items-center justify-center px-4">
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[99999] flex items-center gap-2.5">
           <img src="/polygon-logo-full.webp" alt="Polygon" className="h-8 w-auto" />
-          <span className="font-mono text-xs bg-[#0f0f1a] text-white px-2 py-0.5 rounded-md tracking-tight">
+          <span className="font-mono text-xs bg-[#141635] text-white px-2 py-0.5 rounded-md tracking-tight">
             &gt;_ agent
           </span>
         </div>
-        {/* Floating card */}
         <div
-          className="w-full max-w-sm bg-white rounded-2xl border border-[#e5e5f0] overflow-hidden"
-          style={{ boxShadow: '0 2px 4px rgba(0,0,0,0.04), 0 12px 40px rgba(130,71,229,0.09)' }}
+          className="w-full max-w-sm bg-white rounded-3xl border border-[#c8cfe1] overflow-hidden"
+          style={{ boxShadow: '0 2px 8px rgba(20,22,53,0.06), 0 16px 48px rgba(20,22,53,0.08)' }}
         >
-          {/* Purple accent line */}
-          <div className="h-0.5 bg-gradient-to-r from-[#8247e5] via-[#a855f7] to-[#8247e5]" />
+          {/* Header */}
+          <div className="px-8 pt-8 pb-6 flex flex-col items-center gap-3 text-center">
+            <h1 className="text-lg font-bold text-[#141635]">Connect your agent wallet</h1>
+            <p className="text-sm text-[#64708f] leading-relaxed">
+              Create a secure session to authorize onchain operations
+            </p>
+          </div>
 
-          <div className="px-8 py-10 flex flex-col items-center">
-            {/* CTA / status */}
+          <div className="px-8 pb-8 flex flex-col items-center gap-4">
             {isWaiting ? (
-              <div className="flex items-center gap-2.5 text-sm text-[#6b7280]">
+              <div className="flex items-center gap-2.5 text-sm text-[#64708f] py-2">
                 <div
-                  className="w-3.5 h-3.5 rounded-full border-2 border-[#8247e5] border-t-transparent flex-shrink-0"
+                  className="w-4 h-4 rounded-full border-2 border-[#7c3aed] border-t-transparent flex-shrink-0"
                   style={{ animation: 'spin 0.8s linear infinite' }}
                 />
-                Waiting for wallet authorization
+                Waiting for wallet authorization…
               </div>
             ) : (
-              <>
-                <p className="text-sm text-[#6b7280] mb-6 text-center leading-relaxed">
-                  Create a secure session for your agent
-                </p>
-                <button
-                  onClick={connect}
-                  className="btn-press w-full flex items-center justify-center gap-2 bg-[#8247e5] hover:bg-[#7139d4] text-white text-sm font-semibold px-5 py-3 rounded-xl transition-colors cursor-pointer border-0"
-                >
-                  <Wallet className="w-4 h-4" />
-                  Sign In
-                </button>
-              </>
+              <button
+                onClick={connect}
+                className="btn-press w-full flex items-center justify-center gap-2 bg-[#141635] hover:bg-[#1e2155] text-white text-sm font-bold px-5 py-3 rounded-xl transition-colors cursor-pointer border-0"
+              >
+                <Wallet className="w-4 h-4" />
+                Sign In
+              </button>
             )}
 
-            {/* Error */}
             {error && (
-              <div className="mt-4 w-full flex items-start gap-2 px-3.5 py-3 rounded-xl bg-red-50 border border-red-100">
+              <div className="w-full flex items-start gap-2.5 px-4 py-3 rounded-xl bg-red-50 border border-red-100">
                 <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
                 <div>
                   <p className="text-sm text-red-600">{error}</p>
                   <button
                     onClick={connect}
-                    className="mt-1.5 text-xs text-[#8247e5] hover:text-[#7139d4] font-medium cursor-pointer border-0 bg-transparent transition-colors"
+                    className="mt-1.5 text-xs text-[#7c3aed] hover:text-[#6d28d9] font-medium cursor-pointer border-0 bg-transparent transition-colors"
                   >
                     Try again →
                   </button>
                 </div>
               </div>
             )}
+          </div>
+
+          <div className="border-t border-[#c8cfe1] px-8 py-3 flex items-center justify-center gap-1.5">
+            <span className="text-xs text-[#64708f]">Powered by</span>
+            <img src="/polygon-logo-full.webp" alt="Polygon" className="h-3.5 w-auto opacity-40" />
           </div>
         </div>
       </div>
@@ -589,10 +577,10 @@ function App() {
   // ── Screen 2: Code confirm ──
   if (sessionCode && !showFunding && !showDashboard) {
     return (
-      <div className="min-h-screen bg-[#eeeef5] flex flex-col items-center justify-center px-4">
+      <div className="min-h-screen bg-[#f5f6fb] flex flex-col items-center justify-center px-4">
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[99999] flex items-center gap-2.5">
           <img src="/polygon-logo-full.webp" alt="Polygon" className="h-8 w-auto" />
-          <span className="font-mono text-xs bg-[#0f0f1a] text-white px-2 py-0.5 rounded-md tracking-tight">
+          <span className="font-mono text-xs bg-[#141635] text-white px-2 py-0.5 rounded-md tracking-tight">
             &gt;_ agent
           </span>
         </div>
@@ -613,11 +601,10 @@ function App() {
   // ── Screen 3: Funding ──
   if (showFunding && !showDashboard) {
     return (
-      <div className="min-h-screen bg-[#eeeef5] flex flex-col items-center justify-center px-4">
-        {/* Fixed so Trails modal overlay can never cover the logo */}
+      <div className="min-h-screen bg-[#f5f6fb] flex flex-col items-center justify-center px-4">
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[99999] flex items-center gap-2.5">
           <img src="/polygon-logo-full.webp" alt="Polygon" className="h-8 w-auto" />
-          <span className="font-mono text-xs bg-[#0f0f1a] text-white px-2 py-0.5 rounded-md tracking-tight">
+          <span className="font-mono text-xs bg-[#141635] text-white px-2 py-0.5 rounded-md tracking-tight">
             &gt;_ agent
           </span>
         </div>
@@ -640,12 +627,12 @@ function App() {
 
   // ── Screen 4: Dashboard ──
   return (
-    <div className="min-h-screen bg-[#eeeef5]">
+    <div className="min-h-screen bg-[#f5f6fb]">
       {/* Nav */}
-      <nav className="bg-white border-b border-[#e5e5f0] px-6 py-3.5 flex items-center justify-between">
+      <nav className="bg-white border-b border-[#c8cfe1] px-6 py-3.5 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <img src="/polygon-logo-full.webp" alt="Polygon" className="h-7 w-auto" />
-          <span className="font-mono text-xs bg-[#0f0f1a] text-white px-2 py-0.5 rounded-md tracking-tight">
+          <span className="font-mono text-xs bg-[#141635] text-white px-2 py-0.5 rounded-md tracking-tight">
             &gt;_ agent
           </span>
         </div>
@@ -653,10 +640,10 @@ function App() {
           href="https://wallet.polygon.technology"
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-2 bg-[#f3f4f8] hover:bg-[#eeeef5] rounded-full px-3 py-1.5 transition-colors no-underline"
+          className="flex items-center gap-2 bg-[#f5f6fb] hover:bg-[#eef0f8] border border-[#c8cfe1] rounded-full px-3 py-1.5 transition-colors no-underline"
         >
-          <div className="w-5 h-5 rounded-full bg-gradient-to-br from-[#8247e5] to-[#c084fc] flex-shrink-0" />
-          <span className="font-mono text-sm text-[#374151]">{shortAddr}</span>
+          <div className="w-5 h-5 rounded-full bg-gradient-to-br from-[#7c3aed] to-[#a78bfa] flex-shrink-0" />
+          <span className="font-mono text-sm text-[#141635]">{shortAddr}</span>
         </a>
       </nav>
 
@@ -664,16 +651,16 @@ function App() {
         {/* Balance row */}
         <div className="flex items-start justify-between mb-8">
           <div>
-            <div className="text-5xl font-bold text-[#0f0f1a] mb-2">
+            <div className="text-5xl font-bold text-[#141635] mb-2 leading-none">
               {totalUsd === null ? (
-                <span className="text-[#d1d5db]">$—</span>
+                <span className="text-[#c8cfe1]">$—</span>
               ) : (
                 `$${totalUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
               )}
             </div>
-            <div className="flex items-center gap-2 text-sm text-[#6b7280]">
-              <div className="w-3.5 h-3.5 rounded-full bg-[#8247e5]" />
-              <span className="font-mono text-xs">{walletAddress}</span>
+            <div className="flex items-center gap-2 mt-2">
+              <div className="w-2 h-2 rounded-full bg-[#7c3aed]" />
+              <span className="font-mono text-xs text-[#64708f]">{walletAddress}</span>
             </div>
           </div>
           <button
@@ -681,7 +668,7 @@ function App() {
               setShowFunding(true);
               setShowDashboard(false);
             }}
-            className="btn-press flex items-center gap-2 bg-[#8247e5] hover:bg-[#7139d4] text-white font-semibold px-5 py-2.5 rounded-full transition-colors cursor-pointer border-0"
+            className="btn-press flex items-center gap-2 bg-[#141635] hover:bg-[#1e2155] text-white font-bold px-5 py-2.5 rounded-xl transition-colors cursor-pointer border-0 text-sm"
           >
             <Plus className="w-4 h-4" />
             Add funds
@@ -690,7 +677,7 @@ function App() {
 
         {/* Section header */}
         <div className="flex items-center gap-3 mb-4">
-          <h2 className="text-base font-semibold text-[#0f0f1a]">Use your wallet with agents</h2>
+          <h2 className="text-base font-bold text-[#141635]">Use your wallet with agents</h2>
           <span className="flex items-center gap-1.5 text-xs text-[#16a34a] bg-[#f0fdf4] border border-[#bbf7d0] px-2.5 py-1 rounded-full font-medium">
             <span className="w-1.5 h-1.5 rounded-full bg-[#16a34a] inline-block" />
             polygon-agent connected
@@ -698,9 +685,9 @@ function App() {
         </div>
 
         {/* Use cases + terminal */}
-        <div className="grid grid-cols-2 gap-0 bg-white rounded-2xl border border-[#e5e5f0] overflow-hidden mb-4">
+        <div className="grid grid-cols-2 gap-0 bg-white rounded-3xl border border-[#c8cfe1] overflow-hidden mb-4">
           {/* Left: use cases */}
-          <div className="p-5 border-r border-[#e5e5f0]">
+          <div className="p-5 border-r border-[#c8cfe1]">
             <div className="space-y-1">
               {USE_CASES.map((uc, i) => {
                 const Icon = uc.icon;
@@ -710,11 +697,11 @@ function App() {
                     onClick={() => setSelectedUseCase(i)}
                     className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-left cursor-pointer transition-colors ${
                       i === selectedUseCase
-                        ? 'bg-[#f3f4f8] text-[#0f0f1a] font-medium'
-                        : 'text-[#374151] hover:bg-[#f9f9fc]'
+                        ? 'bg-[#f5f6fb] text-[#141635] font-bold'
+                        : 'text-[#64708f] hover:bg-[#f9f9fd] font-medium'
                     }`}
                   >
-                    <Icon className="w-3.5 h-3.5 flex-shrink-0 text-[#8247e5]" />
+                    <Icon className="w-3.5 h-3.5 flex-shrink-0 text-[#7c3aed]" />
                     {uc.label}
                   </button>
                 );
@@ -724,7 +711,7 @@ function App() {
               href="https://github.com/0xPolygon/polygon-agent-cli"
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-[#e5e5f0] text-sm text-[#374151] bg-transparent cursor-pointer hover:bg-[#f9f9fc] transition-colors no-underline"
+              className="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-[#c8cfe1] text-sm text-[#64708f] bg-transparent cursor-pointer hover:bg-[#f5f6fb] transition-all hover:border-[#929eba] no-underline font-medium"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
                 <path
@@ -741,7 +728,7 @@ function App() {
 
           {/* Right: terminal */}
           <div className="p-5 flex flex-col">
-            <pre className="text-xs leading-relaxed flex-1 text-[#374151] whitespace-pre-wrap font-mono">
+            <pre className="text-xs leading-relaxed flex-1 text-[#64708f] whitespace-pre-wrap font-mono">
               <span
                 className="font-semibold"
                 style={{ color: AGENTS.find((a) => a.id === selectedAgent)?.color }}
@@ -751,18 +738,18 @@ function App() {
               {' "'}
               {USE_CASES[selectedUseCase].display}"
             </pre>
-            <div className="mt-3 pt-3 border-t border-[#f0f0f5]">
+            <div className="mt-3 pt-3 border-t border-[#c8cfe1]">
               {/* Agent selector chips */}
               <div className="flex items-center gap-1.5 mb-3">
-                <span className="text-xs text-[#9ca3af] mr-0.5">Run with</span>
+                <span className="text-xs text-[#64708f] mr-0.5">Run with</span>
                 {AGENTS.map((agent) => (
                   <button
                     key={agent.id}
                     onClick={() => setSelectedAgent(agent.id)}
-                    className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-all cursor-pointer border ${
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold transition-all cursor-pointer border ${
                       selectedAgent === agent.id
                         ? 'text-white border-transparent'
-                        : 'bg-white text-[#6b7280] border-[#e5e5f0] hover:border-[#d1d5db]'
+                        : 'bg-white text-[#64708f] border-[#c8cfe1] hover:border-[#929eba]'
                     }`}
                     style={
                       selectedAgent === agent.id
@@ -791,7 +778,7 @@ function App() {
                       setTimeout(() => setCopied(false), 2000);
                     });
                 }}
-                className="w-full flex items-center justify-center gap-2 border border-[#e5e5f0] rounded-xl py-2.5 text-sm text-[#374151] hover:bg-[#f9f9fc] transition-colors cursor-pointer bg-white"
+                className="w-full flex items-center justify-center gap-2 border border-[#c8cfe1] rounded-xl py-2.5 text-sm text-[#141635] font-bold hover:bg-[#f5f6fb] hover:border-[#929eba] transition-all cursor-pointer bg-white"
               >
                 <Copy className="w-4 h-4" />
                 {copied ? 'Copied!' : 'Copy to your terminal'}
@@ -801,7 +788,7 @@ function App() {
         </div>
 
         {/* Learn more */}
-        <h3 className="text-base font-semibold text-[#0f0f1a] mb-3 mt-8">Learn more</h3>
+        <h3 className="text-base font-bold text-[#141635] mb-3 mt-8">Learn more</h3>
         <div className="grid grid-cols-3 gap-3 mb-6">
           {[
             {
@@ -820,16 +807,17 @@ function App() {
               href={card.href}
               target="_blank"
               rel="noopener noreferrer"
-              className="bg-white rounded-xl border border-[#e5e5f0] p-4 no-underline block hover:border-[#8247e5] transition-colors"
+              className="bg-white rounded-3xl border border-[#c8cfe1] p-6 no-underline block hover:border-[#929eba] transition-all group"
+              style={{ boxShadow: '0 1px 4px rgba(20,22,53,0.04)' }}
             >
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-semibold text-[#0f0f1a]">{card.title}</span>
+              <div className="flex items-start justify-between mb-3">
+                <span className="text-base font-bold text-[#141635]">{card.title}</span>
                 <svg
-                  width="14"
-                  height="14"
+                  width="16"
+                  height="16"
                   viewBox="0 0 24 24"
                   fill="none"
-                  className="text-[#9ca3af]"
+                  className="text-[#929eba] mt-0.5 flex-shrink-0"
                 >
                   <path
                     d="M7 17L17 7M17 7H7M17 7V17"
@@ -840,12 +828,14 @@ function App() {
                   />
                 </svg>
               </div>
-              <p className="text-xs text-[#9ca3af] leading-relaxed">{card.desc}</p>
+              <p className="text-sm text-[#64708f] leading-relaxed font-medium">{card.desc}</p>
             </a>
           ))}
         </div>
 
-        <div className="text-center py-4 text-xs text-[#9ca3af]">Powered by Polygon</div>
+        <div className="text-center py-4 text-xs text-[#929eba] font-medium">
+          Powered by Polygon
+        </div>
       </main>
     </div>
   );
