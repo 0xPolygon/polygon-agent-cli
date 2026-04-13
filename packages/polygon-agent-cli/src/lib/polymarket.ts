@@ -1,15 +1,13 @@
 // Polymarket integration library
 // Covers: Gamma API (market discovery), CLOB API (trading via @polymarket/clob-client), on-chain ops
 //
-// Architecture: Sequence smart wallet → Polymarket proxy wallet → CLOB
-// - Sequence smart wallet funds the Polymarket proxy wallet (USDC.e transfer)
-// - EOA calls proxy.execute([approve, split]) to run on-chain ops FROM the proxy wallet
-// - CLOB orders use maker=proxyWallet, signer=EOA, signatureType=POLY_PROXY
+// Architecture: Sequence smart wallet → CLOB directly (EIP-1271 / POLY_GNOSIS_SAFE)
+// - Sequence smart wallet holds USDC.e and outcome tokens directly
+// - Smart wallet signs CLOB orders via session key (EIP-1271 compatible)
+// - No separate EOA or proxy wallet required
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyWalletClient = any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyPublicClient = any;
 
 export interface Market {
   id: string;
@@ -25,13 +23,6 @@ export interface Market {
   endDate: string | null;
 }
 
-export interface ProxyTx {
-  typeCode?: number;
-  to: string;
-  value?: string | number | bigint;
-  data: string;
-}
-
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 export const GAMMA_URL = process.env.POLYMARKET_GAMMA_URL || 'https://gamma-api.polymarket.com';
@@ -45,60 +36,39 @@ export const CTF_EXCHANGE = '0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E'; // CLO
 export const NEG_RISK_CTF_EXCHANGE = '0xC5d563A36AE78145C45a50134d48A1215220f80a';
 export const NEG_RISK_ADAPTER = '0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296';
 
-// Polymarket proxy wallet factory (Polygon mainnet)
-export const PROXY_WALLET_FACTORY = '0xaB45c5A4B0c941a2F231C04C3f49182e1A254052';
+// ─── Sequence session signer ─────────────────────────────────────────────────
 
-// ─── Proxy wallet helpers ────────────────────────────────────────────────────
+// Build a viem WalletClient that signs with the Sequence explicit session key
+// but presents the smart wallet address as the account. The Sequence smart wallet's
+// isValidSignature() on-chain validates session key ECDSA signatures.
+export async function buildSequenceSignerForPolymarket(
+  walletName: string
+): Promise<{ walletClient: AnyWalletClient; smartWalletAddress: string }> {
+  const { loadWalletSession } = await import('./storage.ts');
+  const { jsonRevivers } = await import('@0xsequence/dapp-client');
+  const { privateKeyToAccount } = await import('viem/accounts');
+  const { createWalletClient, http } = await import('viem');
+  const { polygon } = await import('viem/chains');
 
-// Compute the Polymarket proxy wallet address for a given EOA address (CREATE2, deterministic)
-export async function getPolymarketProxyWalletAddress(eoaAddress: string): Promise<string> {
-  const { getProxyWalletAddress } = await import('@polymarket/sdk');
-  return getProxyWalletAddress(PROXY_WALLET_FACTORY, eoaAddress);
-}
+  const session = await loadWalletSession(walletName);
+  if (!session) throw new Error(`Wallet not found: ${walletName}`);
 
-// Proxy wallet execute ABI: execute(Transaction[]) — selector 0x34ee9791
-const PROXY_EXECUTE_ABI = [
-  {
-    name: 'execute',
-    type: 'function',
-    inputs: [
-      {
-        name: 'transactions',
-        type: 'tuple[]',
-        components: [
-          { name: 'typeCode', type: 'uint8' },
-          { name: 'to', type: 'address' },
-          { name: 'value', type: 'uint256' },
-          { name: 'data', type: 'bytes' }
-        ]
-      }
-    ],
-    outputs: [{ name: '', type: 'bytes[]' }]
-  }
-];
+  const explicitRaw = session.explicitSession;
+  if (!explicitRaw)
+    throw new Error('No explicit session found. Run: polygon-agent wallet start-session');
 
-// Execute a batch of transactions through the Polymarket proxy wallet (EOA is owner/caller)
-export async function executeViaProxyWallet(
-  walletClient: AnyWalletClient,
-  publicClient: AnyPublicClient,
-  proxyWalletAddress: string,
-  txs: ProxyTx[]
-): Promise<string> {
-  const { encodeFunctionData } = await import('viem');
-  const transactions = txs.map((t) => ({
-    typeCode: Number(t.typeCode ?? 1),
-    to: t.to,
-    value: BigInt(t.value || 0),
-    data: t.data
-  }));
-  const data = encodeFunctionData({
-    abi: PROXY_EXECUTE_ABI,
-    functionName: 'execute',
-    args: [transactions]
-  });
-  const hash = await walletClient.sendTransaction({ to: PROXY_WALLET_FACTORY, data, value: 0n });
-  await publicClient.waitForTransactionReceipt({ hash });
-  return hash;
+  const explicitSession = JSON.parse(explicitRaw, jsonRevivers);
+  if (!explicitSession?.pk) throw new Error('Session missing signing key. Re-link wallet.');
+
+  const smartWalletAddress = session.walletAddress as `0x${string}`;
+  const sessionAccount = privateKeyToAccount(explicitSession.pk as `0x${string}`);
+
+  // Override address to be the smart wallet — it is the CLOB order maker.
+  // The session key signs; the Sequence contract validates via isValidSignature().
+  const account = { ...sessionAccount, address: smartWalletAddress };
+  const walletClient = createWalletClient({ account, chain: polygon, transport: http() });
+
+  return { walletClient, smartWalletAddress };
 }
 
 // ─── Gamma API ──────────────────────────────────────────────────────────────
@@ -223,39 +193,57 @@ export async function getOrderBook(tokenId: string): Promise<any> {
 
 // ─── CLOB API — @polymarket/clob-client ─────────────────────────────────────
 
+// Build a CLOB client using the Sequence smart wallet as signer (POLY_GNOSIS_SAFE).
+// The smart wallet address is both the order maker and the funder address.
 async function getClobClient(
-  privateKey: string,
-  proxyWalletAddress?: string
+  walletClient: AnyWalletClient,
+  smartWalletAddress: string
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-): Promise<{ client: any; creds: any; address: string }> {
-  const { Wallet } = await import('ethers5');
+): Promise<{ client: any; creds: any }> {
   const { ClobClient } = await import('@polymarket/clob-client');
   const { SignatureType } = await import('@polymarket/order-utils');
-  const signer = new Wallet(privateKey);
   const chainId = 137;
-  const anonClient = new ClobClient(CLOB_URL, chainId, signer);
+
+  // Derive API credentials using the smart wallet signer.
+  // createOrDeriveApiKey returns undefined (does not throw) if CLOB rejects the request —
+  // typically because the wallet has not accepted Polymarket's Terms of Service.
+  const anonClient = new ClobClient(CLOB_URL, chainId, walletClient);
   const creds = await anonClient.createOrDeriveApiKey();
-  const signatureType = proxyWalletAddress ? SignatureType.POLY_PROXY : SignatureType.EOA;
+  if (!creds?.key) {
+    throw new Error(
+      `Polymarket CLOB auth failed for wallet ${smartWalletAddress}. ` +
+        'The smart wallet must accept Polymarket Terms of Service at polymarket.com before trading.'
+    );
+  }
+
   const client = new ClobClient(
     CLOB_URL,
     chainId,
-    signer,
+    walletClient,
     creds,
-    signatureType,
-    proxyWalletAddress
+    SignatureType.POLY_GNOSIS_SAFE,
+    smartWalletAddress // funderAddress — the smart wallet holds and funds orders
   );
-  return { client, creds, address: await signer.getAddress() };
+
+  return { client, creds };
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function getOpenOrders(privateKey: string): Promise<any> {
-  const { client } = await getClobClient(privateKey);
+export async function getOpenOrders(
+  walletClient: AnyWalletClient,
+  smartWalletAddress: string
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<any> {
+  const { client } = await getClobClient(walletClient, smartWalletAddress);
   return client.getOpenOrders();
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function cancelOrder(orderId: string, privateKey: string): Promise<any> {
-  const { client } = await getClobClient(privateKey);
+export async function cancelOrder(
+  orderId: string,
+  walletClient: AnyWalletClient,
+  smartWalletAddress: string
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<any> {
+  const { client } = await getClobClient(walletClient, smartWalletAddress);
   return client.cancelOrder({ orderID: orderId });
 }
 
@@ -267,19 +255,19 @@ export async function createAndPostOrder({
   size,
   price,
   orderType = 'GTC',
-  privateKey,
-  proxyWalletAddress
+  walletClient,
+  smartWalletAddress
 }: {
   tokenId: string;
   side: 'BUY' | 'SELL';
   size: number;
   price: number;
   orderType?: string;
-  privateKey: string;
-  proxyWalletAddress?: string;
+  walletClient: AnyWalletClient;
+  smartWalletAddress: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 }): Promise<any> {
-  const { client } = await getClobClient(privateKey, proxyWalletAddress);
+  const { client } = await getClobClient(walletClient, smartWalletAddress);
   const order = await client.createOrder({
     tokenID: tokenId,
     price,
@@ -295,18 +283,18 @@ export async function createAndPostMarketOrder({
   side,
   amount,
   orderType = 'FOK',
-  privateKey,
-  proxyWalletAddress
+  walletClient,
+  smartWalletAddress
 }: {
   tokenId: string;
   side: 'BUY' | 'SELL';
   amount: number;
   orderType?: string;
-  privateKey: string;
-  proxyWalletAddress?: string;
+  walletClient: AnyWalletClient;
+  smartWalletAddress: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 }): Promise<any> {
-  const { client } = await getClobClient(privateKey, proxyWalletAddress);
+  const { client } = await getClobClient(walletClient, smartWalletAddress);
   const order = await client.createMarketOrder({
     tokenID: tokenId,
     side,

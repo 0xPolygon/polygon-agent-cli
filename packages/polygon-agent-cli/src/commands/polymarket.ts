@@ -1,8 +1,9 @@
 // Polymarket CLI commands
-// Architecture: Sequence smart wallet → Polymarket proxy wallet → CLOB
-// - `approve`: sets on-chain approvals on proxy wallet (one-time)
-// - `clob-buy`: funds proxy wallet from smart wallet, then places CLOB BUY order
-// - CLOB orders: maker=proxyWallet, signer=EOA, signatureType=POLY_PROXY
+// Architecture: Sequence smart wallet → CLOB directly (EIP-1271 / POLY_GNOSIS_SAFE)
+// - Smart wallet is the CLOB order maker — no separate EOA or proxy wallet required
+// - `approve`: sets CTF/USDC.e approvals on the smart wallet directly
+// - `clob-buy`: places CLOB BUY order signed by the smart wallet session key
+// - CLOB orders: maker=smartWallet, signer=sessionKey, signatureType=POLY_GNOSIS_SAFE
 
 import type { CommandModule } from 'yargs';
 
@@ -14,16 +15,15 @@ import {
   cancelOrder,
   createAndPostOrder,
   createAndPostMarketOrder,
-  getPolymarketProxyWalletAddress,
-  executeViaProxyWallet,
   getPositions,
+  buildSequenceSignerForPolymarket,
   USDC_E,
   CTF,
   CTF_EXCHANGE,
   NEG_RISK_CTF_EXCHANGE,
   NEG_RISK_ADAPTER
 } from '../lib/polymarket.ts';
-import { loadWalletSession, savePolymarketKey, loadPolymarketKey } from '../lib/storage.ts';
+import { loadWalletSession } from '../lib/storage.ts';
 
 // ─── handlers ────────────────────────────────────────────────────────────────
 
@@ -55,104 +55,34 @@ async function handleMarket(argv: { conditionId: string }): Promise<void> {
   }
 }
 
-async function handleSetKey(argv: { privateKey: string }): Promise<void> {
-  const pk = argv.privateKey.startsWith('0x') ? argv.privateKey : `0x${argv.privateKey}`;
-
-  if (!/^0x[0-9a-fA-F]{64}$/.test(pk)) {
-    console.error(
-      JSON.stringify(
-        { ok: false, error: 'Invalid private key — must be 32 bytes (64 hex chars)' },
-        null,
-        2
-      )
-    );
-    process.exit(1);
-  }
-
-  try {
-    const { privateKeyToAccount } = await import('viem/accounts');
-    const account = privateKeyToAccount(pk as `0x${string}`);
-    const proxyWalletAddress = await getPolymarketProxyWalletAddress(account.address);
-
-    await savePolymarketKey(pk);
-
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
-          eoaAddress: account.address,
-          proxyWalletAddress,
-          note: 'Polymarket signing key saved (encrypted). All polymarket commands will use this EOA. Remember to accept Polymarket ToS at polymarket.com with this address.'
-        },
-        null,
-        2
-      )
-    );
-  } catch (err) {
-    console.error(JSON.stringify({ ok: false, error: (err as Error).message }));
-    process.exit(1);
-  }
-}
-
-async function handleProxyWallet(): Promise<void> {
-  try {
-    const privateKey = await loadPolymarketKey();
-    const { privateKeyToAccount } = await import('viem/accounts');
-    const account = privateKeyToAccount(privateKey as `0x${string}`);
-    const proxyWalletAddress = await getPolymarketProxyWalletAddress(account.address);
-
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
-          eoaAddress: account.address,
-          proxyWalletAddress,
-          note: 'Fund proxyWalletAddress with USDC.e on Polygon to enable CLOB trading.'
-        },
-        null,
-        2
-      )
-    );
-  } catch (err) {
-    console.error(JSON.stringify({ ok: false, error: (err as Error).message }));
-    process.exit(1);
-  }
-}
-
-async function handleApprove(argv: { negRisk?: boolean; broadcast?: boolean }): Promise<void> {
+async function handleApprove(argv: {
+  negRisk?: boolean;
+  broadcast?: boolean;
+  wallet?: string;
+}): Promise<void> {
   const negRisk = argv.negRisk ?? false;
   const broadcast = argv.broadcast ?? false;
+  const walletName = argv.wallet ?? 'main';
 
   try {
-    const privateKey = await loadPolymarketKey();
-    const { privateKeyToAccount } = await import('viem/accounts');
-    const account = privateKeyToAccount(privateKey as `0x${string}`);
-    const proxyWalletAddress = await getPolymarketProxyWalletAddress(account.address);
+    const session = await loadWalletSession(walletName);
+    if (!session) throw new Error(`Wallet not found: ${walletName}`);
+    const smartWalletAddress = session.walletAddress;
 
     const MAX_UINT256 = '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
     const pad = (val: string, n = 64) => val.replace(/^0x/, '').padStart(n, '0');
-    const erc20Approve = (token: string, spender: string, amount: string) => ({
-      typeCode: 1,
-      to: token,
-      value: '0',
-      data: '0x095ea7b3' + pad(spender) + pad(amount)
-    });
-    const erc1155ApproveAll = (token: string, operator: string) => ({
-      typeCode: 1,
-      to: token,
-      value: '0',
-      data: '0xa22cb465' + pad(operator) + pad('0x01')
-    });
+    const erc20ApproveData = (spender: string) => '0x095ea7b3' + pad(spender) + pad(MAX_UINT256);
+    const erc1155ApproveAllData = (operator: string) => '0xa22cb465' + pad(operator) + pad('0x01');
 
     let txBatch;
     let approvalLabels: string[];
     if (negRisk) {
       txBatch = [
-        erc20Approve(USDC_E, NEG_RISK_ADAPTER, MAX_UINT256),
-        erc20Approve(USDC_E, NEG_RISK_CTF_EXCHANGE, MAX_UINT256),
-        erc1155ApproveAll(CTF, CTF_EXCHANGE),
-        erc1155ApproveAll(CTF, NEG_RISK_CTF_EXCHANGE),
-        erc1155ApproveAll(CTF, NEG_RISK_ADAPTER)
+        { to: USDC_E, value: 0n, data: erc20ApproveData(NEG_RISK_ADAPTER) },
+        { to: USDC_E, value: 0n, data: erc20ApproveData(NEG_RISK_CTF_EXCHANGE) },
+        { to: CTF, value: 0n, data: erc1155ApproveAllData(CTF_EXCHANGE) },
+        { to: CTF, value: 0n, data: erc1155ApproveAllData(NEG_RISK_CTF_EXCHANGE) },
+        { to: CTF, value: 0n, data: erc1155ApproveAllData(NEG_RISK_ADAPTER) }
       ];
       approvalLabels = [
         'USDC.e → NEG_RISK_ADAPTER',
@@ -163,8 +93,8 @@ async function handleApprove(argv: { negRisk?: boolean; broadcast?: boolean }): 
       ];
     } else {
       txBatch = [
-        erc20Approve(USDC_E, CTF_EXCHANGE, MAX_UINT256),
-        erc1155ApproveAll(CTF, CTF_EXCHANGE)
+        { to: USDC_E, value: 0n, data: erc20ApproveData(CTF_EXCHANGE) },
+        { to: CTF, value: 0n, data: erc1155ApproveAllData(CTF_EXCHANGE) }
       ];
       approvalLabels = ['USDC.e → CTF_EXCHANGE', 'CTF → CTF_EXCHANGE'];
     }
@@ -175,11 +105,10 @@ async function handleApprove(argv: { negRisk?: boolean; broadcast?: boolean }): 
           {
             ok: true,
             dryRun: true,
-            proxyWalletAddress,
-            signerAddress: account.address,
+            smartWalletAddress,
             negRisk,
             approvals: approvalLabels,
-            note: 'Re-run with --broadcast to execute. EOA must have POL for gas.'
+            note: 'Re-run with --broadcast to execute. Smart wallet must hold USDC.e for gas fees.'
           },
           null,
           2
@@ -188,31 +117,28 @@ async function handleApprove(argv: { negRisk?: boolean; broadcast?: boolean }): 
       return;
     }
 
-    const { createWalletClient, createPublicClient, http } = await import('viem');
-    const { polygon } = await import('viem/chains');
-    const walletClient = createWalletClient({ account, chain: polygon, transport: http() });
-    const publicClient = createPublicClient({ chain: polygon, transport: http() });
-
     process.stderr.write(
-      `[polymarket] Setting ${txBatch.length} approvals on proxy wallet ${proxyWalletAddress}...\n`
+      `[polymarket] Setting ${txBatch.length} approvals on smart wallet ${smartWalletAddress}...\n`
     );
-    const approveTxHash = await executeViaProxyWallet(
-      walletClient,
-      publicClient,
-      proxyWalletAddress,
-      txBatch
-    );
-    process.stderr.write(`[polymarket] Approvals set: ${approveTxHash}\n`);
+
+    const result = await runDappClientTx({
+      walletName,
+      chainId: 137,
+      transactions: txBatch,
+      broadcast: true,
+      preferNativeFee: false
+    });
+
+    process.stderr.write(`[polymarket] Approvals set: ${result.txHash}\n`);
 
     console.log(
       JSON.stringify(
         {
           ok: true,
-          proxyWalletAddress,
-          signerAddress: account.address,
+          smartWalletAddress,
           negRisk,
-          approveTxHash,
-          note: 'Proxy wallet approvals set. Ready for clob-buy and sell.'
+          approveTxHash: result.txHash,
+          note: 'Smart wallet approvals set. Ready for clob-buy and sell.'
         },
         null,
         2
@@ -237,7 +163,6 @@ async function handleClobBuy(argv: {
   wallet?: string;
   price?: number;
   fak?: boolean;
-  skipFund?: boolean;
   broadcast?: boolean;
 }): Promise<void> {
   const conditionId = argv.conditionId;
@@ -246,7 +171,6 @@ async function handleClobBuy(argv: {
   const walletName = argv.wallet ?? 'main';
   const priceArg = argv.price;
   const useFak = argv.fak ?? false;
-  const skipFund = argv.skipFund ?? false;
   const broadcast = argv.broadcast ?? false;
 
   if (!['YES', 'NO'].includes(outcomeArg)) {
@@ -264,13 +188,10 @@ async function handleClobBuy(argv: {
     const orderType = priceArg ? 'GTC' : useFak ? 'FAK' : 'FOK';
 
     if (!broadcast) {
-      let proxyWalletAddress: string | null = null;
+      let smartWalletAddress: string | null = null;
       try {
-        const { privateKeyToAccount } = await import('viem/accounts');
-        const pk = await loadPolymarketKey();
-        proxyWalletAddress = await getPolymarketProxyWalletAddress(
-          privateKeyToAccount(pk as `0x${string}`).address
-        );
+        const session = await loadWalletSession(walletName);
+        smartWalletAddress = session?.walletAddress ?? null;
       } catch {
         /* ignore */
       }
@@ -288,14 +209,12 @@ async function handleClobBuy(argv: {
             amountUsd,
             orderType,
             price: priceArg ?? 'market',
-            proxyWalletAddress,
-            flow: skipFund
-              ? ['Place CLOB BUY order (using existing proxy wallet USDC.e balance)']
-              : [
-                  `Smart wallet (${walletName}) → fund proxy wallet with ${amountUsd} USDC.e`,
-                  'Place CLOB BUY order (maker=proxyWallet, signatureType=POLY_PROXY)'
-                ],
-            note: 'Requires proxy wallet approvals — run `polymarket approve --broadcast` once first. Re-run with --broadcast to execute.'
+            smartWalletAddress,
+            flow: [
+              'Place CLOB BUY order (maker=smartWallet, signatureType=POLY_GNOSIS_SAFE)',
+              'USDC.e debited directly from smart wallet — no fund transfer needed'
+            ],
+            note: 'Requires smart wallet approvals — run `polymarket approve --broadcast` once first. Re-run with --broadcast to execute.'
           },
           null,
           2
@@ -304,40 +223,11 @@ async function handleClobBuy(argv: {
       return;
     }
 
-    const [session, privateKey] = await Promise.all([
-      loadWalletSession(walletName),
-      loadPolymarketKey()
-    ]);
-    if (!session) throw new Error(`Wallet not found: ${walletName}`);
+    const { walletClient, smartWalletAddress } = await buildSequenceSignerForPolymarket(walletName);
 
-    const { privateKeyToAccount } = await import('viem/accounts');
-    const account = privateKeyToAccount(privateKey as `0x${string}`);
-    const proxyWalletAddress = await getPolymarketProxyWalletAddress(account.address);
     process.stderr.write(
-      `[polymarket] CLOB BUY ${amountUsd} USDC → ${outcomeArg} via proxy wallet ${proxyWalletAddress}\n`
+      `[polymarket] CLOB BUY ${amountUsd} USDC → ${outcomeArg} via smart wallet ${smartWalletAddress}\n`
     );
-
-    let fundTxHash: string | null = null;
-    if (skipFund) {
-      process.stderr.write(`[polymarket] --skip-fund: using existing proxy wallet balance\n`);
-    } else {
-      process.stderr.write(
-        `[polymarket] Funding proxy wallet ${proxyWalletAddress} with ${amountUsd} USDC.e...\n`
-      );
-      const amountUnits = BigInt(Math.round(amountUsd * 1e6));
-      const pad = (hex: string, n = 64) => String(hex).replace(/^0x/, '').padStart(n, '0');
-      const transferData =
-        '0xa9059cbb' + pad(proxyWalletAddress) + pad('0x' + amountUnits.toString(16));
-      const fundResult = await runDappClientTx({
-        walletName,
-        chainId: 137,
-        transactions: [{ to: USDC_E, value: 0n, data: transferData }],
-        broadcast: true,
-        preferNativeFee: false
-      });
-      fundTxHash = fundResult.txHash ?? null;
-      process.stderr.write(`[polymarket] Funded: ${fundTxHash}\n`);
-    }
 
     let orderResult;
     if (priceArg) {
@@ -348,8 +238,8 @@ async function handleClobBuy(argv: {
         size: estimatedShares,
         price: priceArg,
         orderType: 'GTC',
-        privateKey,
-        proxyWalletAddress
+        walletClient,
+        smartWalletAddress
       });
     } else {
       orderResult = await createAndPostMarketOrder({
@@ -357,8 +247,8 @@ async function handleClobBuy(argv: {
         side: 'BUY',
         amount: amountUsd,
         orderType,
-        privateKey,
-        proxyWalletAddress
+        walletClient,
+        smartWalletAddress
       });
     }
 
@@ -371,9 +261,7 @@ async function handleClobBuy(argv: {
           outcome: outcomeArg,
           amountUsd,
           currentPrice,
-          proxyWalletAddress,
-          signerAddress: account.address,
-          fundTxHash,
+          smartWalletAddress,
           orderId: orderResult?.orderId || orderResult?.orderID || orderResult?.id || null,
           orderType,
           orderStatus: orderResult?.status || null
@@ -398,6 +286,7 @@ async function handleSell(argv: {
   conditionId: string;
   outcome: string;
   shares: number;
+  wallet?: string;
   price?: number;
   fak?: boolean;
   broadcast?: boolean;
@@ -405,6 +294,7 @@ async function handleSell(argv: {
   const conditionId = argv.conditionId;
   const outcomeArg = argv.outcome.toUpperCase();
   const shares = argv.shares;
+  const walletName = argv.wallet ?? 'main';
   const priceArg = argv.price;
   const useFak = argv.fak ?? false;
   const broadcast = argv.broadcast ?? false;
@@ -424,13 +314,10 @@ async function handleSell(argv: {
     const estimatedUsd = shares * (currentPrice || 0);
 
     if (!broadcast) {
-      let proxyWalletAddress: string | null = null;
+      let smartWalletAddress: string | null = null;
       try {
-        const { privateKeyToAccount } = await import('viem/accounts');
-        const pk = await loadPolymarketKey();
-        proxyWalletAddress = await getPolymarketProxyWalletAddress(
-          privateKeyToAccount(pk as `0x${string}`).address
-        );
+        const session = await loadWalletSession(walletName);
+        smartWalletAddress = session?.walletAddress ?? null;
       } catch {
         /* ignore */
       }
@@ -449,8 +336,8 @@ async function handleSell(argv: {
             estimatedUsd: Math.round(estimatedUsd * 100) / 100,
             orderType: priceArg ? 'GTC' : useFak ? 'FAK' : 'FOK',
             price: priceArg ?? 'market',
-            proxyWalletAddress,
-            note: 'Direct CLOB SELL of existing position. Tokens must be in proxy wallet. Re-run with --broadcast.'
+            smartWalletAddress,
+            note: 'Tokens must be in the smart wallet. Re-run with --broadcast to execute.'
           },
           null,
           2
@@ -459,12 +346,10 @@ async function handleSell(argv: {
       return;
     }
 
-    const privateKey = await loadPolymarketKey();
-    const { privateKeyToAccount } = await import('viem/accounts');
-    const account = privateKeyToAccount(privateKey as `0x${string}`);
-    const proxyWalletAddress = await getPolymarketProxyWalletAddress(account.address);
+    const { walletClient, smartWalletAddress } = await buildSequenceSignerForPolymarket(walletName);
+
     process.stderr.write(
-      `[polymarket] CLOB SELL ${shares} ${outcomeArg} tokens via proxy wallet ${proxyWalletAddress}\n`
+      `[polymarket] CLOB SELL ${shares} ${outcomeArg} tokens via smart wallet ${smartWalletAddress}\n`
     );
 
     let orderResult;
@@ -475,8 +360,8 @@ async function handleSell(argv: {
         size: shares,
         price: priceArg,
         orderType: 'GTC',
-        privateKey,
-        proxyWalletAddress
+        walletClient,
+        smartWalletAddress
       });
     } else {
       const orderType = useFak ? 'FAK' : 'FOK';
@@ -485,8 +370,8 @@ async function handleSell(argv: {
         side: 'SELL',
         amount: shares,
         orderType,
-        privateKey,
-        proxyWalletAddress
+        walletClient,
+        smartWalletAddress
       });
     }
 
@@ -500,8 +385,7 @@ async function handleSell(argv: {
           shares,
           currentPrice,
           estimatedUsd: Math.round(estimatedUsd * 100) / 100,
-          proxyWalletAddress,
-          signerAddress: account.address,
+          smartWalletAddress,
           orderId: orderResult?.orderId || orderResult?.orderID || orderResult?.id || null,
           orderStatus: orderResult?.status || null
         },
@@ -521,19 +405,19 @@ async function handleSell(argv: {
   }
 }
 
-async function handlePositions(): Promise<void> {
+async function handlePositions(argv: { wallet?: string }): Promise<void> {
+  const walletName = argv.wallet ?? 'main';
   try {
-    const privateKey = await loadPolymarketKey();
-    const { privateKeyToAccount } = await import('viem/accounts');
-    const account = privateKeyToAccount(privateKey as `0x${string}`);
-    const proxyWalletAddress = await getPolymarketProxyWalletAddress(account.address);
+    const session = await loadWalletSession(walletName);
+    if (!session) throw new Error(`Wallet not found: ${walletName}`);
+    const smartWalletAddress = session.walletAddress;
 
-    const positions = await getPositions(proxyWalletAddress);
+    const positions = await getPositions(smartWalletAddress);
     console.log(
       JSON.stringify(
         {
           ok: true,
-          proxyWalletAddress,
+          smartWalletAddress,
           count: Array.isArray(positions) ? positions.length : 0,
           positions
         },
@@ -547,10 +431,11 @@ async function handlePositions(): Promise<void> {
   }
 }
 
-async function handleOrders(): Promise<void> {
+async function handleOrders(argv: { wallet?: string }): Promise<void> {
+  const walletName = argv.wallet ?? 'main';
   try {
-    const privateKey = await loadPolymarketKey();
-    const orders = await getOpenOrders(privateKey);
+    const { walletClient, smartWalletAddress } = await buildSequenceSignerForPolymarket(walletName);
+    const orders = await getOpenOrders(walletClient, smartWalletAddress);
     console.log(
       JSON.stringify(
         {
@@ -568,10 +453,11 @@ async function handleOrders(): Promise<void> {
   }
 }
 
-async function handleCancel(argv: { orderId: string }): Promise<void> {
+async function handleCancel(argv: { orderId: string; wallet?: string }): Promise<void> {
+  const walletName = argv.wallet ?? 'main';
   try {
-    const privateKey = await loadPolymarketKey();
-    const result = await cancelOrder(argv.orderId, privateKey);
+    const { walletClient, smartWalletAddress } = await buildSequenceSignerForPolymarket(walletName);
+    const result = await cancelOrder(argv.orderId, walletClient, smartWalletAddress);
     console.log(JSON.stringify({ ok: true, orderId: argv.orderId, result }));
   } catch (err) {
     console.error(JSON.stringify({ ok: false, error: (err as Error).message }));
@@ -610,32 +496,19 @@ export const polymarketCommand: CommandModule = {
         handler: (argv) => handleMarket(argv as any)
       })
       .command({
-        command: 'set-key <privateKey>',
-        describe: 'Import EOA private key for Polymarket signing (stored encrypted)',
-        builder: (y) =>
-          y.positional('privateKey', {
-            type: 'string',
-            demandOption: true,
-            describe: 'EOA private key (hex)'
-          }),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        handler: (argv) => handleSetKey(argv as any)
-      })
-      .command({
-        command: 'proxy-wallet',
-        describe: 'Show Polymarket proxy wallet address for the active EOA',
-        builder: (y) => y,
-        handler: () => handleProxyWallet()
-      })
-      .command({
         command: 'approve',
-        describe: 'Set proxy wallet approvals (run once before clob-buy)',
+        describe: 'Set smart wallet approvals for Polymarket (run once before clob-buy)',
         builder: (y) =>
           y
             .option('neg-risk', {
               type: 'boolean',
               default: false,
-              describe: 'Set neg-risk approvals'
+              describe: 'Set neg-risk market approvals'
+            })
+            .option('wallet', {
+              type: 'string',
+              default: 'main',
+              describe: 'Wallet name'
             })
             .option('broadcast', {
               type: 'boolean',
@@ -647,7 +520,7 @@ export const polymarketCommand: CommandModule = {
       })
       .command({
         command: 'clob-buy <conditionId> <outcome> <amount>',
-        describe: 'Buy YES/NO tokens via CLOB (funds proxy wallet first)',
+        describe: 'Buy YES/NO tokens via CLOB using smart wallet',
         builder: (y) =>
           y
             .positional('conditionId', { type: 'string', demandOption: true })
@@ -656,18 +529,13 @@ export const polymarketCommand: CommandModule = {
             .option('wallet', {
               type: 'string',
               default: 'main',
-              describe: 'Smart wallet to fund from'
+              describe: 'Wallet name'
             })
             .option('price', {
               type: 'number',
               describe: 'Limit price 0-1 (GTC); omit for market order'
             })
             .option('fak', { type: 'boolean', default: false, describe: 'Use FAK instead of FOK' })
-            .option('skip-fund', {
-              type: 'boolean',
-              default: false,
-              describe: 'Skip wallet→proxy funding'
-            })
             .option('broadcast', {
               type: 'boolean',
               default: false,
@@ -688,6 +556,11 @@ export const polymarketCommand: CommandModule = {
               demandOption: true,
               describe: 'Number of tokens to sell'
             })
+            .option('wallet', {
+              type: 'string',
+              default: 'main',
+              describe: 'Wallet name'
+            })
             .option('price', {
               type: 'number',
               describe: 'Limit price 0-1 (GTC); omit for market order'
@@ -703,25 +576,31 @@ export const polymarketCommand: CommandModule = {
       })
       .command({
         command: 'positions',
-        describe: 'List open positions for the Polymarket proxy wallet',
-        builder: (y) => y,
-        handler: () => handlePositions()
+        describe: 'List open positions for the smart wallet',
+        builder: (y) =>
+          y.option('wallet', { type: 'string', default: 'main', describe: 'Wallet name' }),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        handler: (argv) => handlePositions(argv as any)
       })
       .command({
         command: 'orders',
-        describe: 'List open CLOB orders for the active EOA',
-        builder: (y) => y,
-        handler: () => handleOrders()
+        describe: 'List open CLOB orders for the smart wallet',
+        builder: (y) =>
+          y.option('wallet', { type: 'string', default: 'main', describe: 'Wallet name' }),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        handler: (argv) => handleOrders(argv as any)
       })
       .command({
         command: 'cancel <orderId>',
         describe: 'Cancel an open CLOB order',
         builder: (y) =>
-          y.positional('orderId', {
-            type: 'string',
-            demandOption: true,
-            describe: 'Order ID to cancel'
-          }),
+          y
+            .positional('orderId', {
+              type: 'string',
+              demandOption: true,
+              describe: 'Order ID to cancel'
+            })
+            .option('wallet', { type: 'string', default: 'main', describe: 'Wallet name' }),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         handler: (argv) => handleCancel(argv as any)
       })
