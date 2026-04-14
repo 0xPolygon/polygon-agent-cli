@@ -1,20 +1,28 @@
 name: Publish to npm
 
-# Triggered by each version tag created by release.yml via the GitHub API.
-# Decoupled from versioning so that a failed publish can be retried by
-# re-running this workflow in the GitHub Actions UI — no risk of
-# double-versioning.
+# Triggered when a version tag is created — by git push or the GitHub API.
 #
-# lerna publish from-package is idempotent: it checks which versions are
-# already on the npm registry and only publishes what is missing. Running
-# it multiple times for the same tag is safe.
+# push: tags: only fires for git push operations. Tags created via the REST
+# API (POST /git/refs) use the create: event instead. create: covers both
+# cases, so it replaces push: tags: here.
 #
-# Private packages (agent-connector-ui, agent-shared) are skipped
-# automatically by lerna — only @polygonlabs/agent-cli is published.
+# The job condition filters to @polygonlabs/** tags; branch creates are skipped.
+# Note: GitHub skips create events when >3 refs are created at once, but each
+# tag is created in a separate API call so each fires its own event.
+#
+# lerna publish from-package is idempotent — it only publishes versions not
+# yet on the registry. Private packages (agent-connector-ui, agent-shared)
+# are skipped automatically by lerna.
 on:
-  push:
-    tags:
-      - '@polygonlabs/**'
+  create:
+  workflow_dispatch:
+    inputs:
+      dist_tag:
+        description: 'npm dist-tag'
+        required: true
+        default: 'latest'
+        type: choice
+        options: [latest, beta, dev]
 
 permissions:
   contents: read
@@ -22,6 +30,9 @@ permissions:
 
 jobs:
   publish:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/@polygonlabs/'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -37,18 +48,22 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Determine dist-tag from triggering tag
+      - name: Determine dist-tag
         id: dist-tag
         run: |
-          # GITHUB_REF_NAME is the tag name, e.g. "@polygonlabs/agent-cli@0.4.0"
-          # Extract the version portion (everything after the last @)
-          VERSION="${GITHUB_REF_NAME##*@}"
-          # Pull the prerelease identifier out of the version string, if present
-          # e.g. "0.4.0-beta.1" → "beta", "0.4.0" → "latest"
-          if [[ "$VERSION" =~ -([a-zA-Z]+)\. ]]; then
-            echo "value=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "value=${{ github.event.inputs.dist_tag }}" >> "$GITHUB_OUTPUT"
           else
-            echo "value=latest" >> "$GITHUB_OUTPUT"
+            # GITHUB_REF_NAME is the tag name, e.g. "@polygonlabs/agent-cli@0.7.0"
+            # Extract the version portion (everything after the last @)
+            VERSION="${GITHUB_REF_NAME##*@}"
+            # Pull the prerelease identifier out of the version string, if present
+            # e.g. "0.7.0-beta.1" → "beta", "0.7.0" → "latest"
+            if [[ "$VERSION" =~ -([a-zA-Z]+)\. ]]; then
+              echo "value=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+            else
+              echo "value=latest" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       - name: Publish to npm

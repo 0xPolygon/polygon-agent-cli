@@ -148,7 +148,7 @@ if [[ "$HEAD_AFTER" == "$HEAD_BEFORE" ]]; then
     fi
   done
 
-  echo "==> Done. Tag push events will trigger npm-publish.yml."
+  echo "==> Done. npm-publish.yml triggered by create: event for each tag."
   exit 0
 fi
 
@@ -222,7 +222,7 @@ if [[ "$DRY_RUN" == "true" ]]; then
     echo "  gh release create ${TAG} --generate-notes --verify-tag"
     echo ""
   done
-  echo "  (npm publish handled by tag-triggered npm-publish.yml — not part of this script)"
+  echo "  (npm-publish.yml triggered by create: event for each tag above)"
   echo ""
   echo "==> Verifying tree SHA is consistent"
   RECOMPUTED=$(git rev-parse 'HEAD^{tree}')
@@ -344,4 +344,4 @@ for TAG in $LERNA_TAGS; do
   fi
 done
 
-echo "==> Done. Tag push events will trigger npm-publish.yml for each version tag."
+echo "==> Done. npm-publish.yml will be triggered by the create: event for each tag."
