@@ -97,13 +97,12 @@ HEAD_AFTER=$(git rev-parse HEAD)
 # Recovery: lerna produced no new commit
 #
 # Two sub-cases:
-#   (a) All version tags already exist on GitHub — everything committed and
-#       tagged; only npm publish may be missing. Jump straight to Stage 6.
-#   (b) Branch was advanced in a previous run but tags were never created —
-#       package.json already shows the new version so lerna skips the bump,
-#       but the tags are absent. This state cannot be auto-recovered: we
-#       surface a clear error rather than silently create wrong tags or
-#       double-bump.
+#   (a) All version tags already exist — everything committed and tagged.
+#       Exit cleanly; npm-publish.yml handles publishing.
+#   (b) Branch was advanced in a previous run (signed commit exists) but tag
+#       creation didn't complete. lerna skips the bump because package.json
+#       already shows the new version. Use the remote branch HEAD as the
+#       signed SHA and create the missing tags.
 # ---------------------------------------------------------------------------
 if [[ "$HEAD_AFTER" == "$HEAD_BEFORE" ]]; then
   echo "==> lerna found no packages to version — checking recovery state"
@@ -118,23 +117,38 @@ if [[ "$HEAD_AFTER" == "$HEAD_BEFORE" ]]; then
     fi
   done
 
-  if [[ ${#MISSING_TAGS[@]} -gt 0 ]]; then
-    echo ""
-    echo "ERROR: lerna made no version commit, but these tags are absent from GitHub:"
-    for TAG in "${MISSING_TAGS[@]}"; do
-      echo "  - $TAG"
-    done
-    echo ""
-    echo "The branch is likely in a partially-committed state (branch ref was"
-    echo "advanced in a previous run but tag creation did not complete)."
-    echo "Create the missing tags manually pointing to the current branch HEAD,"
-    echo "or reset the branch to before the version commit and re-run from scratch."
-    exit 1
+  if [[ ${#MISSING_TAGS[@]} -eq 0 ]]; then
+    echo "==> All version tags already exist — nothing to do."
+    echo "    Re-trigger npm-publish.yml in the GitHub Actions UI if publish failed."
+    exit 0
   fi
 
-  echo "==> All version tags already exist — nothing to do."
-  echo "    The tag-triggered npm-publish.yml workflow handles publishing."
-  echo "    Re-trigger that workflow in the GitHub Actions UI if npm publish failed."
+  # The signed version commit is already on the branch — use its SHA.
+  RECOVERY_SHA=$(gh api "repos/${OWNER_REPO}/git/ref/heads/${BRANCH}" --jq '.object.sha')
+  echo "==> Branch already at version commit ($RECOVERY_SHA) — creating missing tags"
+
+  for TAG in "${MISSING_TAGS[@]}"; do
+    gh api "repos/${OWNER_REPO}/git/refs" \
+      --method POST \
+      -f ref="refs/tags/${TAG}" \
+      -f sha="${RECOVERY_SHA}"
+    echo "  Created tag: $TAG → $RECOVERY_SHA"
+  done
+
+  for TAG in "${MISSING_TAGS[@]}"; do
+    if gh release view "$TAG" --repo "${OWNER_REPO}" &>/dev/null 2>&1; then
+      echo "  Release $TAG already exists — skipping"
+    else
+      gh release create "$TAG" \
+        --repo "${OWNER_REPO}" \
+        --title "${TAG}" \
+        --generate-notes \
+        --verify-tag
+      echo "  Created release: $TAG"
+    fi
+  done
+
+  echo "==> Done. Tag push events will trigger npm-publish.yml."
   exit 0
 fi
 
@@ -293,7 +307,9 @@ fi
 echo "==> Stage 4: creating version tags"
 
 for TAG in $LERNA_TAGS; do
-  EXISTING=$(gh api "repos/${OWNER_REPO}/git/ref/tags/${TAG}" --jq '.object.sha' 2>/dev/null || echo "")
+  # Use assignment-level || so that a 404 (non-zero exit) overrides any
+  # stdout the failed gh api wrote, rather than appending to it.
+  EXISTING=$(gh api "repos/${OWNER_REPO}/git/ref/tags/${TAG}" --jq '.object.sha' 2>/dev/null) || EXISTING=""
   if [[ -n "$EXISTING" ]]; then
     if [[ "$EXISTING" != "$SIGNED_SHA" ]]; then
       echo "ERROR: tag $TAG already exists but points to $EXISTING, not $SIGNED_SHA" >&2
