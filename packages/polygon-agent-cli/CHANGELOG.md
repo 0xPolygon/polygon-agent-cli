@@ -3,6 +3,19 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## [0.7.2](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-cli@0.7.1...@polygonlabs/agent-cli@0.7.2) (2026-04-14)
+
+
+### Bug Fixes
+
+* **ci:** add --access public to lerna publish for scoped packages ([c157790](https://github.com/0xPolygon/polygon-agent-cli/commit/c1577907f1363e5a173e6f49321c545395260fb9))
+* **cli:** bundle agent-shared into CLI instead of publishing to npm ([1cc2d7b](https://github.com/0xPolygon/polygon-agent-cli/commit/1cc2d7b28b971f7b4b85d9473393c9fce92edd57))
+* **publish:** declare access in publishConfig, remove --access flag from workflow ([e5d23b1](https://github.com/0xPolygon/polygon-agent-cli/commit/e5d23b1ed8c296808f37251cd25843774efd55ac))
+
+
+
+
+
 ## [0.7.1](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-cli@0.7.0...@polygonlabs/agent-cli@0.7.1) (2026-04-14)
 
 **Note:** Version bump only for package @polygonlabs/agent-cli

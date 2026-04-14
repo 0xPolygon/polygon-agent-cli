@@ -3,6 +3,17 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## [0.1.2](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-shared@0.1.1...@polygonlabs/agent-shared@0.1.2) (2026-04-14)
+
+
+### Bug Fixes
+
+* **cli:** bundle agent-shared into CLI instead of publishing to npm ([1cc2d7b](https://github.com/0xPolygon/polygon-agent-cli/commit/1cc2d7b28b971f7b4b85d9473393c9fce92edd57))
+
+
+
+
+
 ## [0.1.1](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-shared@0.5.0...@polygonlabs/agent-shared@0.1.1) (2026-04-14)
 
 

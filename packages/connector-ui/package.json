@@ -1,7 +1,7 @@
 {
   "name": "@polygonlabs/agent-connector-ui",
   "private": true,
-  "version": "1.4.1",
+  "version": "1.4.2",
   "type": "module",
   "description": "Wallet connector UI for Polygon Agent Kit - creates secure encrypted wallet sessions",
   "repository": {
