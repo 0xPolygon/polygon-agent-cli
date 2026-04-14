@@ -3,6 +3,23 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# 0.5.0 (2026-04-14)
+
+
+### Bug Fixes
+
+* **connector-ui:** preserve implicit session metadata, remove tweetnacl, add rid validation ([ca4c4aa](https://github.com/0xPolygon/polygon-agent-cli/commit/ca4c4aa7ce972639e80b3fe4c8cc6abd01db3df1))
+* **shared:** correct import path in plan, suppress vitest warning, add requestId guard ([84d5673](https://github.com/0xPolygon/polygon-agent-cli/commit/84d56731a17ddd6a40534c6cc97ae2e8e43d6ff4))
+
+
+### Features
+
+* **shared:** add v2 crypto protocol package (X25519+HKDF+XChaCha20) ([a5c23b3](https://github.com/0xPolygon/polygon-agent-cli/commit/a5c23b3b63ea464ea514734bcd9aa36895480701))
+
+
+
+
+
 # 0.4.0 (2026-04-14)
 
 

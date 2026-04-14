@@ -3,6 +3,41 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [0.7.0](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-cli@0.3.0...@polygonlabs/agent-cli@0.7.0) (2026-04-14)
+
+
+### Bug Fixes
+
+* add VITE_TRAILS_API_KEY to build env and fix session payload mapping ([560ff65](https://github.com/0xPolygon/polygon-agent-cli/commit/560ff65bde87435254c3591aa09ab2c82f99aaaf))
+* address code review issues — persist cliSk, raise payload limit, validate inputs, cleanup ([f38d2f2](https://github.com/0xPolygon/polygon-agent-cli/commit/f38d2f2afc59122655e46274e201016c0f4240f2))
+* **ci:** use GitHub environments for per-env secrets, add CF Access token support to relay client ([9a89472](https://github.com/0xPolygon/polygon-agent-cli/commit/9a89472bcd740f4e3711046aefe8825e42777676))
+* **cli:** wire --timeout to waitForReady, document ephemeral key storage ([3c08268](https://github.com/0xPolygon/polygon-agent-cli/commit/3c082688c73404338512eb68335c53cbe3790bc9))
+* **dapp-client:** parse guard string back to GuardConfig with jsonRevivers ([6a2addb](https://github.com/0xPolygon/polygon-agent-cli/commit/6a2addb83db085c5385cdb56f706529ba73bbba5))
+* **skills:** quote SKILL.md description to fix YAML colon parse error ([79e1f65](https://github.com/0xPolygon/polygon-agent-cli/commit/79e1f6542f4faed33f8aa4b4db6aa79dc99902db))
+* **skills:** update x402 service endpoints to native onrender.com paths ([a29c3da](https://github.com/0xPolygon/polygon-agent-cli/commit/a29c3da0d851e625670d7e820b24082f42d1c9de))
+* **x402-pay:** align payment_details handler with x402 Bazaar integration guide ([c3a751e](https://github.com/0xPolygon/polygon-agent-cli/commit/c3a751e1689b6f1dfc3155b30e13de19ec4ca686))
+* **x402-pay:** implement EIP-3009 facilitator path for Polygon payment_details ([42d4d05](https://github.com/0xPolygon/polygon-agent-cli/commit/42d4d05bebe059e7c0ab617f12e88f2411ee0e15))
+* **x402-pay:** scope Bazaar payment_details handling to x402-api.onrender.com only ([06563b0](https://github.com/0xPolygon/polygon-agent-cli/commit/06563b03cf483f9c7787231689a3257dc64844b9))
+* **x402-pay:** use per-network recipient from payment_details.networks ([abd8da0](https://github.com/0xPolygon/polygon-agent-cli/commit/abd8da0929ca930fa5bd15212b3e01ea72466388))
+
+
+### Features
+
+* **cli:** auto-whitelist Polygon & Katana DeFi vault contracts in sessions ([d78a093](https://github.com/0xPolygon/polygon-agent-cli/commit/d78a09385448f25e5411673794c68dd474583039))
+* **cli:** ink UI redesign and DX improvements ([8ad6596](https://github.com/0xPolygon/polygon-agent-cli/commit/8ad6596448b75590d699c1bcf3fa332c73750b7f))
+* **cli:** polygon purple brand color, bordered code input, dry-run banner, tx result, fund TTY UI ([4490e86](https://github.com/0xPolygon/polygon-agent-cli/commit/4490e86dbd56c089790ffa176f825b782bc325ee))
+* **cli:** replace cloudflared tunnel with relay + 6-digit code handoff ([8dba6fb](https://github.com/0xPolygon/polygon-agent-cli/commit/8dba6fb7540adcad4e74dfef574557682ac096c5))
+* refactor skills into sub-skill files by use-case ([d8e1f7b](https://github.com/0xPolygon/polygon-agent-cli/commit/d8e1f7b0203f39b4a631b9ac90629e2b801ced92))
+* **skills:** add DeFi sub-skill with swap, bridge, deposit, and vault whitelist ([2da3222](https://github.com/0xPolygon/polygon-agent-cli/commit/2da3222506ba1dfa69f32dc0091817084818d586))
+* **skills:** add x402 Bazaar services section with call instructions ([0f73484](https://github.com/0xPolygon/polygon-agent-cli/commit/0f7348467f97fe48018a8a5bb284d5edbfd10807))
+* **skills:** add yield vault whitelist and fix x402 Bazaar methods to POST ([dc17591](https://github.com/0xPolygon/polygon-agent-cli/commit/dc17591217136d62a0d40ace8ea0a17c910a733e))
+* **ui,skills:** replace code review use case with lead scoring ([73b9283](https://github.com/0xPolygon/polygon-agent-cli/commit/73b92835379f641c81ac5f4b5765449d19e91523))
+* **x402-pay:** handle custom payment_details 402 format from x402-api.onrender.com ([310a1db](https://github.com/0xPolygon/polygon-agent-cli/commit/310a1db56801299530189781048abea55fbd02bb))
+
+
+
+
+
 # [0.6.0](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-cli@0.3.0...@polygonlabs/agent-cli@0.6.0) (2026-04-14)
 
 
