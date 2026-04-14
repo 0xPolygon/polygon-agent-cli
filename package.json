@@ -1,6 +1,6 @@
 {
   "name": "polygon-agent-sdk",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "CLI + Agent Skills for building on-chain agents on Polygon",
   "type": "module",
   "packageManager": "pnpm@10.30.3",
@@ -24,7 +24,8 @@
   "devDependencies": {
     "@commitlint/cli": "^20.4.2",
     "@commitlint/config-conventional": "^20.4.2",
-    "@polygonlabs/apps-team-lint": "^1.0.0",
+    "@polygonlabs/apps-team-lint": "^2.0.0",
+    "@tsconfig/node24": "^24.0.4",
     "@tsconfig/node-ts": "^23.6.4",
     "@tsconfig/node24": "^24.0.4",
     "@types/node": "^22.15.0",
