@@ -1,0 +1,59 @@
+name: Publish to npm
+
+# Triggered by each version tag created by release.yml via the GitHub API.
+# Decoupled from versioning so that a failed publish can be retried by
+# re-running this workflow in the GitHub Actions UI — no risk of
+# double-versioning.
+#
+# lerna publish from-package is idempotent: it checks which versions are
+# already on the npm registry and only publishes what is missing. Running
+# it multiple times for the same tag is safe.
+#
+# Private packages (agent-connector-ui, agent-shared) are skipped
+# automatically by lerna — only @polygonlabs/agent-cli is published.
+on:
+  push:
+    tags:
+      - '@polygonlabs/**'
+
+permissions:
+  contents: read
+  id-token: write # required for npm provenance attestations
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: 'pnpm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Determine dist-tag from triggering tag
+        id: dist-tag
+        run: |
+          # GITHUB_REF_NAME is the tag name, e.g. "@polygonlabs/agent-cli@0.4.0"
+          # Extract the version portion (everything after the last @)
+          VERSION="${GITHUB_REF_NAME##*@}"
+          # Pull the prerelease identifier out of the version string, if present
+          # e.g. "0.4.0-beta.1" → "beta", "0.4.0" → "latest"
+          if [[ "$VERSION" =~ -([a-zA-Z]+)\. ]]; then
+            echo "value=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to npm
+        run: |
+          echo "Publishing with dist-tag: ${{ steps.dist-tag.outputs.value }}"
+          pnpm exec lerna publish from-package \
+            --dist-tag "${{ steps.dist-tag.outputs.value }}" \
+            --yes

@@ -54,8 +54,6 @@ polygon-agent wallet create --usdc-limit 100 --native-limit 5
 # → user approves in browser, browser shows a 6-digit code
 # → enter the 6-digit code in the terminal when prompted
 # → session saved to ~/.polygon-agent/wallets/main.json
-# → notify the user and send them to https://agentconnect.polygon.technology/?rid=<rid>
-#   so they can fund their wallet with access to the session
 
 # Step 3: Fund wallet
 polygon-agent fund
