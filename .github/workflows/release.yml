@@ -47,24 +47,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Release with Lerna
+      - name: Configure git identity
+        run: |
+          git config --global user.name "${{ steps.app-token.outputs.app-slug }}[bot]"
+          git config --global user.email "${{ secrets.SEMANTIC_RELEASE_BOT_APP_ID }}+${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com"
+
+      - name: Release with Lerna (signed commits)
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          git config --global user.email "semantic-release-bot@users.noreply.github.com"
-          git config --global user.name "Semantic Release Bot"
-
-          DIST_TAG="${{ github.event.inputs.channel || 'latest' }}"
-          echo "Publishing to channel: $DIST_TAG"
-
-          if [[ "$DIST_TAG" != "dev" && "$DIST_TAG" != "beta" && "$DIST_TAG" != "latest" ]]; then
-            echo "Invalid dist-tag: $DIST_TAG. Defaulting to latest."
-            DIST_TAG="latest"
-          fi
-
-          if [[ "$DIST_TAG" == "latest" ]]; then
-            pnpm exec lerna version --conventional-commits --create-release github --yes
-          else
-            pnpm exec lerna version --conventional-commits --conventional-prerelease --preid "$DIST_TAG" --create-release github --yes
-          fi
-          pnpm exec lerna publish from-package --dist-tag "$DIST_TAG" --yes
+          bash .github/scripts/lerna-signed-release.sh \
+            "${{ github.event.inputs.channel || 'latest' }}" \
+            "${{ github.event.inputs.branch || 'main' }}"
