@@ -11,8 +11,9 @@ name: Publish to npm
 # tag is created in a separate API call so each fires its own event.
 #
 # lerna publish from-package is idempotent — it only publishes versions not
-# yet on the registry. Private packages (agent-connector-ui) are skipped
-# automatically by lerna. --access public is required for scoped packages.
+# yet on the registry. Private packages (agent-connector-ui, agent-shared)
+# are skipped automatically by lerna. Access is declared via publishConfig
+# in each package's package.json rather than as a flag here.
 on:
   create:
   workflow_dispatch:
@@ -71,5 +72,4 @@ jobs:
           echo "Publishing with dist-tag: ${{ steps.dist-tag.outputs.value }}"
           pnpm exec lerna publish from-package \
             --dist-tag "${{ steps.dist-tag.outputs.value }}" \
-            --access public \
             --yes

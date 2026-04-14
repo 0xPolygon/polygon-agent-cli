@@ -8,6 +8,9 @@
     "directory": "packages/polygon-agent-cli"
   },
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "polygon-agent": "dist/index.js"
   },
