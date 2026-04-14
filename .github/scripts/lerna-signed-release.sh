@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Creates a signed Lerna version commit via the GitHub API, then publishes to npm.
+# Creates a signed Lerna version commit via the GitHub GraphQL API, then
+# triggers npm publish via version tags.
 #
-# Why: git commits created locally are unsigned, failing branch-protection
-# "require signed commits" rules. Commits created via the GitHub REST API are
-# verified by GitHub's web-flow GPG key. We let lerna do all version
-# calculations locally (--no-push), capture the resulting tree/parent/message,
-# re-create that commit through the API, then update branch and tag refs on
-# GitHub — bypassing git push entirely.
+# Why GraphQL, not REST: POST /repos/.../git/commits (REST) creates raw git
+# objects and does NOT sign them. The GraphQL createCommitOnBranch mutation
+# creates a commit that GitHub marks as verified (signed), satisfying the
+# "require signed commits" branch protection rule. It also advances the branch
+# ref atomically — no separate PATCH needed.
 #
 # Usage:
 #   .github/scripts/lerna-signed-release.sh <dist-tag> [<branch>] [--dry-run]
@@ -41,12 +41,11 @@ set -euo pipefail
 #
 # Stage ordering and rationale:
 #   1. lerna version --no-push  — determines bumps, updates files, local commit + tags
-#   2. POST /git/commits        — creates the signed commit object on GitHub
-#   3. PATCH /git/refs/heads/*  — makes the signed commit part of branch history
-#   4. POST /git/refs (tags)    — tags point to the signed commit (idempotent)
-#   5. gh release create        — metadata on top of tags (idempotent)
+#   2. createCommitOnBranch     — GraphQL mutation: creates signed commit, advances branch
+#   3. POST /git/refs (tags)    — tags point to the signed commit (idempotent)
+#   4. gh release create        — metadata on top of tags (idempotent)
 #
-#   npm publish is NOT done here. Each tag push (step 4) triggers the
+#   npm publish is NOT done here. Each tag push (step 3) triggers the
 #   npm-publish.yml workflow, which runs lerna publish from-package independently.
 #   This decouples versioning from publishing: if publish fails, re-trigger
 #   that workflow without any risk of double-versioning.
@@ -146,8 +145,9 @@ echo "==> Stage 2: capturing lerna's version commit"
 
 TREE_SHA=$(git rev-parse 'HEAD^{tree}')
 PARENT_SHA=$(git rev-parse 'HEAD^1')
-COMMIT_MSG=$(git log -1 --format='%B')
 LERNA_TAGS=$(git tag --points-at HEAD)
+COMMIT_HEADLINE=$(git log -1 --format='%s')
+COMMIT_BODY=$(git log -1 --format='%b')
 
 echo "  Tree:    $TREE_SHA"
 echo "  Parent:  $PARENT_SHA"
@@ -159,7 +159,30 @@ git diff --name-status "$HEAD_BEFORE" HEAD
 
 echo ""
 echo "==> Commit message"
-echo "$COMMIT_MSG"
+git log -1 --format='%B'
+
+# ---------------------------------------------------------------------------
+# Build file changes for the GraphQL mutation.
+# createCommitOnBranch takes explicit file additions/deletions rather than
+# a tree SHA, which is how it can sign the commit without requiring the tree
+# to already exist in GitHub's object store.
+# ---------------------------------------------------------------------------
+ADDITIONS='[]'
+DELETIONS='[]'
+
+while IFS=$'\t' read -r STATUS FILEPATH; do
+  case "$STATUS" in
+    A | M)
+      CONTENT=$(git show "HEAD:${FILEPATH}" | base64 | tr -d '\n')
+      ADDITIONS=$(printf '%s' "$ADDITIONS" | jq --arg p "$FILEPATH" --arg c "$CONTENT" \
+        '. += [{"path": $p, "contents": $c}]')
+      ;;
+    D)
+      DELETIONS=$(printf '%s' "$DELETIONS" | jq --arg p "$FILEPATH" \
+        '. += [{"path": $p}]')
+      ;;
+  esac
+done < <(git diff --name-status "$PARENT_SHA" HEAD)
 
 # ---------------------------------------------------------------------------
 # Dry-run: show planned API calls then restore
@@ -167,20 +190,18 @@ echo "$COMMIT_MSG"
 if [[ "$DRY_RUN" == "true" ]]; then
   echo "==> API calls that would be made"
   echo ""
-  echo "  POST https://api.github.com/repos/${OWNER_REPO}/git/commits"
-  echo "    tree:       $TREE_SHA"
-  echo "    parents[0]: $PARENT_SHA"
-  printf '    message:    %s\n' "$(echo "$COMMIT_MSG" | head -1)"
-  echo "    (GitHub signs this commit with its web-flow GPG key)"
-  echo ""
-  echo "  PATCH https://api.github.com/repos/${OWNER_REPO}/git/refs/heads/${BRANCH}"
-  echo "    sha: <sha returned by commit creation above>"
-  echo "    force: false"
+  echo "  GraphQL createCommitOnBranch mutation"
+  echo "    branch:          ${OWNER_REPO}@${BRANCH}"
+  echo "    expectedHeadOid: $PARENT_SHA"
+  echo "    headline:        $COMMIT_HEADLINE"
+  echo "    additions:       $(printf '%s' "$ADDITIONS" | jq 'length') file(s)"
+  echo "    deletions:       $(printf '%s' "$DELETIONS" | jq 'length') file(s)"
+  echo "    (GitHub signs this commit as verified)"
   echo ""
   for TAG in $LERNA_TAGS; do
     echo "  POST https://api.github.com/repos/${OWNER_REPO}/git/refs"
     echo "    ref: refs/tags/${TAG}"
-    echo "    sha: <sha returned by commit creation above>"
+    echo "    sha: <oid returned by createCommitOnBranch above>"
     echo ""
   done
   for TAG in $LERNA_TAGS; do
@@ -211,14 +232,17 @@ if [[ "$DRY_RUN" == "true" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Stage 3: create signed commit on GitHub
+# Stage 3: create signed commit via GraphQL createCommitOnBranch
 #
-# If the branch already shows the correct tree (a previous run advanced the
-# ref before failing on tags), reuse that commit rather than creating a new
-# one. Tags must all point to the same SHA, so we must not create a second
-# signed commit with a different SHA.
+# Unlike POST /git/commits (REST), this mutation:
+#   - Signs the commit (appears as "verified" in GitHub)
+#   - Advances the branch ref atomically — no separate PATCH needed
+#   - Takes file changes directly, so the tree doesn't need to pre-exist
+#
+# If the branch already shows the correct tree (a previous run completed
+# this stage before failing on tags), reuse that commit SHA.
 # ---------------------------------------------------------------------------
-echo "==> Stage 3: creating signed commit"
+echo "==> Stage 3: creating signed commit (GraphQL createCommitOnBranch)"
 
 REMOTE_HEAD=$(gh api "repos/${OWNER_REPO}/git/ref/heads/${BRANCH}" --jq '.object.sha')
 REMOTE_TREE=$(gh api "repos/${OWNER_REPO}/git/commits/${REMOTE_HEAD}" --jq '.tree.sha')
@@ -227,29 +251,46 @@ if [[ "$REMOTE_TREE" == "$TREE_SHA" ]]; then
   SIGNED_SHA="$REMOTE_HEAD"
   echo "  Branch already shows version changes — reusing existing commit $SIGNED_SHA"
 else
-  SIGNED_SHA=$(gh api "repos/${OWNER_REPO}/git/commits" \
-    --method POST \
-    -f message="${COMMIT_MSG}" \
-    -f tree="${TREE_SHA}" \
-    -F "parents[]=${PARENT_SHA}" \
-    --jq '.sha')
-  echo "  Created signed commit: $SIGNED_SHA"
+  # Write the full GraphQL request body to a temp file. Using gh api -F to
+  # pass nested JSON with large base64 payloads is unreliable; --input avoids
+  # all shell escaping and size issues.
+  GQL_TMPFILE=$(mktemp /tmp/lerna-release-graphql-XXXXXX.json)
+  trap 'rm -f "$GQL_TMPFILE"' EXIT
 
-  # ---------------------------------------------------------------------------
-  # Stage 4: advance branch ref to the signed commit
-  # ---------------------------------------------------------------------------
-  echo "==> Stage 4: advancing branch ref"
-  gh api "repos/${OWNER_REPO}/git/refs/heads/${BRANCH}" \
-    --method PATCH \
-    -f sha="${SIGNED_SHA}" \
-    -F force=false
-  echo "  Branch ${BRANCH} → $SIGNED_SHA"
+  jq -n \
+    --arg query 'mutation CreateSignedCommit($input: CreateCommitOnBranchInput!) {
+      createCommitOnBranch(input: $input) { commit { oid } }
+    }' \
+    --arg repo "$OWNER_REPO" \
+    --arg branch "$BRANCH" \
+    --arg headline "$COMMIT_HEADLINE" \
+    --arg body "$COMMIT_BODY" \
+    --arg expectedHeadOid "$PARENT_SHA" \
+    --argjson additions "$ADDITIONS" \
+    --argjson deletions "$DELETIONS" \
+    '{
+      "query": $query,
+      "variables": {
+        "input": {
+          "branch": {"repositoryNameWithOwner": $repo, "branchName": $branch},
+          "message": {"headline": $headline, "body": $body},
+          "fileChanges": {"additions": $additions, "deletions": $deletions},
+          "expectedHeadOid": $expectedHeadOid
+        }
+      }
+    }' > "$GQL_TMPFILE"
+
+  SIGNED_SHA=$(gh api graphql --input "$GQL_TMPFILE" \
+    --jq '.data.createCommitOnBranch.commit.oid')
+
+  echo "  Created signed commit: $SIGNED_SHA"
+  echo "  Branch ${BRANCH} advanced (atomic via GraphQL mutation)"
 fi
 
 # ---------------------------------------------------------------------------
-# Stage 5: create version tags (idempotent — skip existing, fail on mismatch)
+# Stage 4: create version tags (idempotent — skip existing, fail on mismatch)
 # ---------------------------------------------------------------------------
-echo "==> Stage 5: creating version tags"
+echo "==> Stage 4: creating version tags"
 
 for TAG in $LERNA_TAGS; do
   EXISTING=$(gh api "repos/${OWNER_REPO}/git/ref/tags/${TAG}" --jq '.object.sha' 2>/dev/null || echo "")
@@ -270,9 +311,9 @@ for TAG in $LERNA_TAGS; do
 done
 
 # ---------------------------------------------------------------------------
-# Stage 5b: create GitHub releases (idempotent — skip existing)
+# Stage 4b: create GitHub releases (idempotent — skip existing)
 # ---------------------------------------------------------------------------
-echo "==> Stage 5b: creating GitHub releases"
+echo "==> Stage 4b: creating GitHub releases"
 
 for TAG in $LERNA_TAGS; do
   if gh release view "$TAG" --repo "${OWNER_REPO}" &>/dev/null 2>&1; then
