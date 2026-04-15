@@ -1,5 +1,5 @@
 ---
-name: polygon-agent-kit
+name: Polygon Agent
 description: "Complete Polygon agent toolkit for on-chain operations on Polygon. Use this skill whenever helping an agent set up a wallet, check balances, send or swap tokens, bridge assets, deposit to earn yield, register on-chain identity, submit or query reputation/feedback, or make x402 micropayments. Covers the full lifecycle: Sequence smart contract wallets, Trails DeFi actions, ERC-8004 identity + reputation, x402 payments. Single CLI entry point (`polygon-agent`), AES-256-GCM encrypted storage."
 ---
 
@@ -54,6 +54,8 @@ polygon-agent wallet create --usdc-limit 100 --native-limit 5
 # → user approves in browser, browser shows a 6-digit code
 # → enter the 6-digit code in the terminal when prompted
 # → session saved to ~/.polygon-agent/wallets/main.json
+# → notify the user and send them to https://agentconnect.polygon.technology/?rid=<rid>
+#   so they can fund their wallet with access to the session
 
 # Step 3: Fund wallet
 polygon-agent fund
@@ -182,12 +184,12 @@ $0.005 USDC per call.
 ```bash
 # Profile + recent tweets
 polygon-agent x402-pay \
-  --url "https://x402-api.onrender.com/api/call/99063826-5171-47d1-8b96-56ab8a6e3ddb?user=<username>" \
+  --url "https://x402-api.onrender.com/api/twitter?user=<username>" \
   --wallet main --method POST
 
 # Specific tweet
 polygon-agent x402-pay \
-  --url "https://x402-api.onrender.com/api/call/99063826-5171-47d1-8b96-56ab8a6e3ddb?tweet=https://x.com/user/status/<id>" \
+  --url "https://x402-api.onrender.com/api/twitter?tweet=https://x.com/user/status/<id>" \
   --wallet main --method POST
 ```
 Returns: follower count, recent tweets, engagement metrics.

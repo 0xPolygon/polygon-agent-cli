@@ -15,19 +15,28 @@ Pay-per-call APIs accessible via `x402-pay`. No API keys or subscriptions — ea
 
 $0.005 USDC per call.
 
+> **Note:** The catalog proxy (`/api/call/99063826-...`) returns 401 or HTML for this service.
+> Use the direct endpoint below instead.
+
 ```bash
 # Profile + recent tweets
 polygon-agent x402-pay \
-  --url "https://x402-api.onrender.com/api/call/99063826-5171-47d1-8b96-56ab8a6e3ddb?user=<username>" \
-  --wallet main --method GET
+  --url "https://x402-api.onrender.com/api/twitter?user=<username>" \
+  --wallet main --method POST
 
 # Specific tweet
 polygon-agent x402-pay \
-  --url "https://x402-api.onrender.com/api/call/99063826-5171-47d1-8b96-56ab8a6e3ddb?tweet=https://x.com/user/status/<id>" \
-  --wallet main --method GET
+  --url "https://x402-api.onrender.com/api/twitter?tweet=https://x.com/user/status/<id>" \
+  --wallet main --method POST
 ```
 
 Returns: follower count, recent tweets, engagement metrics.
+
+**Troubleshooting:** If the direct endpoint fails, check the live catalog for the current URL:
+```bash
+curl -s "https://x402-api.onrender.com/api/catalog?status=online" \
+  | jq '.[] | select(.name | test("twitter"; "i"))'
+```
 
 ---
 
