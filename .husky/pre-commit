@@ -9,8 +9,11 @@
 #     skill entry point for the agent.
 #
 #   packages/connector-ui/public/skills/
-#     Served at https://agentconnect.polygon.technology/skills/ — agents fetch
-#     skill files at runtime from this URL.
+#     Served at https://agentconnect.polygon.technology/skills/ — full tree.
+#
+#   packages/connector-ui/public/<sub-skill>/
+#     Also served at https://agentconnect.polygon.technology/<sub-skill>/SKILL.md
+#     (e.g. /polygon-discovery/SKILL.md) to match the URLs in the root SKILL.md.
 #
 #   packages/polygon-agent-cli/skills/
 #     Bundled inside the published npm package so skills are available
@@ -41,15 +44,23 @@ function copyDir(src, dest) {
 // Sync root SKILL.md to connector-ui public root (served at /SKILL.md)
 fs.copyFileSync('skills/SKILL.md', 'packages/connector-ui/public/SKILL.md');
 
-// Sync to connector-ui (verbatim)
+// Sync to connector-ui (verbatim — full tree under /skills/)
 copyDir('skills', 'packages/connector-ui/public/skills');
+
+// Also serve each sub-skill at the root level (e.g. /polygon-discovery/SKILL.md)
+// to match the URLs referenced in the root SKILL.md
+for (const entry of fs.readdirSync('skills', { withFileTypes: true })) {
+  if (entry.isDirectory()) {
+    copyDir(path.join('skills', entry.name), path.join('packages/connector-ui/public', entry.name));
+  }
+}
 
 // Sync to CLI package (rewrite name field in root SKILL.md only)
 copyDir('skills', 'packages/polygon-agent-cli/skills');
 const cliSkill = path.join('packages/polygon-agent-cli/skills/SKILL.md');
 fs.writeFileSync(cliSkill, fs.readFileSync(cliSkill, 'utf8').replace('name: polygon-agent-kit', 'name: polygon-agent-cli'));
 "
-git add packages/connector-ui/public/SKILL.md packages/connector-ui/public/skills packages/polygon-agent-cli/skills
+git add packages/connector-ui/public/SKILL.md packages/connector-ui/public/skills packages/connector-ui/public/polygon-* packages/polygon-agent-cli/skills
 
 pnpm exec lint-staged
 pnpm run typecheck
