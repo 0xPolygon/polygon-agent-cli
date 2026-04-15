@@ -1,9 +1,11 @@
 ---
 name: polygon-defi
-description: DeFi operations on Polygon using the Polygon Agent CLI. Covers same-chain token swaps, cross-chain bridging, and yield deposits into Aave v3 and Morpho vaults via Trails earn pool discovery. All commands dry-run by default — add --broadcast to execute.
+description: DeFi operations on Polygon using the Polygon Agent CLI. Covers same-chain token swaps, cross-chain bridging, and yield deposits into Aave v3 and Morpho vaults via Trails earn pool discovery. Uses the Trails skill for cross-chain swap/bridge/earn flows. Requires a Trails API key — get one at https://dashboard.trails.build. All commands dry-run by default — add --broadcast to execute.
 ---
 
 # Polygon DeFi Skill
+
+> **Trails Integration**: Swaps, bridges, and earn pool discovery are all powered by [Trails](https://trails.build). This skill uses the `TRAILS_ACCESS_KEY` environment variable (auto-loaded by the CLI from `~/.polygon-agent/builder.json`). For direct Widget, SDK, or API integration, load the `trails` skill. Get your API key at [https://dashboard.trails.build](https://dashboard.trails.build).
 
 ## Swap Tokens (Same-Chain)
 
@@ -42,6 +44,7 @@ Use `getEarnPools` to discover live yield opportunities across protocols before 
 curl --request POST \
   --url https://trails-api.sequence.app/rpc/Trails/GetEarnPools \
   --header 'Content-Type: application/json' \
+  --header "X-Access-Key: $TRAILS_ACCESS_KEY" \
   --data '{"chainIds": [137]}'
 ```
 
@@ -56,12 +59,15 @@ All request fields are optional — omit any you don't need to filter on.
 
 ### Fetch (agent code)
 
-The API key is the project access key already available to the agent (`SEQUENCE_PROJECT_ACCESS_KEY`).
+The API key is available as `TRAILS_ACCESS_KEY` (auto-loaded by the CLI; get one at [https://dashboard.trails.build](https://dashboard.trails.build)).
 
 ```typescript
 const res = await fetch('https://trails-api.sequence.app/rpc/Trails/GetEarnPools', {
   method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
+  headers: {
+    'Content-Type': 'application/json',
+    'X-Access-Key': process.env.TRAILS_ACCESS_KEY!,
+  },
   body: JSON.stringify({ chainIds: [137] }),
 });
 const { pools } = await res.json();
