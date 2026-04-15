@@ -173,7 +173,9 @@ polygon-agent fund                                 # Open funding widget
 ### Token Operations
 
 ```bash
-polygon-agent balances                             # Check all balances
+polygon-agent balances                             # Balances on session default chain
+polygon-agent balances --chain arbitrum            # Single chain override
+polygon-agent balances --chains polygon,base,arbitrum  # Same wallet, multiple chains (JSON)
 polygon-agent send --to 0x... --amount 1.0         # Send POL (dry-run)
 polygon-agent send --symbol USDC --to 0x... --amount 10 --broadcast
 polygon-agent swap --from USDC --to USDT --amount 5 --broadcast
@@ -194,6 +196,7 @@ polygon-agent agent reviews --agent-id <id>
 | ------------- | ---------------------- | -------------------- |
 | Wallet name   | `main`                 | `--name <name>`      |
 | Chain         | `polygon`              | `--chain <name\|id>` |
+| Multi-chain balances | —                 | `--chains <csv>` (comma-separated, max 20; overrides `--chain`) |
 | Wallet create | Auto-wait for approval | `--no-wait`          |
 | Broadcast     | Dry-run (preview)      | `--broadcast`        |
 

@@ -111,16 +111,114 @@ async function getTokenConfig({
 
 const bigintReplacer = (_k: string, v: unknown) => (typeof v === 'bigint' ? v.toString() : v);
 
+const BALANCES_MAX_CHAINS = 20;
+
+function parseCommaChainList(chainsArg: string | undefined): string[] {
+  if (!chainsArg || typeof chainsArg !== 'string') return [];
+  return chainsArg
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+type BalanceRowJson =
+  | { type: 'native'; symbol: string; balance: string }
+  | {
+      type: 'erc20';
+      symbol: string;
+      name?: string;
+      contractAddress: string;
+      balance: string;
+    };
+
+async function fetchBalancesRowsForChain(
+  walletAddress: string,
+  chainSpec: string,
+  indexerKey: string
+): Promise<{ chainId: number; chain: string; balances: BalanceRowJson[] }> {
+  const network = resolveNetwork(chainSpec);
+  const nativeDecimals = network.nativeToken?.decimals ?? 18;
+  const nativeSymbol = network.nativeToken?.symbol || 'POL';
+
+  const { SequenceIndexer } = await import('@0xsequence/indexer');
+  const indexerUrl = getChainIndexerUrl(network.chainId);
+  const indexer = new SequenceIndexer(indexerUrl, indexerKey);
+
+  const [nativeRes, tokenRes] = await Promise.all([
+    indexer.getNativeTokenBalance({
+      accountAddress: walletAddress
+    }),
+    indexer.getTokenBalances({
+      accountAddress: walletAddress,
+      includeMetadata: true
+    })
+  ]);
+
+  const nativeWei = nativeRes?.balance?.balance || '0';
+  const native: BalanceRowJson[] = [
+    {
+      type: 'native',
+      symbol: nativeSymbol,
+      balance: formatUnits(BigInt(nativeWei), nativeDecimals)
+    }
+  ];
+
+  const erc20: BalanceRowJson[] = (tokenRes?.balances || []).map(
+    (b: {
+      contractInfo?: { symbol?: string; name?: string; decimals?: number };
+      contractAddress: string;
+      balance?: string;
+    }) => ({
+      type: 'erc20' as const,
+      symbol: b.contractInfo?.symbol || 'ERC20',
+      name: b.contractInfo?.name || undefined,
+      contractAddress: b.contractAddress,
+      balance: formatUnits(b.balance || '0', b.contractInfo?.decimals ?? 18)
+    })
+  );
+
+  return {
+    chainId: network.chainId,
+    chain: network.name,
+    balances: [...native, ...erc20]
+  };
+}
+
 // --- balances ---
 export const balancesCommand: CommandModule = {
   command: 'balances',
   describe: 'Check token balances',
-  builder: (yargs) => withWalletAndChain(yargs),
+  builder: (yargs) =>
+    withWalletAndChain(yargs).option('chains', {
+      type: 'string',
+      describe:
+        'Comma-separated chain names or IDs (e.g. polygon,base,arbitrum). When set, overrides --chain. Two or more chains return multi-chain JSON (TTY included).'
+    }),
   handler: async (argv) => {
     const walletName = argv.wallet as string;
+    const chainListRaw = parseCommaChainList(argv.chains as string | undefined);
+    if (chainListRaw.length > BALANCES_MAX_CHAINS) {
+      console.error(
+        JSON.stringify(
+          {
+            ok: false,
+            error: `Too many chains in --chains (max ${BALANCES_MAX_CHAINS}).`
+          },
+          null,
+          2
+        )
+      );
+      process.exit(1);
+    }
+    const chainList = chainListRaw;
 
-    if (!isTTY()) {
-      // Non-TTY: original JSON output
+    const preferChainsArg = chainList.length > 0;
+    const singleChainSpec = preferChainsArg
+      ? chainList[0]
+      : ((argv.chain as string) || undefined);
+    const multiChainMode = preferChainsArg && chainList.length > 1;
+
+    if (multiChainMode || (preferChainsArg && !isTTY())) {
       try {
         const session = await loadWalletSession(walletName);
         if (!session) {
@@ -135,46 +233,81 @@ export const balancesCommand: CommandModule = {
           throw new Error('Missing project access key (not in wallet session or environment)');
         }
 
-        const network = resolveNetwork((argv.chain as string) || session.chain || 'polygon');
-        const nativeDecimals = network.nativeToken?.decimals ?? 18;
-        const nativeSymbol = network.nativeToken?.symbol || 'POL';
-
-        const { SequenceIndexer } = await import('@0xsequence/indexer');
-        const indexerUrl = getChainIndexerUrl(network.chainId);
-        const indexer = new SequenceIndexer(indexerUrl, indexerKey);
-
-        const [nativeRes, tokenRes] = await Promise.all([
-          indexer.getNativeTokenBalance({
-            accountAddress: session.walletAddress
-          }),
-          indexer.getTokenBalances({
-            accountAddress: session.walletAddress,
-            includeMetadata: true
-          })
-        ]);
-
-        const nativeWei = nativeRes?.balance?.balance || '0';
-        const native = [
-          {
-            type: 'native',
-            symbol: nativeSymbol,
-            balance: formatUnits(BigInt(nativeWei), nativeDecimals)
-          }
-        ];
-
-        const erc20 = (tokenRes?.balances || []).map(
-          (b: {
-            contractInfo?: { symbol?: string; name?: string; decimals?: number };
-            contractAddress: string;
-            balance?: string;
-          }) => ({
-            type: 'erc20',
-            symbol: b.contractInfo?.symbol || 'ERC20',
-            name: b.contractInfo?.name || undefined,
-            contractAddress: b.contractAddress,
-            balance: formatUnits(b.balance || '0', b.contractInfo?.decimals ?? 18)
-          })
+        if (multiChainMode) {
+          const chainsOut = await Promise.all(
+            chainList.map((spec) =>
+              fetchBalancesRowsForChain(session.walletAddress, spec, indexerKey)
+            )
+          );
+          console.log(
+            JSON.stringify(
+              {
+                ok: true,
+                walletName,
+                walletAddress: session.walletAddress,
+                multiChain: true,
+                chains: chainsOut
+              },
+              bigintReplacer,
+              2
+            )
+          );
+        } else {
+          const one = await fetchBalancesRowsForChain(
+            session.walletAddress,
+            singleChainSpec!,
+            indexerKey
+          );
+          console.log(
+            JSON.stringify(
+              {
+                ok: true,
+                walletName,
+                walletAddress: session.walletAddress,
+                chainId: one.chainId,
+                chain: one.chain,
+                balances: one.balances
+              },
+              bigintReplacer,
+              2
+            )
+          );
+        }
+      } catch (error) {
+        console.error(
+          JSON.stringify(
+            {
+              ok: false,
+              error: (error as Error).message,
+              stack: (error as Error).stack
+            },
+            null,
+            2
+          )
         );
+        process.exit(1);
+      }
+      return;
+    }
+
+    if (!isTTY()) {
+      // Non-TTY: original JSON output (single default / --chain)
+      try {
+        const session = await loadWalletSession(walletName);
+        if (!session) {
+          throw new Error(`Wallet not found: ${walletName}`);
+        }
+
+        const indexerKey =
+          process.env.SEQUENCE_INDEXER_ACCESS_KEY ||
+          session.projectAccessKey ||
+          process.env.SEQUENCE_PROJECT_ACCESS_KEY;
+        if (!indexerKey) {
+          throw new Error('Missing project access key (not in wallet session or environment)');
+        }
+
+        const chainSpec = (argv.chain as string) || session.chain || 'polygon';
+        const one = await fetchBalancesRowsForChain(session.walletAddress, chainSpec, indexerKey);
 
         console.log(
           JSON.stringify(
@@ -182,11 +315,11 @@ export const balancesCommand: CommandModule = {
               ok: true,
               walletName,
               walletAddress: session.walletAddress,
-              chainId: network.chainId,
-              chain: network.name,
-              balances: [...native, ...erc20]
+              chainId: one.chainId,
+              chain: one.chain,
+              balances: one.balances
             },
-            null,
+            bigintReplacer,
             2
           )
         );
@@ -211,7 +344,7 @@ export const balancesCommand: CommandModule = {
         await inkRender(
           React.createElement(BalancesUI, {
             walletName,
-            chainOverride: argv.chain as string | undefined
+            chainOverride: preferChainsArg ? singleChainSpec : (argv.chain as string | undefined)
           })
         );
       } catch {

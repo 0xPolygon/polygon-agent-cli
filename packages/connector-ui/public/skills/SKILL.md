@@ -99,7 +99,7 @@ polygon-agent wallet remove [--name <n>]
 
 ### Operations
 ```bash
-polygon-agent balances [--wallet <n>] [--chain <chain>]
+polygon-agent balances [--wallet <n>] [--chain <chain>] [--chains <csv>]
 polygon-agent send --to <addr> --amount <num> [--symbol <SYM>] [--token <addr>] [--decimals <n>] [--broadcast]
 polygon-agent send-native --to <addr> --amount <num> [--broadcast] [--direct]
 polygon-agent send-token --symbol <SYM> --to <addr> --amount <num> [--token <addr>] [--decimals <n>] [--broadcast]
@@ -127,6 +127,7 @@ polygon-agent agent feedback --agent-id <id> --value <score> [--tag1 <t>] [--tag
 
 - **Dry-run by default** — all write commands require `--broadcast` to execute
 - **Smart defaults** — `--wallet main`, `--chain polygon`, auto-wait on `wallet create`
+- **`balances --chains`** — comma-separated chains (max 20); two or more return JSON with `multiChain: true` and a `chains` array (same wallet address on each)
 - **Fee preference** — auto-selects USDC over native POL when both available
 - **`fund`** — reads `walletAddress` from the wallet session and sets it as `toAddress` in the Trails widget URL. Always run `polygon-agent fund` to get the correct URL — never construct it manually or hardcode any address.
 - **`deposit`** — picks highest-TVL pool via Trails `getEarnPools`. If session rejects (contract not whitelisted), re-create wallet with `--contract <depositAddress>`
