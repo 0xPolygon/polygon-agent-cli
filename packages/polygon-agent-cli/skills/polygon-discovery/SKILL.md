@@ -11,7 +11,7 @@ Pay-per-call APIs accessible via `x402-pay`. No API keys or subscriptions — ea
 
 ---
 
-## Read Twitter/X Profiles & Tweets
+## Read Twitter/X Profile
 
 $0.005 USDC per call.
 
@@ -30,7 +30,7 @@ polygon-agent x402-pay \
   --wallet main --method POST
 ```
 
-Returns: follower count, recent tweets, engagement metrics.
+Returns: follower/following counts and tweet metrics.
 
 **Troubleshooting:** If the direct endpoint fails, check the live catalog for the current URL:
 ```bash
