@@ -412,12 +412,12 @@ function App() {
         deadline: BigInt(Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 183),
         permissions: [
           ...basePermissions,
-          ...contractWhitelistPermissions,
           ...oneOffErc20Permissions,
           ...openTokenPermissions,
           ...dynamicTokenPermissions,
           ...nativeFeePermission,
-          ...feePermissions
+          ...feePermissions,
+          ...contractWhitelistPermissions
         ]
       };
 
