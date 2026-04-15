@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## [Unreleased]
+
+### Features
+
+* **cli:** `withdraw` command — exit Aave v3 via aToken (`Pool.withdraw`) or ERC-4626 vaults (`redeem`); dry-run shows pool/vault and calldata ([docs](README.md#cli-reference))
+
+### Bug Fixes
+
+* **cli:** avoid double slash in transaction explorer URLs when `blockExplorer.rootUrl` ends with `/`
+
 ## [0.7.2](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-cli@0.7.1...@polygonlabs/agent-cli@0.7.2) (2026-04-14)
 
 

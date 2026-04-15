@@ -1,6 +1,6 @@
 ---
 name: Polygon Agent
-description: "Complete Polygon agent toolkit for on-chain operations on Polygon. Use this skill whenever helping an agent set up a wallet, check balances, send or swap tokens, bridge assets, deposit to earn yield, register on-chain identity, submit or query reputation/feedback, or make x402 micropayments. Covers the full lifecycle: Sequence smart contract wallets, Trails DeFi actions, ERC-8004 identity + reputation, x402 payments. Single CLI entry point (`polygon-agent`), AES-256-GCM encrypted storage."
+description: "Complete Polygon agent toolkit for on-chain operations on Polygon. Use this skill whenever helping an agent set up a wallet, check balances, send or swap tokens, bridge assets, deposit or withdraw from yield (Aave aTokens, ERC-4626 vaults), register on-chain identity, submit or query reputation/feedback, or make x402 micropayments. Covers the full lifecycle: Sequence smart contract wallets, Trails DeFi actions, ERC-8004 identity + reputation, x402 payments. Single CLI entry point (`polygon-agent`), AES-256-GCM encrypted storage."
 ---
 
 # Polygon Agentic CLI
@@ -105,6 +105,7 @@ polygon-agent send-native --to <addr> --amount <num> [--broadcast] [--direct]
 polygon-agent send-token --symbol <SYM> --to <addr> --amount <num> [--token <addr>] [--decimals <n>] [--broadcast]
 polygon-agent swap --from <SYM> --to <SYM> --amount <num> [--to-chain <chain>] [--slippage <num>] [--broadcast]
 polygon-agent deposit --asset <SYM> --amount <num> [--protocol aave|morpho] [--broadcast]
+polygon-agent withdraw --position <addr> --amount <num|max> [--chain <chain>] [--broadcast]
 polygon-agent fund [--wallet <n>] [--token <addr>]
 polygon-agent x402-pay --url <url> --wallet <n> [--method GET] [--body <str>] [--header Key:Value]
 ```
@@ -131,6 +132,7 @@ polygon-agent agent feedback --agent-id <id> --value <score> [--tag1 <t>] [--tag
 - **Fee preference** — auto-selects USDC over native POL when both available
 - **`fund`** — reads `walletAddress` from the wallet session and sets it as `toAddress` in the Trails widget URL. Always run `polygon-agent fund` to get the correct URL — never construct it manually or hardcode any address.
 - **`deposit`** — picks highest-TVL pool via Trails `getEarnPools`. If session rejects (contract not whitelisted), re-create wallet with `--contract <depositAddress>`
+- **`withdraw`** — `--position` = aToken or ERC-4626 vault; `--amount` = `max` or underlying units (Aave / vault). Dry-run JSON includes `poolAddress` / `vault`. Broadcast needs session on the **same chain** as `--chain`, with pool/vault + underlying token whitelisted where the relayer touches them
 - **`x402-pay`** — probes endpoint for 402, smart wallet funds builder EOA with exact token amount, EOA signs EIP-3009 payment. Chain auto-detected from 402 response
 - **`send-native --direct`** — bypasses ValueForwarder contract for direct EOA transfer
 - **Session permissions** — without `--usdc-limit` etc., session gets bare-bones defaults and may not transact
@@ -163,6 +165,7 @@ CLI commands output JSON (non-TTY). After running a command, always render the r
 | `send` / `send-token` / `send-native` | One-liner summary: amount, symbol, recipient. If broadcast, show tx hash as a code span and explorer URL as a link. |
 | `swap` | Summary: `X FROM → Y TO` with chain. If broadcast, show deposit tx hash + explorer link. |
 | `deposit` | Summary: amount, asset, protocol, pool address. If broadcast, show tx hash + explorer link. |
+| `withdraw` | Summary: `kind` (aave / erc4626), position, amount, pool or vault. If broadcast, show tx hash + explorer link. |
 | `fund` | Show the `fundingUrl` as a clickable link with a brief instruction to open it. |
 | `wallet create` / `wallet list` | Wallet name, truncated address, chain in a small table or bullet list. |
 | `agent register` | Show agent name and tx hash as a code span with Polygonscan link. Remind user to retrieve `agentId` from the Registered event on the Logs tab. |
@@ -183,7 +186,7 @@ For specific workflows, fetch and load the relevant sub-skill:
 | Use Case | Skill URL |
 |----------|-----------|
 | Polymarket prediction market trading | https://agentconnect.polygon.technology/polygon-polymarket/SKILL.md |
-| DeFi — swap, deposit, yield | https://agentconnect.polygon.technology/polygon-defi/SKILL.md |
+| DeFi — swap, deposit, withdraw, yield | https://agentconnect.polygon.technology/polygon-defi/SKILL.md |
 | x402 discovery & pay-per-call APIs | https://agentconnect.polygon.technology/polygon-discovery/SKILL.md |
 
 ---
@@ -201,6 +204,8 @@ For specific workflows, fetch and load the relevant sub-skill:
 | `Invalid code: hash mismatch` | Wrong 6-digit code entered — retry (3 attempts allowed) |
 | `Relay request not found` | Session expired or already used — re-run `wallet create` (or `wallet create --print-url`) |
 | Deposit session rejected | Re-create wallet with `--contract <depositAddress>` |
+| `withdraw` / broadcast: wrong chain or session rejects | Use `wallet create --chain <same as --chain>` and `--contract` for pool/vault + underlying ERC-20 on that chain; omit tight `--usdc-limit` if it blocks fee transfers |
+| `Stored explicit session is missing pk` | Re-link: `wallet import --code …` after `wallet create` |
 | Wrong recipient in Trails widget | Run `polygon-agent fund` (do not construct the URL manually) |
 | `x402-pay`: no 402 response | Endpoint doesn't require x402 payment, or URL is wrong |
 | `x402-pay`: payment token mismatch | Chain/token in the 402 response differs from wallet — check `--wallet` points to the right chain |

@@ -87,7 +87,8 @@ export function getRpcUrl(network: NetworkMetadata): string {
 
 /** Explorer URL for transaction */
 export function getExplorerUrl(network: NetworkMetadata, txHash: string): string {
-  const base = network.blockExplorer?.rootUrl || `https://polygonscan.com`;
+  const raw = network.blockExplorer?.rootUrl || `https://polygonscan.com`;
+  const base = raw.replace(/\/+$/, '');
   return `${base}/tx/${txHash}`;
 }
 

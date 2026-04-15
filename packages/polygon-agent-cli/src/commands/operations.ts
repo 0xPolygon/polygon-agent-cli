@@ -10,6 +10,7 @@ import {
   formatUnits,
   parseUnits,
   getExplorerUrl,
+  getRpcUrl,
   fileCoerce
 } from '../lib/utils.ts';
 import { isTTY, inkRender } from '../ui/render.js';
@@ -1300,6 +1301,385 @@ export const depositCommand: CommandModule = {
             txHash: result.txHash,
             explorerUrl: getExplorerUrl(network, result.txHash ?? ''),
             note: `${assetSymbol} is now earning yield in ${protocolLabel}. You will receive an interest-bearing token in your wallet.`
+          },
+          bigintReplacer,
+          2
+        )
+      );
+    } catch (error) {
+      console.error(
+        JSON.stringify(
+          {
+            ok: false,
+            error: (error as Error).message,
+            stack: (error as Error).stack
+          },
+          null,
+          2
+        )
+      );
+      process.exit(1);
+    }
+  }
+};
+
+const AAVE_ATOKEN_META_ABI = [
+  {
+    name: 'POOL',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'address' }]
+  },
+  {
+    name: 'UNDERLYING_ASSET_ADDRESS',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'address' }]
+  }
+] as const;
+
+const ERC20_DECIMALS_ABI = [
+  {
+    name: 'decimals',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'uint8' }]
+  }
+] as const;
+
+const ERC20_BALANCE_OF_ABI = [
+  {
+    name: 'balanceOf',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ type: 'uint256' }]
+  }
+] as const;
+
+const ERC4626_ASSET_ABI = [
+  {
+    name: 'asset',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'address' }]
+  }
+] as const;
+
+const ERC4626_CONVERT_TO_SHARES_ABI = [
+  {
+    name: 'convertToShares',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'assets', type: 'uint256' }],
+    outputs: [{ type: 'uint256' }]
+  }
+] as const;
+
+const AAVE_POOL_WITHDRAW_ABI = [
+  {
+    name: 'withdraw',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'asset', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+      { name: 'to', type: 'address' }
+    ],
+    outputs: [{ type: 'uint256' }]
+  }
+] as const;
+
+const ERC4626_REDEEM_ABI = [
+  {
+    name: 'redeem',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'shares', type: 'uint256' },
+      { name: 'receiver', type: 'address' },
+      { name: 'owner', type: 'address' }
+    ],
+    outputs: [{ type: 'uint256' }]
+  }
+] as const;
+
+async function viemChainForWithdraw(chainId: number) {
+  const {
+    mainnet,
+    polygon,
+    arbitrum,
+    optimism,
+    base,
+    avalanche,
+    bsc,
+    gnosis,
+    polygonAmoy
+  } = await import('viem/chains');
+  const map = {
+    1: mainnet,
+    137: polygon,
+    42161: arbitrum,
+    10: optimism,
+    8453: base,
+    43114: avalanche,
+    56: bsc,
+    100: gnosis,
+    80002: polygonAmoy
+  } as const;
+  const c = map[chainId as keyof typeof map];
+  if (!c) {
+    throw new Error(
+      `withdraw: chainId ${chainId} has no bundled viem chain config. Extend viemChainForWithdraw or use a supported chain.`
+    );
+  }
+  return c;
+}
+
+// --- withdraw ---
+export const withdrawCommand: CommandModule = {
+  command: 'withdraw',
+  describe: 'Withdraw from an Aave v3 aToken position or ERC-4626 vault (dry-run by default)',
+  builder: (yargs) =>
+    withBroadcast(
+      withWalletAndChain(yargs)
+        .option('position', {
+          type: 'string',
+          demandOption: true,
+          describe: 'Position token: Aave aToken address, or ERC-4626 vault (share token) address',
+          coerce: fileCoerce
+        })
+        .option('amount', {
+          type: 'string',
+          demandOption: true,
+          describe: 'Underlying amount to withdraw (Aave), or max | partial underlying (ERC-4626). Use max for full exit.',
+          coerce: fileCoerce
+        })
+    ),
+  handler: async (argv) => {
+    const walletName = (argv.wallet as string) || 'main';
+    const positionAddr = String(argv.position || '')
+      .trim()
+      .toLowerCase() as `0x${string}`;
+    const amountArg = String(argv.amount || '').trim().toLowerCase();
+    const broadcast = argv.broadcast as boolean;
+
+    if (!positionAddr.startsWith('0x') || positionAddr.length !== 42) {
+      console.error(
+        JSON.stringify(
+          { ok: false, error: 'Invalid --position address (expected 0x + 40 hex chars).' },
+          null,
+          2
+        )
+      );
+      process.exit(1);
+    }
+
+    try {
+      const session = await loadWalletSession(walletName);
+      if (!session) throw new Error(`Wallet not found: ${walletName}`);
+
+      const network = resolveNetwork((argv.chain as string) || session.chain || 'polygon');
+      const { chainId } = network;
+      const walletAddress = session.walletAddress as `0x${string}`;
+
+      const { createPublicClient, http, encodeFunctionData, maxUint256 } = await import('viem');
+      const viemChain = await viemChainForWithdraw(chainId);
+      const publicClient = createPublicClient({
+        chain: viemChain,
+        transport: http(getRpcUrl(network))
+      });
+
+      const aaveMeta = await publicClient
+        .readContract({
+          address: positionAddr,
+          abi: AAVE_ATOKEN_META_ABI,
+          functionName: 'POOL'
+        })
+        .then(async (pool) => {
+          const underlying = await publicClient.readContract({
+            address: positionAddr,
+            abi: AAVE_ATOKEN_META_ABI,
+            functionName: 'UNDERLYING_ASSET_ADDRESS'
+          });
+          return { pool: pool as `0x${string}`, underlying: underlying as `0x${string}` };
+        })
+        .catch(() => null);
+
+      let transactions: { to: `0x${string}`; value: bigint; data: `0x${string}` }[];
+      let kind: 'aave' | 'erc4626';
+      let summary: Record<string, unknown>;
+
+      if (aaveMeta) {
+        kind = 'aave';
+        const underlyingDec = Number(
+          await publicClient.readContract({
+            address: aaveMeta.underlying,
+            abi: ERC20_DECIMALS_ABI,
+            functionName: 'decimals'
+          })
+        );
+        const amountWei =
+          amountArg === 'max' || amountArg === 'all'
+            ? maxUint256
+            : parseUnits(amountArg, underlyingDec);
+
+        transactions = [
+          {
+            to: aaveMeta.pool,
+            value: 0n,
+            data: encodeFunctionData({
+              abi: AAVE_POOL_WITHDRAW_ABI,
+              functionName: 'withdraw',
+              args: [aaveMeta.underlying, amountWei, walletAddress]
+            })
+          }
+        ];
+        summary = {
+          protocol: 'aave',
+          poolAddress: aaveMeta.pool,
+          underlyingAsset: aaveMeta.underlying,
+          aToken: positionAddr,
+          amount: amountArg === 'max' || amountArg === 'all' ? 'max' : amountArg,
+          underlyingDecimals: underlyingDec
+        };
+      } else {
+        const underlying = await publicClient
+          .readContract({
+            address: positionAddr,
+            abi: ERC4626_ASSET_ABI,
+            functionName: 'asset'
+          })
+          .catch(() => null);
+
+        if (!underlying) {
+          throw new Error(
+            'Could not treat --position as Aave aToken (POOL / UNDERLYING_ASSET_ADDRESS) or ERC-4626 vault (asset()). ' +
+              'Pass the aToken or vault share contract you hold.'
+          );
+        }
+
+        kind = 'erc4626';
+        const underlyingAddr = underlying as `0x${string}`;
+        const underlyingDec = Number(
+          await publicClient.readContract({
+            address: underlyingAddr,
+            abi: ERC20_DECIMALS_ABI,
+            functionName: 'decimals'
+          })
+        );
+
+        const shareBal = await publicClient.readContract({
+          address: positionAddr,
+          abi: ERC20_BALANCE_OF_ABI,
+          functionName: 'balanceOf',
+          args: [walletAddress]
+        });
+
+        if (shareBal === 0n) {
+          throw new Error('ERC-4626 share balance is zero for this wallet on this chain.');
+        }
+
+        let sharesOut: bigint;
+        if (amountArg === 'max' || amountArg === 'all') {
+          sharesOut = shareBal;
+        } else {
+          const assetsWei = parseUnits(amountArg, underlyingDec);
+          sharesOut = await publicClient.readContract({
+            address: positionAddr,
+            abi: ERC4626_CONVERT_TO_SHARES_ABI,
+            functionName: 'convertToShares',
+            args: [assetsWei]
+          });
+          if (sharesOut > shareBal) {
+            throw new Error(
+              `Requested underlying withdraw exceeds vault shares (need ${sharesOut.toString()} shares, have ${shareBal.toString()}). Try --amount max.`
+            );
+          }
+        }
+
+        transactions = [
+          {
+            to: positionAddr,
+            value: 0n,
+            data: encodeFunctionData({
+              abi: ERC4626_REDEEM_ABI,
+              functionName: 'redeem',
+              args: [sharesOut, walletAddress, walletAddress]
+            })
+          }
+        ];
+        summary = {
+          protocol: 'erc4626',
+          vault: positionAddr,
+          underlyingAsset: underlyingAddr,
+          sharesRedeemed: sharesOut.toString(),
+          shareBalance: shareBal.toString(),
+          underlyingDecimals: underlyingDec
+        };
+      }
+
+      const targetContract = kind === 'aave' ? (summary.poolAddress as string) : positionAddr;
+
+      if (!broadcast) {
+        console.log(
+          JSON.stringify(
+            {
+              ok: true,
+              dryRun: true,
+              walletName,
+              walletAddress,
+              chainId,
+              chain: network.name,
+              kind,
+              ...summary,
+              transactions,
+              note:
+                `Re-run with --broadcast to submit. If the session rejects the call, re-create the wallet with the pool/vault whitelisted: polygon-agent wallet create --contract ${targetContract}`
+            },
+            bigintReplacer,
+            2
+          )
+        );
+        return;
+      }
+
+      let result;
+      try {
+        result = await runDappClientTx({
+          walletName,
+          chainId,
+          transactions,
+          broadcast,
+          preferNativeFee: false
+        });
+      } catch (txErr) {
+        if ((txErr as Error).message?.includes('No signer supported')) {
+          throw new Error(
+            `Session does not permit calls to ${targetContract}. ` +
+              `Re-create the wallet session with: polygon-agent wallet create --contract ${targetContract}\n` +
+              `Original error: ${(txErr as Error).message}`
+          );
+        }
+        throw txErr;
+      }
+
+      console.log(
+        JSON.stringify(
+          {
+            ok: true,
+            walletName,
+            walletAddress,
+            chainId,
+            chain: network.name,
+            kind,
+            ...summary,
+            txHash: result.txHash,
+            explorerUrl: getExplorerUrl(network, result.txHash ?? '')
           },
           bigintReplacer,
           2

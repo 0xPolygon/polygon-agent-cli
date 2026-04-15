@@ -129,6 +129,25 @@ polygon-agent deposit --asset USDC --amount 0.3 --protocol morpho --broadcast
 
 Vault/pool addresses are resolved dynamically from Trails — they are not hardcoded. The dry-run output includes `depositAddress` so you can inspect the exact contract before broadcasting.
 
+## Withdraw (Aave aToken or ERC-4626 vault)
+
+Pass the **position token** you hold: an **Aave aToken** address, or a **Morpho / ERC-4626 vault** (share) address. The CLI resolves the Aave **Pool** via `POOL()` on the aToken, or uses `redeem` on the vault. Dry-run by default.
+
+```bash
+# Full exit from an Aave position (aToken from balances output)
+polygon-agent withdraw --position 0x68215b6533c47ff9f7125ac95adf00fe4a62f79e --amount max --chain mainnet
+
+# Partial Aave withdraw (underlying units, e.g. USDC)
+polygon-agent withdraw --position <aToken> --amount 0.5 --chain mainnet --broadcast
+
+# ERC-4626: max redeems all shares; partial amount is underlying units (convertToShares)
+polygon-agent withdraw --position <vault> --amount max --chain polygon --broadcast
+```
+
+Whitelist the **pool** (Aave) or **vault** contract on the session if the wallet rejects the call (`polygon-agent wallet create --contract <poolOrVault>`).
+
+**Same chain as the transaction:** if you use `withdraw --chain mainnet`, create or refresh the session with **`wallet create --chain mainnet`** (not only Polygon defaults). Include **`--contract`** for the **pool** and for the **underlying ERC-20** on that chain (e.g. mainnet USDC `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`) so fee / helper transfers are allowed. Tight **`--usdc-limit`** can block those — omit or relax for yield exits.
+
 ### Session Whitelisting
 
 If the deposit is rejected with a session permission error, the pool's contract address needs to be whitelisted when creating the wallet session:
