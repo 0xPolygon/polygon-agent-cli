@@ -4,6 +4,10 @@
 # skills/ is the single source of truth for all agent skill definitions.
 # The entire directory is synced to two locations on every commit:
 #
+#   packages/connector-ui/public/SKILL.md
+#     Served at https://agentconnect.polygon.technology/SKILL.md — the root
+#     skill entry point for the agent.
+#
 #   packages/connector-ui/public/skills/
 #     Served at https://agentconnect.polygon.technology/skills/ — agents fetch
 #     skill files at runtime from this URL.
@@ -34,6 +38,9 @@ function copyDir(src, dest) {
   }
 }
 
+// Sync root SKILL.md to connector-ui public root (served at /SKILL.md)
+fs.copyFileSync('skills/SKILL.md', 'packages/connector-ui/public/SKILL.md');
+
 // Sync to connector-ui (verbatim)
 copyDir('skills', 'packages/connector-ui/public/skills');
 
@@ -42,7 +49,7 @@ copyDir('skills', 'packages/polygon-agent-cli/skills');
 const cliSkill = path.join('packages/polygon-agent-cli/skills/SKILL.md');
 fs.writeFileSync(cliSkill, fs.readFileSync(cliSkill, 'utf8').replace('name: polygon-agent-kit', 'name: polygon-agent-cli'));
 "
-git add packages/connector-ui/public/skills packages/polygon-agent-cli/skills
+git add packages/connector-ui/public/SKILL.md packages/connector-ui/public/skills packages/polygon-agent-cli/skills
 
 pnpm exec lint-staged
 pnpm run typecheck

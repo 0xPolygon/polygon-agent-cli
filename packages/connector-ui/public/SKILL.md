@@ -7,7 +7,7 @@ description: "Complete Polygon agent toolkit for on-chain operations on Polygon.
 
 ## Prerequisites
 - Node.js 20+
-- Install globally: `npm install -g github:0xPolygon/polygon-agent-kit` (reinstall to update)
+- Install globally: `npm install -g @polygonlabs/agent-cli` (reinstall to update)
 - Entry point: `polygon-agent <command>`
 - Storage: `~/.polygon-agent/` (AES-256-GCM encrypted)
 
