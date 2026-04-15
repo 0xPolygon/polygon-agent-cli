@@ -129,10 +129,10 @@ function applySessionPermissionParams(url: URL, argv: SessionPermissionArgs): vo
   }
 
   const nativeLimit = argv['native-limit'];
-  const usdcLimit = argv['usdc-limit'] || '50';
+  const usdcLimit = argv['usdc-limit'];
   const usdtLimit = argv['usdt-limit'];
   if (nativeLimit) url.searchParams.set('nativeLimit', nativeLimit);
-  url.searchParams.set('usdcLimit', usdcLimit);
+  if (usdcLimit) url.searchParams.set('usdcLimit', usdcLimit);
   if (usdtLimit) url.searchParams.set('usdtLimit', usdtLimit);
 
   const tokenLimits = (argv['token-limit'] || [])
