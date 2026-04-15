@@ -173,90 +173,19 @@ CLI commands output JSON (non-TTY). After running a command, always render the r
 
 **Errors** — extract the `error` field and present it as a clear sentence, not a JSON blob. Include the relevant fix from the Troubleshooting table if applicable.
 
-## x402 Bazaar Services
+---
 
-Pay-per-call APIs accessible via `x402-pay`. No API keys or subscriptions — each call costs a small USDC amount drawn from your wallet. The CLI detects the 402 response, funds the exact amount, and retries automatically.
+## Use-Case Skills
 
-**Catalog:** `GET https://x402-api.onrender.com/api/catalog?status=online`
+For specific workflows, fetch and load the relevant sub-skill:
 
-### Read Twitter/X profiles & tweets
-$0.005 USDC per call.
-```bash
-# Profile + recent tweets
-polygon-agent x402-pay \
-  --url "https://x402-api.onrender.com/api/twitter?user=<username>" \
-  --wallet main --method POST
+| Use Case | Skill URL |
+|----------|-----------|
+| Polymarket prediction market trading | https://agentconnect.polygon.technology/polygon-polymarket/SKILL.md |
+| DeFi — swap, deposit, yield | https://agentconnect.polygon.technology/polygon-defi/SKILL.md |
+| x402 discovery & pay-per-call APIs | https://agentconnect.polygon.technology/polygon-discovery/SKILL.md |
 
-# Specific tweet
-polygon-agent x402-pay \
-  --url "https://x402-api.onrender.com/api/twitter?tweet=https://x.com/user/status/<id>" \
-  --wallet main --method POST
-```
-Returns: follower count, recent tweets, engagement metrics.
-
-### Generate an AI image
-$0.02 USDC per call. Powered by Google Gemini.
-```bash
-polygon-agent x402-pay \
-  --url "https://x402-api.onrender.com/api/call/2998d205-94d9-4f7e-8f8a-201a090a5530?prompt=<description>&size=512" \
-  --wallet main --method POST
-```
-`size` options: `256`, `512`, `1024`. Returns JSON with `data_uri` (base64 PNG) for embedding.
-
-### Score a sales lead
-$0.01 USDC per call.
-```bash
-polygon-agent x402-pay \
-  --url "https://x402-api.onrender.com/api/call/31bf0100-2674-4706-a3d4-fc631d44c649?domain=<domain>" \
-  --wallet main --method POST
-```
-Returns: 0–100 score, A–F grade, and 7 signal breakdown: domain age, email setup (MX records), SSL health, DNS configuration, GitHub presence, and tech stack.
-
-### Other useful services
-
-| Service | Price | Endpoint | Key param |
-|---------|-------|----------|-----------|
-| Web search (DuckDuckGo) | $0.005 | `9b0f5b5f-8e6c-4b55-a264-008e4e490c26` | `?q=<query>&max=10` |
-| Latest news (Google News) | $0.005 | `266d045f-bae2-4c71-9469-3638ec860fc4` | `?topic=<topic>&lang=en` |
-| Summarize text (GPT-4o-mini) | $0.01 | `dd9b5098-700d-47a9-a41a-c9eae66ca49d` | `?text=<text>&maxLength=200` |
-| Article → Markdown | $0.005 | `87b50238-5b99-4521-b5e1-7515a9c1526d` | `?url=<article-url>` |
-| Sentiment analysis (GPT-4o-mini) | $0.005 | `66d68ca6-a8d9-41a3-b024-a3fac2f5c7ba` | `?text=<text>` |
-
-All use POST via `polygon-agent x402-pay --url "https://x402-api.onrender.com/api/call/<id><params>" --wallet main --method POST`.
-
-## Yield Vault Contract Whitelist
-
-To deposit into yield vaults, the wallet session must pre-whitelist each vault contract. When creating a wallet for yield/deposit use cases, add `--contract` flags for the vaults you intend to use. Also omit `--usdc-limit` and pass `--contract 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359` (USDC) instead — `--usdc-limit` blocks the `approve` calls that deposit requires.
-
-**Example wallet create for yield:**
-```bash
-polygon-agent wallet create \
-  --contract 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359 \
-  --contract <vault-address> \
-  --native-limit 5
-```
-
-### Katana (chainId 747474) — Morpho vaults
-
-| Vault | Protocol | Asset | TVL | Address |
-|-------|----------|-------|-----|---------|
-| Gauntlet USDT | Morpho | USDT | ~$97M | `0x1ecdc3f2b5e90bfb55ff45a7476ff98a8957388e` |
-| Steakhouse Prime USDC | Morpho | USDC | ~$54M | `0x61d4f9d3797ba4da152238c53a6f93fb665c3c1d` |
-| Yearn OG ETH | Morpho | WETH | ~$16M | `0xfade0c546f44e33c134c4036207b314ac643dc2e` |
-| Yearn OG USDC | Morpho | USDC | ~$16M | `0xce2b8e464fc7b5e58710c24b7e5ebfb6027f29d7` |
-| Gauntlet USDC | Morpho | USDC | ~$8M | `0xe4248e2105508fcbad3fe95691551d1af14015f7` |
-| Yearn OG USDT | Morpho | USDT | ~$8M | `0x8ed68f91afbe5871dce31ae007a936ebe8511d47` |
-| Gauntlet WETH | Morpho | WETH | ~$6M | `0xc5e7ab07030305fc925175b25b93b285d40dcdff` |
-| Hyperithm vbUSDC Apex | Morpho | USDC | ~$3M | `0xef77f8c53af95f3348cee0fb2a02ee02ab9cdca5` |
-
-### Polygon mainnet (chainId 137)
-
-| Protocol | Asset | Address |
-|----------|-------|---------|
-| Aave V3 Pool (all markets) | USDC, USDT, WETH, WMATIC… | `0x794a61358d6845594f94dc1db02a252b5b4814ad` |
-| Morpho Compound USDC | USDC | `0x781fb7f6d845e3be129289833b04d43aa8558c42` |
-| Morpho Compound WETH | WETH | `0xf5c81d25ee174d83f1fd202ca94ae6070d073ccf` |
-| Morpho Compound POL | POL | `0x3f33f9f7e2d7cfbcbdf8ea8b870a6e3d449664c2` |
+---
 
 ## Troubleshooting
 
