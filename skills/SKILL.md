@@ -177,13 +177,13 @@ CLI commands output JSON (non-TTY). After running a command, always render the r
 
 ## Use-Case Skills
 
-For specific workflows, load the relevant sub-skill:
+For specific workflows, fetch and load the relevant sub-skill:
 
-| Use Case | Skill |
-|----------|-------|
-| Polymarket prediction market trading | [polygon-polymarket/SKILL.md](polygon-polymarket/SKILL.md) |
-| DeFi — swap, deposit, yield | [polygon-defi/SKILL.md](polygon-defi/SKILL.md) |
-| x402 discovery & pay-per-call APIs | [polygon-discovery/SKILL.md](polygon-discovery/SKILL.md) |
+| Use Case | Skill URL |
+|----------|-----------|
+| Polymarket prediction market trading | https://agentconnect.polygon.technology/polygon-polymarket/SKILL.md |
+| DeFi — swap, deposit, yield | https://agentconnect.polygon.technology/polygon-defi/SKILL.md |
+| x402 discovery & pay-per-call APIs | https://agentconnect.polygon.technology/polygon-discovery/SKILL.md |
 
 ---
 
