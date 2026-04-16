@@ -1452,9 +1452,16 @@ export const withdrawCommand: CommandModule = {
       withWalletAndChain(yargs)
         .option('position', {
           type: 'string',
-          demandOption: true,
-          describe: 'Position token: Aave aToken address, or ERC-4626 vault (share token) address',
+          describe: 'Position token: Aave aToken address, or ERC-4626 vault (share token) address. (Optional if --asset and --protocol are used)',
           coerce: fileCoerce
+        })
+        .option('asset', {
+          type: 'string',
+          describe: 'Asset symbol (e.g. USDC). Used with --protocol to auto-discover the position address.'
+        })
+        .option('protocol', {
+          type: 'string',
+          describe: 'Filter by protocol (e.g. aave, morpho). Used with --asset to auto-discover the position address.'
         })
         .option('amount', {
           type: 'string',
@@ -1465,22 +1472,10 @@ export const withdrawCommand: CommandModule = {
     ),
   handler: async (argv) => {
     const walletName = (argv.wallet as string) || 'main';
-    const positionAddr = String(argv.position || '')
-      .trim()
-      .toLowerCase() as `0x${string}`;
     const amountArg = String(argv.amount || '').trim().toLowerCase();
     const broadcast = argv.broadcast as boolean;
-
-    if (!positionAddr.startsWith('0x') || positionAddr.length !== 42) {
-      console.error(
-        JSON.stringify(
-          { ok: false, error: 'Invalid --position address (expected 0x + 40 hex chars).' },
-          null,
-          2
-        )
-      );
-      process.exit(1);
-    }
+    const protocolFilter = (argv.protocol as string)?.toLowerCase();
+    const assetSymbol = (argv.asset as string)?.toUpperCase();
 
     try {
       const session = await loadWalletSession(walletName);
@@ -1490,12 +1485,105 @@ export const withdrawCommand: CommandModule = {
       const { chainId } = network;
       const walletAddress = session.walletAddress as `0x${string}`;
 
-      const { createPublicClient, http, encodeFunctionData, maxUint256 } = await import('viem');
+      const { createPublicClient, http, encodeFunctionData, maxUint256, parseUnits } = await import('viem');
       const viemChain = await viemChainForWithdraw(chainId);
       const publicClient = createPublicClient({
         chain: viemChain,
         transport: http(getRpcUrl(network))
       });
+
+      let positionAddr = String(argv.position || '').trim().toLowerCase() as `0x${string}`;
+
+      if (!positionAddr && assetSymbol && protocolFilter) {
+        const asset = await getTokenConfig({
+          chainId,
+          symbol: assetSymbol,
+          nativeSymbol: network.nativeToken?.symbol || 'POL'
+        });
+
+        const { TrailsApi } = await import('@0xtrails/api');
+        const trailsApiKey =
+          process.env.TRAILS_API_KEY ||
+          session.projectAccessKey ||
+          process.env.SEQUENCE_PROJECT_ACCESS_KEY ||
+          '';
+        const trails = new TrailsApi(trailsApiKey, {
+          hostname: process.env.TRAILS_API_HOSTNAME
+        });
+
+        const earnRes = await trails.getEarnPools({ chainIds: [chainId] });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let pools = ((earnRes as any)?.pools || []).filter(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (p: any) =>
+            p.isActive &&
+            p.chainId === chainId &&
+            (p.token?.symbol?.toUpperCase() === assetSymbol ||
+              p.token?.address?.toLowerCase() === asset.address.toLowerCase())
+        );
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        pools = pools.filter((p: any) =>
+          p.protocol?.toLowerCase().includes(protocolFilter)
+        );
+
+        if (pools.length === 0) {
+          throw new Error(
+            `No active earn pools found for ${assetSymbol} on ${network.name} (protocol filter: ${protocolFilter}). Try passing --position explicitly.`
+          );
+        }
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        pools.sort((a: any, b: any) => b.tvl - a.tvl);
+        const pool = pools[0];
+        
+        if (protocolFilter.includes('aave')) {
+          const AAVE_POOL_RESERVE_DATA_ABI = [{
+            "inputs": [{"internalType": "address","name": "asset","type": "address"}],
+            "name": "getReserveData",
+            "outputs": [
+              {"components": [
+                {"components": [{"internalType": "uint256","name": "data","type": "uint256"}],"internalType": "struct DataTypes.ReserveConfigurationMap","name": "configuration","type": "tuple"},
+                {"internalType": "uint128","name": "liquidityIndex","type": "uint128"},
+                {"internalType": "uint128","name": "currentLiquidityRate","type": "uint128"},
+                {"internalType": "uint128","name": "variableBorrowIndex","type": "uint128"},
+                {"internalType": "uint128","name": "currentVariableBorrowRate","type": "uint128"},
+                {"internalType": "uint128","name": "currentStableBorrowRate","type": "uint128"},
+                {"internalType": "uint40","name": "lastUpdateTimestamp","type": "uint40"},
+                {"internalType": "uint16","name": "id","type": "uint16"},
+                {"internalType": "address","name": "aTokenAddress","type": "address"},
+                {"internalType": "address","name": "stableDebtTokenAddress","type": "address"},
+                {"internalType": "address","name": "variableDebtTokenAddress","type": "address"},
+                {"internalType": "address","name": "interestRateStrategyAddress","type": "address"},
+                {"internalType": "uint128","name": "accruedToTreasury","type": "uint128"},
+                {"internalType": "uint128","name": "unbacked","type": "uint128"},
+                {"internalType": "uint128","name": "isolationModeTotalDebt","type": "uint128"}
+              ],"internalType": "struct DataTypes.ReserveData","name": "","type": "tuple"}
+            ],
+            "stateMutability": "view",
+            "type": "function"
+          }];
+          
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const reserveData: any = await publicClient.readContract({
+            address: pool.depositAddress as `0x${string}`,
+            abi: AAVE_POOL_RESERVE_DATA_ABI,
+            functionName: 'getReserveData',
+            args: [asset.address as `0x${string}`]
+          }).catch(() => null);
+          
+          if (!reserveData || !reserveData.aTokenAddress) {
+             throw new Error(`Failed to resolve aToken address for ${assetSymbol} on Aave pool ${pool.depositAddress}. Try passing --position explicitly.`);
+          }
+          positionAddr = reserveData.aTokenAddress.toLowerCase() as `0x${string}`;
+        } else {
+          positionAddr = pool.depositAddress.toLowerCase() as `0x${string}`;
+        }
+      }
+
+      if (!positionAddr.startsWith('0x') || positionAddr.length !== 42) {
+        throw new Error('Invalid or missing --position address (expected 0x + 40 hex chars). Provide --position or both --asset and --protocol.');
+      }
 
       const aaveMeta = await publicClient
         .readContract({
@@ -1561,7 +1649,7 @@ export const withdrawCommand: CommandModule = {
 
         if (!underlying) {
           throw new Error(
-            'Could not treat --position as Aave aToken (POOL / UNDERLYING_ASSET_ADDRESS) or ERC-4626 vault (asset()). ' +
+            `Could not treat position (${positionAddr}) as Aave aToken (POOL / UNDERLYING_ASSET_ADDRESS) or ERC-4626 vault (asset()). ` +
               'Pass the aToken or vault share contract you hold.'
           );
         }
