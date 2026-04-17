@@ -3,6 +3,31 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [1.5.0](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-connector-ui@1.4.2...@polygonlabs/agent-connector-ui@1.5.0) (2026-04-16)
+
+
+### Bug Fixes
+
+* **skills:** fix Twitter/X x402 endpoint in polygon-discovery ([8f667f9](https://github.com/0xPolygon/polygon-agent-cli/commit/8f667f97f8b51c26d95e77de37c6b8877b5a759b))
+* **skills:** rename to "Polygon Agent" and fix Twitter/X x402 endpoint ([7909791](https://github.com/0xPolygon/polygon-agent-cli/commit/7909791aa715a3ed5a6aecdf5a0d35d5cf17b9c0))
+* **skills:** serve sub-skills at root paths on agentconnect domain ([8d3b042](https://github.com/0xPolygon/polygon-agent-cli/commit/8d3b042e815a485af0582af60d791c15a37249d0))
+* **skills:** sync root public/SKILL.md in pre-commit hook ([0e7c291](https://github.com/0xPolygon/polygon-agent-cli/commit/0e7c291c440112c15813ea907aa19dc20d88ae02))
+* **skills:** sync root public/SKILL.md to use sub-skill URLs ([0c748fb](https://github.com/0xPolygon/polygon-agent-cli/commit/0c748fb29f3719b2c1d3b8e89a17808465268a41))
+* **skills:** update install command to npm install -g @polygonlabs/agent-cli ([e0ac8cb](https://github.com/0xPolygon/polygon-agent-cli/commit/e0ac8cb34212f9b4b24b22ea1fa6c3416744cc1a))
+* **skills:** update Twitter/X description to follower/following counts and tweet metrics ([7dcfb29](https://github.com/0xPolygon/polygon-agent-cli/commit/7dcfb29d4e5b8c8b5c7227835ce84118adca7b47))
+* **skills:** use absolute URLs for sub-skill discovery ([12a8d14](https://github.com/0xPolygon/polygon-agent-cli/commit/12a8d145363bd4749b628e2b94d497e7fa12cba7))
+
+
+### Features
+
+* **skill:** add prerequisites check to polygon-discovery skill ([d16d6fa](https://github.com/0xPolygon/polygon-agent-cli/commit/d16d6fa8f1eff21f2338550d4f0acc40fc7248a3))
+* **skills:** add getEarnPools API reference to polygon-defi skill ([a175c26](https://github.com/0xPolygon/polygon-agent-cli/commit/a175c2670914ad618541ab3dc8d56fac374e03a3))
+* **skills:** add getEarnPools API reference to polygon-defi skill ([411d831](https://github.com/0xPolygon/polygon-agent-cli/commit/411d831fe5c43881f1aaa3e07b20359a79e3c673))
+
+
+
+
+
 ## [1.4.2](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-connector-ui@1.4.1...@polygonlabs/agent-connector-ui@1.4.2) (2026-04-14)
 
 
