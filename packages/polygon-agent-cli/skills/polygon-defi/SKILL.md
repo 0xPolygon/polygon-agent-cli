@@ -134,27 +134,25 @@ Vault/pool addresses are resolved dynamically from Trails — they are not hardc
 
 ### Session Whitelisting
 
-If the deposit is rejected with a session permission error, the pool's contract address needs to be whitelisted when creating the wallet session:
+A deposit sends **two transactions**: an ERC-20 `approve()` on the token contract, then the pool deposit call. Both contracts must be whitelisted in the session. If the deposit is rejected with a session permission error:
 
 ```bash
-# 1. Dry-run first to get the depositAddress
+# 1. Dry-run first — output includes both addresses under `transactions[0].to` (token) and `depositAddress` (pool)
 polygon-agent deposit --asset USDC --amount 0.3
-# → note the depositAddress in output
+# → note the token contract address (e.g. USDC: 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359)
+# → note the depositAddress (e.g. Aave V3: 0x794a61358d6845594f94dc1db02a252b5b4814ad)
 
-# 2. Re-create wallet session with that contract whitelisted
-polygon-agent wallet create --contract <depositAddress>
+# 2. Re-create wallet session with BOTH contracts whitelisted
+polygon-agent wallet create --contract <tokenAddress> --contract <depositAddress>
 
 # 3. Retry
 polygon-agent deposit --asset USDC --amount 0.3 --broadcast
 ```
 
-When creating a wallet specifically for yield, add `--contract` flags for all intended vaults upfront and omit `--usdc-limit`:
-
-```bash
-polygon-agent wallet create \
-  --contract 0x794a61358d6845594f94dc1db02a252b5b4814ad \
-  --contract 0x781fb7f6d845e3be129289833b04d43aa8558c42
-```
+Common token contracts on Polygon mainnet (already auto-whitelisted in sessions created by the CLI):
+- USDC: `0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359`
+- USDT: `0xc2132D05D31c914a87C6611C10748AEb04B58e8F`
+- WETH: `0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619`
 
 ### Yield Vault Contract Whitelist
 
@@ -206,7 +204,7 @@ polygon-agent swap --from USDC --to USDC --amount 0.5 --to-chain arbitrum --broa
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `Deposit session rejected` | Pool contract not whitelisted in session | Re-create wallet with `--contract <depositAddress>` |
+| `Deposit session rejected` | Pool or token contract not whitelisted | Re-create wallet with `--contract <tokenAddress> --contract <depositAddress>` (both required) |
 | `Protocol X not yet supported` | Trails returned a protocol other than aave/morpho | Use `polygon-agent swap` to obtain the yield-bearing token manually |
 | `Fee option errors` | Wallet has insufficient balance | Run `polygon-agent balances` and fund the wallet |
 | `swap`: no route found | Insufficient liquidity for the pair | Try a different amount or token pair |

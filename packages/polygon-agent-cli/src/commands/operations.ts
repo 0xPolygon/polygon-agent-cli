@@ -1256,7 +1256,7 @@ export const depositCommand: CommandModule = {
               chainId,
               chain: network.name,
               transactions,
-              note: `Re-run with --broadcast to submit the deposit. If session rejects the call, re-create with: polygon-agent wallet create --contract ${pool.depositAddress}`
+              note: `Re-run with --broadcast to submit the deposit. If session rejects the call, re-create with: polygon-agent wallet create --contract ${asset.address} --contract ${pool.depositAddress}`
             },
             bigintReplacer,
             2
@@ -1277,8 +1277,8 @@ export const depositCommand: CommandModule = {
       } catch (txErr) {
         if ((txErr as Error).message?.includes('No signer supported')) {
           throw new Error(
-            `Session does not permit calls to ${pool.depositAddress} (${pool.protocol} pool). ` +
-              `Re-create the wallet session with: polygon-agent wallet create --contract ${pool.depositAddress}\n` +
+            `Session does not permit calls to ${pool.depositAddress} (${pool.protocol} pool) or ${asset.address} (${assetSymbol} approve). ` +
+              `Re-create the wallet session with: polygon-agent wallet create --contract ${asset.address} --contract ${pool.depositAddress}\n` +
               `Original error: ${(txErr as Error).message}`
           );
         }

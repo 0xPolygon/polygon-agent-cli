@@ -20,15 +20,15 @@ description: "Complete Polygon agent toolkit for on-chain operations on Polygon.
 
 ## Environment Variables
 
-### Access key — auto-loaded, no export needed
+### Access key — one key, many names
 
-After `setup` runs, the access key is stored in `~/.polygon-agent/builder.json`. The CLI bootstraps it into `SEQUENCE_PROJECT_ACCESS_KEY` and `SEQUENCE_INDEXER_ACCESS_KEY` automatically on every invocation. Trails commands additionally fall back through `session.projectAccessKey` → `SEQUENCE_PROJECT_ACCESS_KEY`, so `TRAILS_API_KEY` also does not need to be exported manually.
+`SEQUENCE_PROJECT_ACCESS_KEY`, `SEQUENCE_INDEXER_ACCESS_KEY`, and `TRAILS_API_KEY` are **all the same key** — the Sequence project access key created during `setup`. The CLI treats them as aliases and falls back through all of them automatically.
 
-**In a fresh agent session with no environment variables set**, simply run commands — the CLI reads credentials from disk. No `export` step is required between phases.
+After `setup` runs the key is stored in `~/.polygon-agent/builder.json`. Every CLI invocation bootstraps it into the environment — no `export` is needed. In a fresh agent session with no environment variables set, simply run commands and the CLI reads credentials from disk.
 
 Only set these manually to override the stored value (e.g. to point at a different project):
 ```bash
-export SEQUENCE_PROJECT_ACCESS_KEY=<override-key>
+export SEQUENCE_PROJECT_ACCESS_KEY=<key>  # also covers TRAILS_API_KEY and indexer calls
 ```
 
 ### Optional overrides
@@ -131,7 +131,7 @@ polygon-agent agent feedback --agent-id <id> --value <score> [--tag1 <t>] [--tag
 - **`balances --chains`** — comma-separated chains (max 20); two or more return JSON with `multiChain: true` and a `chains` array (same wallet address on each)
 - **Fee preference** — auto-selects USDC over native POL when both available
 - **`fund`** — reads `walletAddress` from the wallet session and sets it as `toAddress` in the Trails widget URL. Always run `polygon-agent fund` to get the correct URL — never construct it manually or hardcode any address.
-- **`deposit`** — picks highest-TVL pool via Trails `getEarnPools`. If session rejects (contract not whitelisted), re-create wallet with `--contract <depositAddress>`
+- **`deposit`** — picks highest-TVL pool via Trails `getEarnPools`. Sends two txs: ERC-20 `approve()` on the token contract, then the pool deposit. If session rejects, re-create wallet with both `--contract <tokenAddress> --contract <depositAddress>` (the dry-run output shows both addresses).
 - **`withdraw`** — `--position` = aToken or ERC-4626 vault; `--amount` = `max` or underlying units (Aave / vault). Dry-run JSON includes `poolAddress` / `vault`. Broadcast needs session on the **same chain** as `--chain`, with pool/vault + underlying token whitelisted where the relayer touches them
 - **`x402-pay`** — probes endpoint for 402, smart wallet funds builder EOA with exact token amount, EOA signs EIP-3009 payment. Chain auto-detected from 402 response
 - **`send-native --direct`** — bypasses ValueForwarder contract for direct EOA transfer
@@ -203,7 +203,7 @@ For specific workflows, fetch and load the relevant sub-skill:
 | `Timed out waiting for wallet approval` | Add `--timeout 600` |
 | `Invalid code: hash mismatch` | Wrong 6-digit code entered — retry (3 attempts allowed) |
 | `Relay request not found` | Session expired or already used — re-run `wallet create` (or `wallet create --print-url`) |
-| Deposit session rejected | Re-create wallet with `--contract <depositAddress>` |
+| Deposit session rejected | Re-create wallet with `--contract <tokenAddress> --contract <depositAddress>` (both required: token approve + pool call) |
 | `withdraw` / broadcast: wrong chain or session rejects | Use `wallet create --chain <same as --chain>` and `--contract` for pool/vault + underlying ERC-20 on that chain; omit tight `--usdc-limit` if it blocks fee transfers |
 | `Stored explicit session is missing pk` | Re-link: `wallet import --code …` after `wallet create` |
 | Wrong recipient in Trails widget | Run `polygon-agent fund` (do not construct the URL manually) |

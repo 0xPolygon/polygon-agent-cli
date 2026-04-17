@@ -51,6 +51,11 @@ const AUTO_WHITELISTED_CONTRACTS = [
   // NOTE: Trails deposit contract for swap --from POL is dynamic (changes per route/quote)
   // and cannot be reliably pre-whitelisted here.
 
+  // Polygon mainnet (chainId 137) — ERC-20 token contracts (needed for approve() in deposits/swaps)
+  '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', // USDC (native)
+  '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', // USDT
+  '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619', // WETH
+
   // Polygon mainnet (chainId 137) — yield vaults
   '0x794a61358d6845594f94dc1db02a252b5b4814ad', // Aave V3 Pool (all markets)
   '0x781fb7f6d845e3be129289833b04d43aa8558c42', // Morpho Compound USDC
