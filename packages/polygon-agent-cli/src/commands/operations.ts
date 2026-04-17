@@ -10,6 +10,7 @@ import {
   formatUnits,
   parseUnits,
   getExplorerUrl,
+  getRpcUrl,
   fileCoerce
 } from '../lib/utils.ts';
 import { isTTY, inkRender } from '../ui/render.js';
@@ -111,16 +112,114 @@ async function getTokenConfig({
 
 const bigintReplacer = (_k: string, v: unknown) => (typeof v === 'bigint' ? v.toString() : v);
 
+const BALANCES_MAX_CHAINS = 20;
+
+function parseCommaChainList(chainsArg: string | undefined): string[] {
+  if (!chainsArg || typeof chainsArg !== 'string') return [];
+  return chainsArg
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+type BalanceRowJson =
+  | { type: 'native'; symbol: string; balance: string }
+  | {
+      type: 'erc20';
+      symbol: string;
+      name?: string;
+      contractAddress: string;
+      balance: string;
+    };
+
+async function fetchBalancesRowsForChain(
+  walletAddress: string,
+  chainSpec: string,
+  indexerKey: string
+): Promise<{ chainId: number; chain: string; balances: BalanceRowJson[] }> {
+  const network = resolveNetwork(chainSpec);
+  const nativeDecimals = network.nativeToken?.decimals ?? 18;
+  const nativeSymbol = network.nativeToken?.symbol || 'POL';
+
+  const { SequenceIndexer } = await import('@0xsequence/indexer');
+  const indexerUrl = getChainIndexerUrl(network.chainId);
+  const indexer = new SequenceIndexer(indexerUrl, indexerKey);
+
+  const [nativeRes, tokenRes] = await Promise.all([
+    indexer.getNativeTokenBalance({
+      accountAddress: walletAddress
+    }),
+    indexer.getTokenBalances({
+      accountAddress: walletAddress,
+      includeMetadata: true
+    })
+  ]);
+
+  const nativeWei = nativeRes?.balance?.balance || '0';
+  const native: BalanceRowJson[] = [
+    {
+      type: 'native',
+      symbol: nativeSymbol,
+      balance: formatUnits(BigInt(nativeWei), nativeDecimals)
+    }
+  ];
+
+  const erc20: BalanceRowJson[] = (tokenRes?.balances || []).map(
+    (b: {
+      contractInfo?: { symbol?: string; name?: string; decimals?: number };
+      contractAddress: string;
+      balance?: string;
+    }) => ({
+      type: 'erc20' as const,
+      symbol: b.contractInfo?.symbol || 'ERC20',
+      name: b.contractInfo?.name || undefined,
+      contractAddress: b.contractAddress,
+      balance: formatUnits(b.balance || '0', b.contractInfo?.decimals ?? 18)
+    })
+  );
+
+  return {
+    chainId: network.chainId,
+    chain: network.name,
+    balances: [...native, ...erc20]
+  };
+}
+
 // --- balances ---
 export const balancesCommand: CommandModule = {
   command: 'balances',
   describe: 'Check token balances',
-  builder: (yargs) => withWalletAndChain(yargs),
+  builder: (yargs) =>
+    withWalletAndChain(yargs).option('chains', {
+      type: 'string',
+      describe:
+        'Comma-separated chain names or IDs (e.g. polygon,base,arbitrum). When set, overrides --chain. Two or more chains return multi-chain JSON (TTY included).'
+    }),
   handler: async (argv) => {
     const walletName = argv.wallet as string;
+    const chainListRaw = parseCommaChainList(argv.chains as string | undefined);
+    if (chainListRaw.length > BALANCES_MAX_CHAINS) {
+      console.error(
+        JSON.stringify(
+          {
+            ok: false,
+            error: `Too many chains in --chains (max ${BALANCES_MAX_CHAINS}).`
+          },
+          null,
+          2
+        )
+      );
+      process.exit(1);
+    }
+    const chainList = chainListRaw;
 
-    if (!isTTY()) {
-      // Non-TTY: original JSON output
+    const preferChainsArg = chainList.length > 0;
+    const singleChainSpec = preferChainsArg
+      ? chainList[0]
+      : ((argv.chain as string) || undefined);
+    const multiChainMode = preferChainsArg && chainList.length > 1;
+
+    if (multiChainMode || (preferChainsArg && !isTTY())) {
       try {
         const session = await loadWalletSession(walletName);
         if (!session) {
@@ -135,46 +234,81 @@ export const balancesCommand: CommandModule = {
           throw new Error('Missing project access key (not in wallet session or environment)');
         }
 
-        const network = resolveNetwork((argv.chain as string) || session.chain || 'polygon');
-        const nativeDecimals = network.nativeToken?.decimals ?? 18;
-        const nativeSymbol = network.nativeToken?.symbol || 'POL';
-
-        const { SequenceIndexer } = await import('@0xsequence/indexer');
-        const indexerUrl = getChainIndexerUrl(network.chainId);
-        const indexer = new SequenceIndexer(indexerUrl, indexerKey);
-
-        const [nativeRes, tokenRes] = await Promise.all([
-          indexer.getNativeTokenBalance({
-            accountAddress: session.walletAddress
-          }),
-          indexer.getTokenBalances({
-            accountAddress: session.walletAddress,
-            includeMetadata: true
-          })
-        ]);
-
-        const nativeWei = nativeRes?.balance?.balance || '0';
-        const native = [
-          {
-            type: 'native',
-            symbol: nativeSymbol,
-            balance: formatUnits(BigInt(nativeWei), nativeDecimals)
-          }
-        ];
-
-        const erc20 = (tokenRes?.balances || []).map(
-          (b: {
-            contractInfo?: { symbol?: string; name?: string; decimals?: number };
-            contractAddress: string;
-            balance?: string;
-          }) => ({
-            type: 'erc20',
-            symbol: b.contractInfo?.symbol || 'ERC20',
-            name: b.contractInfo?.name || undefined,
-            contractAddress: b.contractAddress,
-            balance: formatUnits(b.balance || '0', b.contractInfo?.decimals ?? 18)
-          })
+        if (multiChainMode) {
+          const chainsOut = await Promise.all(
+            chainList.map((spec) =>
+              fetchBalancesRowsForChain(session.walletAddress, spec, indexerKey)
+            )
+          );
+          console.log(
+            JSON.stringify(
+              {
+                ok: true,
+                walletName,
+                walletAddress: session.walletAddress,
+                multiChain: true,
+                chains: chainsOut
+              },
+              bigintReplacer,
+              2
+            )
+          );
+        } else {
+          const one = await fetchBalancesRowsForChain(
+            session.walletAddress,
+            singleChainSpec!,
+            indexerKey
+          );
+          console.log(
+            JSON.stringify(
+              {
+                ok: true,
+                walletName,
+                walletAddress: session.walletAddress,
+                chainId: one.chainId,
+                chain: one.chain,
+                balances: one.balances
+              },
+              bigintReplacer,
+              2
+            )
+          );
+        }
+      } catch (error) {
+        console.error(
+          JSON.stringify(
+            {
+              ok: false,
+              error: (error as Error).message,
+              stack: (error as Error).stack
+            },
+            null,
+            2
+          )
         );
+        process.exit(1);
+      }
+      return;
+    }
+
+    if (!isTTY()) {
+      // Non-TTY: original JSON output (single default / --chain)
+      try {
+        const session = await loadWalletSession(walletName);
+        if (!session) {
+          throw new Error(`Wallet not found: ${walletName}`);
+        }
+
+        const indexerKey =
+          process.env.SEQUENCE_INDEXER_ACCESS_KEY ||
+          session.projectAccessKey ||
+          process.env.SEQUENCE_PROJECT_ACCESS_KEY;
+        if (!indexerKey) {
+          throw new Error('Missing project access key (not in wallet session or environment)');
+        }
+
+        const chainSpec = (argv.chain as string) || session.chain || 'polygon';
+        const one = await fetchBalancesRowsForChain(session.walletAddress, chainSpec, indexerKey);
 
         console.log(
           JSON.stringify(
@@ -182,11 +316,11 @@ export const balancesCommand: CommandModule = {
               ok: true,
               walletName,
               walletAddress: session.walletAddress,
-              chainId: network.chainId,
-              chain: network.name,
-              balances: [...native, ...erc20]
+              chainId: one.chainId,
+              chain: one.chain,
+              balances: one.balances
             },
-            null,
+            bigintReplacer,
             2
           )
         );
@@ -211,7 +345,7 @@ export const balancesCommand: CommandModule = {
         await inkRender(
           React.createElement(BalancesUI, {
             walletName,
-            chainOverride: argv.chain as string | undefined
+            chainOverride: preferChainsArg ? singleChainSpec : (argv.chain as string | undefined)
           })
         );
       } catch {
@@ -1167,6 +1301,473 @@ export const depositCommand: CommandModule = {
             txHash: result.txHash,
             explorerUrl: getExplorerUrl(network, result.txHash ?? ''),
             note: `${assetSymbol} is now earning yield in ${protocolLabel}. You will receive an interest-bearing token in your wallet.`
+          },
+          bigintReplacer,
+          2
+        )
+      );
+    } catch (error) {
+      console.error(
+        JSON.stringify(
+          {
+            ok: false,
+            error: (error as Error).message,
+            stack: (error as Error).stack
+          },
+          null,
+          2
+        )
+      );
+      process.exit(1);
+    }
+  }
+};
+
+const AAVE_ATOKEN_META_ABI = [
+  {
+    name: 'POOL',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'address' }]
+  },
+  {
+    name: 'UNDERLYING_ASSET_ADDRESS',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'address' }]
+  }
+] as const;
+
+const ERC20_DECIMALS_ABI = [
+  {
+    name: 'decimals',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'uint8' }]
+  }
+] as const;
+
+const ERC20_BALANCE_OF_ABI = [
+  {
+    name: 'balanceOf',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ type: 'uint256' }]
+  }
+] as const;
+
+const ERC4626_ASSET_ABI = [
+  {
+    name: 'asset',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'address' }]
+  }
+] as const;
+
+const ERC4626_CONVERT_TO_SHARES_ABI = [
+  {
+    name: 'convertToShares',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'assets', type: 'uint256' }],
+    outputs: [{ type: 'uint256' }]
+  }
+] as const;
+
+const AAVE_POOL_WITHDRAW_ABI = [
+  {
+    name: 'withdraw',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'asset', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+      { name: 'to', type: 'address' }
+    ],
+    outputs: [{ type: 'uint256' }]
+  }
+] as const;
+
+const ERC4626_REDEEM_ABI = [
+  {
+    name: 'redeem',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'shares', type: 'uint256' },
+      { name: 'receiver', type: 'address' },
+      { name: 'owner', type: 'address' }
+    ],
+    outputs: [{ type: 'uint256' }]
+  }
+] as const;
+
+async function viemChainForWithdraw(chainId: number) {
+  const {
+    mainnet,
+    polygon,
+    arbitrum,
+    optimism,
+    base,
+    avalanche,
+    bsc,
+    gnosis,
+    polygonAmoy
+  } = await import('viem/chains');
+  const map = {
+    1: mainnet,
+    137: polygon,
+    42161: arbitrum,
+    10: optimism,
+    8453: base,
+    43114: avalanche,
+    56: bsc,
+    100: gnosis,
+    80002: polygonAmoy
+  } as const;
+  const c = map[chainId as keyof typeof map];
+  if (!c) {
+    throw new Error(
+      `withdraw: chainId ${chainId} has no bundled viem chain config. Extend viemChainForWithdraw or use a supported chain.`
+    );
+  }
+  return c;
+}
+
+// --- withdraw ---
+export const withdrawCommand: CommandModule = {
+  command: 'withdraw',
+  describe: 'Withdraw from an Aave v3 aToken position or ERC-4626 vault (dry-run by default)',
+  builder: (yargs) =>
+    withBroadcast(
+      withWalletAndChain(yargs)
+        .option('position', {
+          type: 'string',
+          describe: 'Position token: Aave aToken address, or ERC-4626 vault (share token) address. (Optional if --asset and --protocol are used)',
+          coerce: fileCoerce
+        })
+        .option('asset', {
+          type: 'string',
+          describe: 'Asset symbol (e.g. USDC). Used with --protocol to auto-discover the position address.'
+        })
+        .option('protocol', {
+          type: 'string',
+          describe: 'Filter by protocol (e.g. aave, morpho). Used with --asset to auto-discover the position address.'
+        })
+        .option('amount', {
+          type: 'string',
+          demandOption: true,
+          describe: 'Underlying amount to withdraw (Aave), or max | partial underlying (ERC-4626). Use max for full exit.',
+          coerce: fileCoerce
+        })
+    ),
+  handler: async (argv) => {
+    const walletName = (argv.wallet as string) || 'main';
+    const amountArg = String(argv.amount || '').trim().toLowerCase();
+    const broadcast = argv.broadcast as boolean;
+    const protocolFilter = (argv.protocol as string)?.toLowerCase();
+    const assetSymbol = (argv.asset as string)?.toUpperCase();
+
+    try {
+      const session = await loadWalletSession(walletName);
+      if (!session) throw new Error(`Wallet not found: ${walletName}`);
+
+      const network = resolveNetwork((argv.chain as string) || session.chain || 'polygon');
+      const { chainId } = network;
+      const walletAddress = session.walletAddress as `0x${string}`;
+
+      const { createPublicClient, http, encodeFunctionData, maxUint256, parseUnits } = await import('viem');
+      const viemChain = await viemChainForWithdraw(chainId);
+      const publicClient = createPublicClient({
+        chain: viemChain,
+        transport: http(getRpcUrl(network))
+      });
+
+      let positionAddr = String(argv.position || '').trim().toLowerCase() as `0x${string}`;
+
+      if (!positionAddr && assetSymbol && protocolFilter) {
+        const asset = await getTokenConfig({
+          chainId,
+          symbol: assetSymbol,
+          nativeSymbol: network.nativeToken?.symbol || 'POL'
+        });
+
+        const { TrailsApi } = await import('@0xtrails/api');
+        const trailsApiKey =
+          process.env.TRAILS_API_KEY ||
+          session.projectAccessKey ||
+          process.env.SEQUENCE_PROJECT_ACCESS_KEY ||
+          '';
+        const trails = new TrailsApi(trailsApiKey, {
+          hostname: process.env.TRAILS_API_HOSTNAME
+        });
+
+        const earnRes = await trails.getEarnPools({ chainIds: [chainId] });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let pools = ((earnRes as any)?.pools || []).filter(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (p: any) =>
+            p.isActive &&
+            p.chainId === chainId &&
+            (p.token?.symbol?.toUpperCase() === assetSymbol ||
+              p.token?.address?.toLowerCase() === asset.address.toLowerCase())
+        );
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        pools = pools.filter((p: any) =>
+          p.protocol?.toLowerCase().includes(protocolFilter)
+        );
+
+        if (pools.length === 0) {
+          throw new Error(
+            `No active earn pools found for ${assetSymbol} on ${network.name} (protocol filter: ${protocolFilter}). Try passing --position explicitly.`
+          );
+        }
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        pools.sort((a: any, b: any) => b.tvl - a.tvl);
+        const pool = pools[0];
+        
+        if (protocolFilter.includes('aave')) {
+          const AAVE_POOL_RESERVE_DATA_ABI = [{
+            "inputs": [{"internalType": "address","name": "asset","type": "address"}],
+            "name": "getReserveData",
+            "outputs": [
+              {"components": [
+                {"components": [{"internalType": "uint256","name": "data","type": "uint256"}],"internalType": "struct DataTypes.ReserveConfigurationMap","name": "configuration","type": "tuple"},
+                {"internalType": "uint128","name": "liquidityIndex","type": "uint128"},
+                {"internalType": "uint128","name": "currentLiquidityRate","type": "uint128"},
+                {"internalType": "uint128","name": "variableBorrowIndex","type": "uint128"},
+                {"internalType": "uint128","name": "currentVariableBorrowRate","type": "uint128"},
+                {"internalType": "uint128","name": "currentStableBorrowRate","type": "uint128"},
+                {"internalType": "uint40","name": "lastUpdateTimestamp","type": "uint40"},
+                {"internalType": "uint16","name": "id","type": "uint16"},
+                {"internalType": "address","name": "aTokenAddress","type": "address"},
+                {"internalType": "address","name": "stableDebtTokenAddress","type": "address"},
+                {"internalType": "address","name": "variableDebtTokenAddress","type": "address"},
+                {"internalType": "address","name": "interestRateStrategyAddress","type": "address"},
+                {"internalType": "uint128","name": "accruedToTreasury","type": "uint128"},
+                {"internalType": "uint128","name": "unbacked","type": "uint128"},
+                {"internalType": "uint128","name": "isolationModeTotalDebt","type": "uint128"}
+              ],"internalType": "struct DataTypes.ReserveData","name": "","type": "tuple"}
+            ],
+            "stateMutability": "view",
+            "type": "function"
+          }];
+          
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const reserveData: any = await publicClient.readContract({
+            address: pool.depositAddress as `0x${string}`,
+            abi: AAVE_POOL_RESERVE_DATA_ABI,
+            functionName: 'getReserveData',
+            args: [asset.address as `0x${string}`]
+          }).catch(() => null);
+          
+          if (!reserveData || !reserveData.aTokenAddress) {
+             throw new Error(`Failed to resolve aToken address for ${assetSymbol} on Aave pool ${pool.depositAddress}. Try passing --position explicitly.`);
+          }
+          positionAddr = reserveData.aTokenAddress.toLowerCase() as `0x${string}`;
+        } else {
+          positionAddr = pool.depositAddress.toLowerCase() as `0x${string}`;
+        }
+      }
+
+      if (!positionAddr.startsWith('0x') || positionAddr.length !== 42) {
+        throw new Error('Invalid or missing --position address (expected 0x + 40 hex chars). Provide --position or both --asset and --protocol.');
+      }
+
+      const aaveMeta = await publicClient
+        .readContract({
+          address: positionAddr,
+          abi: AAVE_ATOKEN_META_ABI,
+          functionName: 'POOL'
+        })
+        .then(async (pool) => {
+          const underlying = await publicClient.readContract({
+            address: positionAddr,
+            abi: AAVE_ATOKEN_META_ABI,
+            functionName: 'UNDERLYING_ASSET_ADDRESS'
+          });
+          return { pool: pool as `0x${string}`, underlying: underlying as `0x${string}` };
+        })
+        .catch(() => null);
+
+      let transactions: { to: `0x${string}`; value: bigint; data: `0x${string}` }[];
+      let kind: 'aave' | 'erc4626';
+      let summary: Record<string, unknown>;
+
+      if (aaveMeta) {
+        kind = 'aave';
+        const underlyingDec = Number(
+          await publicClient.readContract({
+            address: aaveMeta.underlying,
+            abi: ERC20_DECIMALS_ABI,
+            functionName: 'decimals'
+          })
+        );
+        const amountWei =
+          amountArg === 'max' || amountArg === 'all'
+            ? maxUint256
+            : parseUnits(amountArg, underlyingDec);
+
+        transactions = [
+          {
+            to: aaveMeta.pool,
+            value: 0n,
+            data: encodeFunctionData({
+              abi: AAVE_POOL_WITHDRAW_ABI,
+              functionName: 'withdraw',
+              args: [aaveMeta.underlying, amountWei, walletAddress]
+            })
+          }
+        ];
+        summary = {
+          protocol: 'aave',
+          poolAddress: aaveMeta.pool,
+          underlyingAsset: aaveMeta.underlying,
+          aToken: positionAddr,
+          amount: amountArg === 'max' || amountArg === 'all' ? 'max' : amountArg,
+          underlyingDecimals: underlyingDec
+        };
+      } else {
+        const underlying = await publicClient
+          .readContract({
+            address: positionAddr,
+            abi: ERC4626_ASSET_ABI,
+            functionName: 'asset'
+          })
+          .catch(() => null);
+
+        if (!underlying) {
+          throw new Error(
+            `Could not treat position (${positionAddr}) as Aave aToken (POOL / UNDERLYING_ASSET_ADDRESS) or ERC-4626 vault (asset()). ` +
+              'Pass the aToken or vault share contract you hold.'
+          );
+        }
+
+        kind = 'erc4626';
+        const underlyingAddr = underlying as `0x${string}`;
+        const underlyingDec = Number(
+          await publicClient.readContract({
+            address: underlyingAddr,
+            abi: ERC20_DECIMALS_ABI,
+            functionName: 'decimals'
+          })
+        );
+
+        const shareBal = await publicClient.readContract({
+          address: positionAddr,
+          abi: ERC20_BALANCE_OF_ABI,
+          functionName: 'balanceOf',
+          args: [walletAddress]
+        });
+
+        if (shareBal === 0n) {
+          throw new Error('ERC-4626 share balance is zero for this wallet on this chain.');
+        }
+
+        let sharesOut: bigint;
+        if (amountArg === 'max' || amountArg === 'all') {
+          sharesOut = shareBal;
+        } else {
+          const assetsWei = parseUnits(amountArg, underlyingDec);
+          sharesOut = await publicClient.readContract({
+            address: positionAddr,
+            abi: ERC4626_CONVERT_TO_SHARES_ABI,
+            functionName: 'convertToShares',
+            args: [assetsWei]
+          });
+          if (sharesOut > shareBal) {
+            throw new Error(
+              `Requested underlying withdraw exceeds vault shares (need ${sharesOut.toString()} shares, have ${shareBal.toString()}). Try --amount max.`
+            );
+          }
+        }
+
+        transactions = [
+          {
+            to: positionAddr,
+            value: 0n,
+            data: encodeFunctionData({
+              abi: ERC4626_REDEEM_ABI,
+              functionName: 'redeem',
+              args: [sharesOut, walletAddress, walletAddress]
+            })
+          }
+        ];
+        summary = {
+          protocol: 'erc4626',
+          vault: positionAddr,
+          underlyingAsset: underlyingAddr,
+          sharesRedeemed: sharesOut.toString(),
+          shareBalance: shareBal.toString(),
+          underlyingDecimals: underlyingDec
+        };
+      }
+
+      const targetContract = kind === 'aave' ? (summary.poolAddress as string) : positionAddr;
+
+      if (!broadcast) {
+        console.log(
+          JSON.stringify(
+            {
+              ok: true,
+              dryRun: true,
+              walletName,
+              walletAddress,
+              chainId,
+              chain: network.name,
+              kind,
+              ...summary,
+              transactions,
+              note:
+                `Re-run with --broadcast to submit. If the session rejects the call, re-create the wallet with the pool/vault whitelisted: polygon-agent wallet create --contract ${targetContract}`
+            },
+            bigintReplacer,
+            2
+          )
+        );
+        return;
+      }
+
+      let result;
+      try {
+        result = await runDappClientTx({
+          walletName,
+          chainId,
+          transactions,
+          broadcast,
+          preferNativeFee: false
+        });
+      } catch (txErr) {
+        if ((txErr as Error).message?.includes('No signer supported')) {
+          throw new Error(
+            `Session does not permit calls to ${targetContract}. ` +
+              `Re-create the wallet session with: polygon-agent wallet create --contract ${targetContract}\n` +
+              `Original error: ${(txErr as Error).message}`
+          );
+        }
+        throw txErr;
+      }
+
+      console.log(
+        JSON.stringify(
+          {
+            ok: true,
+            walletName,
+            walletAddress,
+            chainId,
+            chain: network.name,
+            kind,
+            ...summary,
+            txHash: result.txHash,
+            explorerUrl: getExplorerUrl(network, result.txHash ?? '')
           },
           bigintReplacer,
           2

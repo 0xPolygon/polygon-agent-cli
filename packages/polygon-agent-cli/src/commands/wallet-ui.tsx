@@ -294,8 +294,8 @@ export function WalletCreateUI({
 
   useInput((input, key) => {
     if (phase !== 'code') return;
-    if (/^\d$/.test(input) && code.length < 6) {
-      setCode((prev) => prev + input);
+    if (/^\d+$/.test(input)) {
+      setCode((prev) => (prev + input).slice(0, 6));
     }
     if (key.backspace || key.delete) {
       setCode((prev) => prev.slice(0, -1));

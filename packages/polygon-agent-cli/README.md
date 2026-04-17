@@ -124,7 +124,7 @@ Wallet sessions are created through a secure handshake between the CLI, the Conn
 | ------------ | -------------------------------------------------------------------------------------------- | ------------------------------- |
 | **Bridging** | Move assets cross-chain into your Polygon wallet and fund the initial flows to your wallet   | `fund`                          |
 | **Swapping** | Token swaps with configurable slippage seamlessly built in                                   | `swap`                          |
-| **Actions**  | Composable onchain operations (deposit into a DeFi vault, stake with your favorite protocol) | `send`, `deposit`, `send-token` |
+| **Actions**  | Composable onchain operations (deposit / withdraw from yield, send tokens) | `send`, `deposit`, `withdraw`, `send-token` |
 
 ### Onchain Agentic Identity
 
@@ -173,11 +173,19 @@ polygon-agent fund                                 # Open funding widget
 ### Token Operations
 
 ```bash
-polygon-agent balances                             # Check all balances
+polygon-agent balances                             # Balances on session default chain
+polygon-agent balances --chain arbitrum            # Single chain override
+polygon-agent balances --chains polygon,base,arbitrum  # Same wallet, multiple chains (JSON)
 polygon-agent send --to 0x... --amount 1.0         # Send POL (dry-run)
 polygon-agent send --symbol USDC --to 0x... --amount 10 --broadcast
 polygon-agent swap --from USDC --to USDT --amount 5 --broadcast
+polygon-agent withdraw --position <aToken-or-vault> --amount max [--chain <chain>]   # dry-run; add --broadcast
+polygon-agent withdraw --position <aToken> --amount 0.5 --chain mainnet --broadcast   # partial (underlying units)
 ```
+
+**`withdraw`** exits **Aave v3** positions using your **aToken** address (`POOL()` + `UNDERLYING_ASSET_ADDRESS()` → `Pool.withdraw`), or **ERC-4626** vaults (e.g. Morpho) via `redeem`. Dry-run prints `poolAddress` / `vault` and calldata.
+
+For **`--broadcast`**, the session must allow the **pool or vault** and (on that chain) **fee / underlying ERC-20** touches — use `wallet create --chain <same-as-tx> --contract <pool> --contract <underlying-USDC-or-asset>`. If your default session is Polygon but you transact on **mainnet**, create or extend a **mainnet** session for that chain.
 
 ### Agent Registry (ERC-8004)
 
@@ -194,6 +202,7 @@ polygon-agent agent reviews --agent-id <id>
 | ------------- | ---------------------- | -------------------- |
 | Wallet name   | `main`                 | `--name <name>`      |
 | Chain         | `polygon`              | `--chain <name\|id>` |
+| Multi-chain balances | —                 | `--chains <csv>` (comma-separated, max 20; overrides `--chain`) |
 | Wallet create | Auto-wait for approval | `--no-wait`          |
 | Broadcast     | Dry-run (preview)      | `--broadcast`        |
 

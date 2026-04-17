@@ -16,6 +16,7 @@ import {
   sendNativeCommand,
   sendTokenCommand,
   swapCommand,
+  withdrawCommand,
   x402PayCommand
 } from './commands/operations.ts';
 import { polymarketCommand } from './commands/polymarket.ts';
@@ -93,6 +94,7 @@ const parser = yargs(hideBin(process.argv))
   .command(sendTokenCommand)
   .command(swapCommand)
   .command(depositCommand)
+  .command(withdrawCommand)
   .command(x402PayCommand)
   .command(agentCommand)
   .command(polymarketCommand);

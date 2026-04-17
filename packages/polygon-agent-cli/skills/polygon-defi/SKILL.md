@@ -32,20 +32,95 @@ polygon-agent swap --from USDC --to USDC --amount 1 --to-chain mainnet --broadca
 
 Valid `--to-chain` values: `polygon`, `amoy`, `mainnet`, `arbitrum`, `optimism`, `base`.
 
+## Query Earn Pools
+
+Use `getEarnPools` to discover live yield opportunities across protocols before deciding where to deposit.
+
+### HTTP
+
+```bash
+curl --request POST \
+  --url https://trails-api.sequence.app/rpc/Trails/GetEarnPools \
+  --header 'Content-Type: application/json' \
+  --data '{"chainIds": [137]}'
+```
+
+All request fields are optional — omit any you don't need to filter on.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `chainIds` | `number[]` | Filter by chain (e.g. `[137]` for Polygon mainnet) |
+| `protocols` | `string[]` | Filter by protocol name, e.g. `["Aave"]`, `["Morpho"]` |
+| `minTvl` | `number` | Minimum TVL in USD |
+| `maxApy` | `number` | Maximum APY (useful to exclude outlier/at-risk pools) |
+
+### Fetch (agent code)
+
+The API key is the project access key already available to the agent (`SEQUENCE_PROJECT_ACCESS_KEY`).
+
+```typescript
+const res = await fetch('https://trails-api.sequence.app/rpc/Trails/GetEarnPools', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ chainIds: [137] }),
+});
+const { pools } = await res.json();
+```
+
+### Response Schema
+
+```typescript
+interface GetEarnPoolsResponse {
+  pools:     EarnPool[];
+  timestamp: string;   // ISO-8601 fetch time
+  cached:    boolean;
+}
+
+interface EarnPool {
+  id:                          string;  // "{protocol}-{chainId}-{address}"
+  name:                        string;  // e.g. "USDC Market"
+  protocol:                    string;  // "Aave" | "Morpho"
+  chainId:                     number;
+  apy:                         number;  // annualised yield as a decimal percent
+  tvl:                         number;  // USD
+  token:                       PoolTokenInfo;
+  depositAddress:              string;  // contract to approve/send to
+  isActive:                    boolean;
+  poolUrl?:                    string;
+  protocolUrl?:                string;
+  wrappedTokenGatewayAddress?: string; // non-null for Aave native-token markets
+}
+
+interface PoolTokenInfo {
+  symbol:   string;
+  name:     string;
+  address:  string;
+  decimals: number;
+  logoUrl?: string;
+}
+```
+
+> **Tip:** `wrappedTokenGatewayAddress` is set on Aave markets that accept a wrapped native token (WPOL, WETH). Pass this address instead of `depositAddress` when depositing POL/ETH directly.
+
+---
+
 ## Deposit to Earn Yield
 
 Pool discovery uses `TrailsApi.getEarnPools` — picks the most liquid pool (highest TVL) for the asset on the current chain. No hardcoded addresses — the pool is resolved at runtime.
 
+**Note on Morpho Vaults:**
+Trails categorizes Morpho vaults by their *receipt* token symbol (e.g., `STEAKUSDC` or `gtUSDCp`), rather than the underlying token. To deposit into a Morpho vault, you must provide the vault's exact receipt token symbol as the `--asset`.
+If you try to deposit using `--asset USDC`, it may fail to find the pool. In those cases, you can use the `swap` command to swap `USDC` directly for the vault's receipt token address.
+
 ```bash
 # Dry-run — shows pool name, APY, TVL, and deposit address before committing
-polygon-agent deposit --asset USDC --amount 0.3
+polygon-agent deposit --asset STEAKUSDC --amount 0.3 --protocol morpho
 
 # Execute — deposits into the highest-TVL active pool
-polygon-agent deposit --asset USDC --amount 0.3 --broadcast
+polygon-agent deposit --asset STEAKUSDC --amount 0.3 --protocol morpho --broadcast
 
-# Filter by protocol
+# Filter by protocol (Aave uses the underlying asset name)
 polygon-agent deposit --asset USDC --amount 0.3 --protocol aave --broadcast
-polygon-agent deposit --asset USDC --amount 0.3 --protocol morpho --broadcast
 ```
 
 ### Supported Protocols
