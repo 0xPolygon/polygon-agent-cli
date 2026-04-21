@@ -11,6 +11,16 @@ description: "Complete Polygon agent toolkit for on-chain operations on Polygon.
 - Entry point: `polygon-agent <command>`
 - Storage: `~/.polygon-agent/` (AES-256-GCM encrypted)
 
+## If a command fails with "Unknown argument" or "command not found"
+
+This skill is versioned with the CLI — commands and flags drift across releases. Check your version, compare to latest, and upgrade if behind:
+
+```bash
+polygon-agent --version                        # currently installed
+npm view @polygonlabs/agent-cli version        # latest published
+npm install -g @polygonlabs/agent-cli@latest   # upgrade
+```
+
 ## Architecture
 
 | Wallet | Created by | Purpose | Fund? |
