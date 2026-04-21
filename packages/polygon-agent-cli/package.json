@@ -16,8 +16,7 @@
   },
   "files": [
     "dist",
-    "contracts",
-    "skills"
+    "contracts"
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
