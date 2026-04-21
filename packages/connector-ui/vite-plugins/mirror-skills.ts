@@ -4,18 +4,26 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Mirror skills/ at the repo root onto the following URL surface, purely in
-// memory — no symlinks, no committed duplicates:
+// Mirror skills/ at the repo root onto an explicit, enumerated URL surface.
+// The SKILL protocol defines one file per skill directory (SKILL.md), and
+// the published surface is exactly that — nothing else from skills/ is
+// served, so stray files (.DS_Store, repo-local READMEs, lint configs)
+// cannot leak to the CDN.
 //
-//   /SKILL.md                     <- skills/SKILL.md         (root entrypoint)
-//   /skills/<...>                 <- skills/<...>            (full tree)
+// Emitted paths, derived from skills/ contents at build and dev-server
+// startup:
+//
+//   /SKILL.md                     <- skills/SKILL.md
+//   /skills/SKILL.md              <- skills/SKILL.md
+//   /skills/<sub-skill>/SKILL.md  <- skills/<sub-skill>/SKILL.md
 //   /<sub-skill>/SKILL.md         <- skills/<sub-skill>/SKILL.md
-//                                   (compat with URLs referenced in older
-//                                    CLIs' bundled root SKILL.md)
+//                                    (flattened mirror; compat with URLs
+//                                     referenced in older CLIs' bundled
+//                                     root SKILL.md)
 //
-// Every pattern is derived dynamically from skills/ contents at build and
-// dev-server startup. Adding skills/<new-skill>/SKILL.md starts serving
-// /skills/<new-skill>/SKILL.md and /<new-skill>/SKILL.md automatically.
+// Adding skills/<new-skill>/SKILL.md starts serving both
+// /skills/<new-skill>/SKILL.md and /<new-skill>/SKILL.md automatically
+// on the next build.
 export function mirrorSkills(): Plugin {
   const here = dirname(fileURLToPath(import.meta.url));
   const skillsDir = resolve(here, '../../../skills');
@@ -23,26 +31,13 @@ export function mirrorSkills(): Plugin {
   const withinSkillsDir = (candidate: string) =>
     candidate === skillsDir || candidate.startsWith(`${skillsDir}/`);
 
-  const contentType = (file: string) =>
-    file.endsWith('.md') ? 'text/markdown; charset=utf-8' : 'application/octet-stream';
-
-  function walk(dir: string, prefix: string, emit: (fileName: string, source: Buffer) => void) {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const full = resolve(dir, entry.name);
-      if (entry.isDirectory()) {
-        walk(full, `${prefix}${entry.name}/`, emit);
-      } else {
-        emit(`${prefix}${entry.name}`, readFileSync(full));
-      }
-    }
-  }
-
   function resolveRequest(url: string): string | null {
-    if (url === '/SKILL.md') return resolve(skillsDir, 'SKILL.md');
-    if (url.startsWith('/skills/')) return resolve(skillsDir, url.slice('/skills/'.length));
-    const match = url.match(/^\/([^/]+)\/SKILL\.md$/);
-    if (match) return resolve(skillsDir, match[1], 'SKILL.md');
-    return null;
+    if (url === '/SKILL.md' || url === '/skills/SKILL.md') {
+      return resolve(skillsDir, 'SKILL.md');
+    }
+    const match = url.match(/^\/(?:skills\/)?([^/]+)\/SKILL\.md$/);
+    if (!match) return null;
+    return resolve(skillsDir, match[1], 'SKILL.md');
   }
 
   return {
@@ -52,7 +47,7 @@ export function mirrorSkills(): Plugin {
         const url = req.url?.split('?')[0] ?? '';
         const file = resolveRequest(url);
         if (file && withinSkillsDir(file) && existsSync(file) && statSync(file).isFile()) {
-          res.setHeader('content-type', contentType(file));
+          res.setHeader('content-type', 'text/markdown; charset=utf-8');
           res.end(readFileSync(file));
           return;
         }
@@ -62,22 +57,27 @@ export function mirrorSkills(): Plugin {
     generateBundle() {
       if (!existsSync(skillsDir)) return;
 
+      const rootSkill = resolve(skillsDir, 'SKILL.md');
+      if (!existsSync(rootSkill)) return;
+
       const emit = (fileName: string, source: Buffer) => {
         this.emitFile({ type: 'asset', fileName, source });
       };
 
-      // /SKILL.md
-      emit('SKILL.md', readFileSync(resolve(skillsDir, 'SKILL.md')));
+      // Root entrypoint — served at both /SKILL.md and /skills/SKILL.md
+      const rootSource = readFileSync(rootSkill);
+      emit('SKILL.md', rootSource);
+      emit('skills/SKILL.md', rootSource);
 
-      // /skills/* (whole tree, recursive)
-      walk(skillsDir, 'skills/', emit);
-
-      // /<sub-skill>/SKILL.md (compat mirror for older-CLI URLs)
+      // Each sub-skill, served at both /skills/<name>/SKILL.md (structured)
+      // and /<name>/SKILL.md (flattened, for older-CLI URL compat)
       for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
         if (!entry.isDirectory()) continue;
         const file = resolve(skillsDir, entry.name, 'SKILL.md');
         if (!existsSync(file)) continue;
-        emit(`${entry.name}/SKILL.md`, readFileSync(file));
+        const source = readFileSync(file);
+        emit(`skills/${entry.name}/SKILL.md`, source);
+        emit(`${entry.name}/SKILL.md`, source);
       }
     }
   };
