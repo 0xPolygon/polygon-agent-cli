@@ -3,6 +3,26 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [1.6.0](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-connector-ui@1.5.0...@polygonlabs/agent-connector-ui@1.6.0) (2026-04-21)
+
+
+### Bug Fixes
+
+* **deposit:** whitelist ERC-20 token contracts and fix session error messages ([1beb54b](https://github.com/0xPolygon/polygon-agent-cli/commit/1beb54b61012c4661b3aa9602bb172b3e2c3c7d6))
+* restore connector skill URL sync (polygon-* public copies + husky) ([d979216](https://github.com/0xPolygon/polygon-agent-cli/commit/d97921674df79dbb616c31de60b4ac1b8028689b))
+* smart wallet usdc transfer limits and permissions order ([83e7f2c](https://github.com/0xPolygon/polygon-agent-cli/commit/83e7f2cf281390fbb019d78008a55245ca03fd1d))
+
+
+### Features
+
+* **cli:** add --chains comma list for balances ([0a4f50c](https://github.com/0xPolygon/polygon-agent-cli/commit/0a4f50c1f8c71b9cc4cf9fb15cd46b4c4181a4c1))
+* **cli:** add withdraw for Aave aTokens and ERC-4626 vaults ([494ccbc](https://github.com/0xPolygon/polygon-agent-cli/commit/494ccbc3e65c0a2cf87ed22794431cfcc47e183d))
+* **cli:** drop bundled skills and sync hook ([d9872eb](https://github.com/0xPolygon/polygon-agent-cli/commit/d9872ebc8c7d0422af4e871e8e84d04080962f5a))
+
+
+
+
+
 # [1.5.0](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-connector-ui@1.4.2...@polygonlabs/agent-connector-ui@1.5.0) (2026-04-16)
 
 

@@ -1,6 +1,6 @@
 {
   "name": "@polygonlabs/agent-cli",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "CLI + Agent Skills for building on-chain agents on Polygon",
   "repository": {
     "type": "git",
