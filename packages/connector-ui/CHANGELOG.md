@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## [1.6.2](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-connector-ui@1.6.1...@polygonlabs/agent-connector-ui@1.6.2) (2026-04-22)
+
+**Note:** Version bump only for package @polygonlabs/agent-connector-ui
+
+
+
+
+
 ## [1.6.1](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-connector-ui@1.6.0...@polygonlabs/agent-connector-ui@1.6.1) (2026-04-21)
 
 **Note:** Version bump only for package @polygonlabs/agent-connector-ui

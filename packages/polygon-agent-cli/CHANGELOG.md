@@ -3,6 +3,17 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## [0.9.2](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-cli@0.9.1...@polygonlabs/agent-cli@0.9.2) (2026-04-22)
+
+
+### Bug Fixes
+
+* **deposit:** correct APY display inflated by 100x ([4d3f1d0](https://github.com/0xPolygon/polygon-agent-cli/commit/4d3f1d0ab2132e50a1ff304409e69c55d4fafaa2))
+
+
+
+
+
 ## [0.9.1](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-cli@0.9.0...@polygonlabs/agent-cli@0.9.1) (2026-04-21)
 
 
