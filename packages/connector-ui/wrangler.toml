@@ -50,3 +50,4 @@ class_name = "SessionRelay"
 [[env.production.migrations]]
 tag = "v1"
 new_classes = ["SessionRelay"]
+
