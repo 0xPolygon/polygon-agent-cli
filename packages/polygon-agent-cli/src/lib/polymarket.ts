@@ -284,8 +284,7 @@ export async function createAndPostOrder({
     tokenID: tokenId,
     price,
     size,
-    side,
-    feeRateBps: '0'
+    side
   });
   return client.postOrder(order, orderType);
 }
@@ -311,8 +310,7 @@ export async function createAndPostMarketOrder({
     tokenID: tokenId,
     side,
     amount,
-    orderType,
-    feeRateBps: '0'
+    orderType
   });
   return client.postOrder(order, orderType);
 }
