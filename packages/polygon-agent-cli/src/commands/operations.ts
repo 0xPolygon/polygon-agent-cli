@@ -357,12 +357,8 @@ export const balancesCommand: CommandModule = {
 // --- fund ---
 export const fundCommand: CommandModule = {
   command: 'fund',
-  describe: 'Open Trails widget to fund wallet',
-  builder: (yargs) =>
-    withWalletAndChain(yargs).option('token', {
-      type: 'string',
-      describe: 'Fund token address'
-    }),
+  describe: 'Get funding URL for wallet',
+  builder: (yargs) => withWalletAndChain(yargs),
   handler: async (argv) => {
     const walletName = argv.wallet as string;
 
@@ -374,10 +370,7 @@ export const fundCommand: CommandModule = {
 
       const walletAddress = session.walletAddress;
       const chainId = session.chainId || 137;
-      const toToken = (argv.token as string) || '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359';
-      const apiKey = process.env.SEQUENCE_PROJECT_ACCESS_KEY || '';
-
-      const fundingUrl = `https://demo.trails.build/?mode=swap&toAddress=${walletAddress}&toChainId=${chainId}&toToken=${toToken}&apiKey=${apiKey}&theme=light`;
+      const fundingUrl = `https://wallet.polygon.technology`;
 
       if (isTTY()) {
         await inkRender(
@@ -392,7 +385,7 @@ export const fundCommand: CommandModule = {
               walletAddress,
               chainId,
               fundingUrl,
-              message: 'Open the funding URL in your browser to fund your wallet via Trails.'
+              message: `Visit ${fundingUrl} to fund your wallet (${walletAddress}).`
             },
             null,
             2
