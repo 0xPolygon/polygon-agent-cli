@@ -116,7 +116,7 @@ polygon-agent send-token --symbol <SYM> --to <addr> --amount <num> [--token <add
 polygon-agent swap --from <SYM> --to <SYM> --amount <num> [--to-chain <chain>] [--slippage <num>] [--broadcast]
 polygon-agent deposit --asset <SYM> --amount <num> [--protocol aave|morpho] [--broadcast]
 polygon-agent withdraw --position <addr> --amount <num|max> [--chain <chain>] [--broadcast]
-polygon-agent fund [--wallet <n>] [--token <addr>]
+polygon-agent fund [--wallet <n>]
 polygon-agent x402-pay --url <url> --wallet <n> [--method GET] [--body <str>] [--header Key:Value]
 ```
 
@@ -140,8 +140,8 @@ polygon-agent agent feedback --agent-id <id> --value <score> [--tag1 <t>] [--tag
 - **Smart defaults** — `--wallet main`, `--chain polygon`, auto-wait on `wallet create`
 - **`balances --chains`** — comma-separated chains (max 20); two or more return JSON with `multiChain: true` and a `chains` array (same wallet address on each)
 - **Fee preference** — auto-selects USDC over native POL when both available
-- **`fund`** — reads `walletAddress` from the wallet session and sets it as `toAddress` in the Trails widget URL. Always run `polygon-agent fund` to get the correct URL — never construct it manually or hardcode any address.
-- **`deposit`** — picks highest-TVL pool via Trails `getEarnPools`. Sends two txs: ERC-20 `approve()` on the token contract, then the pool deposit. If session rejects, re-create wallet with both `--contract <tokenAddress> --contract <depositAddress>` (the dry-run output shows both addresses).
+- **`fund`** — returns `https://wallet.polygon.technology` as the `fundingUrl`. Always run `polygon-agent fund` to get the URL and wallet address — never hardcode or construct manually.
+- **`deposit`** — picks highest-TVL pool via Trails `getEarnPools`. Sends two txs: ERC-20 `approve()` on the token contract, then the pool deposit. If the session rejects the call, re-create the wallet with both `--contract <tokenAddress> --contract <depositAddress>` (the dry-run output shows both addresses). Full deposit reference: https://agentconnect.polygon.technology/polygon-defi/SKILL.md
 - **`withdraw`** — `--position` = aToken or ERC-4626 vault; `--amount` = `max` or underlying units (Aave / vault). Dry-run JSON includes `poolAddress` / `vault`. Broadcast needs session on the **same chain** as `--chain`, with pool/vault + underlying token whitelisted where the relayer touches them
 - **`x402-pay`** — probes endpoint for 402, smart wallet funds builder EOA with exact token amount, EOA signs EIP-3009 payment. Chain auto-detected from 402 response
 - **`send-native --direct`** — bypasses ValueForwarder contract for direct EOA transfer
@@ -216,7 +216,7 @@ For specific workflows, fetch and load the relevant sub-skill:
 | Deposit session rejected | Re-create wallet with `--contract <tokenAddress> --contract <depositAddress>` (both required: token approve + pool call) |
 | `withdraw` / broadcast: wrong chain or session rejects | Use `wallet create --chain <same as --chain>` and `--contract` for pool/vault + underlying ERC-20 on that chain; omit tight `--usdc-limit` if it blocks fee transfers |
 | `Stored explicit session is missing pk` | Re-link: `wallet import --code …` after `wallet create` |
-| Wrong recipient in Trails widget | Run `polygon-agent fund` (do not construct the URL manually) |
+| Wrong recipient on funding page | Run `polygon-agent fund` to get the correct wallet address — do not hardcode it |
 | `x402-pay`: no 402 response | Endpoint doesn't require x402 payment, or URL is wrong |
 | `x402-pay`: payment token mismatch | Chain/token in the 402 response differs from wallet — check `--wallet` points to the right chain |
 | `x402-pay`: EOA funding failed | Wallet lacks sufficient balance to cover the payment amount — run `balances` and fund if needed |
