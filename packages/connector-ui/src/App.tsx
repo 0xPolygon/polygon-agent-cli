@@ -124,7 +124,7 @@ const USE_CASES: { label: string; display: string; icon: ElementType }[] = [
   {
     label: 'Automate yield strategies',
     display:
-      'Deposit USDC into the highest-TVL lending vault on Polygon or Katana with TVL above $100M and report the APY and pool address. Then set up a daily cron job to automatically re-evaluate and deposit into the best vault each morning.',
+      'Deposit USDC into the highest-yield active lending vault on Polygon and report the APY and pool address. Then set up a daily cron job to automatically re-evaluate and deposit into the best vault each morning.',
     icon: TrendingUp
   }
 ];

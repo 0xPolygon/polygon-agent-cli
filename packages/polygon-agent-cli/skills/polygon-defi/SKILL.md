@@ -106,7 +106,9 @@ interface PoolTokenInfo {
 
 ## Deposit to Earn Yield
 
-Pool discovery uses `TrailsApi.getEarnPools` — picks the most liquid pool (highest TVL) for the asset on the current chain. No hardcoded addresses — the pool is resolved at runtime.
+Pool discovery uses `TrailsApi.getEarnPools` — picks the most liquid pool (highest TVL) for the asset. Only Polygon mainnet (chainId 137) is supported. No hardcoded addresses — the pool is resolved at runtime.
+
+**Gas requirement:** The wallet needs POL for gas, or a session created with `--usdc-limit` to enable USDC paymaster. If the wallet has no POL, create the session with `--usdc-limit 5`. When USDC paymaster is active and the deposit amount would consume the full balance, the CLI auto-reserves 0.05 USDC for gas and prints a note.
 
 ```bash
 # Dry-run — shows pool name, APY, TVL, and deposit address before committing
@@ -181,19 +183,6 @@ Common token contracts on Polygon mainnet (already auto-whitelisted in sessions 
 | Morpho Compound WETH | WETH | `0xf5c81d25ee174d83f1fd202ca94ae6070d073ccf` |
 | Morpho Compound POL | POL | `0x3f33f9f7e2d7cfbcbdf8ea8b870a6e3d449664c2` |
 
-#### Katana (chainId 747474) — Morpho Vaults
-
-| Vault | Asset | TVL | Address |
-|-------|-------|-----|---------|
-| Gauntlet USDT | USDT | ~$97M | `0x1ecdc3f2b5e90bfb55ff45a7476ff98a8957388e` |
-| Steakhouse Prime USDC | USDC | ~$54M | `0x61d4f9d3797ba4da152238c53a6f93fb665c3c1d` |
-| Yearn OG ETH | WETH | ~$16M | `0xfade0c546f44e33c134c4036207b314ac643dc2e` |
-| Yearn OG USDC | USDC | ~$16M | `0xce2b8e464fc7b5e58710c24b7e5ebfb6027f29d7` |
-| Gauntlet USDC | USDC | ~$8M | `0xe4248e2105508fcbad3fe95691551d1af14015f7` |
-| Yearn OG USDT | USDT | ~$8M | `0x8ed68f91afbe5871dce31ae007a936ebe8511d47` |
-| Gauntlet WETH | WETH | ~$6M | `0xc5e7ab07030305fc925175b25b93b285d40dcdff` |
-| Hyperithm vbUSDC Apex | USDC | ~$3M | `0xef77f8c53af95f3348cee0fb2a02ee02ab9cdca5` |
-
 ---
 
 ## Full DeFi Flow Example
@@ -216,11 +205,32 @@ polygon-agent swap --from USDC --to USDC --amount 0.5 --to-chain arbitrum --broa
 
 ---
 
+## wallet create — Key Options
+
+| Flag | Purpose |
+|------|---------|
+| `--usdc-limit <amt>` | Enable USDC gas paymaster. Required when the wallet has no POL. Recommended: `--usdc-limit 5`. |
+| `--force` | Replace an existing session without prompting. By default, re-creating a session is blocked if one already exists — the old wallet balance is not accessible from a new session. |
+| `--contract <addr>` | Whitelist an additional contract (repeatable). Use this if a deposit is rejected due to a missing contract permission. |
+
+```bash
+# New session with USDC gas and deposit contracts pre-whitelisted
+polygon-agent wallet create --usdc-limit 5
+
+# Replace an existing session
+polygon-agent wallet create --force --usdc-limit 5
+```
+
+---
+
 ## Troubleshooting
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `Deposit session rejected` | Pool or token contract not whitelisted | Re-create wallet with `--contract <tokenAddress> --contract <depositAddress>` (both required) |
+| `Insufficient <token>: wallet has X` | Balance too low for the requested deposit amount | Run `polygon-agent balances` and adjust `--amount` |
+| `Wallet has no POL for gas` | No native gas and no USDC paymaster | Fund with POL (`polygon-agent fund`) or re-create session with `--usdc-limit 5` |
+| `Transaction rejected by relay` | Session permissions missing for pool or token contract | Re-create with `--contract <tokenAddress> --contract <depositAddress>` |
+| `Unable to pay gas` | No usable fee token found | Fund with POL or add `--usdc-limit 5` to session |
+| `Wallet already exists` | Re-creating would orphan the old session | Use `--force` only after confirming old wallet funds are swept or unneeded |
 | `Protocol X not yet supported` | Trails returned a protocol other than aave/morpho | Use `polygon-agent swap` to obtain the yield-bearing token manually |
-| `Fee option errors` | Wallet has insufficient balance | Run `polygon-agent balances` and fund the wallet |
 | `swap`: no route found | Insufficient liquidity for the pair | Try a different amount or token pair |

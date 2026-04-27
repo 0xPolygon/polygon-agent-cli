@@ -376,7 +376,8 @@ export async function runDappClientTx({
 
       if (paymentAddress && erc20Token) {
         const decimals = typeof erc20Token.decimals === 'number' ? erc20Token.decimals : 6;
-        const feeValue = decimals >= 2 ? 10 ** (decimals - 2) : 1;
+        // 0.1 token units as fee cap (e.g. 0.1 USDC = 100000 for 6 decimals)
+        const feeValue = decimals >= 1 ? 10 ** (decimals - 1) : 1;
         feeOpt = {
           token: erc20Token,
           to: paymentAddress,
@@ -399,7 +400,11 @@ export async function runDappClientTx({
       const feeOptions = await client.getFeeOptions(chainId, transactions as any);
       feeOpt = feeOptions?.[0];
     } catch (e) {
-      throw new Error(`Unable to determine fee option: ${(e as Error)?.message}`);
+      throw new Error(
+        `Unable to pay gas: wallet has no POL (native gas) and no usable fee token. ` +
+          `Fund with POL: polygon-agent fund, or enable USDC gas: polygon-agent wallet create --usdc-limit 5. ` +
+          `Technical: ${(e as Error)?.message}`
+      );
     }
   }
 
