@@ -93,6 +93,18 @@ polygon-agent agent register --name "MyAgent" --broadcast
 # → use agentId for reputation queries, reviews, and feedback
 ```
 
+## Use-Case Skills
+
+For specific workflows, fetch and load the relevant sub-skill:
+
+| Use Case | Skill URL |
+|----------|-----------|
+| Polymarket prediction market trading | https://agentconnect.polygon.technology/polygon-polymarket/SKILL.md |
+| DeFi — swap, deposit, withdraw, yield | https://agentconnect.polygon.technology/polygon-defi/SKILL.md |
+| x402 discovery & pay-per-call APIs | https://agentconnect.polygon.technology/polygon-discovery/SKILL.md |
+
+---
+
 ## Commands Reference
 
 ### Setup
@@ -196,18 +208,6 @@ CLI commands output JSON (non-TTY). After running a command, always render the r
 **Dry-run results** — always make it visually clear this was a simulation. Prefix with `⚡ Dry run` and show what *would* happen. Remind the user to re-run with `--broadcast` to execute.
 
 **Errors** — extract the `error` field and present it as a clear sentence, not a JSON blob. Include the relevant fix from the Troubleshooting table if applicable.
-
----
-
-## Use-Case Skills
-
-For specific workflows, fetch and load the relevant sub-skill:
-
-| Use Case | Skill URL |
-|----------|-----------|
-| Polymarket prediction market trading | https://agentconnect.polygon.technology/polygon-polymarket/SKILL.md |
-| DeFi — swap, deposit, withdraw, yield | https://agentconnect.polygon.technology/polygon-defi/SKILL.md |
-| x402 discovery & pay-per-call APIs | https://agentconnect.polygon.technology/polygon-discovery/SKILL.md |
 
 ---
 
