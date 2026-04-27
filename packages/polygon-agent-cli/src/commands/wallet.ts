@@ -67,17 +67,7 @@ const DEFI_CONTRACTS = [
   '0x794a61358d6845594f94dc1db02a252b5b4814ad', // Aave V3 Pool (all markets)
   '0x781fb7f6d845e3be129289833b04d43aa8558c42', // Morpho Compound USDC
   '0xf5c81d25ee174d83f1fd202ca94ae6070d073ccf', // Morpho Compound WETH
-  '0x3f33f9f7e2d7cfbcbdf8ea8b870a6e3d449664c2', // Morpho Compound POL
-
-  // Katana (chainId 747474) — Morpho vaults
-  '0x1ecdc3f2b5e90bfb55ff45a7476ff98a8957388e', // Gauntlet USDT (~$97M TVL)
-  '0x61d4f9d3797ba4da152238c53a6f93fb665c3c1d', // Steakhouse Prime USDC (~$54M TVL)
-  '0xfade0c546f44e33c134c4036207b314ac643dc2e', // Yearn OG ETH (~$16M TVL)
-  '0xce2b8e464fc7b5e58710c24b7e5ebfb6027f29d7', // Yearn OG USDC (~$16M TVL)
-  '0xe4248e2105508fcbad3fe95691551d1af14015f7', // Gauntlet USDC (~$8M TVL)
-  '0x8ed68f91afbe5871dce31ae007a936ebe8511d47', // Yearn OG USDT (~$8M TVL)
-  '0xc5e7ab07030305fc925175b25b93b285d40dcdff', // Gauntlet WETH (~$6M TVL)
-  '0xef77f8c53af95f3348cee0fb2a02ee02ab9cdca5' // Hyperithm vbUSDC Apex (~$3M TVL)
+  '0x3f33f9f7e2d7cfbcbdf8ea8b870a6e3d449664c2' // Morpho Compound POL
 ];
 
 // Session permission options shared by create subcommands

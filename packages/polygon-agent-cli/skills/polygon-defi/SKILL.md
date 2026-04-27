@@ -154,9 +154,9 @@ Before running deposits, swaps, or withdrawals, create the wallet session with `
 polygon-agent wallet create --defi
 ```
 
-Without `--defi`, only USDC and USDC.e are whitelisted by default. The `--defi` flag adds USDT, WETH, and all supported yield vault addresses (Aave, Morpho on Polygon mainnet and Katana).
+Without `--defi`, only USDC and USDC.e are whitelisted by default. The `--defi` flag adds USDT, WETH, and all supported yield vault addresses (Aave and Morpho on Polygon mainnet).
 
-**Same chain as the transaction:** if you use `withdraw --chain mainnet`, create or refresh the session with **`wallet create --chain mainnet --defi`**. Include **`--contract`** for the **underlying ERC-20** on that chain (e.g. mainnet USDC `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`) since `--defi` only covers Polygon mainnet and Katana contracts. Tight **`--usdc-limit`** can block fee/helper transfers — omit or relax for yield exits.
+**Same chain as the transaction:** if you use `withdraw --chain mainnet`, create or refresh the session with **`wallet create --chain mainnet --defi`**. Include **`--contract`** for the **underlying ERC-20** on that chain (e.g. mainnet USDC `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`) since `--defi` only covers Polygon mainnet contracts. Tight **`--usdc-limit`** can block fee/helper transfers — omit or relax for yield exits.
 
 ### Session Whitelisting
 
@@ -223,7 +223,7 @@ polygon-agent swap --from USDC --to USDC --amount 0.5 --to-chain arbitrum --broa
 
 | Flag | Purpose |
 |------|---------|
-| `--defi` | Whitelist DeFi contracts (USDT, WETH, yield vaults on Polygon mainnet and Katana). Required for swaps and deposits. |
+| `--defi` | Whitelist DeFi contracts (USDT, WETH, yield vaults on Polygon mainnet). Required for swaps and deposits. |
 | `--usdc-limit <amt>` | Enable USDC gas paymaster. Required when the wallet has no POL. Recommended: `--usdc-limit 5`. |
 | `--force` | Replace an existing session without prompting. By default, re-creating a session is blocked if one already exists — the old wallet balance is not accessible from a new session. |
 | `--contract <addr>` | Whitelist an additional contract (repeatable). Use this if a deposit is rejected due to a missing contract permission. |
