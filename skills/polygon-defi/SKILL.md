@@ -152,7 +152,7 @@ Whitelist the **pool** (Aave) or **vault** contract on the session if the wallet
 
 ### Session Whitelisting
 
-A deposit sends **two transactions**: an ERC-20 `approve()` on the token contract, then the pool deposit call. Both contracts must be whitelisted in the session. If the deposit is rejected with a session permission error:
+If the deposit is rejected with a session permission error, both the token contract and the pool deposit contract must be whitelisted in the session:
 
 ```bash
 # 1. Dry-run first — output includes both addresses under `transactions[0].to` (token) and `depositAddress` (pool)
