@@ -249,28 +249,9 @@ interface CreateArgs extends SessionPermissionArgs {
   chain: string;
   'print-url': boolean;
   timeout: number;
-  force?: boolean;
 }
 
 async function handleCreate(argv: CreateArgs): Promise<void> {
-  if (!argv.force) {
-    const existing = await loadWalletSession(argv.name);
-    if (existing) {
-      const msg =
-        `Wallet '${argv.name}' already exists (${existing.walletAddress}). ` +
-        `Re-creating replaces the session — the old wallet balance will not be accessible from the new session. ` +
-        `Use --force to proceed.`;
-      if (isTTY()) {
-        process.stderr.write(`\nError: ${msg}\n\n`);
-        process.exit(1);
-      } else {
-        console.log(
-          JSON.stringify({ ok: false, error: msg, existingAddress: existing.walletAddress })
-        );
-        process.exit(1);
-      }
-    }
-  }
   if (argv['print-url']) {
     await handleCreateNoWait(argv);
   } else {
@@ -576,11 +557,6 @@ export const walletCommand: CommandModule = {
                 type: 'number',
                 default: 300,
                 describe: 'Seconds to wait for approval before timing out'
-              })
-              .option('force', {
-                type: 'boolean',
-                default: false,
-                describe: 'Replace existing session without prompting'
               })
           ),
         handler: (argv) => handleCreate(argv as unknown as CreateArgs)

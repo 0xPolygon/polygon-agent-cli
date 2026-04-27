@@ -210,15 +210,11 @@ polygon-agent swap --from USDC --to USDC --amount 0.5 --to-chain arbitrum --broa
 | Flag | Purpose |
 |------|---------|
 | `--usdc-limit <amt>` | Enable USDC gas paymaster. Required when the wallet has no POL. Recommended: `--usdc-limit 5`. |
-| `--force` | Replace an existing session without prompting. By default, re-creating a session is blocked if one already exists — the old wallet balance is not accessible from a new session. |
 | `--contract <addr>` | Whitelist an additional contract (repeatable). Use this if a deposit is rejected due to a missing contract permission. |
 
 ```bash
-# New session with USDC gas and deposit contracts pre-whitelisted
+# New session with USDC gas enabled
 polygon-agent wallet create --usdc-limit 5
-
-# Replace an existing session
-polygon-agent wallet create --force --usdc-limit 5
 ```
 
 ---
@@ -231,6 +227,5 @@ polygon-agent wallet create --force --usdc-limit 5
 | `Wallet has no POL for gas` | No native gas and no USDC paymaster | Fund with POL (`polygon-agent fund`) or re-create session with `--usdc-limit 5` |
 | `Transaction rejected by relay` | Session permissions missing for pool or token contract | Re-create with `--contract <tokenAddress> --contract <depositAddress>` |
 | `Unable to pay gas` | No usable fee token found | Fund with POL or add `--usdc-limit 5` to session |
-| `Wallet already exists` | Re-creating would orphan the old session | Use `--force` only after confirming old wallet funds are swept or unneeded |
 | `Protocol X not yet supported` | Trails returned a protocol other than aave/morpho | Use `polygon-agent swap` to obtain the yield-bearing token manually |
 | `swap`: no route found | Insufficient liquidity for the pair | Try a different amount or token pair |
