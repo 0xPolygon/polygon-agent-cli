@@ -52,7 +52,6 @@ const AUTO_WHITELISTED_CONTRACTS = [
   // and cannot be reliably pre-whitelisted here.
 
   // Polygon mainnet (chainId 137) — default tokens
-  '0x0000000000000000000000000000000000001010', // POL (native ERC-20)
   '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', // USDC (native)
   '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174' // USDC.e (bridged)
 ];
