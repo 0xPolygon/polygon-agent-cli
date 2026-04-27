@@ -58,6 +58,7 @@ async function resetLocalSessionStateForNewRid(rid: string): Promise<boolean> {
 
 // --- Static background: use-cases panel ---
 
+// v2
 const SKILL_URL = 'https://agentconnect.polygon.technology/SKILL.md';
 
 const AGENTS: {
