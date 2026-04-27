@@ -3,6 +3,20 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## [0.9.5](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-cli@0.9.4...@polygonlabs/agent-cli@0.9.5) (2026-04-27)
+
+
+### Bug Fixes
+
+* **wallet:** add POL native ERC-20 to default session whitelist ([93280af](https://github.com/0xPolygon/polygon-agent-cli/commit/93280af01ead364ebe00b1ccae619b295310a5db))
+* **wallet:** remove Katana vault contracts from --defi whitelist ([04728b7](https://github.com/0xPolygon/polygon-agent-cli/commit/04728b796b566323d65275211398ad11b59f4f88))
+* **wallet:** remove POL 0x1010 from default whitelist — not needed ([5b5f039](https://github.com/0xPolygon/polygon-agent-cli/commit/5b5f0392cc2cdb657700d2f90bbdd667e39809cc))
+* **wallet:** scope default session whitelist to USDC/USDC.e; add --defi flag ([f8c9256](https://github.com/0xPolygon/polygon-agent-cli/commit/f8c92566a26257554c585555a5ff6dd6fd9ee591))
+
+
+
+
+
 ## [0.9.4](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-cli@0.9.3...@polygonlabs/agent-cli@0.9.4) (2026-04-27)
 
 

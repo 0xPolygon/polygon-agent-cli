@@ -3,6 +3,17 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## [1.6.6](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-connector-ui@1.6.4...@polygonlabs/agent-connector-ui@1.6.6) (2026-04-27)
+
+
+### Bug Fixes
+
+* **wallet:** scope default session whitelist to USDC/USDC.e; add --defi flag ([f8c9256](https://github.com/0xPolygon/polygon-agent-cli/commit/f8c92566a26257554c585555a5ff6dd6fd9ee591))
+
+
+
+
+
 ## [1.6.4](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-connector-ui@1.6.3...@polygonlabs/agent-connector-ui@1.6.4) (2026-04-27)
 
 

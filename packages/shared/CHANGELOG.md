@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## [0.1.9](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-shared@0.1.8...@polygonlabs/agent-shared@0.1.9) (2026-04-27)
+
+**Note:** Version bump only for package @polygonlabs/agent-shared
+
+
+
+
+
 ## [0.1.8](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-shared@0.1.7...@polygonlabs/agent-shared@0.1.8) (2026-04-27)
 
 **Note:** Version bump only for package @polygonlabs/agent-shared
