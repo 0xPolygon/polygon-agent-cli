@@ -180,20 +180,34 @@ git log -1 --format='%B'
 # createCommitOnBranch takes explicit file additions/deletions rather than
 # a tree SHA, which is how it can sign the commit without requiring the tree
 # to already exist in GitHub's object store.
+#
+# Each file's base64-encoded contents can easily exceed Linux's per-argument
+# ARG_MAX (~128 KB) — pnpm-lock.yaml alone blows past it. Pass content via
+# `jq --rawfile` (a file read), not `--arg` (an argv slot). Accumulate the
+# JSON arrays directly in temp files so we never round-trip a multi-megabyte
+# blob through a shell variable.
 # ---------------------------------------------------------------------------
-ADDITIONS='[]'
-DELETIONS='[]'
+ADDITIONS_FILE=$(mktemp /tmp/lerna-release-additions-XXXXXX.json)
+DELETIONS_FILE=$(mktemp /tmp/lerna-release-deletions-XXXXXX.json)
+CONTENT_FILE=$(mktemp /tmp/lerna-release-content-XXXXXX.b64)
+trap 'rm -f "$ADDITIONS_FILE" "$DELETIONS_FILE" "$CONTENT_FILE"' EXIT
+
+printf '[]' > "$ADDITIONS_FILE"
+printf '[]' > "$DELETIONS_FILE"
 
 while IFS=$'\t' read -r STATUS FILEPATH; do
   case "$STATUS" in
     A | M)
-      CONTENT=$(git show "HEAD:${FILEPATH}" | base64 | tr -d '\n')
-      ADDITIONS=$(printf '%s' "$ADDITIONS" | jq --arg p "$FILEPATH" --arg c "$CONTENT" \
-        '. += [{"path": $p, "contents": $c}]')
+      git show "HEAD:${FILEPATH}" | base64 | tr -d '\n' > "$CONTENT_FILE"
+      jq --arg p "$FILEPATH" --rawfile c "$CONTENT_FILE" \
+        '. += [{"path": $p, "contents": $c}]' "$ADDITIONS_FILE" \
+        > "${ADDITIONS_FILE}.next"
+      mv "${ADDITIONS_FILE}.next" "$ADDITIONS_FILE"
       ;;
     D)
-      DELETIONS=$(printf '%s' "$DELETIONS" | jq --arg p "$FILEPATH" \
-        '. += [{"path": $p}]')
+      jq --arg p "$FILEPATH" '. += [{"path": $p}]' "$DELETIONS_FILE" \
+        > "${DELETIONS_FILE}.next"
+      mv "${DELETIONS_FILE}.next" "$DELETIONS_FILE"
       ;;
   esac
 done < <(git diff --name-status "$PARENT_SHA" HEAD)
@@ -208,8 +222,8 @@ if [[ "$DRY_RUN" == "true" ]]; then
   echo "    branch:          ${OWNER_REPO}@${BRANCH}"
   echo "    expectedHeadOid: $PARENT_SHA"
   echo "    headline:        $COMMIT_HEADLINE"
-  echo "    additions:       $(printf '%s' "$ADDITIONS" | jq 'length') file(s)"
-  echo "    deletions:       $(printf '%s' "$DELETIONS" | jq 'length') file(s)"
+  echo "    additions:       $(jq 'length' "$ADDITIONS_FILE") file(s)"
+  echo "    deletions:       $(jq 'length' "$DELETIONS_FILE") file(s)"
   echo "    (GitHub signs this commit as verified)"
   echo ""
   for TAG in $LERNA_TAGS; do
@@ -267,17 +281,10 @@ if [[ "$REMOTE_TREE" == "$TREE_SHA" ]]; then
 else
   # Write the full GraphQL request body to a temp file. Using gh api -F to
   # pass nested JSON with large base64 payloads is unreliable; --input avoids
-  # all shell escaping and size issues.
+  # all shell escaping and size issues. Additions/deletions are loaded via
+  # --slurpfile from the files already populated above.
   GQL_TMPFILE=$(mktemp /tmp/lerna-release-graphql-XXXXXX.json)
-  ADDITIONS_FILE=$(mktemp /tmp/lerna-release-additions-XXXXXX.json)
-  DELETIONS_FILE=$(mktemp /tmp/lerna-release-deletions-XXXXXX.json)
-  trap 'rm -f "$GQL_TMPFILE" "$ADDITIONS_FILE" "$DELETIONS_FILE"' EXIT
-
-  # Spill additions/deletions to files and load with --slurpfile. Passing the
-  # base64-encoded file contents via --argjson exceeds ARG_MAX (~128 KB on
-  # Linux) once a release touches more than a handful of sizeable files.
-  printf '%s' "$ADDITIONS" > "$ADDITIONS_FILE"
-  printf '%s' "$DELETIONS" > "$DELETIONS_FILE"
+  trap 'rm -f "$ADDITIONS_FILE" "$DELETIONS_FILE" "$CONTENT_FILE" "$GQL_TMPFILE"' EXIT
 
   jq -n \
     --arg query 'mutation CreateSignedCommit($input: CreateCommitOnBranchInput!) {
