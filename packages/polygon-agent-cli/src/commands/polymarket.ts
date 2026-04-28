@@ -18,10 +18,12 @@ import {
   executeViaProxyWallet,
   getPositions,
   USDC_E,
+  PUSD,
   CTF,
   CTF_EXCHANGE,
   NEG_RISK_CTF_EXCHANGE,
-  NEG_RISK_ADAPTER
+  NEG_RISK_ADAPTER,
+  COLLATERAL_ONRAMP
 } from '../lib/polymarket.ts';
 import { loadWalletSession, savePolymarketKey, loadPolymarketKey } from '../lib/storage.ts';
 
@@ -107,7 +109,7 @@ async function handleProxyWallet(): Promise<void> {
           ok: true,
           eoaAddress: account.address,
           proxyWalletAddress,
-          note: 'Fund proxyWalletAddress with USDC.e on Polygon to enable CLOB trading.'
+          note: 'Fund proxyWalletAddress with USDC.e (auto-wrapped to pUSD) on Polygon to enable CLOB V2 trading.'
         },
         null,
         2
@@ -148,25 +150,38 @@ async function handleApprove(argv: { negRisk?: boolean; broadcast?: boolean }): 
     let approvalLabels: string[];
     if (negRisk) {
       txBatch = [
-        erc20Approve(USDC_E, NEG_RISK_ADAPTER, MAX_UINT256),
-        erc20Approve(USDC_E, NEG_RISK_CTF_EXCHANGE, MAX_UINT256),
+        // pUSD approvals for V2 exchange contracts
+        erc20Approve(PUSD, NEG_RISK_ADAPTER, MAX_UINT256),
+        erc20Approve(PUSD, NEG_RISK_CTF_EXCHANGE, MAX_UINT256),
+        // CTF (ERC1155) approvals for V2 exchange contracts
         erc1155ApproveAll(CTF, CTF_EXCHANGE),
         erc1155ApproveAll(CTF, NEG_RISK_CTF_EXCHANGE),
-        erc1155ApproveAll(CTF, NEG_RISK_ADAPTER)
+        erc1155ApproveAll(CTF, NEG_RISK_ADAPTER),
+        // USDC.e approval for CollateralOnramp (wrapping USDC.e → pUSD)
+        erc20Approve(USDC_E, COLLATERAL_ONRAMP, MAX_UINT256)
       ];
       approvalLabels = [
-        'USDC.e → NEG_RISK_ADAPTER',
-        'USDC.e → NEG_RISK_CTF_EXCHANGE',
-        'CTF → CTF_EXCHANGE',
-        'CTF → NEG_RISK_CTF_EXCHANGE',
-        'CTF → NEG_RISK_ADAPTER'
+        'pUSD → NEG_RISK_ADAPTER',
+        'pUSD → NEG_RISK_CTF_EXCHANGE',
+        'CTF → CTF_EXCHANGE (V2)',
+        'CTF → NEG_RISK_CTF_EXCHANGE (V2)',
+        'CTF → NEG_RISK_ADAPTER',
+        'USDC.e → COLLATERAL_ONRAMP (for wrapping)'
       ];
     } else {
       txBatch = [
-        erc20Approve(USDC_E, CTF_EXCHANGE, MAX_UINT256),
-        erc1155ApproveAll(CTF, CTF_EXCHANGE)
+        // pUSD approval for V2 exchange contract
+        erc20Approve(PUSD, CTF_EXCHANGE, MAX_UINT256),
+        // CTF (ERC1155) approval for V2 exchange contract
+        erc1155ApproveAll(CTF, CTF_EXCHANGE),
+        // USDC.e approval for CollateralOnramp (wrapping USDC.e → pUSD)
+        erc20Approve(USDC_E, COLLATERAL_ONRAMP, MAX_UINT256)
       ];
-      approvalLabels = ['USDC.e → CTF_EXCHANGE', 'CTF → CTF_EXCHANGE'];
+      approvalLabels = [
+        'pUSD → CTF_EXCHANGE (V2)',
+        'CTF → CTF_EXCHANGE (V2)',
+        'USDC.e → COLLATERAL_ONRAMP (for wrapping)'
+      ];
     }
 
     if (!broadcast) {
@@ -290,12 +305,13 @@ async function handleClobBuy(argv: {
             price: priceArg ?? 'market',
             proxyWalletAddress,
             flow: skipFund
-              ? ['Place CLOB BUY order (using existing proxy wallet USDC.e balance)']
+              ? ['Place CLOB BUY order (using existing proxy wallet pUSD balance)']
               : [
                   `Smart wallet (${walletName}) → fund proxy wallet with ${amountUsd} USDC.e`,
+                  'Proxy wallet wraps USDC.e → pUSD via CollateralOnramp',
                   'Place CLOB BUY order (maker=proxyWallet, signatureType=POLY_PROXY)'
                 ],
-            note: 'Requires proxy wallet approvals — run `polymarket approve --broadcast` once first. Re-run with --broadcast to execute.'
+            note: 'Requires proxy wallet approvals for V2 exchange — run `polymarket approve --broadcast` first. Re-run with --broadcast to execute.'
           },
           null,
           2
@@ -314,20 +330,21 @@ async function handleClobBuy(argv: {
     const account = privateKeyToAccount(privateKey as `0x${string}`);
     const proxyWalletAddress = await getPolymarketProxyWalletAddress(account.address);
     process.stderr.write(
-      `[polymarket] CLOB BUY ${amountUsd} USDC → ${outcomeArg} via proxy wallet ${proxyWalletAddress}\n`
+      `[polymarket] CLOB V2 BUY ${amountUsd} USDC → ${outcomeArg} via proxy wallet ${proxyWalletAddress}\n`
     );
 
     let fundTxHash: string | null = null;
+    let wrapTxHash: string | null = null;
     if (skipFund) {
-      process.stderr.write(`[polymarket] --skip-fund: using existing proxy wallet balance\n`);
+      process.stderr.write(`[polymarket] --skip-fund: using existing proxy wallet pUSD balance\n`);
     } else {
       process.stderr.write(
         `[polymarket] Funding proxy wallet ${proxyWalletAddress} with ${amountUsd} USDC.e...\n`
       );
       const amountUnits = BigInt(Math.round(amountUsd * 1e6));
-      const pad = (hex: string, n = 64) => String(hex).replace(/^0x/, '').padStart(n, '0');
+      const padHex = (hex: string, n = 64) => String(hex).replace(/^0x/, '').padStart(n, '0');
       const transferData =
-        '0xa9059cbb' + pad(proxyWalletAddress) + pad('0x' + amountUnits.toString(16));
+        '0xa9059cbb' + padHex(proxyWalletAddress) + padHex('0x' + amountUnits.toString(16));
       const fundResult = await runDappClientTx({
         walletName,
         chainId: 137,
@@ -337,6 +354,39 @@ async function handleClobBuy(argv: {
       });
       fundTxHash = fundResult.txHash ?? null;
       process.stderr.write(`[polymarket] Funded: ${fundTxHash}\n`);
+
+      // Wrap USDC.e → pUSD via CollateralOnramp (executed from proxy wallet)
+      process.stderr.write(
+        `[polymarket] Wrapping ${amountUsd} USDC.e → pUSD via CollateralOnramp...\n`
+      );
+      const {
+        createWalletClient: cwc,
+        createPublicClient: cpc,
+        http: httpTransport
+      } = await import('viem');
+      const { polygon: polygonChain } = await import('viem/chains');
+      const wrapWalletClient = cwc({
+        account,
+        chain: polygonChain,
+        transport: httpTransport()
+      });
+      const wrapPublicClient = cpc({ chain: polygonChain, transport: httpTransport() });
+
+      // CollateralOnramp.wrap(address _asset, address _to, uint256 _amount)
+      // selector: keccak256("wrap(address,address,uint256)") = 0x62355638
+      const wrapData =
+        '0x62355638' +
+        padHex(USDC_E) +
+        padHex(proxyWalletAddress) +
+        padHex('0x' + amountUnits.toString(16));
+
+      wrapTxHash = await executeViaProxyWallet(
+        wrapWalletClient,
+        wrapPublicClient,
+        proxyWalletAddress,
+        [{ typeCode: 1, to: COLLATERAL_ONRAMP, value: '0', data: wrapData }]
+      );
+      process.stderr.write(`[polymarket] Wrapped to pUSD: ${wrapTxHash}\n`);
     }
 
     let orderResult;
@@ -374,6 +424,7 @@ async function handleClobBuy(argv: {
           proxyWalletAddress,
           signerAddress: account.address,
           fundTxHash,
+          wrapTxHash,
           orderId: orderResult?.orderId || orderResult?.orderID || orderResult?.id || null,
           orderType,
           orderStatus: orderResult?.status || null
