@@ -6,11 +6,14 @@
   "packageManager": "pnpm@10.30.3",
   "scripts": {
     "prepare": "husky",
-    "lint": "eslint .",
-    "format": "eslint . --fix && prettier --write .",
+    "lint": "concurrently --group --prefix-colors auto 'pnpm:lint:ts' 'pnpm:typecheck' 'prettier --check .'",
+    "lint:ts": "eslint .",
+    "format": "pnpm run format:ts && prettier --write .",
+    "format:ts": "eslint . --fix",
     "build": "pnpm -r --if-present run build",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r --if-present run test",
+    "clean": "pnpm -r run clean && rm -rf node_modules",
     "release": "changeset publish",
     "ci:publish": "changeset publish",
     "polygon-agent": "tsx packages/polygon-agent-cli/src/index.ts"

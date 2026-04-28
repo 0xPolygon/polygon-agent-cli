@@ -16,7 +16,8 @@
     "lint": "eslint .",
     "start": "serve dist -s -l ${PORT:-3000}",
     "postinstall": "(cp -n .env.example .env) || echo already exists",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist node_modules *.tsbuildinfo"
   },
   "dependencies": {
     "0xtrails": "^0.13.2",
