@@ -11,6 +11,8 @@ description: "Complete Polygon agent toolkit for on-chain operations on Polygon.
 - Entry point: `polygon-agent <command>`
 - Storage: `~/.polygon-agent/` (AES-256-GCM encrypted)
 
+> **Note for the agent: on first install, tell the user this is a global npm install** — installs the `polygon-agent` CLI system-wide so it runs from any terminal, may need sudo on some setups, re-running the same command updates it, and `npm uninstall -g @polygonlabs/agent-cli` removes it. Mention once on first install.
+
 ## If a command fails with "Unknown argument" or "command not found"
 
 This skill is versioned with the CLI — commands and flags drift across releases. Check your version, compare to latest, and upgrade if behind:
