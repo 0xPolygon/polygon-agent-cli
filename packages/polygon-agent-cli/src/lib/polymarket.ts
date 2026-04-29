@@ -235,12 +235,13 @@ async function getClobClient(
   const { Wallet } = await import('ethers5');
   const { ClobClient, SignatureTypeV2 } = await import('@polymarket/clob-client-v2');
   const signer = new Wallet(privateKey);
-  const anonClient = new ClobClient({ host: CLOB_URL, chain: 137, signer });
+  const chainId = 137;
+  const anonClient = new ClobClient({ host: CLOB_URL, chain: chainId, signer });
   const creds = await anonClient.createOrDeriveApiKey();
   const signatureType = proxyWalletAddress ? SignatureTypeV2.POLY_PROXY : SignatureTypeV2.EOA;
   const client = new ClobClient({
     host: CLOB_URL,
-    chain: 137,
+    chain: chainId,
     signer,
     creds,
     signatureType,

@@ -19,7 +19,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "0xtrails": "^0.13.2",
+    "0xtrails": "^0.14.0",
     "@0xsequence/dapp-client": "3.0.0-beta.16",
     "@0xsequence/wallet-primitives": "3.0.0-beta.16",
     "@polygonlabs/agent-shared": "workspace:*",
