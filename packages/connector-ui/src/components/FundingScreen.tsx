@@ -1,4 +1,4 @@
-import { TrailsWidget } from '0xtrails/widget';
+import { Fund } from '0xtrails/widget';
 
 import { trailsApiKey } from '../config';
 
@@ -83,17 +83,18 @@ export function FundingScreen({ walletAddress, chainId, onSkip }: FundingScreenP
             </p>
           </div>
 
-          {/* Trails widget renders its own styled button */}
-          <TrailsWidget
+          <Fund
             apiKey={trailsApiKey}
-            mode="fund"
             theme="light"
             customCss={trailsTheme}
-            toChainId={chainId}
-            toToken={USDC_POLYGON}
-            toAddress={walletAddress}
+            to={{
+              recipient: walletAddress,
+              currency: USDC_POLYGON,
+              chain: chainId
+            }}
             buttonText="Add Funds to Agent"
-            fundOptions={{ fiatAmount: '20', hideSwap: true }}
+            hideSwap={true}
+            from={{ amount: 20 }}
             onramp={{
               mesh: {
                 environment: 'production'

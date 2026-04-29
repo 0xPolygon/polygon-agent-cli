@@ -229,21 +229,20 @@ async function getClobClient(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<{ client: any; creds: any; address: string }> {
   const { Wallet } = await import('ethers5');
-  const { ClobClient } = await import('@polymarket/clob-client');
-  const { SignatureType } = await import('@polymarket/order-utils');
+  const { ClobClient, SignatureTypeV2 } = await import('@polymarket/clob-client-v2');
   const signer = new Wallet(privateKey);
   const chainId = 137;
-  const anonClient = new ClobClient(CLOB_URL, chainId, signer);
+  const anonClient = new ClobClient({ host: CLOB_URL, chain: chainId, signer });
   const creds = await anonClient.createOrDeriveApiKey();
-  const signatureType = proxyWalletAddress ? SignatureType.POLY_PROXY : SignatureType.EOA;
-  const client = new ClobClient(
-    CLOB_URL,
-    chainId,
+  const signatureType = proxyWalletAddress ? SignatureTypeV2.POLY_PROXY : SignatureTypeV2.EOA;
+  const client = new ClobClient({
+    host: CLOB_URL,
+    chain: chainId,
     signer,
     creds,
     signatureType,
-    proxyWalletAddress
-  );
+    funderAddress: proxyWalletAddress
+  });
   return { client, creds, address: await signer.getAddress() };
 }
 
