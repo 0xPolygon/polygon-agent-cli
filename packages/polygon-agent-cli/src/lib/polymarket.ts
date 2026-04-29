@@ -1,9 +1,10 @@
-// Polymarket integration library
-// Covers: Gamma API (market discovery), CLOB API (trading via @polymarket/clob-client), on-chain ops
+// Polymarket integration library — CLOB V2
+// Covers: Gamma API (market discovery), CLOB V2 API (trading via @polymarket/clob-client-v2), on-chain ops
 //
 // Architecture: Sequence smart wallet → Polymarket proxy wallet → CLOB
 // - Sequence smart wallet funds the Polymarket proxy wallet (USDC.e transfer)
-// - EOA calls proxy.execute([approve, split]) to run on-chain ops FROM the proxy wallet
+// - Proxy wallet wraps USDC.e → pUSD via CollateralOnramp before trading
+// - EOA calls proxy.execute([approve, wrap]) to run on-chain ops FROM the proxy wallet
 // - CLOB orders use maker=proxyWallet, signer=EOA, signatureType=POLY_PROXY
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -40,10 +41,13 @@ export const DATA_URL = process.env.POLYMARKET_DATA_URL || 'https://data-api.pol
 
 // Polygon mainnet (chain 137)
 export const USDC_E = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174'; // USDC.e — 6 decimals
+export const PUSD = '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB'; // pUSD — Polymarket USD, 6 decimals
 export const CTF = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045'; // Conditional Token Framework
-export const CTF_EXCHANGE = '0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E'; // CLOB exchange
-export const NEG_RISK_CTF_EXCHANGE = '0xC5d563A36AE78145C45a50134d48A1215220f80a';
+export const CTF_EXCHANGE = '0xE111180000d2663C0091e4f400237545B87B996B'; // CLOB V2 exchange
+export const NEG_RISK_CTF_EXCHANGE = '0xe2222d279d744050d28e00520010520000310F59'; // V2 neg-risk exchange
 export const NEG_RISK_ADAPTER = '0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296';
+export const COLLATERAL_ONRAMP = '0x93070a847efEf7F70739046A929D47a521F5B8ee'; // USDC.e → pUSD wrapping
+export const COLLATERAL_OFFRAMP = '0x2957922Eb93258b93368531d39fAcCA3B4dC5854'; // pUSD → USDC.e unwrapping
 
 // Polymarket proxy wallet factory (Polygon mainnet)
 export const PROXY_WALLET_FACTORY = '0xaB45c5A4B0c941a2F231C04C3f49182e1A254052';
@@ -56,10 +60,10 @@ export async function getPolymarketProxyWalletAddress(eoaAddress: string): Promi
   return getProxyWalletAddress(PROXY_WALLET_FACTORY, eoaAddress);
 }
 
-// Proxy wallet execute ABI: execute(Transaction[]) — selector 0x34ee9791
+// Proxy wallet ABI: proxy(Transaction[]) — selector 0x34ee9791
 const PROXY_EXECUTE_ABI = [
   {
-    name: 'execute',
+    name: 'proxy',
     type: 'function',
     inputs: [
       {
@@ -93,7 +97,7 @@ export async function executeViaProxyWallet(
   }));
   const data = encodeFunctionData({
     abi: PROXY_EXECUTE_ABI,
-    functionName: 'execute',
+    functionName: 'proxy',
     args: [transactions]
   });
   const hash = await walletClient.sendTransaction({ to: PROXY_WALLET_FACTORY, data, value: 0n });
@@ -221,7 +225,7 @@ export async function getOrderBook(tokenId: string): Promise<any> {
   return res.json();
 }
 
-// ─── CLOB API — @polymarket/clob-client ─────────────────────────────────────
+// ─── CLOB V2 API — @polymarket/clob-client-v2 ──────────────────────────────
 
 async function getClobClient(
   privateKey: string,
@@ -258,7 +262,7 @@ export async function cancelOrder(orderId: string, privateKey: string): Promise<
   return client.cancelOrder({ orderID: orderId });
 }
 
-// ─── CLOB API — order creation ───────────────────────────────────────────────
+// ─── CLOB V2 API — order creation ───────────────────────────────────────────
 
 export async function createAndPostOrder({
   tokenId,
@@ -279,6 +283,7 @@ export async function createAndPostOrder({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 }): Promise<any> {
   const { client } = await getClobClient(privateKey, proxyWalletAddress);
+  // V2: client auto-fetches tickSize and negRisk from getClobMarketInfo
   const order = await client.createOrder({
     tokenID: tokenId,
     price,
@@ -305,6 +310,7 @@ export async function createAndPostMarketOrder({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 }): Promise<any> {
   const { client } = await getClobClient(privateKey, proxyWalletAddress);
+  // V2: no feeRateBps — fees determined by protocol at match time
   const order = await client.createMarketOrder({
     tokenID: tokenId,
     side,

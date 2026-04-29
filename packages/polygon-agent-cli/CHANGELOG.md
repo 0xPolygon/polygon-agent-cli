@@ -3,6 +3,17 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [0.10.0](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-cli@0.9.5...@polygonlabs/agent-cli@0.10.0) (2026-04-28)
+
+
+### Features
+
+* **polymarket:** migrate to CLOB V2 SDK, pUSD collateral, and V2 exchange contracts ([95ad532](https://github.com/0xPolygon/polygon-agent-cli/commit/95ad53231556da3e61741598f503cf6057af8e8c))
+
+
+
+
+
 ## [0.9.5](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-cli@0.9.4...@polygonlabs/agent-cli@0.9.5) (2026-04-27)
 
 
