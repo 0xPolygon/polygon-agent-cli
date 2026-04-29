@@ -59,13 +59,11 @@ polygon-agent setup --name "MyAgent"
 # → all subsequent commands auto-load the access key from disk — no export needed
 
 # Step 2: Create ecosystem wallet (opens browser, waits for 6-digit code)
-# If the user's goal involves DeFi (deposit, yield, swap, Aave, Morpho), include all DeFi
-# contracts now so the user only approves once — not again when the deposit is attempted.
-polygon-agent wallet create --usdc-limit 100 --native-limit 5 \
-  --contract 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359 \
+# Aave V3 Pool is auto-whitelisted in all sessions. For Morpho or other DeFi vaults,
+# add --contract flags as needed.
+polygon-agent wallet create --usdc-limit 50 --native-limit 5 \
   --contract 0xc2132D05D31c914a87C6611C10748AEb04B58e8F \
   --contract 0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619 \
-  --contract 0x794a61358d6845594f94dc1db02a252b5b4814ad \
   --contract 0x781fb7f6d845e3be129289833b04d43aa8558c42 \
   --contract 0xf5c81d25ee174d83f1fd202ca94ae6070d073ccf \
   --contract 0x3f33f9f7e2d7cfbcbdf8ea8b870a6e3d449664c2
@@ -162,13 +160,14 @@ polygon-agent agent feedback --agent-id <id> --value <score> [--tag1 <t>] [--tag
 - **`balances --chains`** — comma-separated chains (max 20); two or more return JSON with `multiChain: true` and a `chains` array (same wallet address on each)
 - **Fee preference** — auto-selects USDC over native POL when both available
 - **`fund`** — returns `https://wallet.polygon.technology` as the `fundingUrl`. Always run `polygon-agent fund` to get the URL and wallet address — never hardcode or construct manually.
-- **`deposit`** — picks highest-TVL pool via Trails `getEarnPools` and deposits directly. `wallet create` auto-whitelists USDC, Aave V3 Pool (`0x794a61358d6845594f94dc1db02a252b5b4814ad`), and all standard DeFi contracts — if the user has an older session, re-run `wallet create --usdc-limit 5` before depositing. Full deposit reference: https://agentconnect.polygon.technology/polygon-defi/SKILL.md
+- **`deposit`** — picks highest-TVL pool via Trails `getEarnPools` and deposits directly. Aave V3 Pool (`0x794a61358d6845594f94dc1db02a252b5b4814ad`) is auto-whitelisted in all sessions. Full deposit reference: https://agentconnect.polygon.technology/polygon-defi/SKILL.md
+- **Gas reserve** — when using `deposit` or any command that spends tokens, always reserve at least 0.1 USDC or 0.1 POL in the wallet for gas. Never attempt to spend the full balance. The `deposit` command enforces a 0.1 reserve automatically, but the agent must apply the same rule when constructing amounts for `send`, `swap`, or direct contract calls.
 - **`withdraw`** — `--position` = aToken or ERC-4626 vault; `--amount` = `max` or underlying units (Aave / vault). Dry-run JSON includes `poolAddress` / `vault`. Broadcast needs session on the **same chain** as `--chain`, with pool/vault + underlying token whitelisted where the relayer touches them
 - **`x402-pay`** — probes endpoint for 402, smart wallet funds builder EOA with exact token amount, EOA signs EIP-3009 payment. Chain auto-detected from 402 response
 - **`send-native --direct`** — bypasses ValueForwarder contract for direct EOA transfer
 - **Session permissions** — without `--usdc-limit` etc., session gets bare-bones defaults and may not transact
 - **Session expiry** — 6 months from creation
-- **One-pass session setup** — if the user's intent involves DeFi (deposit, yield, swap, Aave, Morpho), include all required DeFi contracts in the initial `wallet create` call. Never create a bare session and then ask the user to re-approve when a deposit is later attempted. See the Complete Setup Flow above for the full contract list.
+- **One-pass session setup** — if the user's intent involves DeFi (deposit, yield, swap, Aave, Morpho), include any additional contracts (Morpho vaults etc.) in the initial `wallet create` call. Never create a bare session and then ask the user to re-approve when a deposit is later attempted.
 
 ## Wallet Creation Flow (v2 Relay)
 

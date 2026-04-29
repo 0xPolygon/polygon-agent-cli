@@ -53,7 +53,10 @@ const AUTO_WHITELISTED_CONTRACTS = [
 
   // Polygon mainnet (chainId 137) — default tokens
   '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', // USDC (native)
-  '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174' // USDC.e (bridged)
+  '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174', // USDC.e (bridged)
+
+  // Polygon mainnet (chainId 137) — yield vaults (always available for deposit)
+  '0x794a61358d6845594f94dc1db02a252b5b4814ad' // Aave V3 Pool (all markets)
 ];
 
 // Additional contracts whitelisted when --defi flag is passed.
@@ -63,8 +66,7 @@ const DEFI_CONTRACTS = [
   '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', // USDT
   '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619', // WETH
 
-  // Polygon mainnet (chainId 137) — yield vaults
-  '0x794a61358d6845594f94dc1db02a252b5b4814ad', // Aave V3 Pool (all markets)
+  // Polygon mainnet (chainId 137) — additional yield vaults
   '0x781fb7f6d845e3be129289833b04d43aa8558c42', // Morpho Compound USDC
   '0xf5c81d25ee174d83f1fd202ca94ae6070d073ccf', // Morpho Compound WETH
   '0x3f33f9f7e2d7cfbcbdf8ea8b870a6e3d449664c2' // Morpho Compound POL
