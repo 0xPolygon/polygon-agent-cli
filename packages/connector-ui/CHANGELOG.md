@@ -3,6 +3,17 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## [1.6.12](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-connector-ui@1.6.10...@polygonlabs/agent-connector-ui@1.6.12) (2026-04-29)
+
+
+### Bug Fixes
+
+* auto-whitelist Aave V3 Pool, enforce 0.1 gas reserve on deposit ([d7db76b](https://github.com/0xPolygon/polygon-agent-cli/commit/d7db76b1cd202fbe14d45e18c3fc2b23883907a6))
+
+
+
+
+
 ## [1.6.10](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-connector-ui@1.6.8...@polygonlabs/agent-connector-ui@1.6.10) (2026-04-29)
 
 

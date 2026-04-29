@@ -3,6 +3,18 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## [0.10.2](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-cli@0.10.1...@polygonlabs/agent-cli@0.10.2) (2026-04-29)
+
+
+### Bug Fixes
+
+* auto-whitelist Aave V3 Pool, enforce 0.1 gas reserve on deposit ([d7db76b](https://github.com/0xPolygon/polygon-agent-cli/commit/d7db76b1cd202fbe14d45e18c3fc2b23883907a6))
+* **deposit:** restore native balance check, reserve USDC only when POL < 0.1 ([f4be1a9](https://github.com/0xPolygon/polygon-agent-cli/commit/f4be1a9e562e55eeda67481fe8a0cd665cab1e9a))
+
+
+
+
+
 ## [0.10.1](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-cli@0.10.0...@polygonlabs/agent-cli@0.10.1) (2026-04-29)
 
 **Note:** Version bump only for package @polygonlabs/agent-cli
