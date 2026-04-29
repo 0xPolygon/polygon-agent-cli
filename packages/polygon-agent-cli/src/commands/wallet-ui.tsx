@@ -111,6 +111,28 @@ export interface WalletCreateUIProps {
   onError?: (message: string) => void;
 }
 
+// Renders nothing but registers Ink's keystroke listener so the user can type
+// the 6-digit approval code. Extracted so it can be conditionally mounted —
+// useInput() triggers raw-mode setup on stdin which crashes in non-TTY contexts.
+function CodeInputCapture({
+  phase,
+  setCode
+}: {
+  phase: WalletCreatePhase;
+  setCode: React.Dispatch<React.SetStateAction<string>>;
+}) {
+  useInput((input, key) => {
+    if (phase !== 'code') return;
+    if (/^\d+$/.test(input)) {
+      setCode((prev) => (prev + input).slice(0, 6));
+    }
+    if (key.backspace || key.delete) {
+      setCode((prev) => prev.slice(0, -1));
+    }
+  });
+  return null;
+}
+
 export function WalletCreateUI({
   name,
   chain,
@@ -292,16 +314,6 @@ export function WalletCreateUI({
     }
   }, [phase, code]);
 
-  useInput((input, key) => {
-    if (phase !== 'code') return;
-    if (/^\d+$/.test(input)) {
-      setCode((prev) => (prev + input).slice(0, 6));
-    }
-    if (key.backspace || key.delete) {
-      setCode((prev) => prev.slice(0, -1));
-    }
-  });
-
   const regStatus: 'active' | 'done' | 'error' =
     phase === 'registering' ? 'active' : phase === 'error' && !url ? 'error' : 'done';
 
@@ -333,6 +345,11 @@ export function WalletCreateUI({
 
   return (
     <Box flexDirection="column" paddingX={1} paddingTop={1}>
+      {/* Only listen for keystrokes when we have a TTY. Mounting useInput()
+          in a non-TTY context triggers Ink's raw-mode setup, which throws
+          "Raw mode is not supported on the current process.stdin". */}
+      {tty && <CodeInputCapture phase={phase} setCode={setCode} />}
+
       <Header sub={`wallet create · ${chain}`} />
 
       {/* Steps */}
