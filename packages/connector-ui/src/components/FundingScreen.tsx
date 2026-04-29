@@ -94,7 +94,6 @@ export function FundingScreen({ walletAddress, chainId, onSkip }: FundingScreenP
             }}
             buttonText="Add Funds to Agent"
             hideSwap={true}
-            from={{ amount: 20 }}
             onramp={{
               mesh: {
                 environment: 'production'
