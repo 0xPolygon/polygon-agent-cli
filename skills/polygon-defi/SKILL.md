@@ -10,21 +10,17 @@ description: DeFi operations on Polygon using the Polygon Agent CLI. Covers same
 **Before any DeFi operation, the wallet session must include the token contracts and pool contracts.** If the user does not yet have a session, or has an older session that predates this list, create one now — do not wait until a deposit fails:
 
 ```bash
-polygon-agent wallet create --usdc-limit 5 \
-  --contract 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359 \
+polygon-agent wallet create --usdc-limit 50 \
   --contract 0xc2132D05D31c914a87C6611C10748AEb04B58e8F \
   --contract 0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619 \
-  --contract 0x794a61358d6845594f94dc1db02a252b5b4814ad \
   --contract 0x781fb7f6d845e3be129289833b04d43aa8558c42 \
   --contract 0xf5c81d25ee174d83f1fd202ca94ae6070d073ccf \
   --contract 0x3f33f9f7e2d7cfbcbdf8ea8b870a6e3d449664c2
 ```
 
-This automatically includes:
-- USDC (native): `0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359`
+**Aave V3 Pool (`0x794a61358d6845594f94dc1db02a252b5b4814ad`) is auto-whitelisted in every session** — no `--contract` flag needed for it. The above command adds:
 - USDT: `0xc2132D05D31c914a87C6611C10748AEb04B58e8F`
 - WETH: `0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619`
-- Aave V3 Pool (all markets): `0x794a61358d6845594f94dc1db02a252b5b4814ad`
 - Morpho Compound USDC: `0x781fb7f6d845e3be129289833b04d43aa8558c42`
 - Morpho Compound WETH: `0xf5c81d25ee174d83f1fd202ca94ae6070d073ccf`
 - Morpho Compound POL: `0x3f33f9f7e2d7cfbcbdf8ea8b870a6e3d449664c2`
@@ -136,7 +132,7 @@ interface PoolTokenInfo {
 
 Pool discovery uses `TrailsApi.getEarnPools` — picks the most liquid pool (highest TVL) for the asset on the requested chain. No hardcoded addresses — the pool is resolved at runtime. Supported chains: Polygon, Base, Arbitrum, Optimism, Ethereum mainnet (any chain Trails indexes).
 
-**Gas requirement:** The wallet needs POL for gas, or a session created with `--usdc-limit` to enable USDC paymaster. If the wallet has no POL, create the session with `--usdc-limit 5`. When USDC paymaster is active and the deposit amount would consume the full balance, the CLI auto-reserves 0.05 USDC for gas and prints a note.
+**Gas requirement:** The wallet needs POL for gas, or a session created with `--usdc-limit` to enable USDC paymaster. If the wallet has no POL, create the session with `--usdc-limit 50`. The CLI always reserves 0.1 USDC for gas — never deposit the full balance. If the requested amount would leave less than 0.1 USDC, the CLI auto-reduces the deposit and prints a note.
 
 **Session setup:** The wallet session must whitelist the token contract and the pool deposit contract, or the relay will reject the transaction with a 400 error. Run a dry-run first to get the exact addresses, then create (or re-create) the session with both contracts:
 
@@ -145,7 +141,7 @@ Pool discovery uses `TrailsApi.getEarnPools` — picks the most liquid pool (hig
 polygon-agent deposit --asset USDC --amount 1
 
 # 2. Create session with those contracts whitelisted (prevents 400 permission error on broadcast)
-polygon-agent wallet create --usdc-limit 5 --contract <tokenAddress> --contract <depositAddress>
+polygon-agent wallet create --usdc-limit 50 --contract <tokenAddress> --contract <depositAddress>
 
 # 3. Broadcast
 polygon-agent deposit --asset USDC --amount 1 --broadcast
@@ -210,10 +206,10 @@ polygon-agent wallet create --contract <tokenAddress> --contract <depositAddress
 polygon-agent deposit --asset USDC --amount 0.3 --broadcast
 ```
 
-Common token contracts on Polygon mainnet (already auto-whitelisted in sessions created by the CLI):
+Contracts auto-whitelisted in every session (no `--contract` flag needed):
 - USDC: `0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359`
-- USDT: `0xc2132D05D31c914a87C6611C10748AEb04B58e8F`
-- WETH: `0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619`
+- USDC.e: `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174`
+- Aave V3 Pool: `0x794a61358d6845594f94dc1db02a252b5b4814ad`
 
 ### Yield Vault Contract Whitelist
 
@@ -252,12 +248,12 @@ polygon-agent swap --from USDC --to USDC --amount 0.5 --to-chain arbitrum --broa
 
 | Flag | Purpose |
 |------|---------|
-| `--usdc-limit <amt>` | Enable USDC gas paymaster. Required when the wallet has no POL. Recommended: `--usdc-limit 5`. |
+| `--usdc-limit <amt>` | Enable USDC gas paymaster. Required when the wallet has no POL. Recommended: `--usdc-limit 50`. |
 | `--contract <addr>` | Whitelist an additional contract (repeatable). Use this if a deposit is rejected due to a missing contract permission. |
 
 ```bash
 # New session with USDC gas enabled
-polygon-agent wallet create --usdc-limit 5
+polygon-agent wallet create --usdc-limit 50
 ```
 
 ---
@@ -267,8 +263,8 @@ polygon-agent wallet create --usdc-limit 5
 | Error | Cause | Fix |
 |-------|-------|-----|
 | `Insufficient <token>: wallet has X` | Balance too low for the requested deposit amount | Run `polygon-agent balances` and adjust `--amount` |
-| `Wallet has no POL for gas` | No native gas and no USDC paymaster | Fund with POL (`polygon-agent fund`) or re-create session with `--usdc-limit 5` |
+| `Wallet has no POL for gas` | No native gas and no USDC paymaster | Fund with POL (`polygon-agent fund`) or re-create session with `--usdc-limit 50` |
 | `Transaction rejected by relay` | Session permissions missing for pool or token contract | Re-create with `--contract <tokenAddress> --contract <depositAddress>` |
-| `Unable to pay gas` | No usable fee token found | Fund with POL or add `--usdc-limit 5` to session |
+| `Unable to pay gas` | No usable fee token found | Fund with POL or add `--usdc-limit 50` to session |
 | `Protocol X not yet supported` | Trails returned a protocol other than aave/morpho | Use `polygon-agent swap` to obtain the yield-bearing token manually |
 | `swap`: no route found | Insufficient liquidity for the pair | Try a different amount or token pair |
