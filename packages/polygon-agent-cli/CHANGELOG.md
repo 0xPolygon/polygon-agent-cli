@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## [0.10.1](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-cli@0.10.0...@polygonlabs/agent-cli@0.10.1) (2026-04-29)
+
+**Note:** Version bump only for package @polygonlabs/agent-cli
+
+
+
+
+
 # [0.10.0](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-cli@0.9.5...@polygonlabs/agent-cli@0.10.0) (2026-04-28)
 
 
