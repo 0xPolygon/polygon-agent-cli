@@ -1140,11 +1140,11 @@ export const depositCommand: CommandModule = {
         createPublicClient,
         http
       } = await import('viem');
-      // Pre-flight: verify balance and auto-reserve gas buffer when wallet has no native token
+      // Pre-flight: verify balance and auto-reserve gas buffer
       try {
         const viemChain = await viemChainForDeposit(chainId);
         const publicClient = createPublicClient({ chain: viemChain, transport: http() });
-        const [usdcBal] = await Promise.all([
+        const [usdcBal, nativeBal] = await Promise.all([
           publicClient.readContract({
             address: asset.address as `0x${string}`,
             abi: ERC20_BALANCE_OF_ABI,
@@ -1154,7 +1154,8 @@ export const depositCommand: CommandModule = {
           publicClient.getBalance({ address: walletAddress as `0x${string}` })
         ]);
         const requestedUnits = viemParseUnits(amountArg, asset.decimals);
-        const GAS_RESERVE = viemParseUnits('0.1', asset.decimals);
+        const USDC_GAS_RESERVE = viemParseUnits('0.1', asset.decimals);
+        const POL_GAS_RESERVE = viemParseUnits('0.1', 18);
         if (usdcBal < requestedUnits) {
           const available = viemFormatUnits(usdcBal, asset.decimals);
           throw new Error(
@@ -1162,18 +1163,18 @@ export const depositCommand: CommandModule = {
               `Run: polygon-agent balances`
           );
         }
-        if (requestedUnits + GAS_RESERVE > usdcBal) {
-          // Always reserve 0.1 for gas regardless of whether POL is available
-          const adjusted = usdcBal - GAS_RESERVE;
+        if (nativeBal < POL_GAS_RESERVE && requestedUnits + USDC_GAS_RESERVE > usdcBal) {
+          // Not enough POL to cover gas — USDC paymaster will be used; reserve 0.1 USDC
+          const adjusted = usdcBal - USDC_GAS_RESERVE;
           if (adjusted <= 0n) {
             throw new Error(
               `Insufficient ${assetSymbol} for deposit plus 0.1 gas reserve. ` +
-                `Fund with POL for native gas: polygon-agent fund`
+                `Fund with at least 0.1 POL for native gas or ensure USDC balance exceeds deposit by 0.1: polygon-agent fund`
             );
           }
           amountArg = viemFormatUnits(adjusted, asset.decimals);
           process.stderr.write(
-            `Note: reduced deposit to ${amountArg} ${assetSymbol} (0.1 reserved for gas)\n`
+            `Note: reduced deposit to ${amountArg} ${assetSymbol} (0.1 reserved for USDC gas paymaster — fund with POL to avoid this)\n`
           );
         }
       } catch (e) {
