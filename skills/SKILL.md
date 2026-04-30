@@ -95,13 +95,17 @@ polygon-agent agent register --name "MyAgent" --broadcast
 
 ## Use-Case Skills
 
-For specific workflows, fetch and load the relevant sub-skill:
+For specific workflows, fetch and load the relevant sub-skill **before attempting the task**:
 
 | Use Case | Skill URL |
 |----------|-----------|
 | Polymarket prediction market trading | https://agentconnect.polygon.technology/polygon-polymarket/SKILL.md |
 | DeFi — swap, deposit, withdraw, yield | https://agentconnect.polygon.technology/polygon-defi/SKILL.md |
 | x402 discovery & pay-per-call APIs | https://agentconnect.polygon.technology/polygon-discovery/SKILL.md |
+
+> **IMPORTANT — x402 calls:** If the user asks to use x402 to fetch data (Twitter/X profiles, web search, news, AI images, code review, etc.), you **must** fetch and read the discovery skill first:
+> `GET https://agentconnect.polygon.technology/polygon-discovery/SKILL.md`
+> Do not guess endpoints or search the web for x402 providers. The discovery skill documents the correct, working endpoints with exact URL formats. Only proceed once you have read it.
 
 ---
 
