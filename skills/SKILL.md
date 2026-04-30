@@ -103,9 +103,13 @@ For specific workflows, fetch and load the relevant sub-skill **before attemptin
 | DeFi — swap, deposit, withdraw, yield | https://agentconnect.polygon.technology/polygon-defi/SKILL.md |
 | x402 discovery & pay-per-call APIs | https://agentconnect.polygon.technology/polygon-discovery/SKILL.md |
 
-> **IMPORTANT — x402 calls:** If the user asks to use x402 to fetch data (Twitter/X profiles, web search, news, AI images, code review, etc.), you **must** fetch and read the discovery skill first:
-> `GET https://agentconnect.polygon.technology/polygon-discovery/SKILL.md`
-> Do not guess endpoints or search the web for x402 providers. The discovery skill documents the correct, working endpoints with exact URL formats. Only proceed once you have read it.
+> **IMPORTANT — x402 calls:** If the user asks to use x402 to fetch data (Twitter/X profiles, web search, news, AI images, code review, etc.), follow these steps in order before making any request:
+>
+> 1. Fetch and read the discovery skill: `GET https://agentconnect.polygon.technology/polygon-discovery/SKILL.md`
+> 2. Run `polygon-agent wallet list` — if no wallet exists, complete the full setup flow (setup → wallet create → fund)
+> 3. Run `polygon-agent balances` — confirm USDC is available before proceeding; x402 calls will fail with an EOA funding error if the wallet is empty
+>
+> Do not guess endpoints or search the web for x402 providers. The discovery skill documents the correct, working endpoints with exact URL formats.
 
 ---
 
