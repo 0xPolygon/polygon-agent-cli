@@ -3,6 +3,17 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## [0.10.3](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-cli@0.10.2...@polygonlabs/agent-cli@0.10.3) (2026-04-30)
+
+
+### Bug Fixes
+
+* **wallet:** prevent 'Raw mode is not supported' error in non-TTY environments ([4e6a269](https://github.com/0xPolygon/polygon-agent-cli/commit/4e6a269d9d0d1e0db6567235b5068474d6393fec))
+
+
+
+
+
 ## [0.10.2](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-cli@0.10.1...@polygonlabs/agent-cli@0.10.2) (2026-04-29)
 
 
