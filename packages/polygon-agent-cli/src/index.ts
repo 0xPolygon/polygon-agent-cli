@@ -21,6 +21,7 @@ import {
 } from './commands/operations.ts';
 import { polymarketCommand } from './commands/polymarket.ts';
 import { setupCommand } from './commands/setup.ts';
+import { shopifyCommand } from './commands/shopify.ts';
 import { walletCommand } from './commands/wallet.ts';
 import { bootstrapAccessKey } from './lib/storage.ts';
 
@@ -97,7 +98,8 @@ const parser = yargs(hideBin(process.argv))
   .command(withdrawCommand)
   .command(x402PayCommand)
   .command(agentCommand)
-  .command(polymarketCommand);
+  .command(polymarketCommand)
+  .command(shopifyCommand);
 
 // Register legacy aliases
 for (const alias of legacyAliases) {
