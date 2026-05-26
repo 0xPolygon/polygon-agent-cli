@@ -364,11 +364,25 @@ function App() {
             .build()
         );
       }
+      // Parse user-supplied --contract whitelist first so we can use it to
+      // filter the auto-injected fee permissions below. Without this, a fee
+      // token (e.g. USDC) shadows the user's unrestricted entry with a
+      // transfer-only rule and the Sapient signer rejects approve()/other
+      // non-transfer calls against that contract.
+      const contractsRaw = searchParams.get('contracts');
+      const whitelistedTargets = new Set<string>(
+        (contractsRaw ?? '')
+          .split(',')
+          .map((s) => s.trim().toLowerCase())
+          .filter((s) => /^0x[a-f0-9]{40}$/.test(s))
+      );
+
       const nativeFeePermission: any[] = [];
       const feePermissions: any[] =
         (feeTokens as any)?.paymentAddress && Array.isArray((feeTokens as any)?.tokens)
           ? ((feeTokens as any).tokens as any[])
               .filter((t) => !!t?.contractAddress)
+              .filter((t) => !whitelistedTargets.has(String(t.contractAddress).toLowerCase()))
               .map((token: any) => {
                 const decimals = typeof token.decimals === 'number' ? token.decimals : 6;
                 const valueLimit =
@@ -392,17 +406,10 @@ function App() {
               })
           : [];
 
-      const contractsRaw = searchParams.get('contracts');
-      const contractWhitelistPermissions: any[] = [];
-      if (contractsRaw) {
-        for (const addr of contractsRaw
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean)) {
-          if (/^0x[a-fA-F0-9]{40}$/.test(addr))
-            contractWhitelistPermissions.push({ target: addr as any, rules: [] });
-        }
-      }
+      const contractWhitelistPermissions: any[] = Array.from(whitelistedTargets).map((addr) => ({
+        target: addr as any,
+        rules: []
+      }));
 
       const polValueLimit = nativeLimit
         ? BigInt(Math.floor(parseFloat(nativeLimit) * 1e18))
