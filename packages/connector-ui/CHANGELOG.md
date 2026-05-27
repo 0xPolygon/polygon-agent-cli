@@ -3,6 +3,18 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## [1.6.15](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-connector-ui@1.6.13...@polygonlabs/agent-connector-ui@1.6.15) (2026-05-27)
+
+
+### Bug Fixes
+
+* **connector-ui:** let --contract override auto-injected fee-token permissions ([1f446f1](https://github.com/0xPolygon/polygon-agent-cli/commit/1f446f171db5b16672bb862ccb4c02a3f4348807))
+* **skills:** require discovery sub-skill load before x402 calls; bump connector-ui ([c72c080](https://github.com/0xPolygon/polygon-agent-cli/commit/c72c080d02adee47aa306d81def1c1251adc4539))
+
+
+
+
+
 ## [1.6.13](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-connector-ui@1.6.12...@polygonlabs/agent-connector-ui@1.6.13) (2026-04-30)
 
 **Note:** Version bump only for package @polygonlabs/agent-connector-ui
