@@ -812,6 +812,101 @@ async function handleSendToken(argv: {
   }
 }
 
+// --- call ---
+// Generic raw-calldata submitter. Thin wrapper over runDappClientTx:
+// takes a target contract, pre-encoded calldata, and optional native value,
+// and submits as a single transaction through the active wallet session.
+// All ABI encoding is the caller's responsibility (use viem encodeFunctionData,
+// ethers Interface, `cast calldata`, etc.) — keeping this command domain-free.
+async function handleCall(argv: {
+  wallet?: string;
+  to: string;
+  data: string;
+  value?: string;
+  chain?: string;
+  broadcast?: boolean;
+  'prefer-native-fee'?: boolean;
+}): Promise<void> {
+  const walletName = argv.wallet || 'main';
+  const broadcast = argv.broadcast || false;
+  const preferNativeFee = argv['prefer-native-fee'] || false;
+
+  if (!/^0x[0-9a-fA-F]{40}$/.test(argv.to)) {
+    throw new Error('--to must be a 0x-prefixed 20-byte address');
+  }
+  if (!/^0x[0-9a-fA-F]*$/.test(argv.data)) {
+    throw new Error('--data must be 0x-prefixed hex (use viem/ethers/cast to encode)');
+  }
+
+  const session = await loadWalletSession(walletName);
+  if (!session) throw new Error(`Wallet not found: ${walletName}`);
+
+  const network = resolveNetwork(argv.chain || session.chain || 'polygon');
+  const decimals = network.nativeToken?.decimals ?? 18;
+  const value = argv.value ? parseUnits(argv.value, decimals) : 0n;
+
+  // Default: pay gas in an ERC20 fee token (USDC etc.) — matches the rest of
+  // the CLI's gasless UX. Pass --prefer-native-fee to flip to native (POL/ETH)
+  // first; useful when the wallet has only native balance.
+  const result = await runDappClientTx({
+    walletName,
+    chainId: network.chainId,
+    transactions: [{ to: argv.to, value, data: argv.data }],
+    broadcast,
+    preferNativeFee
+  });
+
+  if (!broadcast) return; // runDappClientTx already printed dry-run JSON
+
+  const explorerUrl = getExplorerUrl(network, result.txHash ?? '');
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        txHash: result.txHash,
+        explorerUrl,
+        walletAddress: result.walletAddress
+      },
+      null,
+      2
+    )
+  );
+}
+
+export const callCommand: CommandModule = {
+  command: 'call',
+  describe: 'Submit a raw contract call (pre-encoded calldata) via the active wallet session',
+  builder: (yargs) =>
+    withBroadcast(
+      withWalletAndChain(yargs)
+        .option('to', {
+          type: 'string',
+          demandOption: true,
+          describe: 'Contract address to call',
+          coerce: fileCoerce
+        })
+        .option('data', {
+          type: 'string',
+          demandOption: true,
+          describe: 'Pre-encoded calldata (0x-prefixed hex). Use @path to read from a file.',
+          coerce: fileCoerce
+        })
+        .option('value', {
+          type: 'string',
+          describe: 'Native token value to attach (human units, e.g. 0.01). Default 0.',
+          coerce: fileCoerce
+        })
+        .option('prefer-native-fee', {
+          type: 'boolean',
+          default: false,
+          describe:
+            'Pay gas in the chain native token (POL/ETH) instead of an ERC20 fee token (USDC).'
+        })
+    ),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  handler: (argv) => handleCall(argv as any)
+};
+
 // --- swap ---
 export const swapCommand: CommandModule = {
   command: 'swap',
