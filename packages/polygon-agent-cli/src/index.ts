@@ -10,6 +10,7 @@ import { hideBin } from 'yargs/helpers';
 import { agentCommand } from './commands/agent.ts';
 import {
   balancesCommand,
+  callCommand,
   depositCommand,
   fundCommand,
   sendCommand,
@@ -92,6 +93,7 @@ const parser = yargs(hideBin(process.argv))
   .command(sendCommand)
   .command(sendNativeCommand)
   .command(sendTokenCommand)
+  .command(callCommand)
   .command(swapCommand)
   .command(depositCommand)
   .command(withdrawCommand)
