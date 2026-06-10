@@ -1,1 +1,0 @@
-{"root":["./src/app.tsx","./src/config.ts","./src/indexer.ts","./src/main.tsx","./src/relay.ts","./src/tokendirectory.ts","./src/types.d.ts","./src/vite-env.d.ts","./src/components/codedisplay.tsx","./src/components/fundingscreen.tsx"],"version":"5.9.3"}

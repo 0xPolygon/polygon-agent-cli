@@ -24,7 +24,7 @@ import {
   NEG_RISK_ADAPTER,
   COLLATERAL_ONRAMP
 } from '../lib/polymarket.ts';
-import { loadWalletSession, savePolymarketKey, loadPolymarketKey } from '../lib/storage.ts';
+import { loadOmsWalletPointer, savePolymarketKey, loadPolymarketKey } from '../lib/storage.ts';
 import { runTx as runDappClientTx } from '../lib/tx-dispatch.ts';
 
 // ─── handlers ────────────────────────────────────────────────────────────────
@@ -321,10 +321,13 @@ async function handleClobBuy(argv: {
     }
 
     const [session, privateKey] = await Promise.all([
-      loadWalletSession(walletName),
+      loadOmsWalletPointer(walletName),
       loadPolymarketKey()
     ]);
-    if (!session) throw new Error(`Wallet not found: ${walletName}`);
+    if (!session)
+      throw new Error(
+        `Wallet not found: ${walletName}. Run: polygon-agent wallet login --email <addr>`
+      );
 
     const { privateKeyToAccount } = await import('viem/accounts');
     const account = privateKeyToAccount(privateKey as `0x${string}`);

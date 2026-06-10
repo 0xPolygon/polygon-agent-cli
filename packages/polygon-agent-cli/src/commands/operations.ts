@@ -2,7 +2,12 @@ import type { CommandModule, Argv } from 'yargs';
 
 import React from 'react';
 
-import { loadWalletSession, loadBuilderConfig } from '../lib/storage.ts';
+import type { TokenBalance } from '@0xsequence/typescript-sdk';
+
+import { findNetworkById } from '@0xsequence/typescript-sdk';
+
+import { getOmsClient } from '../lib/oms-client.ts';
+import { loadOmsWalletPointer, loadBuilderConfig } from '../lib/storage.ts';
 import { resolveErc20BySymbol } from '../lib/token-directory.ts';
 import { runTx as runDappClientTx } from '../lib/tx-dispatch.ts';
 import {
@@ -10,7 +15,6 @@ import {
   formatUnits,
   parseUnits,
   getExplorerUrl,
-  getRpcUrl,
   getReadRpcUrl,
   fileCoerce
 } from '../lib/utils.ts';
@@ -40,22 +44,6 @@ function withBroadcast<T>(yargs: Argv<T>) {
 }
 
 // Get per-chain indexer URL
-function getChainIndexerUrl(chainId: number): string {
-  const chainNames: Record<number, string> = {
-    137: 'polygon',
-    80002: 'amoy',
-    1: 'mainnet',
-    42161: 'arbitrum',
-    10: 'optimism',
-    8453: 'base',
-    43114: 'avalanche',
-    56: 'bsc',
-    100: 'gnosis'
-  };
-  const name = chainNames[chainId] || 'polygon';
-  return `https://${name}-indexer.sequence.app`;
-}
-
 // Load optional token map override from env
 function loadTokenMap(): Record<string, Record<string, { address: string; decimals: number }>> {
   const raw = process.env.TRAILS_TOKEN_MAP_JSON || '';
@@ -134,29 +122,24 @@ type BalanceRowJson =
     };
 
 async function fetchBalancesRowsForChain(
+  walletName: string,
   walletAddress: string,
-  chainSpec: string,
-  indexerKey: string
+  chainSpec: string
 ): Promise<{ chainId: number; chain: string; balances: BalanceRowJson[] }> {
   const network = resolveNetwork(chainSpec);
   const nativeDecimals = network.nativeToken?.decimals ?? 18;
   const nativeSymbol = network.nativeToken?.symbol || 'POL';
 
-  const { SequenceIndexer } = await import('@0xsequence/indexer');
-  const indexerUrl = getChainIndexerUrl(network.chainId);
-  const indexer = new SequenceIndexer(indexerUrl, indexerKey);
+  const omsNetwork = findNetworkById(network.chainId);
+  if (!omsNetwork) throw new Error(`Unsupported chain for OMS indexer: ${network.chainId}`);
+  const oms = getOmsClient(walletName);
 
   const [nativeRes, tokenRes] = await Promise.all([
-    indexer.getNativeTokenBalance({
-      accountAddress: walletAddress
-    }),
-    indexer.getTokenBalances({
-      accountAddress: walletAddress,
-      includeMetadata: true
-    })
+    oms.indexer.getNativeTokenBalance({ network: omsNetwork, walletAddress }),
+    oms.indexer.getTokenBalances({ network: omsNetwork, walletAddress, includeMetadata: true })
   ]);
 
-  const nativeWei = nativeRes?.balance?.balance || '0';
+  const nativeWei = nativeRes?.balance || '0';
   const native: BalanceRowJson[] = [
     {
       type: 'native',
@@ -165,19 +148,15 @@ async function fetchBalancesRowsForChain(
     }
   ];
 
-  const erc20: BalanceRowJson[] = (tokenRes?.balances || []).map(
-    (b: {
-      contractInfo?: { symbol?: string; name?: string; decimals?: number };
-      contractAddress: string;
-      balance?: string;
-    }) => ({
+  const erc20: BalanceRowJson[] = (tokenRes?.balances || [])
+    .filter((b: TokenBalance) => !!b.contractAddress)
+    .map((b: TokenBalance) => ({
       type: 'erc20' as const,
       symbol: b.contractInfo?.symbol || 'ERC20',
       name: b.contractInfo?.name || undefined,
-      contractAddress: b.contractAddress,
+      contractAddress: b.contractAddress as string,
       balance: formatUnits(b.balance || '0', b.contractInfo?.decimals ?? 18)
-    })
-  );
+    }));
 
   return {
     chainId: network.chainId,
@@ -220,31 +199,24 @@ export const balancesCommand: CommandModule = {
 
     if (multiChainMode || (preferChainsArg && !isTTY())) {
       try {
-        const session = await loadWalletSession(walletName);
-        if (!session) {
-          throw new Error(`Wallet not found: ${walletName}`);
+        const pointer = await loadOmsWalletPointer(walletName);
+        if (!pointer) {
+          throw new Error(
+            `Wallet not found: ${walletName}. Run: polygon-agent wallet login --email <addr>`
+          );
         }
-
-        const indexerKey =
-          process.env.SEQUENCE_INDEXER_ACCESS_KEY ||
-          session.projectAccessKey ||
-          process.env.SEQUENCE_PROJECT_ACCESS_KEY;
-        if (!indexerKey) {
-          throw new Error('Missing project access key (not in wallet session or environment)');
-        }
+        const walletAddress = pointer.walletAddress;
 
         if (multiChainMode) {
           const chainsOut = await Promise.all(
-            chainList.map((spec) =>
-              fetchBalancesRowsForChain(session.walletAddress, spec, indexerKey)
-            )
+            chainList.map((spec) => fetchBalancesRowsForChain(walletName, walletAddress, spec))
           );
           console.log(
             JSON.stringify(
               {
                 ok: true,
                 walletName,
-                walletAddress: session.walletAddress,
+                walletAddress,
                 multiChain: true,
                 chains: chainsOut
               },
@@ -253,17 +225,13 @@ export const balancesCommand: CommandModule = {
             )
           );
         } else {
-          const one = await fetchBalancesRowsForChain(
-            session.walletAddress,
-            singleChainSpec!,
-            indexerKey
-          );
+          const one = await fetchBalancesRowsForChain(walletName, walletAddress, singleChainSpec!);
           console.log(
             JSON.stringify(
               {
                 ok: true,
                 walletName,
-                walletAddress: session.walletAddress,
+                walletAddress,
                 chainId: one.chainId,
                 chain: one.chain,
                 balances: one.balances
@@ -293,28 +261,22 @@ export const balancesCommand: CommandModule = {
     if (!isTTY()) {
       // Non-TTY: original JSON output (single default / --chain)
       try {
-        const session = await loadWalletSession(walletName);
-        if (!session) {
-          throw new Error(`Wallet not found: ${walletName}`);
+        const pointer = await loadOmsWalletPointer(walletName);
+        if (!pointer) {
+          throw new Error(
+            `Wallet not found: ${walletName}. Run: polygon-agent wallet login --email <addr>`
+          );
         }
 
-        const indexerKey =
-          process.env.SEQUENCE_INDEXER_ACCESS_KEY ||
-          session.projectAccessKey ||
-          process.env.SEQUENCE_PROJECT_ACCESS_KEY;
-        if (!indexerKey) {
-          throw new Error('Missing project access key (not in wallet session or environment)');
-        }
-
-        const chainSpec = (argv.chain as string) || session.chain || 'polygon';
-        const one = await fetchBalancesRowsForChain(session.walletAddress, chainSpec, indexerKey);
+        const chainSpec = (argv.chain as string) || 'polygon';
+        const one = await fetchBalancesRowsForChain(walletName, pointer.walletAddress, chainSpec);
 
         console.log(
           JSON.stringify(
             {
               ok: true,
               walletName,
-              walletAddress: session.walletAddress,
+              walletAddress: pointer.walletAddress,
               chainId: one.chainId,
               chain: one.chain,
               balances: one.balances
@@ -364,13 +326,15 @@ export const fundCommand: CommandModule = {
     const walletName = argv.wallet as string;
 
     try {
-      const session = await loadWalletSession(walletName);
+      const session = await loadOmsWalletPointer(walletName);
       if (!session) {
-        throw new Error(`Wallet not found: ${walletName}. Run 'wallet create' first.`);
+        throw new Error(
+          `Wallet not found: ${walletName}. Run: polygon-agent wallet login --email <addr>`
+        );
       }
 
       const walletAddress = session.walletAddress;
-      const chainId = session.chainId || 137;
+      const chainId = 137;
       const fundingUrl = `https://wallet.polygon.technology`;
 
       if (isTTY()) {
@@ -504,10 +468,13 @@ async function handleSendNative(argv: {
     explorerUrl?: string;
     walletAddress?: string;
   }> {
-    const session = await loadWalletSession(walletName);
-    if (!session) throw new Error(`Wallet not found: ${walletName}`);
+    const session = await loadOmsWalletPointer(walletName);
+    if (!session)
+      throw new Error(
+        `Wallet not found: ${walletName}. Run: polygon-agent wallet login --email <addr>`
+      );
 
-    const network = resolveNetwork((argv.chain as string) || session.chain || 'polygon');
+    const network = resolveNetwork((argv.chain as string) || 'polygon');
     const decimals = network.nativeToken?.decimals ?? 18;
     const value = parseUnits(amount, decimals);
 
@@ -540,10 +507,13 @@ async function handleSendNative(argv: {
   if (!isTTY()) {
     // Non-TTY: original JSON output
     try {
-      const session = await loadWalletSession(walletName);
-      if (!session) throw new Error(`Wallet not found: ${walletName}`);
+      const session = await loadOmsWalletPointer(walletName);
+      if (!session)
+        throw new Error(
+          `Wallet not found: ${walletName}. Run: polygon-agent wallet login --email <addr>`
+        );
 
-      const network = resolveNetwork((argv.chain as string) || session.chain || 'polygon');
+      const network = resolveNetwork((argv.chain as string) || 'polygon');
       const decimals = network.nativeToken?.decimals ?? 18;
       const value = parseUnits(amount, decimals);
 
@@ -608,8 +578,7 @@ async function handleSendNative(argv: {
     // TTY: Ink UI
     let failed = false;
     try {
-      const session = await loadWalletSession(walletName);
-      const network = resolveNetwork((argv.chain as string) || session?.chain || 'polygon');
+      const network = resolveNetwork((argv.chain as string) || 'polygon');
       const nativeSymbol = network.nativeToken?.symbol || 'POL';
 
       await inkRender(
@@ -692,10 +661,13 @@ async function handleSendToken(argv: {
     resolvedSymbol: string;
     network: ReturnType<typeof resolveNetwork>;
   }> {
-    const session = await loadWalletSession(walletName);
-    if (!session) throw new Error(`Wallet not found: ${walletName}`);
+    const session = await loadOmsWalletPointer(walletName);
+    if (!session)
+      throw new Error(
+        `Wallet not found: ${walletName}. Run: polygon-agent wallet login --email <addr>`
+      );
 
-    const network = resolveNetwork((argv.chain as string) || session.chain || 'polygon');
+    const network = resolveNetwork((argv.chain as string) || 'polygon');
     let token = tokenAddress;
     let decimals = decimalsArg ?? null;
     let resolvedSymbol = symbolArg || 'TOKEN';
@@ -839,10 +811,13 @@ async function handleCall(argv: {
     throw new Error('--data must be 0x-prefixed hex (use viem/ethers/cast to encode)');
   }
 
-  const session = await loadWalletSession(walletName);
-  if (!session) throw new Error(`Wallet not found: ${walletName}`);
+  const session = await loadOmsWalletPointer(walletName);
+  if (!session)
+    throw new Error(
+      `Wallet not found: ${walletName}. Run: polygon-agent wallet login --email <addr>`
+    );
 
-  const network = resolveNetwork(argv.chain || session.chain || 'polygon');
+  const network = resolveNetwork(argv.chain || 'polygon');
   const decimals = network.nativeToken?.decimals ?? 18;
   const value = argv.value ? parseUnits(argv.value, decimals) : 0n;
 
@@ -952,12 +927,14 @@ export const swapCommand: CommandModule = {
     const broadcast = argv.broadcast as boolean;
 
     try {
-      const session = await loadWalletSession(walletName);
+      const session = await loadOmsWalletPointer(walletName);
       if (!session) {
-        throw new Error(`Wallet not found: ${walletName}`);
+        throw new Error(
+          `Wallet not found: ${walletName}. Run: polygon-agent wallet login --email <addr>`
+        );
       }
 
-      const originNetwork = resolveNetwork((argv.chain as string) || session.chain || 'polygon');
+      const originNetwork = resolveNetwork((argv.chain as string) || 'polygon');
       const originChainId = originNetwork.chainId;
       const originNativeSymbol = originNetwork.nativeToken?.symbol || 'NATIVE';
 
@@ -1177,10 +1154,13 @@ export const depositCommand: CommandModule = {
     const broadcast = argv.broadcast as boolean;
 
     try {
-      const session = await loadWalletSession(walletName);
-      if (!session) throw new Error(`Wallet not found: ${walletName}`);
+      const session = await loadOmsWalletPointer(walletName);
+      if (!session)
+        throw new Error(
+          `Wallet not found: ${walletName}. Run: polygon-agent wallet login --email <addr>`
+        );
 
-      const network = resolveNetwork((argv.chain as string) || session.chain || 'polygon');
+      const network = resolveNetwork((argv.chain as string) || 'polygon');
       const { chainId } = network;
       const walletAddress = session.walletAddress;
 
@@ -1639,10 +1619,13 @@ export const withdrawCommand: CommandModule = {
     const assetSymbol = (argv.asset as string)?.toUpperCase();
 
     try {
-      const session = await loadWalletSession(walletName);
-      if (!session) throw new Error(`Wallet not found: ${walletName}`);
+      const session = await loadOmsWalletPointer(walletName);
+      if (!session)
+        throw new Error(
+          `Wallet not found: ${walletName}. Run: polygon-agent wallet login --email <addr>`
+        );
 
-      const network = resolveNetwork((argv.chain as string) || session.chain || 'polygon');
+      const network = resolveNetwork((argv.chain as string) || 'polygon');
       const { chainId } = network;
       const walletAddress = session.walletAddress as `0x${string}`;
 
@@ -1651,7 +1634,7 @@ export const withdrawCommand: CommandModule = {
       const viemChain = await viemChainForWithdraw(chainId);
       const publicClient = createPublicClient({
         chain: viemChain,
-        transport: http(getRpcUrl(network))
+        transport: http(getReadRpcUrl(network))
       });
 
       let positionAddr = String(argv.position || '')
@@ -1667,10 +1650,7 @@ export const withdrawCommand: CommandModule = {
 
         const { TrailsApi } = await import('@0xtrails/api');
         const trailsApiKey =
-          process.env.TRAILS_API_KEY ||
-          session.projectAccessKey ||
-          process.env.SEQUENCE_PROJECT_ACCESS_KEY ||
-          '';
+          process.env.TRAILS_API_KEY || process.env.SEQUENCE_PROJECT_ACCESS_KEY || '';
         const trails = new TrailsApi(trailsApiKey, {
           hostname: process.env.TRAILS_API_HOSTNAME
         });
@@ -2012,10 +1992,13 @@ export const x402PayCommand: CommandModule = {
 
     try {
       const [session, builderConfig] = await Promise.all([
-        loadWalletSession(walletName),
+        loadOmsWalletPointer(walletName),
         loadBuilderConfig()
       ]);
-      if (!session) throw new Error(`Wallet not found: ${walletName}`);
+      if (!session)
+        throw new Error(
+          `Wallet not found: ${walletName}. Run: polygon-agent wallet login --email <addr>`
+        );
       if (!builderConfig?.privateKey)
         throw new Error('Builder EOA not found. Run: polygon-agent setup');
 
@@ -2212,9 +2195,7 @@ export const x402PayCommand: CommandModule = {
       const chainFromPayment = paymentNetwork?.startsWith('eip155:')
         ? paymentNetwork.split(':')[1]
         : null;
-      const resolvedNetwork = resolveNetwork(
-        chainArg || chainFromPayment || session.chain || 'polygon'
-      );
+      const resolvedNetwork = resolveNetwork(chainArg || chainFromPayment || 'polygon');
       const pad = (hex: string, n = 64) => String(hex).replace(/^0x/, '').padStart(n, '0');
       const transferData =
         '0xa9059cbb' + pad(eoaAccount.address) + pad('0x' + BigInt(amount).toString(16));

@@ -4,7 +4,7 @@ import { ethers } from 'ethers';
 import React from 'react';
 
 import { generateEthAuthProof } from '../lib/ethauth.ts';
-import { saveBuilderConfig, loadBuilderConfig } from '../lib/storage.ts';
+import { saveBuilderConfig, loadBuilderConfig, saveOmsConfig } from '../lib/storage.ts';
 import { generateAgentName } from '../lib/utils.ts';
 import { isTTY, inkRender } from '../ui/render.js';
 import { SetupUI, getAuthToken, createProject, getDefaultAccessKey } from './setup-ui.js';
@@ -12,6 +12,8 @@ import { SetupUI, getAuthToken, createProject, getDefaultAccessKey } from './set
 interface SetupArgs {
   name?: string;
   force?: boolean;
+  'oms-publishable-key'?: string;
+  'oms-project-id'?: string;
 }
 
 export const setupCommand: CommandModule<object, SetupArgs> = {
@@ -27,9 +29,38 @@ export const setupCommand: CommandModule<object, SetupArgs> = {
         type: 'boolean',
         describe: 'Recreate even if already configured',
         default: false
+      })
+      .option('oms-publishable-key', {
+        type: 'string',
+        describe: 'Sequence V3 OMS publishable key (from Sequence Builder dashboard)'
+      })
+      .option('oms-project-id', {
+        type: 'string',
+        describe: 'Sequence V3 OMS project id (e.g. proj_...)'
       }),
   handler: async (argv) => {
     const name = argv.name || generateAgentName();
+
+    // If OMS credentials are supplied, persist them (independent of the legacy
+    // builder/access-key flow). Used by the V3 `wallet login` path.
+    const omsPk = argv['oms-publishable-key'];
+    const omsProj = argv['oms-project-id'];
+    if (omsPk && omsProj) {
+      await saveOmsConfig({ publishableKey: omsPk, omsProjectId: omsProj });
+      if (!isTTY()) {
+        console.log(
+          JSON.stringify(
+            {
+              ok: true,
+              message: 'OMS (Sequence V3) credentials saved to ~/.polygon-agent/builder.json'
+            },
+            null,
+            2
+          )
+        );
+        return;
+      }
+    }
 
     if (!isTTY()) {
       // Non-TTY fallback: original JSON output
