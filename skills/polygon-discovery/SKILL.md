@@ -22,11 +22,11 @@ Before running any `x402-pay` command, verify the wallet session exists and is f
 polygon-agent wallet list
 ```
 
-**If no wallet is listed**, the smart session has not been created. Run through the complete setup flow before proceeding:
+**If no wallet is listed**, log in before proceeding:
 
-1. `polygon-agent setup --name "MyAgent"` — creates EOA and Sequence project
-2. `polygon-agent wallet create --usdc-limit 100` — opens browser for session approval; enter the 6-digit code when prompted
-3. `polygon-agent wallet address` — get address, then fund via https://agentconnect.polygon.technology
+1. `polygon-agent setup --oms-publishable-key <key> --oms-project-id <proj_...>` — saves OMS credentials (from the Sequence Builder dashboard)
+2. `polygon-agent wallet login --email <addr>` — email OTP; enter the 6-digit code when prompted
+3. `polygon-agent wallet address` — get the address, then fund it (`polygon-agent fund`)
 4. `polygon-agent balances` — confirm USDC is available before calling any x402 endpoint
 
 **If a wallet exists but `balances` shows 0 USDC**, direct the user to fund it via the UI — `x402-pay` will fail with an EOA funding error otherwise.
