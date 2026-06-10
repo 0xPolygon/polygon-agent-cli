@@ -23,13 +23,15 @@ import {
 import { polymarketCommand } from './commands/polymarket.ts';
 import { setupCommand } from './commands/setup.ts';
 import { walletCommand } from './commands/wallet.ts';
-import { bootstrapAccessKey } from './lib/storage.ts';
+import { bootstrapAccessKey, bootstrapOmsConfig } from './lib/storage.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8'));
 
 // Auto-load access key from ~/.polygon-agent/builder.json if not already in env
 bootstrapAccessKey();
+// Auto-load OMS (Sequence V3) credentials from builder.json if not already in env
+bootstrapOmsConfig();
 
 // Legacy aliases — hidden commands that map to the new structure
 const legacyAliases = [

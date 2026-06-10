@@ -85,6 +85,30 @@ export function getRpcUrl(network: NetworkMetadata): string {
   return `https://nodes.sequence.app/${network.name}/${accessKey}`;
 }
 
+// Public RPC fallbacks per chain — used for read-only calls (e.g. tx receipt
+// polling) when no Sequence project access key is available (the OMS path uses
+// publishableKey/projectId, not a nodes.sequence.app access key).
+const PUBLIC_RPC_BY_CHAIN_ID: Record<number, string> = {
+  137: 'https://polygon-rpc.com',
+  80002: 'https://rpc-amoy.polygon.technology',
+  8453: 'https://mainnet.base.org',
+  84532: 'https://sepolia.base.org',
+  1: 'https://eth.llamarpc.com',
+  42161: 'https://arb1.arbitrum.io/rpc',
+  10: 'https://mainnet.optimism.io'
+};
+
+/**
+ * Read-only RPC URL. Prefers the Sequence nodes endpoint when a project access
+ * key is configured; otherwise falls back to a public RPC for the chain. Safe
+ * for both the legacy (dapp-client) and OMS (typescript-sdk) paths.
+ */
+export function getReadRpcUrl(network: NetworkMetadata): string {
+  const accessKey = process.env.SEQUENCE_PROJECT_ACCESS_KEY;
+  if (accessKey) return `https://nodes.sequence.app/${network.name}/${accessKey}`;
+  return PUBLIC_RPC_BY_CHAIN_ID[network.chainId] || `https://polygon-rpc.com`;
+}
+
 /** Explorer URL for transaction */
 export function getExplorerUrl(network: NetworkMetadata, txHash: string): string {
   const raw = network.blockExplorer?.rootUrl || `https://polygonscan.com`;

@@ -14,6 +14,7 @@ import {
   decryptSession
 } from '@polygonlabs/agent-shared';
 
+import { getOmsClient } from '../lib/oms-client.ts';
 import { RelayClient } from '../lib/relay-client.ts';
 import {
   saveWalletSession,
@@ -23,7 +24,10 @@ import {
   deleteWalletRequest,
   listWallets,
   deleteWallet,
-  sessionPayloadToWalletSession
+  sessionPayloadToWalletSession,
+  saveOmsWalletPointer,
+  loadOmsWalletPointer,
+  deleteOmsWallet
 } from '../lib/storage.ts';
 import { normalizeChain, resolveNetwork, fileCoerce } from '../lib/utils.ts';
 import { isTTY, inkRender } from '../ui/render.js';
@@ -450,16 +454,34 @@ async function handleList(): Promise<void> {
   try {
     const wallets = await listWallets();
 
-    const details: Array<{ name: string; address: string; chain: string; chainId: number }> = [];
+    const details: Array<{
+      name: string;
+      address: string;
+      chain: string;
+      chainId: number;
+      loginMethod?: string;
+    }> = [];
     for (const name of wallets) {
       const session = await loadWalletSession(name);
-      if (session) {
+      // A legacy WalletSession has a `chainId`; an OMS pointer has `loginMethod: 'email'`.
+      if (session && 'chainId' in session && typeof session.chainId === 'number') {
         details.push({
           name,
           address: session.walletAddress,
           chain: session.chain,
           chainId: session.chainId
         });
+      } else {
+        const pointer = await loadOmsWalletPointer(name);
+        if (pointer) {
+          details.push({
+            name,
+            address: pointer.walletAddress,
+            chain: 'polygon',
+            chainId: 137,
+            loginMethod: pointer.loginMethod
+          });
+        }
       }
     }
 
@@ -484,27 +506,37 @@ async function handleAddress(argv: AddressArgs): Promise<void> {
 
   try {
     const session = await loadWalletSession(name);
-    if (!session) {
-      throw new Error(`Wallet not found: ${name}`);
-    }
-
-    if (!isTTY()) {
-      jsonOut({
-        ok: true,
-        walletAddress: session.walletAddress,
-        chain: session.chain,
-        chainId: session.chainId
-      });
-    } else {
-      await inkRender(
-        React.createElement(WalletAddressUI, {
-          name,
-          address: session.walletAddress,
+    if (session && 'chainId' in session && typeof session.chainId === 'number') {
+      if (!isTTY()) {
+        jsonOut({
+          ok: true,
+          walletAddress: session.walletAddress,
           chain: session.chain,
           chainId: session.chainId
-        })
-      );
+        });
+      } else {
+        await inkRender(
+          React.createElement(WalletAddressUI, {
+            name,
+            address: session.walletAddress,
+            chain: session.chain,
+            chainId: session.chainId
+          })
+        );
+      }
+      return;
     }
+
+    // OMS pointer fallback
+    const pointer = await loadOmsWalletPointer(name);
+    if (!pointer) throw new Error(`Wallet not found: ${name}`);
+    jsonOut({
+      ok: true,
+      walletAddress: pointer.walletAddress,
+      chain: 'polygon',
+      chainId: 137,
+      loginMethod: pointer.loginMethod
+    });
   } catch (error) {
     jsonOut({ ok: false, error: (error as Error).message });
     process.exit(1);
@@ -527,6 +559,90 @@ async function handleRemove(argv: RemoveArgs): Promise<void> {
     }
 
     jsonOut({ ok: true, walletName: name });
+  } catch (error) {
+    jsonOut({ ok: false, error: (error as Error).message });
+    process.exit(1);
+  }
+}
+
+// --- Subcommand: wallet login (OMS / Sequence V3 email auth) ---
+interface LoginArgs {
+  name: string;
+  email: string;
+  code?: string;
+}
+
+// Read a line from stdin (for interactive OTP entry).
+function readLine(promptText: string): Promise<string> {
+  return new Promise((resolve) => {
+    process.stderr.write(promptText);
+    const onData = (chunk: Buffer) => {
+      process.stdin.off('data', onData);
+      process.stdin.pause();
+      resolve(chunk.toString('utf8').trim());
+    };
+    process.stdin.resume();
+    process.stdin.on('data', onData);
+  });
+}
+
+async function handleLogin(argv: LoginArgs): Promise<void> {
+  const name = argv.name;
+  const email = argv.email;
+
+  try {
+    if (!email) throw new Error('--email is required');
+
+    const oms = getOmsClient(name);
+
+    // startEmailAuth + completeEmailAuth must happen in the same process — the
+    // pending-auth commitment is held in memory, not persisted. So we send the
+    // OTP, then obtain the code (either --code or an interactive stdin prompt).
+    await oms.wallet.startEmailAuth({ email });
+
+    // The OTP must be entered in THIS process (the pending-auth commitment is
+    // in-memory only). Obtain it from --code, else prompt on TTY, else read one
+    // line from stdin (so `echo 123456 | wallet login ...` works in automation).
+    let code = argv.code;
+    if (!code) {
+      process.stderr.write(`OTP sent to ${email}. `);
+      code = await readLine('Enter the 6-digit code: ');
+    }
+    if (!code) throw new Error('No OTP code provided');
+
+    const result = await oms.wallet.completeEmailAuth({ code });
+    const walletAddress = result.walletAddress;
+
+    await saveOmsWalletPointer(name, {
+      walletAddress,
+      loginMethod: 'email',
+      email,
+      createdAt: new Date().toISOString()
+    });
+
+    jsonOut({ ok: true, walletName: name, walletAddress, loginMethod: 'email' });
+  } catch (error) {
+    jsonOut({ ok: false, error: (error as Error).message });
+    process.exit(1);
+  }
+}
+
+// --- Subcommand: wallet logout (OMS) ---
+interface LogoutArgs {
+  name: string;
+}
+
+async function handleLogout(argv: LogoutArgs): Promise<void> {
+  const name = argv.name;
+  try {
+    try {
+      const oms = getOmsClient(name);
+      await oms.wallet.signOut();
+    } catch {
+      // signOut may fail if no session/config — proceed to delete local state anyway
+    }
+    await deleteOmsWallet(name);
+    jsonOut({ ok: true, walletName: name, loggedOut: true });
   } catch (error) {
     jsonOut({ ok: false, error: (error as Error).message });
     process.exit(1);
@@ -615,6 +731,38 @@ export const walletCommand: CommandModule = {
               describe: 'Request ID'
             }),
         handler: (argv) => handleImport(argv as unknown as ImportArgs)
+      })
+      .command({
+        command: 'login',
+        describe: 'Log in with email (Sequence V3 embedded wallet)',
+        builder: (y) =>
+          y
+            .option('name', {
+              type: 'string',
+              default: 'main',
+              describe: 'Wallet name'
+            })
+            .option('email', {
+              type: 'string',
+              demandOption: true,
+              describe: 'Email address to authenticate with'
+            })
+            .option('code', {
+              type: 'string',
+              describe: 'OTP code (only if obtained out-of-band in this same session)'
+            }),
+        handler: (argv) => handleLogin(argv as unknown as LoginArgs)
+      })
+      .command({
+        command: 'logout',
+        describe: 'Log out and clear the local Sequence V3 session',
+        builder: (y) =>
+          y.option('name', {
+            type: 'string',
+            default: 'main',
+            describe: 'Wallet name'
+          }),
+        handler: (argv) => handleLogout(argv as unknown as LogoutArgs)
       })
       .command({
         command: 'list',

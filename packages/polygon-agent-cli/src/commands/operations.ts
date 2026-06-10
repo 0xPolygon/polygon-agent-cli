@@ -2,15 +2,16 @@ import type { CommandModule, Argv } from 'yargs';
 
 import React from 'react';
 
-import { runDappClientTx } from '../lib/dapp-client.ts';
 import { loadWalletSession, loadBuilderConfig } from '../lib/storage.ts';
 import { resolveErc20BySymbol } from '../lib/token-directory.ts';
+import { runTx as runDappClientTx } from '../lib/tx-dispatch.ts';
 import {
   resolveNetwork,
   formatUnits,
   parseUnits,
   getExplorerUrl,
   getRpcUrl,
+  getReadRpcUrl,
   fileCoerce
 } from '../lib/utils.ts';
 import { isTTY, inkRender } from '../ui/render.js';
@@ -2136,7 +2137,7 @@ export const x402PayCommand: CommandModule = {
         process.stderr.write('Waiting for confirmation...\n');
         const rpcUrl =
           process.env.SEQUENCE_NODES_URL?.replace('{network}', payChain) ||
-          `https://nodes.sequence.app/${payChain}/${session.projectAccessKey || process.env.SEQUENCE_PROJECT_ACCESS_KEY || ''}`;
+          getReadRpcUrl(resolveNetwork(String(payChainId)));
         for (let attempt = 0; attempt < 30; attempt++) {
           await new Promise((r) => setTimeout(r, 3000));
           try {

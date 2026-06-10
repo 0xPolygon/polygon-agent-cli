@@ -6,7 +6,6 @@
 
 import type { CommandModule } from 'yargs';
 
-import { runDappClientTx } from '../lib/dapp-client.ts';
 import {
   getMarkets,
   getMarket,
@@ -26,6 +25,7 @@ import {
   COLLATERAL_ONRAMP
 } from '../lib/polymarket.ts';
 import { loadWalletSession, savePolymarketKey, loadPolymarketKey } from '../lib/storage.ts';
+import { runTx as runDappClientTx } from '../lib/tx-dispatch.ts';
 
 // ─── handlers ────────────────────────────────────────────────────────────────
 

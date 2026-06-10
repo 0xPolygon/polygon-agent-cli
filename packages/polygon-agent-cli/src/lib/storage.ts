@@ -8,7 +8,7 @@ import type { SessionPayload } from '@polygonlabs/agent-shared';
 const STORAGE_DIR = path.join(os.homedir(), '.polygon-agent');
 const ENCRYPTION_KEY_FILE = path.join(STORAGE_DIR, '.encryption-key');
 
-interface CipherData {
+export interface CipherData {
   iv: string;
   encrypted: string;
   authTag: string;
@@ -19,6 +19,24 @@ export interface BuilderConfig {
   eoaAddress: string;
   accessKey: string;
   projectId: number;
+}
+
+/**
+ * OMS (Sequence V3 "Open Money Stack") credentials for the typescript-sdk path.
+ * publishableKey + omsProjectId come from the Sequence Builder dashboard.
+ * Stored alongside builder.json so `wallet login` and tx submission can read them.
+ */
+export interface OmsConfig {
+  publishableKey: string;
+  omsProjectId: string;
+}
+
+/** Pointer record for an OMS wallet (the SDK persists the real session in its StorageManager). */
+export interface OmsWalletPointer {
+  walletAddress: string;
+  loginMethod: 'email';
+  email: string;
+  createdAt: string;
 }
 
 export interface WalletSession {
@@ -36,7 +54,7 @@ export interface WalletSession {
   createdAt: string;
 }
 
-function ensureStorageDir(): void {
+export function ensureStorageDir(): void {
   if (!fs.existsSync(STORAGE_DIR)) {
     fs.mkdirSync(STORAGE_DIR, { recursive: true, mode: 0o700 });
   }
@@ -49,7 +67,9 @@ function ensureStorageDir(): void {
   }
 }
 
-function getEncryptionKey(): Buffer {
+export const STORAGE_ROOT = STORAGE_DIR;
+
+export function getEncryptionKey(): Buffer {
   ensureStorageDir();
 
   if (fs.existsSync(ENCRYPTION_KEY_FILE)) {
@@ -61,7 +81,7 @@ function getEncryptionKey(): Buffer {
   return key;
 }
 
-function encrypt(plaintext: string): CipherData {
+export function encrypt(plaintext: string): CipherData {
   const key = getEncryptionKey();
   const iv = randomBytes(16);
   const cipher = createCipheriv('aes-256-gcm', key, iv);
@@ -78,7 +98,7 @@ function encrypt(plaintext: string): CipherData {
   };
 }
 
-function decrypt(cipherData: CipherData): string {
+export function decrypt(cipherData: CipherData): string {
   const key = getEncryptionKey();
   const iv = Buffer.from(cipherData.iv, 'hex');
   const authTag = Buffer.from(cipherData.authTag, 'hex');
@@ -270,6 +290,91 @@ export async function loadPolymarketKey(): Promise<string> {
   throw new Error(
     'No EOA key found. Run: polygon-agent setup or polygon-agent polymarket set-key <privateKey>'
   );
+}
+
+// ─── OMS (Sequence V3 / typescript-sdk) config + session storage ──────────────
+
+/** Directory holding the OMS SDK's per-wallet storage + credential key. */
+export function omsWalletDir(name: string): string {
+  ensureStorageDir();
+  const dir = path.join(STORAGE_DIR, 'oms', name);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  }
+  return dir;
+}
+
+/** Persist OMS publishableKey + projectId into builder.json (merged with existing data). */
+export async function saveOmsConfig(config: OmsConfig): Promise<void> {
+  ensureStorageDir();
+  const configPath = path.join(STORAGE_DIR, 'builder.json');
+  let data: Record<string, unknown> = {};
+  try {
+    data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  } catch {
+    // start fresh
+  }
+  data.publishableKey = config.publishableKey;
+  data.omsProjectId = config.omsProjectId;
+  fs.writeFileSync(configPath, JSON.stringify(data, null, 2), { mode: 0o600 });
+}
+
+/**
+ * Resolve OMS credentials. Priority: env vars → builder.json.
+ * Returns null if neither key is available.
+ */
+export function loadOmsConfig(): OmsConfig | null {
+  const envPk = process.env.SEQUENCE_PUBLISHABLE_KEY;
+  const envProj = process.env.SEQUENCE_OMS_PROJECT_ID;
+  if (envPk && envProj) return { publishableKey: envPk, omsProjectId: envProj };
+
+  const configPath = path.join(STORAGE_DIR, 'builder.json');
+  if (fs.existsSync(configPath)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      const publishableKey = envPk ?? data.publishableKey;
+      const omsProjectId = envProj ?? data.omsProjectId;
+      if (publishableKey && omsProjectId) return { publishableKey, omsProjectId };
+    } catch {
+      // ignore malformed config
+    }
+  }
+  return null;
+}
+
+/** Populate OMS env vars from builder.json at startup (mirrors bootstrapAccessKey). */
+export function bootstrapOmsConfig(): void {
+  const cfg = loadOmsConfig();
+  if (!cfg) return;
+  if (!process.env.SEQUENCE_PUBLISHABLE_KEY)
+    process.env.SEQUENCE_PUBLISHABLE_KEY = cfg.publishableKey;
+  if (!process.env.SEQUENCE_OMS_PROJECT_ID) process.env.SEQUENCE_OMS_PROJECT_ID = cfg.omsProjectId;
+}
+
+export async function saveOmsWalletPointer(name: string, pointer: OmsWalletPointer): Promise<void> {
+  ensureStorageDir();
+  const walletPath = path.join(STORAGE_DIR, 'wallets', `${name}.json`);
+  fs.writeFileSync(walletPath, JSON.stringify(pointer, null, 2), { mode: 0o600 });
+}
+
+export async function loadOmsWalletPointer(name: string): Promise<OmsWalletPointer | null> {
+  const walletPath = path.join(STORAGE_DIR, 'wallets', `${name}.json`);
+  if (!fs.existsSync(walletPath)) return null;
+  try {
+    const data = JSON.parse(fs.readFileSync(walletPath, 'utf8'));
+    if (data.loginMethod === 'email' && data.walletAddress) return data as OmsWalletPointer;
+  } catch {
+    // not an OMS pointer (likely a legacy WalletSession)
+  }
+  return null;
+}
+
+/** Remove an OMS wallet's pointer + the SDK's per-wallet state dir. */
+export async function deleteOmsWallet(name: string): Promise<void> {
+  const walletPath = path.join(STORAGE_DIR, 'wallets', `${name}.json`);
+  if (fs.existsSync(walletPath)) fs.unlinkSync(walletPath);
+  const dir = path.join(STORAGE_DIR, 'oms', name);
+  if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
 }
 
 /** Map a v2 SessionPayload into the WalletSession shape. */
