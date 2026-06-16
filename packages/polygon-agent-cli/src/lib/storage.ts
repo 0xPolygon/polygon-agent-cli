@@ -232,10 +232,27 @@ export function loadOmsConfig(): OmsConfig | null {
 /** Populate OMS env vars from builder.json at startup. */
 export function bootstrapOmsConfig(): void {
   const cfg = loadOmsConfig();
-  if (!cfg) return;
-  if (!process.env.SEQUENCE_PUBLISHABLE_KEY)
-    process.env.SEQUENCE_PUBLISHABLE_KEY = cfg.publishableKey;
-  if (!process.env.SEQUENCE_OMS_PROJECT_ID) process.env.SEQUENCE_OMS_PROJECT_ID = cfg.omsProjectId;
+  if (cfg) {
+    if (!process.env.SEQUENCE_PUBLISHABLE_KEY)
+      process.env.SEQUENCE_PUBLISHABLE_KEY = cfg.publishableKey;
+    if (!process.env.SEQUENCE_OMS_PROJECT_ID)
+      process.env.SEQUENCE_OMS_PROJECT_ID = cfg.omsProjectId;
+  }
+
+  // Also bootstrap the Sequence project access key (used by Trails swap/bridge
+  // and the indexer) from builder.json into the env, if present — env always
+  // wins. This is separate from the OMS wallet credentials above.
+  if (!process.env.SEQUENCE_PROJECT_ACCESS_KEY) {
+    const configPath = path.join(STORAGE_DIR, 'builder.json');
+    if (fs.existsSync(configPath)) {
+      try {
+        const data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        if (data.accessKey) process.env.SEQUENCE_PROJECT_ACCESS_KEY = data.accessKey as string;
+      } catch {
+        // ignore malformed config
+      }
+    }
+  }
 }
 
 export async function saveOmsWalletPointer(name: string, pointer: OmsWalletPointer): Promise<void> {

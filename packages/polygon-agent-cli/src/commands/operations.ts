@@ -965,7 +965,10 @@ export const swapCommand: CommandModule = {
 
       const { TrailsApi, TradeType } = await import('@0xtrails/api');
       const trailsApiKey =
-        process.env.TRAILS_API_KEY || (await loadBuilderConfig())?.accessKey || '';
+        process.env.TRAILS_API_KEY ||
+        process.env.SEQUENCE_PROJECT_ACCESS_KEY ||
+        (await loadBuilderConfig())?.accessKey ||
+        '';
       const trails = new TrailsApi(trailsApiKey, {
         hostname: process.env.TRAILS_API_HOSTNAME
       });
@@ -1175,7 +1178,10 @@ export const depositCommand: CommandModule = {
 
       const { TrailsApi } = await import('@0xtrails/api');
       const trailsApiKey =
-        process.env.TRAILS_API_KEY || (await loadBuilderConfig())?.accessKey || '';
+        process.env.TRAILS_API_KEY ||
+        process.env.SEQUENCE_PROJECT_ACCESS_KEY ||
+        (await loadBuilderConfig())?.accessKey ||
+        '';
       const trails = new TrailsApi(trailsApiKey, {
         hostname: process.env.TRAILS_API_HOSTNAME
       });
@@ -1369,7 +1375,7 @@ export const depositCommand: CommandModule = {
               chainId,
               chain: network.name,
               transactions,
-              note: `Re-run with --broadcast to submit the deposit. If session rejects the call, re-create with: polygon-agent wallet create --contract ${asset.address} --contract ${pool.depositAddress}`
+              note: `Submits as two transactions (approve + supply) — non-atomic. Re-run with --broadcast to submit. Ensure the wallet holds ${assetSymbol} plus a little POL or USDC for gas.`
             },
             bigintReplacer,
             2
@@ -1378,45 +1384,14 @@ export const depositCommand: CommandModule = {
         return;
       }
 
-      let result;
-      try {
-        result = await runDappClientTx({
-          walletName,
-          chainId,
-          transactions,
-          broadcast,
-          preferNativeFee: false
-        });
-      } catch (txErr) {
-        const txMsg = (txErr as Error).message || '';
-        if (txMsg.includes('No signer supported')) {
-          throw new Error(
-            `Session does not permit calls to ${pool.depositAddress} (${pool.protocol} pool) or ${asset.address} (${assetSymbol} approve). ` +
-              `Re-create the wallet session with: polygon-agent wallet create --contract ${asset.address} --contract ${pool.depositAddress}\n` +
-              `Original error: ${txMsg}`
-          );
-        }
-        if (txMsg.includes('Identity signers not found') || txMsg.includes('signers not found')) {
-          throw new Error(
-            `Wallet has no POL for gas and no USDC paymaster is configured. ` +
-              `Fund with POL: polygon-agent fund\n` +
-              `Or enable USDC gas: polygon-agent wallet create --usdc-limit 5\n` +
-              `Original error: ${txMsg}`
-          );
-        }
-        if (
-          txMsg.includes('Request aborted') ||
-          txMsg.includes('AbortedError') ||
-          txMsg.includes('code 1005')
-        ) {
-          throw new Error(
-            `Transaction rejected by relay — likely a session permission issue. ` +
-              `Re-create the wallet session: polygon-agent wallet create --contract ${asset.address} --contract ${pool.depositAddress}\n` +
-              `Original error: ${txMsg}`
-          );
-        }
-        throw txErr;
-      }
+      // NON-ATOMIC: deposit submits approve + supply sequentially via runOmsTx.
+      const result = await runDappClientTx({
+        walletName,
+        chainId,
+        transactions,
+        broadcast,
+        preferNativeFee: false
+      });
 
       console.log(
         JSON.stringify(
@@ -1650,7 +1625,10 @@ export const withdrawCommand: CommandModule = {
 
         const { TrailsApi } = await import('@0xtrails/api');
         const trailsApiKey =
-          process.env.TRAILS_API_KEY || process.env.SEQUENCE_PROJECT_ACCESS_KEY || '';
+          process.env.TRAILS_API_KEY ||
+          process.env.SEQUENCE_PROJECT_ACCESS_KEY ||
+          (await loadBuilderConfig())?.accessKey ||
+          '';
         const trails = new TrailsApi(trailsApiKey, {
           hostname: process.env.TRAILS_API_HOSTNAME
         });
@@ -1878,8 +1856,6 @@ export const withdrawCommand: CommandModule = {
         };
       }
 
-      const targetContract = kind === 'aave' ? (summary.poolAddress as string) : positionAddr;
-
       if (!broadcast) {
         console.log(
           JSON.stringify(
@@ -1893,7 +1869,7 @@ export const withdrawCommand: CommandModule = {
               kind,
               ...summary,
               transactions,
-              note: `Re-run with --broadcast to submit. If the session rejects the call, re-create the wallet with the pool/vault whitelisted: polygon-agent wallet create --contract ${targetContract}`
+              note: `Re-run with --broadcast to submit. Ensure the wallet holds a little POL or USDC for gas.`
             },
             bigintReplacer,
             2
@@ -1902,25 +1878,13 @@ export const withdrawCommand: CommandModule = {
         return;
       }
 
-      let result;
-      try {
-        result = await runDappClientTx({
-          walletName,
-          chainId,
-          transactions,
-          broadcast,
-          preferNativeFee: false
-        });
-      } catch (txErr) {
-        if ((txErr as Error).message?.includes('No signer supported')) {
-          throw new Error(
-            `Session does not permit calls to ${targetContract}. ` +
-              `Re-create the wallet session with: polygon-agent wallet create --contract ${targetContract}\n` +
-              `Original error: ${(txErr as Error).message}`
-          );
-        }
-        throw txErr;
-      }
+      const result = await runDappClientTx({
+        walletName,
+        chainId,
+        transactions,
+        broadcast,
+        preferNativeFee: false
+      });
 
       console.log(
         JSON.stringify(
