@@ -6,7 +6,7 @@ export default {
       ? [`eslint --fix ${files.join(' ')}`, `prettier --write ${files.join(' ')}`]
       : [];
   },
-  '*.{json,yaml,yml}': (files) => {
+  '*.{json,yaml,yml,css,html}': (files) => {
     return files.length > 0 ? `prettier --write ${files.join(' ')}` : [];
   }
 };
