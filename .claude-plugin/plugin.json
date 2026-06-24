@@ -1,0 +1,8 @@
+{
+  "name": "polygon-agent-cli",
+  "description": "Polygon Agent toolkit. Session-based smart contract wallets (Sequence), token ops (send/swap/bridge/deposit via Trails), DeFi yield (Aave v3, ERC-4626 vaults), x402 micropayments and the Bazaar service catalog, ERC-8004 on-chain identity + reputation, and Polymarket trading. Single CLI entry point (polygon-agent), AES-256-GCM encrypted storage.",
+  "version": "0.2.0",
+  "author": {
+    "name": "Polygon Labs"
+  }
+}
