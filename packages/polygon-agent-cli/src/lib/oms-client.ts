@@ -22,8 +22,8 @@ export function getOmsClient(walletName: string): OMSClient {
   const cfg = loadOmsConfig();
   if (!cfg) {
     throw new Error(
-      'OMS credentials not configured. Set SEQUENCE_PUBLISHABLE_KEY + SEQUENCE_OMS_PROJECT_ID ' +
-        '(or run `polygon-agent setup`). Get them from the Sequence Builder dashboard.'
+      'OMS credentials not configured. Set SEQUENCE_PUBLISHABLE_KEY ' +
+        '(or run `polygon-agent setup`). Get it from the Sequence Builder dashboard.'
     );
   }
 
@@ -31,9 +31,9 @@ export function getOmsClient(walletName: string): OMSClient {
     loadOrCreateCredentialKey(walletName)
   );
 
+  // SDK 0.1.0-alpha.4: the publishableKey alone identifies the project.
   const oms = new OMSClient({
     publishableKey: cfg.publishableKey,
-    projectId: cfg.omsProjectId,
     storage: new FileStorageManager(walletName),
     credentialSigner
   });

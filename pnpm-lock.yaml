@@ -61,8 +61,8 @@ importers:
         specifier: ^2.3.40
         version: 2.3.41(ethers@6.16.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))
       '@0xsequence/typescript-sdk':
-        specifier: 0.1.0-alpha.2
-        version: 0.1.0-alpha.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)
+        specifier: 0.1.0-alpha.4
+        version: 0.1.0-alpha.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)
       '@0xtrails/api':
         specifier: ^0.10.4
         version: 0.10.4
@@ -170,8 +170,8 @@ packages:
     peerDependencies:
       ethers: '>=6'
 
-  '@0xsequence/typescript-sdk@0.1.0-alpha.2':
-    resolution: {integrity: sha512-sRg+j1z+EHunnGxR934xOTtWTifyhA4seu88KBBS/9Dxap9uGt0e1bdO+v84m2XeP1GF8qLdlkFYQVAey02AjQ==}
+  '@0xsequence/typescript-sdk@0.1.0-alpha.4':
+    resolution: {integrity: sha512-l1xi8OXgcwQ05HeNqt11TFLddGI6NIZ5ObKe930kgAnM4UcLTZ1DNf+bvKQoRQ16hEZUJDS5nE0BkI85vdYGDQ==}
 
   '@0xsequence/utils@2.3.41':
     resolution: {integrity: sha512-wikEOiYxfq+Iqsfb9JF6xHnpyXHaUre+2FUQpk3teo7/FXy0xtHdzxtfbhGn5/EcMnlSErk1nt6isrcxlkkHuQ==}
@@ -4786,7 +4786,7 @@ snapshots:
       '@0xsequence/utils': 2.3.41(ethers@6.16.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))
       ethers: 6.16.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
 
-  '@0xsequence/typescript-sdk@0.1.0-alpha.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)':
+  '@0xsequence/typescript-sdk@0.1.0-alpha.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)':
     dependencies:
       viem: 2.52.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)
     transitivePeerDependencies:

@@ -54,24 +54,22 @@ export function BalancesUI({ walletName, chainOverride }: BalancesUIProps) {
         if (!omsNetwork) throw new Error(`Unsupported chain for OMS indexer: ${network.chainId}`);
         const oms = getOmsClient(walletName);
 
-        const [nativeRes, tokenRes] = await Promise.all([
-          oms.indexer.getNativeTokenBalance({ network: omsNetwork, walletAddress: addr }),
-          oms.indexer.getTokenBalances({
-            network: omsNetwork,
-            walletAddress: addr,
-            includeMetadata: true
-          })
-        ]);
+        // SDK 0.1.0-alpha.4: one getBalances call returns native + tokens.
+        const res = await oms.indexer.getBalances({
+          walletAddress: addr,
+          networks: [omsNetwork],
+          includeMetadata: true
+        });
 
         const rows: BalanceEntry[] = [
           {
             symbol: nativeSymbol,
-            balance: formatUnits(BigInt(nativeRes?.balance || '0'), nativeDecimals),
+            balance: formatUnits(BigInt(res.nativeBalances?.[0]?.balance || '0'), nativeDecimals),
             address: '(native)'
           }
         ];
 
-        for (const b of (tokenRes?.balances || []) as TokenBalance[]) {
+        for (const b of (res.balances || []) as TokenBalance[]) {
           const sym = b.contractInfo?.symbol || 'ERC20';
           const dec = b.contractInfo?.decimals ?? 18;
           const tokenAddr = b.contractAddress ? shortAddr(b.contractAddress) : '';

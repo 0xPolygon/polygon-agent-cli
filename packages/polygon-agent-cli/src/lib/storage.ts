@@ -21,12 +21,13 @@ export interface BuilderConfig {
 
 /**
  * OMS (Sequence V3 "Open Money Stack") credentials for the typescript-sdk path.
- * publishableKey + omsProjectId come from the Sequence Builder dashboard.
- * Stored alongside builder.json so `wallet login` and tx submission can read them.
+ * As of SDK 0.1.0-alpha.4 the publishableKey alone identifies the project;
+ * omsProjectId is retained as optional for backward compat / display only.
+ * Stored alongside builder.json so `wallet login` and tx submission can read it.
  */
 export interface OmsConfig {
   publishableKey: string;
-  omsProjectId: string;
+  omsProjectId?: string;
 }
 
 /** Pointer record for an OMS wallet (the SDK persists the real session in its StorageManager). */
@@ -211,17 +212,18 @@ export async function saveOmsConfig(config: OmsConfig): Promise<void> {
  * Returns null if neither key is available.
  */
 export function loadOmsConfig(): OmsConfig | null {
+  // SDK 0.1.0-alpha.4: only the publishableKey is required (it identifies the
+  // project). omsProjectId is read if present but no longer mandatory.
   const envPk = process.env.SEQUENCE_PUBLISHABLE_KEY;
   const envProj = process.env.SEQUENCE_OMS_PROJECT_ID;
-  if (envPk && envProj) return { publishableKey: envPk, omsProjectId: envProj };
+  if (envPk) return { publishableKey: envPk, omsProjectId: envProj };
 
   const configPath = path.join(STORAGE_DIR, 'builder.json');
   if (fs.existsSync(configPath)) {
     try {
       const data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      const publishableKey = envPk ?? data.publishableKey;
-      const omsProjectId = envProj ?? data.omsProjectId;
-      if (publishableKey && omsProjectId) return { publishableKey, omsProjectId };
+      const publishableKey = data.publishableKey;
+      if (publishableKey) return { publishableKey, omsProjectId: data.omsProjectId };
     } catch {
       // ignore malformed config
     }
@@ -235,7 +237,7 @@ export function bootstrapOmsConfig(): void {
   if (cfg) {
     if (!process.env.SEQUENCE_PUBLISHABLE_KEY)
       process.env.SEQUENCE_PUBLISHABLE_KEY = cfg.publishableKey;
-    if (!process.env.SEQUENCE_OMS_PROJECT_ID)
+    if (!process.env.SEQUENCE_OMS_PROJECT_ID && cfg.omsProjectId)
       process.env.SEQUENCE_OMS_PROJECT_ID = cfg.omsProjectId;
   }
 

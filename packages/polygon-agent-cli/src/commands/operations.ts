@@ -134,12 +134,15 @@ async function fetchBalancesRowsForChain(
   if (!omsNetwork) throw new Error(`Unsupported chain for OMS indexer: ${network.chainId}`);
   const oms = getOmsClient(walletName);
 
-  const [nativeRes, tokenRes] = await Promise.all([
-    oms.indexer.getNativeTokenBalance({ network: omsNetwork, walletAddress }),
-    oms.indexer.getTokenBalances({ network: omsNetwork, walletAddress, includeMetadata: true })
-  ]);
+  // SDK 0.1.0-alpha.4 unified the two indexer calls into getBalances, returning
+  // { nativeBalances, balances } for the requested network(s).
+  const res = await oms.indexer.getBalances({
+    walletAddress,
+    networks: [omsNetwork],
+    includeMetadata: true
+  });
 
-  const nativeWei = nativeRes?.balance || '0';
+  const nativeWei = res.nativeBalances?.[0]?.balance || '0';
   const native: BalanceRowJson[] = [
     {
       type: 'native',
@@ -148,7 +151,7 @@ async function fetchBalancesRowsForChain(
     }
   ];
 
-  const erc20: BalanceRowJson[] = (tokenRes?.balances || [])
+  const erc20: BalanceRowJson[] = (res.balances || [])
     .filter((b: TokenBalance) => !!b.contractAddress)
     .map((b: TokenBalance) => ({
       type: 'erc20' as const,
