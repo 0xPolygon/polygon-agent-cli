@@ -320,6 +320,52 @@ export const balancesCommand: CommandModule = {
   }
 };
 
+// The wallet funding page (Trails on-ramp + swap). Single source of truth so
+// the `fund` command and the post-login step show the same thing.
+export const FUNDING_URL = 'https://wallet.polygon.technology';
+
+/**
+ * Show the funding step for a wallet: an Ink panel in a TTY, JSON otherwise.
+ * Reused by the standalone `fund` command and chained after browser login.
+ * When `openBrowser` is set (and interactive), also open the funding page so the
+ * user is taken straight there after login — the URL is still shown as fallback.
+ */
+export async function showFunding(
+  walletName: string,
+  walletAddress: string,
+  chainId = 137,
+  opts?: { openBrowser?: boolean }
+): Promise<void> {
+  if (opts?.openBrowser && isTTY()) {
+    try {
+      const { default: open } = await import('open');
+      await open(FUNDING_URL);
+    } catch {
+      // open() can fail in headless/odd environments — the URL panel below is the fallback.
+    }
+  }
+  if (isTTY()) {
+    await inkRender(
+      React.createElement(FundUI, { walletName, walletAddress, chainId, fundingUrl: FUNDING_URL })
+    );
+  } else {
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          walletName,
+          walletAddress,
+          chainId,
+          fundingUrl: FUNDING_URL,
+          message: `Visit ${FUNDING_URL} to fund your wallet (${walletAddress}).`
+        },
+        null,
+        2
+      )
+    );
+  }
+}
+
 // --- fund ---
 export const fundCommand: CommandModule = {
   command: 'fund',
@@ -336,30 +382,7 @@ export const fundCommand: CommandModule = {
         );
       }
 
-      const walletAddress = session.walletAddress;
-      const chainId = 137;
-      const fundingUrl = `https://wallet.polygon.technology`;
-
-      if (isTTY()) {
-        await inkRender(
-          React.createElement(FundUI, { walletName, walletAddress, chainId, fundingUrl })
-        );
-      } else {
-        console.log(
-          JSON.stringify(
-            {
-              ok: true,
-              walletName,
-              walletAddress,
-              chainId,
-              fundingUrl,
-              message: `Visit ${fundingUrl} to fund your wallet (${walletAddress}).`
-            },
-            null,
-            2
-          )
-        );
-      }
+      await showFunding(walletName, session.walletAddress);
     } catch (error) {
       console.error(
         JSON.stringify(

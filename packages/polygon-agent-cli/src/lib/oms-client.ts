@@ -32,12 +32,28 @@ export function getOmsClient(walletName: string): OMSClient {
   );
 
   // SDK 0.1.0-alpha.4: the publishableKey alone identifies the project.
+  // `redirectAuthStorage` is REQUIRED for the OIDC browser flow: in Node the SDK
+  // has no sessionStorage to fall back to and throws without it. We back it with
+  // a separate file store so the transient pending-auth state is isolated from
+  // the session store (and the email-login/tx paths simply ignore it).
   const oms = new OMSClient({
     publishableKey: cfg.publishableKey,
     storage: new FileStorageManager(walletName),
+    redirectAuthStorage: new FileStorageManager(walletName, 'redirect-store'),
     credentialSigner
   });
 
   cache.set(walletName, oms);
   return oms;
+}
+
+/**
+ * The OIDC relay redirect URI. Google only ever sees this (pre-registered) HTTPS
+ * callback; the relay bounces the auth code back to our localhost. Overridable
+ * via SEQUENCE_OIDC_RELAY_URI so production can point at a non-staging relay
+ * without a code change. When unset, the SDK's built-in default is used (pass
+ * undefined and the provider default applies).
+ */
+export function oidcRelayRedirectUri(): string | undefined {
+  return process.env.SEQUENCE_OIDC_RELAY_URI || undefined;
 }

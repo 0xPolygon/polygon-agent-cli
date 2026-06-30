@@ -2,7 +2,8 @@ import type { CommandModule } from 'yargs';
 
 import React from 'react';
 
-import { getOmsClient } from '../lib/oms-client.ts';
+import { startOidcCallbackServer } from '../lib/oidc-callback-server.ts';
+import { getOmsClient, oidcRelayRedirectUri } from '../lib/oms-client.ts';
 import {
   listWallets,
   deleteWallet,
@@ -11,6 +12,7 @@ import {
   deleteOmsWallet
 } from '../lib/storage.ts';
 import { isTTY, inkRender } from '../ui/render.js';
+import { showFunding } from './operations.ts';
 import { WalletListUI, WalletAddressUI } from './wallet-ui.js';
 
 // Compact JSON output for AI agent consumers (single line, no stack traces)
@@ -71,6 +73,101 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
     });
 
     jsonOut({ ok: true, walletName: name, walletAddress, loginMethod: 'email' });
+  } catch (error) {
+    jsonOut({ ok: false, error: (error as Error).message });
+    process.exit(1);
+  }
+}
+
+// --- Subcommand: wallet login-browser (Sequence V3 OIDC browser auth) ---
+interface BrowserLoginArgs {
+  name: string;
+  provider: string;
+  port: number;
+  timeout: number;
+  force: boolean;
+  fund: boolean;
+}
+
+async function handleBrowserLogin(argv: BrowserLoginArgs): Promise<void> {
+  const { name, provider } = argv;
+
+  if (provider !== 'google') {
+    jsonOut({
+      ok: false,
+      error: `Unsupported provider "${provider}". Only "google" is wired today.`
+    });
+    process.exit(1);
+  }
+
+  try {
+    const oms = getOmsClient(name);
+
+    // Short-circuit if already logged in (the SDK restores the session from
+    // storage on construction). startOidcRedirectAuth would clearSession(), so
+    // re-login is opt-in via --force.
+    if (!argv.force && oms.wallet.walletAddress) {
+      jsonOut({
+        ok: true,
+        walletName: name,
+        walletAddress: oms.wallet.walletAddress,
+        alreadyLoggedIn: true
+      });
+      return;
+    }
+
+    // 1) Stand up the loopback callback server first, so we have the redirectUri
+    //    before asking the SDK to build the auth URL.
+    const server = await startOidcCallbackServer({
+      port: argv.port,
+      timeoutMs: argv.timeout * 1000
+    });
+
+    try {
+      // 2) Build the OIDC authorization URL. Google only sees the relay's HTTPS
+      //    callback; our localhost redirectUri rides inside the signed state.
+      const relay = oidcRelayRedirectUri();
+      const { url } = await oms.wallet.startOidcRedirectAuth({
+        provider,
+        redirectUri: server.redirectUri,
+        ...(relay ? { relayRedirectUri: relay } : {})
+      });
+
+      // 3) Always print the URL (copy-paste fallback if the browser won't open),
+      //    then try to open it.
+      process.stderr.write(`\nOpen this URL to sign in:\n${url}\n\n`);
+      try {
+        const { default: open } = await import('open');
+        await open(url);
+      } catch {
+        // open() can fail in headless/odd environments — the URL is already printed.
+      }
+      if (isTTY()) {
+        process.stderr.write('Waiting for browser login… (Ctrl-C to cancel)\n');
+      }
+
+      // 4) Wait for the relay→localhost callback, then complete the exchange.
+      const callbackUrl = await server.waitForCallbackUrl;
+      const result = await oms.wallet.completeOidcRedirectAuth({ callbackUrl });
+      const walletAddress = result.walletAddress;
+
+      await saveOmsWalletPointer(name, {
+        walletAddress,
+        loginMethod: 'google',
+        createdAt: new Date().toISOString()
+      });
+
+      jsonOut({ ok: true, walletName: name, walletAddress, loginMethod: 'google' });
+
+      // Chain the funding step right after a successful login: open the funding
+      // page in the browser (interactive only) and show the URL panel. Skip with
+      // --no-fund (e.g. for headless/scripted callers).
+      if (argv.fund !== false) {
+        await showFunding(name, walletAddress, 137, { openBrowser: true });
+      }
+    } finally {
+      server.close();
+    }
   } catch (error) {
     jsonOut({ ok: false, error: (error as Error).message });
     process.exit(1);
@@ -201,7 +298,7 @@ async function handleRemove(argv: RemoveArgs): Promise<void> {
 // --- Main wallet command ---
 export const walletCommand: CommandModule = {
   command: 'wallet',
-  describe: 'Manage wallets (login, logout, list, address, remove)',
+  describe: 'Manage wallets (login, login-browser, logout, list, address, remove)',
   builder: (yargs) =>
     yargs
       .command({
@@ -224,6 +321,43 @@ export const walletCommand: CommandModule = {
               describe: 'OTP code (only if obtained out-of-band in this same session)'
             }),
         handler: (argv) => handleLogin(argv as unknown as LoginArgs)
+      })
+      .command({
+        command: 'login-browser',
+        describe: 'Log in via browser (Google) instead of email OTP',
+        builder: (y) =>
+          y
+            .option('name', {
+              type: 'string',
+              default: 'main',
+              describe: 'Wallet name'
+            })
+            .option('provider', {
+              type: 'string',
+              default: 'google',
+              describe: 'OIDC provider (only "google" is supported today)'
+            })
+            .option('port', {
+              type: 'number',
+              default: 8765,
+              describe: 'Localhost callback port (must match the relay allowlist; default 8765)'
+            })
+            .option('timeout', {
+              type: 'number',
+              default: 180,
+              describe: 'Seconds to wait for the browser login before giving up'
+            })
+            .option('force', {
+              type: 'boolean',
+              default: false,
+              describe: 'Re-login even if a session already exists'
+            })
+            .option('fund', {
+              type: 'boolean',
+              default: true,
+              describe: 'Show the funding step after login (use --no-fund to skip)'
+            }),
+        handler: (argv) => handleBrowserLogin(argv as unknown as BrowserLoginArgs)
       })
       .command({
         command: 'logout',

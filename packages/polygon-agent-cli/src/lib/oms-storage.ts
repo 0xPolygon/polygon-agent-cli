@@ -25,13 +25,15 @@ function keyToFile(dir: string, key: string): string {
 
 /**
  * Synchronous, encrypted, file-backed StorageManager scoped to one wallet name.
- * Each entry is an AES-256-GCM blob written under <omsWalletDir>/store/.
+ * Each entry is an AES-256-GCM blob written under <omsWalletDir>/<subdir>/.
+ * `subdir` defaults to 'store' (the session store); the OIDC redirect flow uses
+ * a separate 'redirect-store' so its transient pending state stays isolated.
  */
 export class FileStorageManager implements StorageManager {
   private dir: string;
 
-  constructor(walletName: string) {
-    this.dir = path.join(omsWalletDir(walletName), 'store');
+  constructor(walletName: string, subdir = 'store') {
+    this.dir = path.join(omsWalletDir(walletName), subdir);
     if (!fs.existsSync(this.dir)) fs.mkdirSync(this.dir, { recursive: true, mode: 0o700 });
   }
 
