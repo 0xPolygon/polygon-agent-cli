@@ -1,0 +1,72 @@
+name: Deploy OIDC Relay to Cloudflare
+
+# Mirrors the connector-ui deploy: merge to `staging-branch` -> deploy the staging
+# worker; merge to `main` -> deploy production. The relay has no build step and
+# no runtime deps, so we deploy it straight with wrangler (run via npx because
+# wrangler is intentionally NOT a workspace dependency — see packages/oidc-relay).
+# Reuses the same Cloudflare credentials as connector-ui (CF_WORKER_* org/env
+# secrets) and the same staging/production GitHub environments.
+
+on:
+  push:
+    branches:
+      - main
+      - staging-branch
+    paths:
+      - 'packages/oidc-relay/**'
+      - '.github/workflows/deploy-oidc-relay.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to deploy
+        type: choice
+        options:
+          - staging
+          - production
+        default: staging
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-staging:
+    name: Deploy (staging)
+    if: github.ref == 'refs/heads/staging-branch' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging')
+    runs-on: ubuntu-latest
+    environment: staging
+    defaults:
+      run:
+        working-directory: packages/oidc-relay
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Deploy to staging
+        run: npx -y wrangler@3 deploy --env staging
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_WORKER_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_WORKER_ACCOUNT_ID }}
+
+  deploy-production:
+    name: Deploy (production)
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'production')
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: packages/oidc-relay
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Deploy to production
+        run: npx -y wrangler@3 deploy --env production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_WORKER_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_WORKER_ACCOUNT_ID }}
