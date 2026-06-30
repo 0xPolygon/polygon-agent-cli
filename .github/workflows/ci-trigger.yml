@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: CI - lint / typecheck / test / build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: 0xPolygon/pipelines/.github/actions/ci@main
+      # The shared `ci` action covers lint/typecheck/test. `build` is added
+      # here because connector-ui's Vite build is only otherwise exercised by
+      # `deploy-connector-ui.yml` on push to `main` — without this step a
+      # broken bundle would land on `main` before the production deploy
+      # surfaces it. The CLI's esbuild bundle is also validated here rather
+      # than waiting for `prepublishOnly` at release time.
+      - run: pnpm run --if-present build
+        shell: bash

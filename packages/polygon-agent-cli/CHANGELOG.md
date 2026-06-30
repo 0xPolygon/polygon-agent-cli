@@ -3,6 +3,17 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [0.11.0](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-cli@0.10.4...@polygonlabs/agent-cli@0.11.0) (2026-06-09)
+
+
+### Features
+
+* **cli:** add `call` command for arbitrary contract calls ([af8225f](https://github.com/0xPolygon/polygon-agent-cli/commit/af8225f415c15471760e33dbe13688114c265dfb))
+
+
+
+
+
 ## [0.10.4](https://github.com/0xPolygon/polygon-agent-cli/compare/@polygonlabs/agent-cli@0.10.3...@polygonlabs/agent-cli@0.10.4) (2026-05-27)
 
 **Note:** Version bump only for package @polygonlabs/agent-cli

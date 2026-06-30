@@ -1,6 +1,6 @@
 {
   "name": "@polygonlabs/agent-cli",
-  "version": "0.10.4",
+  "version": "0.11.0",
   "description": "CLI + Agent Skills for building on-chain agents on Polygon",
   "repository": {
     "type": "git",
@@ -23,7 +23,8 @@
     "prepublishOnly": "pnpm run build",
     "dev": "tsx src/index.ts",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist node_modules *.tsbuildinfo"
   },
   "dependencies": {
     "@0xsequence/network": "^2.3.40",
