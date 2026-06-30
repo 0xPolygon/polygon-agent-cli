@@ -55,6 +55,15 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  packages/oidc-relay:
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4.20240712.0
+        version: 4.20260629.1
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   packages/polygon-agent-cli:
     dependencies:
       '@0xsequence/network':
@@ -211,6 +220,9 @@ packages:
   '@babel/types@7.29.0':
     resolution: {integrity: sha512-LwdZHpScM4Qz8Xw2iKSzS+cfglZzJGvofQICy7W7v4caru4EaAmyUuO6BGrbyQ2mYV11W0U8j5mBhd14dd3B0A==}
     engines: {node: '>=6.9.0'}
+
+  '@cloudflare/workers-types@4.20260629.1':
+    resolution: {integrity: sha512-5vq2ErIFVRSQ8Dcw5YOeEoBdZBudqBjHFKTWD3SBGiJR5hD1+/86aRUV/DTpEK9sXXCGOTGgpWBGlPSlW7djVg==}
 
   '@commitlint/cli@20.4.2':
     resolution: {integrity: sha512-YjYSX2yj/WsVoxh9mNiymfFS2ADbg2EK4+1WAsMuckwKMCqJ5PDG0CJU/8GvmHWcv4VRB2V02KqSiecRksWqZQ==}
@@ -4829,6 +4841,8 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 7.27.1
       '@babel/helper-validator-identifier': 7.28.5
+
+  '@cloudflare/workers-types@4.20260629.1': {}
 
   '@commitlint/cli@20.4.2(@types/node@22.19.13)(typescript@5.9.3)':
     dependencies:
