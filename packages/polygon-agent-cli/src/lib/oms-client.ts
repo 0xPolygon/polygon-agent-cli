@@ -57,3 +57,16 @@ export function getOmsClient(walletName: string): OMSClient {
 export function oidcRelayRedirectUri(): string | undefined {
   return process.env.SEQUENCE_OIDC_RELAY_URI || undefined;
 }
+
+/**
+ * Base URL of OUR OIDC handoff relay (packages/oidc-relay), used by the `--remote`
+ * browser-login path when a localhost callback can't be reached. This is a
+ * DIFFERENT relay from oidcRelayRedirectUri(): that one overrides the Sequence
+ * relay Google redirects to; this is our public bounce target the CLI polls.
+ * Read from POLYGON_AGENT_OIDC_RELAY; the `--relay-url` flag overrides per-run.
+ * Trailing slash trimmed so callers can append `/api/oidc/...` cleanly.
+ */
+export function oidcRelayBaseUrl(): string | undefined {
+  const v = process.env.POLYGON_AGENT_OIDC_RELAY;
+  return v ? v.replace(/\/+$/, '') : undefined;
+}

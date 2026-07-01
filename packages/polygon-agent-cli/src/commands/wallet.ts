@@ -3,7 +3,8 @@ import type { CommandModule } from 'yargs';
 import React from 'react';
 
 import { startOidcCallbackServer } from '../lib/oidc-callback-server.ts';
-import { getOmsClient, oidcRelayRedirectUri } from '../lib/oms-client.ts';
+import { registerRelaySession, pollRelayForCallback } from '../lib/oidc-relay-client.ts';
+import { getOmsClient, oidcRelayRedirectUri, oidcRelayBaseUrl } from '../lib/oms-client.ts';
 import {
   listWallets,
   deleteWallet,
@@ -87,6 +88,72 @@ interface BrowserLoginArgs {
   timeout: number;
   force: boolean;
   fund: boolean;
+  remote: boolean;
+  relayUrl?: string;
+}
+
+// Print the auth URL (copy-paste fallback) and try to open it in a browser.
+async function announceAuthUrl(url: string): Promise<void> {
+  process.stderr.write(`\nOpen this URL to sign in:\n${url}\n\n`);
+  try {
+    const { default: open } = await import('open');
+    await open(url);
+  } catch {
+    // open() can fail in headless/remote environments — the URL is already printed.
+  }
+  if (isTTY()) {
+    process.stderr.write('Waiting for browser login… (Ctrl-C to cancel)\n');
+  }
+}
+
+// Drive the OIDC redirect flow and return the callback URL to complete with.
+// Two paths, both ending in a URL carrying ?code&state:
+//   - remote: start OIDC pointed at OUR public relay's /api/oidc/cb, register the
+//     handoff for this `state`, open the URL, then POLL the relay for code+state.
+//     Works when the browser and CLI are on different machines.
+//   - local:  a short-lived loopback server; the relay bounces the browser to it.
+// Google only ever sees the Sequence relay (relayRedirectUri); our redirectUri
+// rides inside the signed state either way.
+async function obtainBrowserCallbackUrl(
+  oms: ReturnType<typeof getOmsClient>,
+  provider: 'google',
+  argv: BrowserLoginArgs
+): Promise<string> {
+  const seqRelay = oidcRelayRedirectUri();
+
+  if (argv.remote) {
+    const relayBase = argv.relayUrl?.replace(/\/+$/, '') || oidcRelayBaseUrl();
+    if (!relayBase) {
+      throw new Error(
+        'Remote login needs a relay URL. Set POLYGON_AGENT_OIDC_RELAY or pass --relay-url.'
+      );
+    }
+    const { url, state } = await oms.wallet.startOidcRedirectAuth({
+      provider,
+      redirectUri: `${relayBase}/api/oidc/cb`,
+      ...(seqRelay ? { relayRedirectUri: seqRelay } : {})
+    });
+    await registerRelaySession(relayBase, state);
+    await announceAuthUrl(url);
+    const cb = await pollRelayForCallback(relayBase, state, { timeoutMs: argv.timeout * 1000 });
+    return `${relayBase}/api/oidc/cb?code=${encodeURIComponent(cb.code)}&state=${encodeURIComponent(cb.state)}`;
+  }
+
+  const server = await startOidcCallbackServer({
+    port: argv.port,
+    timeoutMs: argv.timeout * 1000
+  });
+  try {
+    const { url } = await oms.wallet.startOidcRedirectAuth({
+      provider,
+      redirectUri: server.redirectUri,
+      ...(seqRelay ? { relayRedirectUri: seqRelay } : {})
+    });
+    await announceAuthUrl(url);
+    return await server.waitForCallbackUrl;
+  } finally {
+    server.close();
+  }
 }
 
 async function handleBrowserLogin(argv: BrowserLoginArgs): Promise<void> {
@@ -116,57 +183,23 @@ async function handleBrowserLogin(argv: BrowserLoginArgs): Promise<void> {
       return;
     }
 
-    // 1) Stand up the loopback callback server first, so we have the redirectUri
-    //    before asking the SDK to build the auth URL.
-    const server = await startOidcCallbackServer({
-      port: argv.port,
-      timeoutMs: argv.timeout * 1000
+    const callbackUrl = await obtainBrowserCallbackUrl(oms, provider, argv);
+    const result = await oms.wallet.completeOidcRedirectAuth({ callbackUrl });
+    const walletAddress = result.walletAddress;
+
+    await saveOmsWalletPointer(name, {
+      walletAddress,
+      loginMethod: 'google',
+      createdAt: new Date().toISOString()
     });
 
-    try {
-      // 2) Build the OIDC authorization URL. Google only sees the relay's HTTPS
-      //    callback; our localhost redirectUri rides inside the signed state.
-      const relay = oidcRelayRedirectUri();
-      const { url } = await oms.wallet.startOidcRedirectAuth({
-        provider,
-        redirectUri: server.redirectUri,
-        ...(relay ? { relayRedirectUri: relay } : {})
-      });
+    jsonOut({ ok: true, walletName: name, walletAddress, loginMethod: 'google' });
 
-      // 3) Always print the URL (copy-paste fallback if the browser won't open),
-      //    then try to open it.
-      process.stderr.write(`\nOpen this URL to sign in:\n${url}\n\n`);
-      try {
-        const { default: open } = await import('open');
-        await open(url);
-      } catch {
-        // open() can fail in headless/odd environments — the URL is already printed.
-      }
-      if (isTTY()) {
-        process.stderr.write('Waiting for browser login… (Ctrl-C to cancel)\n');
-      }
-
-      // 4) Wait for the relay→localhost callback, then complete the exchange.
-      const callbackUrl = await server.waitForCallbackUrl;
-      const result = await oms.wallet.completeOidcRedirectAuth({ callbackUrl });
-      const walletAddress = result.walletAddress;
-
-      await saveOmsWalletPointer(name, {
-        walletAddress,
-        loginMethod: 'google',
-        createdAt: new Date().toISOString()
-      });
-
-      jsonOut({ ok: true, walletName: name, walletAddress, loginMethod: 'google' });
-
-      // Chain the funding step right after a successful login: open the funding
-      // page in the browser (interactive only) and show the URL panel. Skip with
-      // --no-fund (e.g. for headless/scripted callers).
-      if (argv.fund !== false) {
-        await showFunding(name, walletAddress, 137, { openBrowser: true });
-      }
-    } finally {
-      server.close();
+    // Chain the funding step right after a successful login: open the funding
+    // page in the browser (interactive only) and show the URL panel. Skip with
+    // --no-fund (e.g. for headless/scripted callers).
+    if (argv.fund !== false) {
+      await showFunding(name, walletAddress, 137, { openBrowser: true });
     }
   } catch (error) {
     jsonOut({ ok: false, error: (error as Error).message });
@@ -340,7 +373,7 @@ export const walletCommand: CommandModule = {
             .option('port', {
               type: 'number',
               default: 8765,
-              describe: 'Localhost callback port (must match the relay allowlist; default 8765)'
+              describe: 'Localhost callback port for the local (non-remote) flow; default 8765'
             })
             .option('timeout', {
               type: 'number',
@@ -356,6 +389,16 @@ export const walletCommand: CommandModule = {
               type: 'boolean',
               default: true,
               describe: 'Show the funding step after login (use --no-fund to skip)'
+            })
+            .option('remote', {
+              type: 'boolean',
+              default: false,
+              describe:
+                'Remote/headless: use the public OIDC relay + polling instead of a localhost callback (needs POLYGON_AGENT_OIDC_RELAY or --relay-url)'
+            })
+            .option('relay-url', {
+              type: 'string',
+              describe: 'Relay base URL for --remote (overrides POLYGON_AGENT_OIDC_RELAY)'
             }),
         handler: (argv) => handleBrowserLogin(argv as unknown as BrowserLoginArgs)
       })
