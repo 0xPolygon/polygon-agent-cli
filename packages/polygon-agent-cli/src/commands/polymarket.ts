@@ -325,9 +325,7 @@ async function handleClobBuy(argv: {
       loadPolymarketKey()
     ]);
     if (!session)
-      throw new Error(
-        `Wallet not found: ${walletName}. Run: polygon-agent wallet login --email <addr>`
-      );
+      throw new Error(`Wallet not found: ${walletName}. Run: polygon-agent wallet login`);
 
     const { privateKeyToAccount } = await import('viem/accounts');
     const account = privateKeyToAccount(privateKey as `0x${string}`);

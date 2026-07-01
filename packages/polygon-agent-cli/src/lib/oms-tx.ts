@@ -72,7 +72,7 @@ export async function runOmsTx(params: OmsTxParams): Promise<OmsTxResult> {
   const walletAddress = oms.wallet.walletAddress;
   if (!walletAddress) {
     throw new Error(
-      `No active session for wallet '${walletName}'. Run: polygon-agent wallet login --email <addr>`
+      `No active session for wallet '${walletName}'. Run: polygon-agent wallet login`
     );
   }
 
@@ -118,7 +118,7 @@ export async function runOmsTx(params: OmsTxParams): Promise<OmsTxResult> {
       ) {
         throw new Error(
           `Session expired or missing for wallet '${walletName}'. ` +
-            `Run: polygon-agent wallet login --email <addr>`
+            `Run: polygon-agent wallet login`
         );
       }
       throw e;

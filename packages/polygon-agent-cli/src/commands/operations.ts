@@ -204,9 +204,7 @@ export const balancesCommand: CommandModule = {
       try {
         const pointer = await loadOmsWalletPointer(walletName);
         if (!pointer) {
-          throw new Error(
-            `Wallet not found: ${walletName}. Run: polygon-agent wallet login --email <addr>`
-          );
+          throw new Error(`Wallet not found: ${walletName}. Run: polygon-agent wallet login`);
         }
         const walletAddress = pointer.walletAddress;
 
@@ -266,9 +264,7 @@ export const balancesCommand: CommandModule = {
       try {
         const pointer = await loadOmsWalletPointer(walletName);
         if (!pointer) {
-          throw new Error(
-            `Wallet not found: ${walletName}. Run: polygon-agent wallet login --email <addr>`
-          );
+          throw new Error(`Wallet not found: ${walletName}. Run: polygon-agent wallet login`);
         }
 
         const chainSpec = (argv.chain as string) || 'polygon';
@@ -334,14 +330,18 @@ export async function showFunding(
   walletName: string,
   walletAddress: string,
   chainId = 137,
-  opts?: { openBrowser?: boolean }
+  opts?: { openBrowser?: boolean; remote?: boolean }
 ): Promise<void> {
-  if (opts?.openBrowser && isTTY()) {
+  // Human path (local terminal, or under Claude Code / a harness where stdout is
+  // piped so there is no TTY): open the funding page. Headless or --remote (the
+  // browser is on another machine): skip it and just surface the URL + address on
+  // the CLI. open() no-ops/throws on a GUI-less host, so attempting it is safe.
+  if (opts?.openBrowser && !opts?.remote) {
     try {
       const { default: open } = await import('open');
       await open(FUNDING_URL);
     } catch {
-      // open() can fail in headless/odd environments — the URL panel below is the fallback.
+      // open() can fail on a headless host — the URL/panel below is the fallback.
     }
   }
   if (isTTY()) {
@@ -357,7 +357,7 @@ export async function showFunding(
           walletAddress,
           chainId,
           fundingUrl: FUNDING_URL,
-          message: `Visit ${FUNDING_URL} to fund your wallet (${walletAddress}).`
+          message: `Fund wallet ${walletAddress} at ${FUNDING_URL} (send POL or USDC to that address).`
         },
         null,
         2
@@ -377,12 +377,10 @@ export const fundCommand: CommandModule = {
     try {
       const session = await loadOmsWalletPointer(walletName);
       if (!session) {
-        throw new Error(
-          `Wallet not found: ${walletName}. Run: polygon-agent wallet login --email <addr>`
-        );
+        throw new Error(`Wallet not found: ${walletName}. Run: polygon-agent wallet login`);
       }
 
-      await showFunding(walletName, session.walletAddress);
+      await showFunding(walletName, session.walletAddress, 137, { openBrowser: true });
     } catch (error) {
       console.error(
         JSON.stringify(
@@ -496,9 +494,7 @@ async function handleSendNative(argv: {
   }> {
     const session = await loadOmsWalletPointer(walletName);
     if (!session)
-      throw new Error(
-        `Wallet not found: ${walletName}. Run: polygon-agent wallet login --email <addr>`
-      );
+      throw new Error(`Wallet not found: ${walletName}. Run: polygon-agent wallet login`);
 
     const network = resolveNetwork((argv.chain as string) || 'polygon');
     const decimals = network.nativeToken?.decimals ?? 18;
@@ -535,9 +531,7 @@ async function handleSendNative(argv: {
     try {
       const session = await loadOmsWalletPointer(walletName);
       if (!session)
-        throw new Error(
-          `Wallet not found: ${walletName}. Run: polygon-agent wallet login --email <addr>`
-        );
+        throw new Error(`Wallet not found: ${walletName}. Run: polygon-agent wallet login`);
 
       const network = resolveNetwork((argv.chain as string) || 'polygon');
       const decimals = network.nativeToken?.decimals ?? 18;
@@ -689,9 +683,7 @@ async function handleSendToken(argv: {
   }> {
     const session = await loadOmsWalletPointer(walletName);
     if (!session)
-      throw new Error(
-        `Wallet not found: ${walletName}. Run: polygon-agent wallet login --email <addr>`
-      );
+      throw new Error(`Wallet not found: ${walletName}. Run: polygon-agent wallet login`);
 
     const network = resolveNetwork((argv.chain as string) || 'polygon');
     let token = tokenAddress;
@@ -838,10 +830,7 @@ async function handleCall(argv: {
   }
 
   const session = await loadOmsWalletPointer(walletName);
-  if (!session)
-    throw new Error(
-      `Wallet not found: ${walletName}. Run: polygon-agent wallet login --email <addr>`
-    );
+  if (!session) throw new Error(`Wallet not found: ${walletName}. Run: polygon-agent wallet login`);
 
   const network = resolveNetwork(argv.chain || 'polygon');
   const decimals = network.nativeToken?.decimals ?? 18;
@@ -955,9 +944,7 @@ export const swapCommand: CommandModule = {
     try {
       const session = await loadOmsWalletPointer(walletName);
       if (!session) {
-        throw new Error(
-          `Wallet not found: ${walletName}. Run: polygon-agent wallet login --email <addr>`
-        );
+        throw new Error(`Wallet not found: ${walletName}. Run: polygon-agent wallet login`);
       }
 
       const originNetwork = resolveNetwork((argv.chain as string) || 'polygon');
@@ -1185,9 +1172,7 @@ export const depositCommand: CommandModule = {
     try {
       const session = await loadOmsWalletPointer(walletName);
       if (!session)
-        throw new Error(
-          `Wallet not found: ${walletName}. Run: polygon-agent wallet login --email <addr>`
-        );
+        throw new Error(`Wallet not found: ${walletName}. Run: polygon-agent wallet login`);
 
       const network = resolveNetwork((argv.chain as string) || 'polygon');
       const { chainId } = network;
@@ -1622,9 +1607,7 @@ export const withdrawCommand: CommandModule = {
     try {
       const session = await loadOmsWalletPointer(walletName);
       if (!session)
-        throw new Error(
-          `Wallet not found: ${walletName}. Run: polygon-agent wallet login --email <addr>`
-        );
+        throw new Error(`Wallet not found: ${walletName}. Run: polygon-agent wallet login`);
 
       const network = resolveNetwork((argv.chain as string) || 'polygon');
       const { chainId } = network;
@@ -1986,9 +1969,7 @@ export const x402PayCommand: CommandModule = {
         loadBuilderConfig()
       ]);
       if (!session)
-        throw new Error(
-          `Wallet not found: ${walletName}. Run: polygon-agent wallet login --email <addr>`
-        );
+        throw new Error(`Wallet not found: ${walletName}. Run: polygon-agent wallet login`);
       if (!builderConfig?.privateKey)
         throw new Error('Builder EOA not found. Run: polygon-agent setup');
 

@@ -60,5 +60,5 @@ export async function pollRelayForCallback(
     if (data.status === 'expired') throw new Error('Relay session expired before login completed');
     await sleep(intervalMs);
   }
-  throw new Error('Timed out waiting for browser login. Re-run, or use `wallet login --email`.');
+  throw new Error('Timed out waiting for browser login. Re-run, or use `wallet login`.');
 }

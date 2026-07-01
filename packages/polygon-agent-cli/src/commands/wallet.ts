@@ -140,7 +140,7 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
     // page in the browser (interactive only) and show the URL panel. Skip with
     // --no-fund (e.g. for headless/scripted callers).
     if (argv.fund !== false) {
-      await showFunding(name, walletAddress, 137, { openBrowser: true });
+      await showFunding(name, walletAddress, 137, { openBrowser: true, remote: argv.remote });
     }
   } catch (error) {
     jsonOut({ ok: false, error: (error as Error).message });

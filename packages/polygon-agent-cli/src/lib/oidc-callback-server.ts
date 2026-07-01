@@ -83,7 +83,7 @@ export function startOidcCallbackServer(opts: {
     const timer = setTimeout(() => {
       if (!settled) {
         settled = true;
-        rejectUrl(new Error('Browser login timed out. Re-run, or use `wallet login --email`.'));
+        rejectUrl(new Error('Browser login timed out. Re-run, or use `wallet login`.'));
         close();
       }
     }, opts.timeoutMs);
