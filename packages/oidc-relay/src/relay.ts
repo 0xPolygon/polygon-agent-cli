@@ -126,6 +126,11 @@ export default {
     const url = new URL(request.url);
     if (request.method === 'OPTIONS') return cors(new Response(null, { status: 204 }));
 
+    // GET / or /health -> liveness check (confirm the worker is deployed/reachable).
+    if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/health')) {
+      return json({ ok: true, service: 'oidc-relay' });
+    }
+
     // POST /api/oidc/register { state } -> arm the DO for this state.
     // The CLI already holds `state` from startOidcRedirectAuth, so there is no
     // separate request id: the state IS the handle.
