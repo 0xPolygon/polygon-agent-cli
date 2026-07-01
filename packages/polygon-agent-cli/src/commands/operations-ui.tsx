@@ -2,25 +2,14 @@ import { Box, Text, useApp } from 'ink';
 import Spinner from 'ink-spinner';
 import React, { useState, useEffect } from 'react';
 
-import { loadWalletSession } from '../lib/storage.ts';
+import type { TokenBalance } from '@0xsequence/typescript-sdk';
+
+import { findNetworkById } from '@0xsequence/typescript-sdk';
+
+import { getOmsClient } from '../lib/oms-client.ts';
+import { loadOmsWalletPointer } from '../lib/storage.ts';
 import { resolveNetwork, formatUnits } from '../lib/utils.ts';
 import { Header, KV, Err, Divider, DryRunBanner, TxResult } from '../ui/components.js';
-
-// Get per-chain indexer URL
-function getChainIndexerUrl(chainId: number): string {
-  const chainNames: Record<number, string> = {
-    137: 'polygon',
-    80002: 'amoy',
-    1: 'mainnet',
-    42161: 'arbitrum',
-    10: 'optimism',
-    8453: 'base',
-    43114: 'avalanche',
-    56: 'bsc',
-    100: 'gnosis'
-  };
-  return `https://${chainNames[chainId] || 'polygon'}-indexer.sequence.app`;
-}
 
 function shortAddr(address: string, head = 6, tail = 4): string {
   return `${address.slice(0, head)}…${address.slice(-tail)}`;
@@ -52,44 +41,46 @@ export function BalancesUI({ walletName, chainOverride }: BalancesUIProps) {
   useEffect(() => {
     void (async () => {
       try {
-        const session = await loadWalletSession(walletName);
-        if (!session) throw new Error(`Wallet not found: ${walletName}`);
+        const pointer = await loadOmsWalletPointer(walletName);
+        if (!pointer)
+          throw new Error(`Wallet not found: ${walletName}. Run: polygon-agent wallet login`);
+        const addr = pointer.walletAddress;
 
-        const indexerKey =
-          process.env.SEQUENCE_INDEXER_ACCESS_KEY ||
-          session.projectAccessKey ||
-          process.env.SEQUENCE_PROJECT_ACCESS_KEY;
-        if (!indexerKey)
-          throw new Error('Missing project access key (set SEQUENCE_PROJECT_ACCESS_KEY)');
-
-        const network = resolveNetwork(chainOverride || session.chain || 'polygon');
+        const network = resolveNetwork(chainOverride || 'polygon');
         const nativeDecimals = network.nativeToken?.decimals ?? 18;
         const nativeSymbol = network.nativeToken?.symbol || 'POL';
 
-        const { SequenceIndexer } = await import('@0xsequence/indexer');
-        const indexer = new SequenceIndexer(getChainIndexerUrl(network.chainId), indexerKey);
+        const omsNetwork = findNetworkById(network.chainId);
+        if (!omsNetwork) throw new Error(`Unsupported chain for OMS indexer: ${network.chainId}`);
+        const oms = getOmsClient(walletName);
 
-        const [nativeRes, tokenRes] = await Promise.all([
-          indexer.getNativeTokenBalance({ accountAddress: session.walletAddress }),
-          indexer.getTokenBalances({ accountAddress: session.walletAddress, includeMetadata: true })
-        ]);
+        // SDK 0.1.0-alpha.4: one getBalances call returns native + tokens.
+        const res = await oms.indexer.getBalances({
+          walletAddress: addr,
+          networks: [omsNetwork],
+          includeMetadata: true
+        });
 
         const rows: BalanceEntry[] = [
           {
             symbol: nativeSymbol,
-            balance: formatUnits(BigInt(nativeRes?.balance?.balance || '0'), nativeDecimals),
+            balance: formatUnits(BigInt(res.nativeBalances?.[0]?.balance || '0'), nativeDecimals),
             address: '(native)'
           }
         ];
 
-        for (const b of tokenRes?.balances || []) {
+        for (const b of (res.balances || []) as TokenBalance[]) {
           const sym = b.contractInfo?.symbol || 'ERC20';
           const dec = b.contractInfo?.decimals ?? 18;
-          const addr = b.contractAddress ? shortAddr(b.contractAddress) : '';
-          rows.push({ symbol: sym, balance: formatUnits(b.balance || '0', dec), address: addr });
+          const tokenAddr = b.contractAddress ? shortAddr(b.contractAddress) : '';
+          rows.push({
+            symbol: sym,
+            balance: formatUnits(b.balance || '0', dec),
+            address: tokenAddr
+          });
         }
 
-        setWalletAddress(session.walletAddress);
+        setWalletAddress(addr);
         setChainId(network.chainId);
         setChainName(network.name);
         setBalances(rows);

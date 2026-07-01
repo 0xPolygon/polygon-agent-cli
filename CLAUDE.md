@@ -8,10 +8,13 @@ Fetch and apply the Polygon Apps Team standards:
 
 ## Repository Structure
 
-This is a pnpm workspace monorepo with two packages:
+This is a pnpm workspace monorepo. The primary package is:
 
 - `packages/polygon-agent-cli/` — CLI tool for on-chain agent operations on Polygon
-- `packages/connector-ui/` — Wallet connector UI (Vite + React frontend)
+
+Wallets use the Sequence V3 embedded-wallet model (`@0xsequence/typescript-sdk`,
+`OMSClient`): the CLI authenticates via Google browser login (`wallet login`) and
+holds the credential on disk.
 
 Static assets (ABI JSON in `contracts/`, Claude skills in `skills/`) are
 published with the CLI package but are not source code.
@@ -26,5 +29,11 @@ published with the CLI package but are not source code.
 ## Key Directories
 
 - `packages/polygon-agent-cli/src/commands/` — yargs command modules
-- `packages/polygon-agent-cli/src/lib/` — shared utilities (storage, dapp-client, token-directory, ethauth)
+- `packages/polygon-agent-cli/src/lib/` — shared utilities (storage, oms-client, oms-tx, oms-storage, tx-dispatch, token-directory, ethauth)
 - `packages/polygon-agent-cli/src/types.d.ts` — ambient declarations for untyped dependencies
+
+## Wallet auth (Sequence V3 / OMS)
+
+- `polygon-agent wallet login` — logs in with Google in the browser; prints/opens a Google sign-in URL, and once you sign in the embedded wallet is created/unlocked. Add `--remote` for headless hosts (uses a public OIDC relay; needs `POLYGON_AGENT_OIDC_RELAY` or `--relay-url`). Other flags: `--name <n>` (default "main"), `--no-fund`, `--force`. Session persists ~1 week under `~/.polygon-agent/oms/<name>/`.
+- Requires `SEQUENCE_PUBLISHABLE_KEY` + `SEQUENCE_OMS_PROJECT_ID` (from Sequence Builder), via env or `builder.json` (set with `setup --oms-publishable-key/--oms-project-id`).
+- `lib/tx-dispatch.ts` `runTx` is the single tx primitive (wraps `runOmsTx`). All commands submit through it.

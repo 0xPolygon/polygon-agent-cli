@@ -186,14 +186,14 @@ export function SetupUI({ name, force }: { name: string; force: boolean }) {
           <KV k="address" v={`${result.eoaAddress.slice(0, 6)}···${result.eoaAddress.slice(-4)}`} />
           <KV k="key" v={`${result.accessKey.slice(0, 12)}···`} />
           <KV k="project" v={String(result.projectId)} />
-          <Hint>Next: polygon-agent wallet create</Hint>
+          <Hint>Next: polygon-agent wallet login --email &lt;addr&gt;</Hint>
         </Box>
       )}
       {phase === 'existing' && result && (
         <Box flexDirection="column" marginTop={1}>
           <Text color="gray">Already configured</Text>
           <KV k="address" v={`${result.eoaAddress.slice(0, 6)}···${result.eoaAddress.slice(-4)}`} />
-          <Hint>Next: polygon-agent wallet create</Hint>
+          <Hint>Next: polygon-agent wallet login --email &lt;addr&gt;</Hint>
         </Box>
       )}
       {phase === 'error' && <Err message={error} />}

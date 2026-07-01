@@ -25,29 +25,34 @@ npm install -g @polygonlabs/agent-cli@latest   # upgrade
 
 ## Architecture
 
+The CLI uses the **Sequence V3 embedded-wallet** model (`@0xsequence/typescript-sdk`). The agent authenticates with **Google browser login** via `wallet login`; the command prints/opens a Google sign-in URL, and once the user signs in the wallet is created/unlocked and the session credential is stored encrypted on disk. There is no on-chain permission scoping.
+
 | Wallet | Created by | Purpose | Fund? |
 |--------|-----------|---------|-------|
-| EOA | `setup` | Auth with Sequence Builder | NO |
-| Ecosystem Wallet | `wallet create` | Primary spending wallet | YES |
+| Embedded wallet (V3) | `wallet login` | Primary spending wallet | YES |
+
+The wallet address is the **same across all EVM chains**. Sessions last ~1 week before re-login is needed.
 
 ## Environment Variables
 
-### Access key — one key, many names
+### OMS credentials (required)
 
-`SEQUENCE_PROJECT_ACCESS_KEY`, `SEQUENCE_INDEXER_ACCESS_KEY`, and `TRAILS_API_KEY` are **all the same key** — the Sequence project access key created during `setup`. The CLI treats them as aliases and falls back through all of them automatically.
+`wallet login` and on-chain reads need two values from the [Sequence Builder](https://sequence.build) dashboard:
 
-After `setup` runs the key is stored in `~/.polygon-agent/builder.json`. Every CLI invocation bootstraps it into the environment — no `export` is needed. In a fresh agent session with no environment variables set, simply run commands and the CLI reads credentials from disk.
+| Variable | Description |
+|----------|-------------|
+| `SEQUENCE_PUBLISHABLE_KEY` | OMS publishable key (safe in client) |
+| `SEQUENCE_OMS_PROJECT_ID` | OMS project id (e.g. `proj_...`) |
 
-Only set these manually to override the stored value (e.g. to point at a different project):
+Set them via env, or persist once with `setup` so every command reads them from `~/.polygon-agent/builder.json`:
 ```bash
-export SEQUENCE_PROJECT_ACCESS_KEY=<key>  # also covers TRAILS_API_KEY and indexer calls
+polygon-agent setup --oms-publishable-key <key> --oms-project-id <proj_...>
 ```
 
 ### Optional overrides
 | Variable | Default |
 |----------|---------|
-| `SEQUENCE_ECOSYSTEM_CONNECTOR_URL` | `https://agentconnect.polygon.technology` |
-| `SEQUENCE_DAPP_ORIGIN` | Same as connector URL origin |
+| `SEQUENCE_PROJECT_ACCESS_KEY` | Used only as the Trails API key for DeFi earn-pool lookups (optional) |
 | `TRAILS_TOKEN_MAP_JSON` | Token-directory lookup |
 | `POLYGON_AGENT_DEBUG_FETCH` | Off — logs HTTP to `~/.polygon-agent/fetch-debug.log` |
 | `POLYGON_AGENT_DEBUG_FEE` | Off — dumps fee options to stderr |
@@ -55,30 +60,21 @@ export SEQUENCE_PROJECT_ACCESS_KEY=<key>  # also covers TRAILS_API_KEY and index
 ## Complete Setup Flow
 
 ```bash
-# Step 1: Setup (creates EOA + Sequence project, stores access key to disk)
-polygon-agent setup --name "MyAgent"
-# → saves privateKey (not shown again), eoaAddress, accessKey to ~/.polygon-agent/builder.json
-# → all subsequent commands auto-load the access key from disk — no export needed
+# Step 1: Save OMS credentials (from the Sequence Builder dashboard)
+polygon-agent setup --oms-publishable-key <key> --oms-project-id <proj_...>
+# → stores publishableKey + omsProjectId to ~/.polygon-agent/builder.json
+# → all subsequent commands auto-load them from disk — no export needed
 
-# Step 2: Create ecosystem wallet (opens browser, waits for 6-digit code)
-# Aave V3 Pool is auto-whitelisted in all sessions. For Morpho or other DeFi vaults,
-# add --contract flags as needed.
-polygon-agent wallet create --usdc-limit 50 --native-limit 5 \
-  --contract 0xc2132D05D31c914a87C6611C10748AEb04B58e8F \
-  --contract 0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619 \
-  --contract 0x781fb7f6d845e3be129289833b04d43aa8558c42 \
-  --contract 0xf5c81d25ee174d83f1fd202ca94ae6070d073ccf \
-  --contract 0x3f33f9f7e2d7cfbcbdf8ea8b870a6e3d449664c2
-# → opens https://agentconnect.polygon.technology/link?rid=<rid>&...
-# → user approves in browser, browser shows a 6-digit code
-# → enter the 6-digit code in the terminal when prompted
-# → session saved to ~/.polygon-agent/wallets/main.json
-# → notify the user and send them to https://agentconnect.polygon.technology/?rid=<rid>
-#   so they can fund their wallet with access to the session
+# Step 2: Log in with Google in the browser
+polygon-agent wallet login
+# → prints/opens a Google sign-in URL
+# → after the user signs in, the embedded wallet is created/unlocked
+# → on a headless/remote host add --remote (uses a public OIDC relay)
+# → session saved to ~/.polygon-agent/oms/main/; prints the walletAddress
 
 # Step 3: Fund wallet
 polygon-agent fund
-# → reads walletAddress from session, builds Trails widget URL with toAddress=<walletAddress>
+# → reads walletAddress from the session, builds the Trails widget URL with toAddress=<walletAddress>
 # → ALWAYS run this command to get the URL — never construct it manually or hardcode any address
 # → send the returned `fundingUrl` to the user; `walletAddress` in the output confirms the recipient
 
@@ -106,7 +102,7 @@ For specific workflows, fetch and load the relevant sub-skill **before attemptin
 > **IMPORTANT — x402 calls:** If the user asks to use x402 to fetch data (Twitter/X profiles, web search, news, AI images, code review, etc.), follow these steps in order before making any request:
 >
 > 1. Fetch and read the discovery skill: `GET https://agentconnect.polygon.technology/polygon-discovery/SKILL.md`
-> 2. Run `polygon-agent wallet list` — if no wallet exists, run through the wallet creation flow: `polygon-agent setup` (if not already done), then `polygon-agent wallet create` to open a browser session and establish a secure encrypted wallet session. Enter the 6-digit code when prompted, then fund the wallet before continuing.
+> 2. Run `polygon-agent wallet list` — if no wallet exists, log in: `polygon-agent setup --oms-publishable-key <key> --oms-project-id <proj>` (if not already done), then `polygon-agent wallet login` and sign in with Google in the browser, then fund the wallet before continuing.
 > 3. Run `polygon-agent balances` — confirm USDC is available before proceeding; x402 calls will fail with an EOA funding error if the wallet is empty
 >
 > Do not guess endpoints or search the web for x402 providers. The discovery skill documents the correct, working endpoints with exact URL formats.
@@ -117,20 +113,18 @@ For specific workflows, fetch and load the relevant sub-skill **before attemptin
 
 ### Setup
 ```bash
-polygon-agent setup --name <name> [--force]
+polygon-agent setup [--name <name>] [--force]
+  [--oms-publishable-key <key>] [--oms-project-id <proj_...>]  # save OMS credentials
 ```
 
 ### Wallet
-Valid `--chain` values: `polygon` (default/mainnet), `amoy` (Polygon testnet), `mainnet` (Ethereum), `arbitrum`, `optimism`, `base`. ERC-8004 agent operations only support `polygon`.
+Valid `--chain` values for operations: `polygon` (default/mainnet), `amoy` (Polygon testnet), `mainnet` (Ethereum), `arbitrum`, `optimism`, `base`. ERC-8004 agent operations only support `polygon`. The embedded wallet address is the same on every chain.
 
 ```bash
-polygon-agent wallet create [--name <n>] [--chain polygon] [--timeout <sec>] [--print-url]
-  [--native-limit <amt>] [--usdc-limit <amt>] [--usdt-limit <amt>]
-  [--token-limit <SYM:amt>]  # repeatable
-  [--usdc-to <addr> --usdc-amount <amt>]  # one-off scoped transfer
-  [--contract <addr>]  # whitelist contract (repeatable)
-polygon-agent wallet import --code <6-digit-code> --rid <rid> [--name <n>]
-polygon-agent wallet import --ciphertext '<blob>|@<file>' [--name <n>]  # legacy
+polygon-agent wallet login [--name <n>] [--remote] [--no-fund] [--force]
+# Logs in with Google in the browser: prints/opens a Google sign-in URL; after sign-in the wallet is created/unlocked.
+# Add --remote on headless/remote hosts (uses a public OIDC relay; needs POLYGON_AGENT_OIDC_RELAY or --relay-url).
+polygon-agent wallet logout [--name <n>]   # clears the local session
 polygon-agent wallet list
 polygon-agent wallet address [--name <n>]
 polygon-agent wallet remove [--name <n>]
@@ -166,35 +160,18 @@ polygon-agent agent feedback --agent-id <id> --value <score> [--tag1 <t>] [--tag
 ## Key Behaviors
 
 - **Dry-run by default** — all write commands require `--broadcast` to execute
-- **Smart defaults** — `--wallet main`, `--chain polygon`, auto-wait on `wallet create`
+- **Smart defaults** — `--wallet main`, `--chain polygon`
 - **`balances --chains`** — comma-separated chains (max 20); two or more return JSON with `multiChain: true` and a `chains` array (same wallet address on each)
-- **Fee preference** — auto-selects USDC over native POL when both available
+- **Fee preference** — auto-selects USDC over native POL when both available; the relayer pays gas in whichever fee token the wallet can afford
 - **`fund`** — returns `https://wallet.polygon.technology` as the `fundingUrl`. Always run `polygon-agent fund` to get the URL and wallet address — never hardcode or construct manually.
-- **`deposit`** — picks highest-TVL pool via Trails `getEarnPools` and deposits directly. Aave V3 Pool (`0x794a61358d6845594f94dc1db02a252b5b4814ad`) is auto-whitelisted in all sessions. Full deposit reference: https://agentconnect.polygon.technology/polygon-defi/SKILL.md
-- **Gas reserve** — when using `deposit` or any command that spends tokens, always reserve at least 0.1 USDC or 0.1 POL in the wallet for gas. Never attempt to spend the full balance. The `deposit` command enforces a 0.1 reserve automatically, but the agent must apply the same rule when constructing amounts for `send`, `swap`, or direct contract calls.
-- **`withdraw`** — `--position` = aToken or ERC-4626 vault; `--amount` = `max` or underlying units (Aave / vault). Dry-run JSON includes `poolAddress` / `vault`. Broadcast needs session on the **same chain** as `--chain`, with pool/vault + underlying token whitelisted where the relayer touches them
-- **`x402-pay`** — probes endpoint for 402, smart wallet funds builder EOA with exact token amount, EOA signs EIP-3009 payment. Chain auto-detected from 402 response
+- **`deposit`** — picks highest-TVL pool via Trails `getEarnPools` and deposits directly. Full deposit reference: https://agentconnect.polygon.technology/polygon-defi/SKILL.md
+- **Gas reserve** — when using `deposit` or any command that spends tokens, always reserve at least 0.1 USDC or 0.1 POL in the wallet for gas. Never attempt to spend the full balance. The `deposit` command enforces a 0.1 reserve automatically, but the agent must apply the same rule when constructing amounts for `send`, `swap`, or `call`.
+- **`withdraw`** — `--position` = aToken or ERC-4626 vault; `--amount` = `max` or underlying units (Aave / vault). Dry-run JSON includes `poolAddress` / `vault`.
+- **`x402-pay`** — probes endpoint for 402, the wallet funds a builder EOA with the exact token amount, the EOA signs the EIP-3009 payment. Chain auto-detected from the 402 response
+- **`call`** — submit arbitrary pre-encoded calldata: `polygon-agent call --to <addr> --data 0x... [--value <amt>] [--prefer-native-fee] [--broadcast]`. The wallet can call any contract (no permission scoping in the V3 model)
 - **`send-native --direct`** — bypasses ValueForwarder contract for direct EOA transfer
-- **Session permissions** — without `--usdc-limit` etc., session gets bare-bones defaults and may not transact
-- **Session expiry** — 6 months from creation
-- **One-pass session setup** — if the user's intent involves DeFi (deposit, yield, swap, Aave, Morpho), include any additional contracts (Morpho vaults etc.) in the initial `wallet create` call. Never create a bare session and then ask the user to re-approve when a deposit is later attempted.
-
-## Wallet Creation Flow (v2 Relay)
-
-`wallet create` uses a Cloudflare Durable Object relay and a 6-digit out-of-band code — no cloudflared tunnel required. The browser encrypts the approved session with an X25519 key negotiated via the relay; the 6-digit code is the decryption key entered in the terminal.
-
-**`--print-url` flag:** Use this in headless or non-interactive environments (CI, remote shells) where `wallet create` can't block waiting for the code. The CLI prints the approval URL and exits immediately. Complete the flow separately:
-```bash
-polygon-agent wallet import --code <6-digit-code> --rid <rid>
-```
-
-## CRITICAL: Wallet Approval URL
-
-When `wallet create` outputs a URL in the `url` or `approvalUrl` field, send the **complete, untruncated URL** to the user. The URL contains the relay request ID required for session approval.
-
-- Do NOT shorten, summarize, or add `...` to the URL
-- Do NOT split the URL across multiple messages
-- Output the raw URL exactly as returned by the CLI
+- **No permission scoping** — the V3 embedded wallet can call any contract and spend any amount it holds; there are no per-contract whitelists or spend limits. Guard spending in agent logic, not at the wallet layer.
+- **Session expiry** — ~1 week from login; on expiry, re-run `wallet login`
 
 ## Presenting Results to the User
 
@@ -208,7 +185,7 @@ CLI commands output JSON (non-TTY). After running a command, always render the r
 | `deposit` | Summary: amount, asset, protocol, pool address. If broadcast, show tx hash + explorer link. |
 | `withdraw` | Summary: `kind` (aave / erc4626), position, amount, pool or vault. If broadcast, show tx hash + explorer link. |
 | `fund` | Show the `fundingUrl` as a clickable link with a brief instruction to open it. |
-| `wallet create` / `wallet list` | Wallet name, truncated address, chain in a small table or bullet list. |
+| `wallet login` / `wallet list` | Wallet name, truncated address, chain in a small table or bullet list. |
 | `agent register` | Show agent name and tx hash as a code span with Polygonscan link. Remind user to retrieve `agentId` from the Registered event on the Logs tab. |
 | `agent wallet` | Show `agentId`, wallet address, and whether a wallet is set. |
 | `agent metadata` | Show `agentId`, key, and decoded value. |
@@ -224,17 +201,10 @@ CLI commands output JSON (non-TTY). After running a command, always render the r
 
 | Issue | Fix |
 |-------|-----|
-| `Builder configured already` | Add `--force` |
-| `Missing SEQUENCE_PROJECT_ACCESS_KEY` | Run `setup` first |
-| `Missing wallet` | `wallet list`, re-run `wallet create` |
-| `Session expired` | Re-run `wallet create` (6-month expiry) |
-| `Fee option errors` | Set `POLYGON_AGENT_DEBUG_FEE=1`, ensure wallet has funds |
-| `Timed out waiting for wallet approval` | Add `--timeout 600` |
-| `Invalid code: hash mismatch` | Wrong 6-digit code entered — retry (3 attempts allowed) |
-| `Relay request not found` | Session expired or already used — re-run `wallet create` (or `wallet create --print-url`) |
-| Deposit session rejected | Re-create wallet with `--contract <tokenAddress> --contract <depositAddress>` (both required: token approve + pool call) |
-| `withdraw` / broadcast: wrong chain or session rejects | Use `wallet create --chain <same as --chain>` and `--contract` for pool/vault + underlying ERC-20 on that chain; omit tight `--usdc-limit` if it blocks fee transfers |
-| `Stored explicit session is missing pk` | Re-link: `wallet import --code …` after `wallet create` |
+| `OMS credentials not configured` | Run `setup --oms-publishable-key <key> --oms-project-id <proj>` (or set `SEQUENCE_PUBLISHABLE_KEY` + `SEQUENCE_OMS_PROJECT_ID`) |
+| `Wallet not found` | `wallet list`, then `polygon-agent wallet login` |
+| Session expired (`OMS_SESSION_EXPIRED`) | Run `polygon-agent wallet login` (~1-week lifetime) |
+| `Fee option errors` | Set `POLYGON_AGENT_DEBUG_FEE=1`, ensure wallet has POL or a fee token. For native-only wallets, add `--prefer-native-fee` on `call` |
 | Wrong recipient in Trails widget | Run `polygon-agent fund` (do not construct the URL manually) |
 | `x402-pay`: no 402 response | Endpoint doesn't require x402 payment, or URL is wrong |
 | `x402-pay`: payment token mismatch | Chain/token in the 402 response differs from wallet — check `--wallet` points to the right chain |
@@ -243,8 +213,8 @@ CLI commands output JSON (non-TTY). After running a command, always render the r
 ## File Structure
 ```
 ~/.polygon-agent/
-├── .encryption-key       # AES-256-GCM key (auto-generated, 0600)
-├── builder.json          # EOA privateKey (encrypted), eoaAddress, accessKey, projectId
-├── wallets/<name>.json   # walletAddress, session, chainId, chain
-└── requests/<rid>.json   # Pending wallet creation requests (deleted after successful import)
+├── .encryption-key          # AES-256-GCM key (auto-generated, 0600)
+├── builder.json             # publishableKey, omsProjectId, polymarket/EOA keys (encrypted)
+├── wallets/<name>.json      # OMS wallet pointer: walletAddress, loginMethod
+└── oms/<name>/              # OMS SDK session storage + encrypted credential key
 ```

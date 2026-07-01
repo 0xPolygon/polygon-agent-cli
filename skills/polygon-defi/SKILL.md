@@ -7,25 +7,13 @@ description: DeFi operations on Polygon using the Polygon Agent CLI. Covers same
 
 ## Session Prerequisites
 
-**Before any DeFi operation, the wallet session must include the token contracts and pool contracts.** If the user does not yet have a session, or has an older session that predates this list, create one now — do not wait until a deposit fails:
+**Before any DeFi operation, the wallet must be logged in.** The embedded wallet can call any contract and spend any amount it holds — there is no contract whitelist and no per-token spend limit, so no special setup is needed for deposits, swaps, or withdrawals. If the user is not logged in, log in now:
 
 ```bash
-polygon-agent wallet create --usdc-limit 50 \
-  --contract 0xc2132D05D31c914a87C6611C10748AEb04B58e8F \
-  --contract 0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619 \
-  --contract 0x781fb7f6d845e3be129289833b04d43aa8558c42 \
-  --contract 0xf5c81d25ee174d83f1fd202ca94ae6070d073ccf \
-  --contract 0x3f33f9f7e2d7cfbcbdf8ea8b870a6e3d449664c2
+polygon-agent wallet login
 ```
 
-**Aave V3 Pool (`0x794a61358d6845594f94dc1db02a252b5b4814ad`) is auto-whitelisted in every session** — no `--contract` flag needed for it. The above command adds:
-- USDT: `0xc2132D05D31c914a87C6611C10748AEb04B58e8F`
-- WETH: `0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619`
-- Morpho Compound USDC: `0x781fb7f6d845e3be129289833b04d43aa8558c42`
-- Morpho Compound WETH: `0xf5c81d25ee174d83f1fd202ca94ae6070d073ccf`
-- Morpho Compound POL: `0x3f33f9f7e2d7cfbcbdf8ea8b870a6e3d449664c2`
-
-If the user already has a session but deposit/swap calls are rejected with a permission error, re-create the session with the above command to pick up all current contracts.
+This logs in with Google in the browser: the command prints/opens a Google sign-in URL, and after you sign in the embedded wallet is created/unlocked. On a headless/remote host add `--remote` (uses a public OIDC relay). The wallet address is the same across all chains. Sessions last about a week; if calls start failing with an expired-session error, just re-run `wallet login`.
 
 ---
 
@@ -80,7 +68,7 @@ All request fields are optional — omit any you don't need to filter on.
 
 ### Fetch (agent code)
 
-The API key is the project access key already available to the agent (`SEQUENCE_PROJECT_ACCESS_KEY`).
+No API key is required for this public endpoint (an optional `TRAILS_API_KEY` can be set for higher rate limits).
 
 ```typescript
 const res = await fetch('https://trails-api.sequence.app/rpc/Trails/GetEarnPools', {
@@ -132,22 +120,9 @@ interface PoolTokenInfo {
 
 Pool discovery uses `TrailsApi.getEarnPools` — picks the most liquid pool (highest TVL) for the asset on the requested chain. No hardcoded addresses — the pool is resolved at runtime. Supported chains: Polygon, Base, Arbitrum, Optimism, Ethereum mainnet (any chain Trails indexes).
 
-**Gas requirement:** The wallet needs POL for gas, or a session created with `--usdc-limit` to enable USDC paymaster. If the wallet has no POL, create the session with `--usdc-limit 50`. The CLI always reserves 0.1 USDC for gas — never deposit the full balance. If the requested amount would leave less than 0.1 USDC, the CLI auto-reduces the deposit and prints a note.
+**Gas requirement:** The relayer pays gas in USDC or POL, whichever the wallet can afford — so the only requirement is that the wallet holds the funds being deposited plus a little POL or USDC for gas. The CLI always reserves 0.1 USDC for gas — never deposit the full balance. If the requested amount would leave less than 0.1 USDC, the CLI auto-reduces the deposit and prints a note.
 
-**Session setup:** The wallet session must whitelist the token contract and the pool deposit contract, or the relay will reject the transaction with a 400 error. Run a dry-run first to get the exact addresses, then create (or re-create) the session with both contracts:
-
-```bash
-# 1. Dry-run to discover the token address and pool depositAddress
-polygon-agent deposit --asset USDC --amount 1
-
-# 2. Create session with those contracts whitelisted (prevents 400 permission error on broadcast)
-polygon-agent wallet create --usdc-limit 50 --contract <tokenAddress> --contract <depositAddress>
-
-# 3. Broadcast
-polygon-agent deposit --asset USDC --amount 1 --broadcast
-```
-
-Omitting `--contract` for the deposit pool is the most common cause of a "Request aborted" (code 1005) error on broadcast.
+The embedded wallet can call any contract, so deposits work without pre-authorizing the token or pool contract — just dry-run, then broadcast:
 
 ```bash
 # Dry-run — shows pool name, APY, TVL, and deposit address before committing
@@ -185,42 +160,7 @@ polygon-agent withdraw --position <aToken> --amount 0.5 --chain mainnet --broadc
 polygon-agent withdraw --position <vault> --amount max --chain polygon --broadcast
 ```
 
-Whitelist the **pool** (Aave) or **vault** contract on the session if the wallet rejects the call (`polygon-agent wallet create --contract <poolOrVault>`).
-
-**Same chain as the transaction:** if you use `withdraw --chain mainnet`, create or refresh the session with **`wallet create --chain mainnet`** (not only Polygon defaults). Include **`--contract`** for the **pool** and for the **underlying ERC-20** on that chain (e.g. mainnet USDC `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`) so fee / helper transfers are allowed. Tight **`--usdc-limit`** can block those — omit or relax for yield exits.
-
-### Session Whitelisting
-
-If the deposit is rejected with a session permission error, both the token contract and the pool deposit contract must be whitelisted in the session:
-
-```bash
-# 1. Dry-run first — output includes both addresses under `transactions[0].to` (token) and `depositAddress` (pool)
-polygon-agent deposit --asset USDC --amount 0.3
-# → note the token contract address (e.g. USDC: 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359)
-# → note the depositAddress (e.g. Aave V3: 0x794a61358d6845594f94dc1db02a252b5b4814ad)
-
-# 2. Re-create wallet session with BOTH contracts whitelisted
-polygon-agent wallet create --contract <tokenAddress> --contract <depositAddress>
-
-# 3. Retry
-polygon-agent deposit --asset USDC --amount 0.3 --broadcast
-```
-
-Contracts auto-whitelisted in every session (no `--contract` flag needed):
-- USDC: `0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359`
-- USDC.e: `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174`
-- Aave V3 Pool: `0x794a61358d6845594f94dc1db02a252b5b4814ad`
-
-### Yield Vault Contract Whitelist
-
-#### Polygon Mainnet (chainId 137)
-
-| Protocol | Asset | Address |
-|----------|-------|---------|
-| Aave V3 Pool (all markets) | USDC, USDT, WETH, WMATIC… | `0x794a61358d6845594f94dc1db02a252b5b4814ad` |
-| Morpho Compound USDC | USDC | `0x781fb7f6d845e3be129289833b04d43aa8558c42` |
-| Morpho Compound WETH | WETH | `0xf5c81d25ee174d83f1fd202ca94ae6070d073ccf` |
-| Morpho Compound POL | POL | `0x3f33f9f7e2d7cfbcbdf8ea8b870a6e3d449664c2` |
+The embedded wallet can call the pool or vault on any chain, so no contract authorization is needed — just make sure the wallet holds a little POL or USDC on that chain for gas. To withdraw on a chain other than Polygon, pass `--chain mainnet` (or another supported chain) on the `withdraw` command itself.
 
 ---
 
@@ -244,16 +184,19 @@ polygon-agent swap --from USDC --to USDC --amount 0.5 --to-chain arbitrum --broa
 
 ---
 
-## wallet create — Key Options
+## Arbitrary Contract Calls
 
-| Flag | Purpose |
-|------|---------|
-| `--usdc-limit <amt>` | Enable USDC gas paymaster. Required when the wallet has no POL. Recommended: `--usdc-limit 50`. |
-| `--contract <addr>` | Whitelist an additional contract (repeatable). Use this if a deposit is rejected due to a missing contract permission. |
+For any operation not covered by the dedicated commands, use `call` to send a raw transaction to any contract (the embedded wallet can call anything):
 
 ```bash
-# New session with USDC gas enabled
-polygon-agent wallet create --usdc-limit 50
+# Dry-run an arbitrary call
+polygon-agent call --to 0x... --data 0x...
+
+# With an attached native value, then broadcast
+polygon-agent call --to 0x... --data 0x... --value 0.1 --broadcast
+
+# For a native-only wallet, force the relayer to take its fee in POL
+polygon-agent call --to 0x... --data 0x... --prefer-native-fee --broadcast
 ```
 
 ---
@@ -262,9 +205,9 @@ polygon-agent wallet create --usdc-limit 50
 
 | Error | Cause | Fix |
 |-------|-------|-----|
+| `Not logged in` / no wallet found | No active wallet session | Run `polygon-agent wallet login` |
+| Session expired | Sessions last about a week | Run `polygon-agent wallet login` |
 | `Insufficient <token>: wallet has X` | Balance too low for the requested deposit amount | Run `polygon-agent balances` and adjust `--amount` |
-| `Wallet has no POL for gas` | No native gas and no USDC paymaster | Fund with POL (`polygon-agent fund`) or re-create session with `--usdc-limit 50` |
-| `Transaction rejected by relay` | Session permissions missing for pool or token contract | Re-create with `--contract <tokenAddress> --contract <depositAddress>` |
-| `Unable to pay gas` | No usable fee token found | Fund with POL or add `--usdc-limit 50` to session |
+| `Unable to pay gas` / `Wallet has no POL for gas` | Wallet can't cover the relayer fee in USDC or POL | Fund the wallet with a little POL or USDC; for a native-only wallet, pass `--prefer-native-fee` on `call` |
 | `Protocol X not yet supported` | Trails returned a protocol other than aave/morpho | Use `polygon-agent swap` to obtain the yield-bearing token manually |
 | `swap`: no route found | Insufficient liquidity for the pair | Try a different amount or token pair |

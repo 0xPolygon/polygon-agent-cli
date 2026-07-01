@@ -1,0 +1,43 @@
+name = "oidc-relay"
+compatibility_date = "2024-09-23"
+workers_dev = true
+send_metrics = false
+
+main = "src/relay.ts"
+
+[[durable_objects.bindings]]
+name = "OIDC_RELAY"
+class_name = "OidcHandoff"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["OidcHandoff"]
+
+# Staging: a workers.dev URL is fine to start; swap to a custom domain for prod.
+[env.staging]
+name = "oidc-relay-staging"
+workers_dev = true
+
+[[env.staging.durable_objects.bindings]]
+name = "OIDC_RELAY"
+class_name = "OidcHandoff"
+
+[[env.staging.migrations]]
+tag = "v1"
+new_classes = ["OidcHandoff"]
+
+[env.production]
+name = "oidc-relay-production"
+workers_dev = false
+# Set a custom domain for production and have Sequence allowlist its /api/oidc/cb
+# as a redirect target on their relay (Google only ever sees Sequence's relay, so
+# no Google-client change is needed). Same allowlist add as localhost:8765 was.
+# routes = [{ pattern = "oidc-relay.polygon.technology", custom_domain = true }]
+
+[[env.production.durable_objects.bindings]]
+name = "OIDC_RELAY"
+class_name = "OidcHandoff"
+
+[[env.production.migrations]]
+tag = "v1"
+new_classes = ["OidcHandoff"]
