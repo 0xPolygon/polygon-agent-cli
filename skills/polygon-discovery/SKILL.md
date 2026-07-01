@@ -25,7 +25,7 @@ polygon-agent wallet list
 **If no wallet is listed**, log in before proceeding:
 
 1. `polygon-agent setup --oms-publishable-key <key> --oms-project-id <proj_...>` — saves OMS credentials (from the Sequence Builder dashboard)
-2. `polygon-agent wallet login --email <addr>` — email OTP; enter the 6-digit code when prompted
+2. `polygon-agent wallet login` — logs in with Google in the browser; sign in when the Google URL opens (add `--remote` on headless hosts)
 3. `polygon-agent wallet address` — get the address, then fund it (`polygon-agent fund`)
 4. `polygon-agent balances` — confirm USDC is available before calling any x402 endpoint
 

@@ -32,7 +32,7 @@
 
 Polygon Agent CLI gives AI agents everything they need to operate onchain:
 
-- **Create and manage wallets** email-login embedded smart wallets — no private keys to manage and no keys exposed to your agent's context.
+- **Create and manage wallets** Google-login embedded smart wallets, no private keys to manage and no keys exposed to your agent's context.
 - **Send tokens, swap, bridge or any action** pay in any token for any onchain action. Built-in swapping, bridging, deposits, DeFi primitives, and more.
 - **Register agent identity** and build reputation via ERC-8004
 - **Integrated APIs** query cross-chain balances, transaction history and or query nodes via dedicated RPCs
@@ -77,10 +77,10 @@ Once installed via skills or npm, run the following. If running from source, pre
 # 1. Setup: save your Sequence Builder credentials (persisted to ~/.polygon-agent/builder.json)
 polygon-agent setup --oms-publishable-key <key> --oms-project-id <proj_...>
 
-# 2. Log in to your embedded wallet via email OTP (start + complete in one invocation)
-polygon-agent wallet login --email you@example.com
-# A one-time code is emailed to you; enter it at the prompt,
-# or pipe it in: echo 123456 | polygon-agent wallet login --email you@example.com
+# 2. Log in to your embedded wallet with Google in the browser
+polygon-agent wallet login
+# Opens a Google sign-in URL; after you sign in, the embedded wallet is created/unlocked.
+# On a headless/remote host add --remote (uses a public OIDC relay).
 
 # 3. Fund the wallet
 polygon-agent fund
@@ -108,11 +108,11 @@ The CLI is built on three pillars to enable end to end onchain payments with you
 
 | Capability  | What it does                                                                                | CLI command                     |
 | ----------- | ------------------------------------------------------------------------------------------- | ------------------------------- |
-| **Wallets** | Email-login embedded smart wallets (Account Abstraction), chain-agnostic address            | `wallet login`, `wallet list`   |
+| **Wallets** | Google-login embedded smart wallets (Account Abstraction), chain-agnostic address           | `wallet login`, `wallet list`   |
 | **RPCs**    | Load balanced RPCs cross-chain for onchain interactions and node queries                    | Used internally by all commands |
 | **Indexer** | Token balance queries and transaction history across ERC-20/721/1155                        | `balances`                      |
 
-Wallets are created and unlocked via email OTP. The embedded wallet can call any contract and spend any amount it holds — there is no contract whitelist or per-token spend limit. The wallet address is the same across every supported chain, and sessions last about a week before you re-run `wallet login`.
+Wallets are created and unlocked via Google browser login. The embedded wallet can call any contract and spend any amount it holds; there is no contract whitelist or per-token spend limit. The wallet address is the same across every supported chain, and sessions last about a week before you re-run `wallet login`.
 
 ### Trails: Swapping, Bridging, and DeFi Actions
 
@@ -161,7 +161,7 @@ See [`SKILL.md`](skills/SKILL.md) for the full agent-consumable reference and [`
 
 ```bash
 polygon-agent setup --oms-publishable-key <key> --oms-project-id <proj_...>  # Save Builder credentials
-polygon-agent wallet login --email <addr> [--name <n>] [--code <otp>]  # Log in via email OTP
+polygon-agent wallet login [--name <n>] [--remote] [--no-fund] [--force]  # Log in with Google in the browser (add --remote for headless hosts)
 polygon-agent wallet logout [--name <n>]           # Log out of a wallet
 polygon-agent wallet list                          # Show all wallets
 polygon-agent wallet address [--name <n>]          # Show wallet address (same on every chain)
@@ -228,7 +228,7 @@ export SEQUENCE_OMS_PROJECT_ID=<proj_...>
 
 ## Security
 
-- **No keys to manage.** The embedded wallet is unlocked via email OTP — there are no private keys exposed to the agent's context. Credentials are stored in `~/.polygon-agent/`.
+- **No keys to manage.** The embedded wallet is unlocked via Google browser login; there are no private keys exposed to the agent's context. Credentials are stored in `~/.polygon-agent/`.
 - **Sessions expire.** Wallet sessions last about a week, after which you re-run `wallet login`.
 
 ---
@@ -238,8 +238,8 @@ export SEQUENCE_OMS_PROJECT_ID=<proj_...>
 | Issue                                       | Fix                                              |
 | ------------------------------------------- | ------------------------------------------------ |
 | Missing Builder credentials                 | Run `setup` with `--oms-publishable-key` / `--oms-project-id`, or export `SEQUENCE_PUBLISHABLE_KEY` / `SEQUENCE_OMS_PROJECT_ID` |
-| Not logged in                               | Run `wallet login --email <addr>`                |
-| Session expired                             | Re-run `wallet login --email <addr>`             |
+| Not logged in                               | Run `polygon-agent wallet login`                 |
+| Session expired                             | Run `polygon-agent wallet login`                 |
 | Insufficient funds / can't pay gas          | Run `fund`; for a native-only wallet pass `--prefer-native-fee` on `call` |
 | Transaction failed                          | Omit `--broadcast` to dry-run first              |
 

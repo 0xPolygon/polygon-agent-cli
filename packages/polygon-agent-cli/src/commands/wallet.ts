@@ -21,67 +21,8 @@ function jsonOut(data: Record<string, unknown>): void {
   console.log(JSON.stringify(data));
 }
 
-// Read a line from stdin (for interactive OTP entry).
-function readLine(promptText: string): Promise<string> {
-  return new Promise((resolve) => {
-    process.stderr.write(promptText);
-    const onData = (chunk: Buffer) => {
-      process.stdin.off('data', onData);
-      process.stdin.pause();
-      resolve(chunk.toString('utf8').trim());
-    };
-    process.stdin.resume();
-    process.stdin.on('data', onData);
-  });
-}
-
-// --- Subcommand: wallet login (Sequence V3 email auth) ---
+// --- Subcommand: wallet login (Google OIDC browser flow — the only login) ---
 interface LoginArgs {
-  name: string;
-  email: string;
-  code?: string;
-}
-
-async function handleLogin(argv: LoginArgs): Promise<void> {
-  const name = argv.name;
-  const email = argv.email;
-
-  try {
-    if (!email) throw new Error('--email is required');
-
-    const oms = getOmsClient(name);
-
-    // startEmailAuth + completeEmailAuth must happen in the same process — the
-    // pending-auth commitment is held in memory, not persisted. So we send the
-    // OTP, then obtain the code (either --code or an interactive stdin prompt).
-    await oms.wallet.startEmailAuth({ email });
-
-    let code = argv.code;
-    if (!code) {
-      process.stderr.write(`OTP sent to ${email}. `);
-      code = await readLine('Enter the 6-digit code: ');
-    }
-    if (!code) throw new Error('No OTP code provided');
-
-    const result = await oms.wallet.completeEmailAuth({ code });
-    const walletAddress = result.walletAddress;
-
-    await saveOmsWalletPointer(name, {
-      walletAddress,
-      loginMethod: 'email',
-      email,
-      createdAt: new Date().toISOString()
-    });
-
-    jsonOut({ ok: true, walletName: name, walletAddress, loginMethod: 'email' });
-  } catch (error) {
-    jsonOut({ ok: false, error: (error as Error).message });
-    process.exit(1);
-  }
-}
-
-// --- Subcommand: wallet login-browser (Sequence V3 OIDC browser auth) ---
-interface BrowserLoginArgs {
   name: string;
   provider: string;
   port: number;
@@ -117,7 +58,7 @@ async function announceAuthUrl(url: string): Promise<void> {
 async function obtainBrowserCallbackUrl(
   oms: ReturnType<typeof getOmsClient>,
   provider: 'google',
-  argv: BrowserLoginArgs
+  argv: LoginArgs
 ): Promise<string> {
   const seqRelay = oidcRelayRedirectUri();
 
@@ -156,7 +97,7 @@ async function obtainBrowserCallbackUrl(
   }
 }
 
-async function handleBrowserLogin(argv: BrowserLoginArgs): Promise<void> {
+async function handleLogin(argv: LoginArgs): Promise<void> {
   const { name, provider } = argv;
 
   if (provider !== 'google') {
@@ -276,7 +217,7 @@ async function handleAddress(argv: AddressArgs): Promise<void> {
   try {
     const pointer = await loadOmsWalletPointer(name);
     if (!pointer) {
-      throw new Error(`Wallet not found: ${name}. Run: polygon-agent wallet login --email <addr>`);
+      throw new Error(`Wallet not found: ${name}. Run: polygon-agent wallet login`);
     }
 
     if (!isTTY()) {
@@ -331,33 +272,12 @@ async function handleRemove(argv: RemoveArgs): Promise<void> {
 // --- Main wallet command ---
 export const walletCommand: CommandModule = {
   command: 'wallet',
-  describe: 'Manage wallets (login, login-browser, logout, list, address, remove)',
+  describe: 'Manage wallets (login, logout, list, address, remove)',
   builder: (yargs) =>
     yargs
       .command({
         command: 'login',
-        describe: 'Log in with email (Sequence V3 embedded wallet)',
-        builder: (y) =>
-          y
-            .option('name', {
-              type: 'string',
-              default: 'main',
-              describe: 'Wallet name'
-            })
-            .option('email', {
-              type: 'string',
-              demandOption: true,
-              describe: 'Email address to authenticate with'
-            })
-            .option('code', {
-              type: 'string',
-              describe: 'OTP code (only if obtained out-of-band in this same session)'
-            }),
-        handler: (argv) => handleLogin(argv as unknown as LoginArgs)
-      })
-      .command({
-        command: 'login-browser',
-        describe: 'Log in via browser (Google) instead of email OTP',
+        describe: 'Log in with Google in the browser (add --remote for headless/remote hosts)',
         builder: (y) =>
           y
             .option('name', {
@@ -400,7 +320,7 @@ export const walletCommand: CommandModule = {
               type: 'string',
               describe: 'Relay base URL for --remote (overrides POLYGON_AGENT_OIDC_RELAY)'
             }),
-        handler: (argv) => handleBrowserLogin(argv as unknown as BrowserLoginArgs)
+        handler: (argv) => handleLogin(argv as unknown as LoginArgs)
       })
       .command({
         command: 'logout',

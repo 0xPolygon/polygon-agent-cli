@@ -13,8 +13,8 @@ This is a pnpm workspace monorepo. The primary package is:
 - `packages/polygon-agent-cli/` — CLI tool for on-chain agent operations on Polygon
 
 Wallets use the Sequence V3 embedded-wallet model (`@0xsequence/typescript-sdk`,
-`OMSClient`): the CLI authenticates directly via email OTP (`wallet login`) and
-holds the credential on disk. There is no browser-approval connector UI or relay.
+`OMSClient`): the CLI authenticates via Google browser login (`wallet login`) and
+holds the credential on disk.
 
 Static assets (ABI JSON in `contracts/`, Claude skills in `skills/`) are
 published with the CLI package but are not source code.
@@ -34,6 +34,6 @@ published with the CLI package but are not source code.
 
 ## Wallet auth (Sequence V3 / OMS)
 
-- `polygon-agent wallet login --email <addr>` — email OTP; start+complete happen in one process (the pending-auth commitment is in-memory only). Session persists ~1 week under `~/.polygon-agent/oms/<name>/`.
+- `polygon-agent wallet login` — logs in with Google in the browser; prints/opens a Google sign-in URL, and once you sign in the embedded wallet is created/unlocked. Add `--remote` for headless hosts (uses a public OIDC relay; needs `POLYGON_AGENT_OIDC_RELAY` or `--relay-url`). Other flags: `--name <n>` (default "main"), `--no-fund`, `--force`. Session persists ~1 week under `~/.polygon-agent/oms/<name>/`.
 - Requires `SEQUENCE_PUBLISHABLE_KEY` + `SEQUENCE_OMS_PROJECT_ID` (from Sequence Builder), via env or `builder.json` (set with `setup --oms-publishable-key/--oms-project-id`).
 - `lib/tx-dispatch.ts` `runTx` is the single tx primitive (wraps `runOmsTx`). All commands submit through it.

@@ -335,8 +335,8 @@ When deciding whether to sell:
 | `Market has no tokenIds` | Closed market | Check `endDate` — market resolved |
 | `orderStatus: "unmatched"` on FOK | No liquidity at market price | Try `--fak` for partial fill, or `--price 0.x` for limit order |
 | `invalid amount for a marketable BUY order ($X), min size: $1` | Amount below CLOB minimum | Use at least $1. If pUSD was already funded, retry with `--skip-fund` |
-| `Wallet not found: main` | Not logged in | Run `polygon-agent wallet login --email <addr>` |
-| Session expired (`OMS_SESSION_EXPIRED`) | Login session lapsed (~1 week) | Re-run `polygon-agent wallet login --email <addr>` |
+| `Wallet not found: main` | Not logged in | Run `polygon-agent wallet login` |
+| Session expired (`OMS_SESSION_EXPIRED`) | Login session lapsed (~1 week) | Run `polygon-agent wallet login` |
 | Approvals tx reverts after V2 migration | V1 approvals — wrong exchange contracts | Re-run `polygon-agent polymarket approve --broadcast` for V2 contracts |
 
 ---

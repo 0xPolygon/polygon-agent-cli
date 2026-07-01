@@ -1,7 +1,7 @@
 ---
-"@polygonlabs/agent-cli": minor
+"@polygonlabs/agent-cli": major
 ---
 
-Add `wallet login-browser`: browser-based wallet login via Google OIDC (PKCE redirect flow) as an alternative to email OTP, with the funding step chained after a successful login. Sessions persist identically to email login, so downstream commands resume unchanged.
+Wallet login is now Google browser login only. `wallet login` opens a Google sign-in in the browser (OIDC + PKCE) and creates/unlocks the Sequence V3 embedded wallet, with the funding step chained after. Add `--remote` for headless/remote hosts where the browser and CLI are on different machines — it uses a self-hosted OIDC handoff relay (`packages/oidc-relay`, deployed to Cloudflare via GitHub Actions) that only ever carries the OAuth code+state; the PKCE verifier never leaves the CLI.
 
-Supports both a local loopback callback and a `--remote` path for headless/remote hosts where the browser can't reach localhost, backed by a self-hosted OIDC handoff relay worker (`packages/oidc-relay`, deployed to Cloudflare via GitHub Actions). The relay only ever carries the OAuth code+state; the PKCE verifier never leaves the CLI.
+BREAKING: the email-OTP login (`wallet login --email` / `--code`) has been removed so there is a single login flow. Sessions and all downstream commands are unchanged, and existing sessions keep working until they expire.

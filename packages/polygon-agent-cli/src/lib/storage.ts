@@ -30,15 +30,13 @@ export interface OmsConfig {
   omsProjectId?: string;
 }
 
-/** How a wallet session was established. */
-export type OmsLoginMethod = 'email' | 'oidc' | 'google';
+/** How a wallet session was established. Browser (Google OIDC) is the only login flow. */
+export type OmsLoginMethod = 'google';
 
 /** Pointer record for an OMS wallet (the SDK persists the real session in its StorageManager). */
 export interface OmsWalletPointer {
   walletAddress: string;
   loginMethod: OmsLoginMethod;
-  // Present for email login; OIDC/Google may not always return an email.
-  email?: string;
   createdAt: string;
 }
 
@@ -272,8 +270,9 @@ export async function loadOmsWalletPointer(name: string): Promise<OmsWalletPoint
   if (!fs.existsSync(walletPath)) return null;
   try {
     const data = JSON.parse(fs.readFileSync(walletPath, 'utf8'));
-    const KNOWN: OmsLoginMethod[] = ['email', 'oidc', 'google'];
-    if (data.walletAddress && KNOWN.includes(data.loginMethod)) return data as OmsWalletPointer;
+    // Accept any pointer with an address (loginMethod is display-only; legacy
+    // pre-browser sessions still load until they expire).
+    if (data.walletAddress && typeof data.loginMethod === 'string') return data as OmsWalletPointer;
   } catch {
     // not a valid OMS pointer file
   }

@@ -25,13 +25,13 @@ npm install -g @polygonlabs/agent-cli@latest   # upgrade
 
 ## Architecture
 
-The CLI uses the **Sequence V3 embedded-wallet** model (`@0xsequence/typescript-sdk`). The agent authenticates with an **email one-time passcode** via `wallet login`; the wallet is created/activated server-side and the session credential is stored encrypted on disk. There is no browser-approval step, relay, or on-chain permission scoping.
+The CLI uses the **Sequence V3 embedded-wallet** model (`@0xsequence/typescript-sdk`). The agent authenticates with **Google browser login** via `wallet login`; the command prints/opens a Google sign-in URL, and once the user signs in the wallet is created/unlocked and the session credential is stored encrypted on disk. There is no on-chain permission scoping.
 
 | Wallet | Created by | Purpose | Fund? |
 |--------|-----------|---------|-------|
-| Embedded wallet (V3) | `wallet login --email <addr>` | Primary spending wallet | YES |
+| Embedded wallet (V3) | `wallet login` | Primary spending wallet | YES |
 
-The wallet address is deterministic per email identity and the **same across all EVM chains**. Sessions last ~1 week before re-login is needed.
+The wallet address is the **same across all EVM chains**. Sessions last ~1 week before re-login is needed.
 
 ## Environment Variables
 
@@ -65,10 +65,11 @@ polygon-agent setup --oms-publishable-key <key> --oms-project-id <proj_...>
 # → stores publishableKey + omsProjectId to ~/.polygon-agent/builder.json
 # → all subsequent commands auto-load them from disk — no export needed
 
-# Step 2: Log in (email OTP — start + code entry happen in ONE invocation)
-polygon-agent wallet login --email you@example.com
-# → sends a 6-digit code to the email
-# → enter the code at the prompt (or pipe it: `echo 123456 | polygon-agent wallet login --email ...`)
+# Step 2: Log in with Google in the browser
+polygon-agent wallet login
+# → prints/opens a Google sign-in URL
+# → after the user signs in, the embedded wallet is created/unlocked
+# → on a headless/remote host add --remote (uses a public OIDC relay)
 # → session saved to ~/.polygon-agent/oms/main/; prints the walletAddress
 
 # Step 3: Fund wallet
@@ -101,7 +102,7 @@ For specific workflows, fetch and load the relevant sub-skill **before attemptin
 > **IMPORTANT — x402 calls:** If the user asks to use x402 to fetch data (Twitter/X profiles, web search, news, AI images, code review, etc.), follow these steps in order before making any request:
 >
 > 1. Fetch and read the discovery skill: `GET https://agentconnect.polygon.technology/polygon-discovery/SKILL.md`
-> 2. Run `polygon-agent wallet list` — if no wallet exists, log in: `polygon-agent setup --oms-publishable-key <key> --oms-project-id <proj>` (if not already done), then `polygon-agent wallet login --email <addr>` and enter the 6-digit code when prompted, then fund the wallet before continuing.
+> 2. Run `polygon-agent wallet list` — if no wallet exists, log in: `polygon-agent setup --oms-publishable-key <key> --oms-project-id <proj>` (if not already done), then `polygon-agent wallet login` and sign in with Google in the browser, then fund the wallet before continuing.
 > 3. Run `polygon-agent balances` — confirm USDC is available before proceeding; x402 calls will fail with an EOA funding error if the wallet is empty
 >
 > Do not guess endpoints or search the web for x402 providers. The discovery skill documents the correct, working endpoints with exact URL formats.
@@ -120,9 +121,9 @@ polygon-agent setup [--name <name>] [--force]
 Valid `--chain` values for operations: `polygon` (default/mainnet), `amoy` (Polygon testnet), `mainnet` (Ethereum), `arbitrum`, `optimism`, `base`. ERC-8004 agent operations only support `polygon`. The embedded wallet address is the same on every chain.
 
 ```bash
-polygon-agent wallet login --email <addr> [--name <n>] [--code <otp>]
-# start + complete happen in ONE invocation (the OTP is tied to this process).
-# Interactive: prompts for the code. Automation: `echo <code> | polygon-agent wallet login --email <addr>`.
+polygon-agent wallet login [--name <n>] [--remote] [--no-fund] [--force]
+# Logs in with Google in the browser: prints/opens a Google sign-in URL; after sign-in the wallet is created/unlocked.
+# Add --remote on headless/remote hosts (uses a public OIDC relay; needs POLYGON_AGENT_OIDC_RELAY or --relay-url).
 polygon-agent wallet logout [--name <n>]   # clears the local session
 polygon-agent wallet list
 polygon-agent wallet address [--name <n>]
@@ -201,9 +202,8 @@ CLI commands output JSON (non-TTY). After running a command, always render the r
 | Issue | Fix |
 |-------|-----|
 | `OMS credentials not configured` | Run `setup --oms-publishable-key <key> --oms-project-id <proj>` (or set `SEQUENCE_PUBLISHABLE_KEY` + `SEQUENCE_OMS_PROJECT_ID`) |
-| `Wallet not found` | `wallet list`, then `wallet login --email <addr>` |
-| Session expired (`OMS_SESSION_EXPIRED`) | Re-run `wallet login --email <addr>` (~1-week lifetime) |
-| `No pending email auth attempt` | The OTP must be entered in the same `wallet login` invocation that sent it — re-run `wallet login` |
+| `Wallet not found` | `wallet list`, then `polygon-agent wallet login` |
+| Session expired (`OMS_SESSION_EXPIRED`) | Run `polygon-agent wallet login` (~1-week lifetime) |
 | `Fee option errors` | Set `POLYGON_AGENT_DEBUG_FEE=1`, ensure wallet has POL or a fee token. For native-only wallets, add `--prefer-native-fee` on `call` |
 | Wrong recipient in Trails widget | Run `polygon-agent fund` (do not construct the URL manually) |
 | `x402-pay`: no 402 response | Endpoint doesn't require x402 payment, or URL is wrong |
@@ -215,6 +215,6 @@ CLI commands output JSON (non-TTY). After running a command, always render the r
 ~/.polygon-agent/
 ├── .encryption-key          # AES-256-GCM key (auto-generated, 0600)
 ├── builder.json             # publishableKey, omsProjectId, polymarket/EOA keys (encrypted)
-├── wallets/<name>.json      # OMS wallet pointer: walletAddress, loginMethod, email
+├── wallets/<name>.json      # OMS wallet pointer: walletAddress, loginMethod
 └── oms/<name>/              # OMS SDK session storage + encrypted credential key
 ```
