@@ -1,6 +1,6 @@
 name: Deploy OIDC Relay to Cloudflare
 
-# Mirrors the connector-ui deploy: merge to `staging-branch` -> deploy the staging
+# Mirrors the connector-ui deploy: merge to `staging` -> deploy the staging
 # worker; merge to `main` -> deploy production. The relay has no build step and
 # no runtime deps, so we deploy it straight with wrangler (run via npx because
 # wrangler is intentionally NOT a workspace dependency — see packages/oidc-relay).
@@ -11,7 +11,7 @@ on:
   push:
     branches:
       - main
-      - staging-branch
+      - staging
     paths:
       - 'packages/oidc-relay/**'
       - '.github/workflows/deploy-oidc-relay.yml'
@@ -31,7 +31,7 @@ permissions:
 jobs:
   deploy-staging:
     name: Deploy (staging)
-    if: github.ref == 'refs/heads/staging-branch' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging')
+    if: github.ref == 'refs/heads/staging' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging')
     runs-on: ubuntu-latest
     environment: staging
     defaults:
