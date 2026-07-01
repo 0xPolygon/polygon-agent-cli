@@ -57,6 +57,14 @@ const FAIL_HTML = DONE_HTML.replace("You're signed in", 'Login failed').replace(
   'Something went wrong. Return to your terminal for details.'
 );
 
+// Shown when the callback is hit again after the CLI already consumed the
+// one-time session (a browser refresh/duplicate) or after it expired. Login is
+// driven from the terminal, so this is neutral, not an error.
+const CLOSE_HTML = DONE_HTML.replace("You're signed in", 'All set').replace(
+  'Login complete. You can close this tab and return to your terminal.',
+  'This sign-in link has already been used. Check your terminal — you can close this tab.'
+);
+
 // --- Durable Object: one instance per OIDC `state` ---
 export class OidcHandoff {
   private state: DurableObjectState;
@@ -79,7 +87,11 @@ export class OidcHandoff {
       const state = url.searchParams.get('state');
       const error = url.searchParams.get('error');
       const status = await this.state.storage.get<string>('status');
-      if (!status) return new Response('unknown or expired login', { status: 404 });
+      // No session: the CLI already consumed it (refresh/duplicate callback) or it
+      // expired. Serve a neutral page instead of a scary error — the terminal is
+      // the source of truth for success/failure.
+      if (!status)
+        return new Response(CLOSE_HTML, { status: 200, headers: { 'Content-Type': 'text/html' } });
       if (error) {
         await this.state.storage.put({ status: 'error', error });
         return new Response(FAIL_HTML, { status: 200, headers: { 'Content-Type': 'text/html' } });
