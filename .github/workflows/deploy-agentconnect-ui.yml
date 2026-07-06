@@ -1,7 +1,7 @@
 name: Deploy agentconnect UI to Cloudflare
 
 # Builds the funding/dashboard SPA and deploys it to the agentconnect domain
-# (replacing the retired connector-ui): merge to `staging-branch` -> staging,
+# (replacing the retired connector-ui): merge to `staging` -> staging,
 # merge to `main` -> production. wrangler runs via npx (not a workspace dep, to
 # respect the repo trust policy); the `[assets]` worker serves the built SPA and
 # the wrangler.toml v2 migration drops connector-ui's SessionRelay Durable Object.
@@ -11,7 +11,7 @@ on:
   push:
     branches:
       - main
-      - staging-branch
+      - staging
     paths:
       - 'packages/agentconnect-ui/**'
       - '.github/workflows/deploy-agentconnect-ui.yml'
@@ -31,7 +31,7 @@ permissions:
 jobs:
   deploy-staging:
     name: Deploy (staging)
-    if: github.ref == 'refs/heads/staging-branch' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging')
+    if: github.ref == 'refs/heads/staging' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging')
     runs-on: ubuntu-latest
     environment: staging
     defaults:
