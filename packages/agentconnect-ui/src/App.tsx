@@ -5,12 +5,20 @@ import type { ElementType } from 'react';
 import {
   AlertCircle,
   ArrowLeftRight,
-  BarChart2,
   Copy,
+  Cpu,
+  Database,
+  FileText,
+  Globe,
+  Inbox,
+  Newspaper,
   Plus,
+  Search,
+  Send,
+  Server,
+  Sparkles,
   Target,
-  TrendingUp,
-  Twitter
+  TrendingUp
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -59,35 +67,95 @@ const AGENTS: {
   }
 ];
 
-const USE_CASES: { label: string; display: string; icon: ElementType }[] = [
+type UseCase = { label: string; display: string; icon: ElementType };
+const SECTIONS: { name: string; items: UseCase[] }[] = [
   {
-    label: 'Read Twitter/X profiles & tweets',
-    display:
-      'Use x402 to read a Twitter/X profile and recent tweets. Get follower counts, recent tweets, and engagement metrics.',
-    icon: Twitter
+    name: 'DeFi & Polymarket',
+    items: [
+      {
+        label: 'Make a bet on Polymarket',
+        display: 'Make a bet on a Polymarket market. Get the latest market prices and outcomes.',
+        icon: Target
+      },
+      {
+        label: 'Bridge assets cross-chain',
+        display:
+          'Bridge some USDC from Polygon to Base using the cheapest available route. Confirm the arrival and report the final balance on both chains.',
+        icon: ArrowLeftRight
+      },
+      {
+        label: 'Automate yield strategies',
+        display:
+          'Deposit USDC into the highest-yield active lending vault on Polygon and report the APY and pool address. Then set up a daily cron job to automatically re-evaluate and deposit into the best vault each morning.',
+        icon: TrendingUp
+      }
+    ]
   },
   {
-    label: 'Score a sales lead',
-    display:
-      'Score any company domain as a B2B sales lead. Get a 0–100 score and A–F grade from various signals.',
-    icon: BarChart2
+    name: 'Services',
+    items: [
+      {
+        label: 'Query any chain (QuickNode)',
+        display:
+          'Use QuickNode RPC over x402 to query on-chain data across 60+ chains with no API key — get the latest Polygon block number and an account balance.',
+        icon: Server
+      },
+      {
+        label: 'Wallet & token analytics (Allium)',
+        display:
+          "Use Allium over x402 to pull a wallet's balances, PnL, transaction history, and token prices across chains.",
+        icon: Database
+      },
+      {
+        label: 'Give your agent an inbox (AgentMail)',
+        display:
+          'Create an email inbox for your agent with AgentMail over x402, then send, receive, and read messages.',
+        icon: Inbox
+      },
+      {
+        label: 'Run LLM inference (Llama)',
+        display:
+          'Run inference over x402 with Meta Llama on NVIDIA NIM — Llama 3.3 70B for chat and Llama 3.2 90B Vision for images.',
+        icon: Cpu
+      },
+      {
+        label: 'Send an email (Resend)',
+        display: 'Send a transactional email programmatically via Resend over x402.',
+        icon: Send
+      }
+    ]
   },
   {
-    label: 'Make a bet on polymarket',
-    display: 'Make a bet on a Polymarket market. Get the latest market prices and outcomes.',
-    icon: Target
-  },
-  {
-    label: 'Bridge assets cross-chain',
-    display:
-      'Bridge some USDC from Polygon to Base using the cheapest available route. Confirm the arrival and report the final balance on both chains.',
-    icon: ArrowLeftRight
-  },
-  {
-    label: 'Automate yield strategies',
-    display:
-      'Deposit USDC into the highest-yield active lending vault on Polygon and report the APY and pool address. Then set up a daily cron job to automatically re-evaluate and deposit into the best vault each morning.',
-    icon: TrendingUp
+    name: 'Search',
+    items: [
+      {
+        label: 'Scrape a webpage (Firecrawl)',
+        display: 'Scrape any webpage with Firecrawl over x402 and get clean, LLM-ready markdown.',
+        icon: FileText
+      },
+      {
+        label: 'Google search (SearchAPI)',
+        display: 'Run a Google search via SearchAPI over x402 and get structured JSON results.',
+        icon: Search
+      },
+      {
+        label: 'Cloud browser (Browserbase)',
+        display:
+          'Spin up a cloud browser session with Browserbase over x402 for web automation and agent browsing.',
+        icon: Globe
+      },
+      {
+        label: 'AI web search (Exa)',
+        display:
+          'Run an AI-native web search with Exa over x402 to get contextually relevant sources and highlights.',
+        icon: Sparkles
+      },
+      {
+        label: 'Top headlines (NewsAPI)',
+        display: 'Get top news headlines by country, category, or keyword via NewsAPI over x402.',
+        icon: Newspaper
+      }
+    ]
   }
 ];
 
@@ -114,9 +182,12 @@ function Dashboard({
   onAddFunds: () => void;
 }) {
   const [totalUsd, setTotalUsd] = useState<number | null>(null);
+  const [selectedSection, setSelectedSection] = useState(0);
   const [selectedUseCase, setSelectedUseCase] = useState(0);
   const [selectedAgent, setSelectedAgent] = useState<string>('claude');
   const [copied, setCopied] = useState(false);
+
+  const items = SECTIONS[selectedSection].items;
 
   useEffect(() => {
     let active = true;
@@ -188,12 +259,32 @@ function Dashboard({
           </span>
         </div>
 
+        {/* Section nav bar */}
+        <div className="flex items-center gap-1.5 mb-4">
+          {SECTIONS.map((section, i) => (
+            <button
+              key={section.name}
+              onClick={() => {
+                setSelectedSection(i);
+                setSelectedUseCase(0);
+              }}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer border ${
+                i === selectedSection
+                  ? 'bg-[#141635] text-white border-transparent'
+                  : 'bg-white text-[#64708f] border-[#c8cfe1] hover:border-[#929eba]'
+              }`}
+            >
+              {section.name}
+            </button>
+          ))}
+        </div>
+
         {/* Use cases + terminal */}
         <div className="grid grid-cols-2 gap-0 bg-white rounded-3xl border border-[#c8cfe1] overflow-hidden mb-4">
           {/* Left: use cases */}
           <div className="p-5 border-r border-[#c8cfe1]">
             <div className="space-y-1">
-              {USE_CASES.map((uc, i) => {
+              {items.map((uc, i) => {
                 const Icon = uc.icon;
                 return (
                   <button
@@ -211,23 +302,6 @@ function Dashboard({
                 );
               })}
             </div>
-            <a
-              href="https://github.com/0xPolygon/polygon-agent-cli"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-[#c8cfe1] text-sm text-[#64708f] bg-transparent cursor-pointer hover:bg-[#f5f6fb] transition-all hover:border-[#929eba] no-underline font-medium"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M7 17L17 7M17 7H7M17 7V17"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              See all use cases
-            </a>
           </div>
 
           {/* Right: terminal */}
@@ -240,7 +314,7 @@ function Dashboard({
                 {AGENTS.find((a) => a.id === selectedAgent)?.terminalPrefix}
               </span>
               {' "'}
-              {USE_CASES[selectedUseCase].display}"
+              {items[selectedUseCase].display}"
             </pre>
             <div className="mt-3 pt-3 border-t border-[#c8cfe1]">
               {/* Agent selector chips */}
@@ -276,7 +350,7 @@ function Dashboard({
                 onClick={() => {
                   const agent = AGENTS.find((a) => a.id === selectedAgent)!;
                   void navigator.clipboard
-                    .writeText(agent.buildCommand(USE_CASES[selectedUseCase].display))
+                    .writeText(agent.buildCommand(items[selectedUseCase].display))
                     .then(() => {
                       setCopied(true);
                       setTimeout(() => setCopied(false), 2000);
@@ -304,6 +378,11 @@ function Dashboard({
               title: 'Docs',
               desc: 'Full CLI reference, quickstart guide, and architecture docs to get your agent onchain fast.',
               href: 'https://docs.polygon.technology/payment-services/agentic-payments/polygon-agent-cli'
+            },
+            {
+              title: 'Agentic Services',
+              desc: 'Browse the x402 services catalog your agent can pay for — RPC, on-chain data, search, inference, and email.',
+              href: 'https://agentic-services.polygon.technology/discover'
             }
           ].map((card) => (
             <a
