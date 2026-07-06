@@ -29,7 +29,7 @@ type View = 'fund' | 'dashboard';
 
 const WALLET_URL = 'https://wallet.polygon.technology';
 const SKILL_URL = 'https://agentconnect.polygon.technology/SKILL.md';
-// x402 services catalog skill — Services/Search prompts point the agent here so it
+// x402 services catalog skill: Services/Search prompts point the agent here so it
 // knows which service routes to call (not the agentconnect/CLI skill).
 const AGENTIC_SERVICES_SKILL_URL = 'https://agentic-services.polygon.technology/SKILL.md';
 
@@ -100,31 +100,31 @@ const SECTIONS: { name: string; skillUrl: string; items: UseCase[] }[] = [
     skillUrl: AGENTIC_SERVICES_SKILL_URL,
     items: [
       {
-        label: 'Query any chain (QuickNode)',
+        label: 'Query any chain',
         display:
-          'Use QuickNode RPC over x402 to query on-chain data across 60+ chains with no API key — get the latest Polygon block number and an account balance.',
+          'Use QuickNode RPC over x402 to query on-chain data across 60+ chains with no API key. Get the latest Polygon block number and an account balance.',
         icon: Server
       },
       {
-        label: 'Wallet & token analytics (Allium)',
+        label: 'Wallet & token analytics',
         display:
           "Use Allium over x402 to pull a wallet's balances, PnL, transaction history, and token prices across chains.",
         icon: Database
       },
       {
-        label: 'Give your agent an inbox (AgentMail)',
+        label: 'Give your agent an inbox',
         display:
           'Create an email inbox for your agent with AgentMail over x402, then send, receive, and read messages.',
         icon: Inbox
       },
       {
-        label: 'Run LLM inference (Llama)',
+        label: 'Run LLM inference',
         display:
-          'Run inference over x402 with Meta Llama on NVIDIA NIM — Llama 3.3 70B for chat and Llama 3.2 90B Vision for images.',
+          'Run inference over x402 with Meta Llama on NVIDIA NIM: Llama 3.3 70B for chat and Llama 3.2 90B Vision for images.',
         icon: Cpu
       },
       {
-        label: 'Send an email (Resend)',
+        label: 'Send an email',
         display: 'Send a transactional email programmatically via Resend over x402.',
         icon: Send
       }
@@ -135,29 +135,29 @@ const SECTIONS: { name: string; skillUrl: string; items: UseCase[] }[] = [
     skillUrl: AGENTIC_SERVICES_SKILL_URL,
     items: [
       {
-        label: 'Scrape a webpage (Firecrawl)',
+        label: 'Scrape a webpage',
         display: 'Scrape any webpage with Firecrawl over x402 and get clean, LLM-ready markdown.',
         icon: FileText
       },
       {
-        label: 'Google search (SearchAPI)',
+        label: 'Google search',
         display: 'Run a Google search via SearchAPI over x402 and get structured JSON results.',
         icon: Search
       },
       {
-        label: 'Cloud browser (Browserbase)',
+        label: 'Cloud browser',
         display:
           'Spin up a cloud browser session with Browserbase over x402 for web automation and agent browsing.',
         icon: Globe
       },
       {
-        label: 'AI web search (Exa)',
+        label: 'AI web search',
         display:
           'Run an AI-native web search with Exa over x402 to get contextually relevant sources and highlights.',
         icon: Sparkles
       },
       {
-        label: 'Top headlines (NewsAPI)',
+        label: 'Top headlines',
         display: 'Get top news headlines by country, category, or keyword via NewsAPI over x402.',
         icon: Newspaper
       }
@@ -234,7 +234,7 @@ function Dashboard({
           <div>
             <div className="text-5xl font-bold text-[#141635] mb-2 leading-none">
               {totalUsd === null ? (
-                <span className="text-[#c8cfe1]">$—</span>
+                <span className="text-[#c8cfe1]">$0.00</span>
               ) : (
                 `$${totalUsd.toLocaleString('en-US', {
                   minimumFractionDigits: 2,
@@ -392,7 +392,7 @@ function Dashboard({
             },
             {
               title: 'Agentic Services',
-              desc: 'Browse the x402 services catalog your agent can pay for — RPC, on-chain data, search, inference, and email.',
+              desc: 'Browse the x402 services catalog your agent can pay for: RPC, on-chain data, search, inference, and email.',
               href: 'https://agentic-services.polygon.technology/discover'
             }
           ].map((card) => (
