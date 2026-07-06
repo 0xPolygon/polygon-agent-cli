@@ -29,48 +29,52 @@ type View = 'fund' | 'dashboard';
 
 const WALLET_URL = 'https://wallet.polygon.technology';
 const SKILL_URL = 'https://agentconnect.polygon.technology/SKILL.md';
+// x402 services catalog skill — Services/Search prompts point the agent here so it
+// knows which service routes to call (not the agentconnect/CLI skill).
+const AGENTIC_SERVICES_SKILL_URL = 'https://agentic-services.polygon.technology/SKILL.md';
 
 const AGENTS: {
   id: string;
   label: string;
   color: string;
   terminalPrefix: string;
-  buildCommand: (display: string) => string;
+  buildCommand: (display: string, skillUrl: string) => string;
 }[] = [
   {
     id: 'claude',
     label: 'Claude',
     color: '#D97706',
     terminalPrefix: 'claude',
-    buildCommand: (display) => `claude "Read ${SKILL_URL} and ${display}"`
+    buildCommand: (display, skillUrl) => `claude "Read ${skillUrl} and ${display}"`
   },
   {
     id: 'codex',
     label: 'Codex',
     color: '#10A37F',
     terminalPrefix: 'codex',
-    buildCommand: (display) => `codex "Read ${SKILL_URL} and ${display}"`
+    buildCommand: (display, skillUrl) => `codex "Read ${skillUrl} and ${display}"`
   },
   {
     id: 'openclaw',
     label: 'Openclaw',
     color: '#8B5CF6',
     terminalPrefix: 'clawhub',
-    buildCommand: (display) => `npx clawhub@latest run "Read ${SKILL_URL} and ${display}"`
+    buildCommand: (display, skillUrl) => `npx clawhub@latest run "Read ${skillUrl} and ${display}"`
   },
   {
     id: 'hermes',
     label: 'Hermes',
     color: '#EC4899',
     terminalPrefix: 'hermes',
-    buildCommand: (display) => `hermes "Read ${SKILL_URL} and ${display}"`
+    buildCommand: (display, skillUrl) => `hermes "Read ${skillUrl} and ${display}"`
   }
 ];
 
 type UseCase = { label: string; display: string; icon: ElementType };
-const SECTIONS: { name: string; items: UseCase[] }[] = [
+const SECTIONS: { name: string; skillUrl: string; items: UseCase[] }[] = [
   {
     name: 'DeFi & Polymarket',
+    skillUrl: SKILL_URL,
     items: [
       {
         label: 'Make a bet on Polymarket',
@@ -93,6 +97,7 @@ const SECTIONS: { name: string; items: UseCase[] }[] = [
   },
   {
     name: 'Services',
+    skillUrl: AGENTIC_SERVICES_SKILL_URL,
     items: [
       {
         label: 'Query any chain (QuickNode)',
@@ -127,6 +132,7 @@ const SECTIONS: { name: string; items: UseCase[] }[] = [
   },
   {
     name: 'Search',
+    skillUrl: AGENTIC_SERVICES_SKILL_URL,
     items: [
       {
         label: 'Scrape a webpage (Firecrawl)',
@@ -350,7 +356,12 @@ function Dashboard({
                 onClick={() => {
                   const agent = AGENTS.find((a) => a.id === selectedAgent)!;
                   void navigator.clipboard
-                    .writeText(agent.buildCommand(items[selectedUseCase].display))
+                    .writeText(
+                      agent.buildCommand(
+                        items[selectedUseCase].display,
+                        SECTIONS[selectedSection].skillUrl
+                      )
+                    )
                     .then(() => {
                       setCopied(true);
                       setTimeout(() => setCopied(false), 2000);
