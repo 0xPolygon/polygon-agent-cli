@@ -253,9 +253,10 @@ export interface FundUIProps {
   walletAddress: string;
   chainId: number;
   fundingUrl: string;
+  funded?: boolean;
 }
 
-export function FundUI({ walletName, walletAddress, chainId, fundingUrl }: FundUIProps) {
+export function FundUI({ walletName, walletAddress, chainId, fundingUrl, funded }: FundUIProps) {
   const { exit } = useApp();
 
   useEffect(() => {
@@ -264,11 +265,12 @@ export function FundUI({ walletName, walletAddress, chainId, fundingUrl }: FundU
 
   return (
     <Box flexDirection="column" paddingX={1} paddingTop={1} paddingBottom={1}>
-      <Header sub="fund" />
+      <Header sub={funded ? 'dashboard' : 'fund'} />
       <Box flexDirection="column" marginLeft={1} gap={0}>
         <KV k="wallet" v={walletName} />
         <KV k="address" v={walletAddress} keyWidth={10} />
         <KV k="chain id" v={String(chainId)} keyWidth={10} />
+        <KV k="status" v={funded ? 'funded' : 'no balance yet'} keyWidth={10} />
       </Box>
       <Box
         flexDirection="column"
@@ -278,14 +280,20 @@ export function FundUI({ walletName, walletAddress, chainId, fundingUrl }: FundU
         paddingY={0}
         marginY={1}
       >
-        <Text dimColor>open in browser to fund wallet</Text>
+        <Text dimColor>
+          {funded ? 'open your wallet dashboard' : 'open in browser to fund wallet'}
+        </Text>
         <Text color="cyan" wrap="wrap">
           {fundingUrl}
         </Text>
       </Box>
       <Box marginLeft={1} gap={1}>
         <Text color="#8247e5">→</Text>
-        <Text dimColor>swap any token to your wallet via Trails</Text>
+        <Text dimColor>
+          {funded
+            ? 'view balances and manage your wallet'
+            : 'add funds via card, exchange, or any token (Trails)'}
+        </Text>
       </Box>
     </Box>
   );

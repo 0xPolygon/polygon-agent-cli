@@ -6,6 +6,7 @@ import type { TokenBalance } from '@0xsequence/typescript-sdk';
 
 import { findNetworkById } from '@0xsequence/typescript-sdk';
 
+import { isWalletFunded } from '../lib/indexer.ts';
 import { getOmsClient } from '../lib/oms-client.ts';
 import { loadOmsWalletPointer, loadBuilderConfig } from '../lib/storage.ts';
 import { resolveErc20BySymbol } from '../lib/token-directory.ts';
@@ -318,13 +319,23 @@ export const balancesCommand: CommandModule = {
 
 // The wallet funding page (Trails on-ramp + swap). Single source of truth so
 // the `fund` command and the post-login step show the same thing.
+// wallet.polygon.technology — the fallback funding page and the dashboard's
+// "open wallet" link. Our hosted funding/dashboard page (POLYGON_AGENT_FUNDING_UI)
+// is preferred when set.
 export const FUNDING_URL = 'https://wallet.polygon.technology';
 
+/** Base URL of our hosted funding/dashboard page (which reads ?wallet&chain&view). */
+function fundingUiBase(): string | undefined {
+  const v = process.env.POLYGON_AGENT_FUNDING_UI;
+  return v ? v.replace(/\/+$/, '') : undefined;
+}
+
 /**
- * Show the funding step for a wallet: an Ink panel in a TTY, JSON otherwise.
- * Reused by the standalone `fund` command and chained after browser login.
- * When `openBrowser` is set (and interactive), also open the funding page so the
- * user is taken straight there after login — the URL is still shown as fallback.
+ * Post-login funding step, balance-aware. Checks the wallet's USD balance via the
+ * Sequence indexer and routes: funded (>0) -> dashboard, empty -> funding. On a
+ * human's machine (local, incl. under Claude Code / a harness) it opens the page;
+ * headless or --remote just returns the URL + balance on the CLI. Skipped by
+ * --no-fund. Falls back to wallet.polygon.technology if no hosted page is configured.
  */
 export async function showFunding(
   walletName: string,
@@ -332,21 +343,34 @@ export async function showFunding(
   chainId = 137,
   opts?: { openBrowser?: boolean; remote?: boolean }
 ): Promise<void> {
-  // Human path (local terminal, or under Claude Code / a harness where stdout is
-  // piped so there is no TTY): open the funding page. Headless or --remote (the
-  // browser is on another machine): skip it and just surface the URL + address on
-  // the CLI. open() no-ops/throws on a GUI-less host, so attempting it is safe.
+  const funded = await isWalletFunded(walletName, walletAddress, chainId);
+  const view = funded ? 'dashboard' : 'fund';
+
+  const base = fundingUiBase();
+  const url = base ? `${base}/?wallet=${walletAddress}&chain=${chainId}&view=${view}` : FUNDING_URL;
+
+  // Human path (local, incl. under Claude Code / a harness where stdout is piped
+  // so there is no TTY): open the page. Headless or --remote (browser elsewhere):
+  // skip it and surface the URL + balance on the CLI. open() no-ops/throws on a
+  // GUI-less host, so attempting it is safe.
   if (opts?.openBrowser && !opts?.remote) {
     try {
       const { default: open } = await import('open');
-      await open(FUNDING_URL);
+      await open(url);
     } catch {
       // open() can fail on a headless host — the URL/panel below is the fallback.
     }
   }
+
   if (isTTY()) {
     await inkRender(
-      React.createElement(FundUI, { walletName, walletAddress, chainId, fundingUrl: FUNDING_URL })
+      React.createElement(FundUI, {
+        walletName,
+        walletAddress,
+        chainId,
+        fundingUrl: url,
+        funded
+      })
     );
   } else {
     console.log(
@@ -356,8 +380,12 @@ export async function showFunding(
           walletName,
           walletAddress,
           chainId,
-          fundingUrl: FUNDING_URL,
-          message: `Fund wallet ${walletAddress} at ${FUNDING_URL} (send POL or USDC to that address).`
+          funded,
+          view,
+          url,
+          message: funded
+            ? `Wallet ${walletAddress} is funded. Dashboard: ${url}`
+            : `Fund wallet ${walletAddress} (no balance yet). Add funds: ${url}`
         },
         null,
         2
