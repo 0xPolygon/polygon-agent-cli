@@ -58,12 +58,14 @@ export function oidcRelayRedirectUri(): string | undefined {
   return process.env.SEQUENCE_OIDC_RELAY_URI || undefined;
 }
 
-// Production defaults for the browser-login flow. The relay custom domain and
-// the Sequence allowlist entry for its /api/oidc/cb are deploy prerequisites
-// (see docs/superpowers/specs/2026-07-13-browser-login-design.md). Override per
-// environment with POLYGON_AGENT_OIDC_RELAY / POLYGON_AGENT_LOGIN_UI.
-const DEFAULT_OIDC_RELAY = 'https://oidc-relay.polygon.technology';
-const DEFAULT_LOGIN_UI = 'https://agentconnect.polygon.technology';
+// Baked-in defaults for the browser-login flow so `wallet login` needs no env
+// vars. STAGING values while this ships from the staging branch; flip to the
+// production domains (oidc-relay.polygon.technology / agentconnect.polygon.technology)
+// before the npm release, once the relay custom domain is live and Sequence has
+// allowlisted its /api/oidc/cb (see docs/superpowers/specs/2026-07-13-browser-login-design.md).
+// Override per environment with POLYGON_AGENT_OIDC_RELAY / POLYGON_AGENT_LOGIN_UI.
+const DEFAULT_OIDC_RELAY = 'https://oidc-relay-staging.polygon-technology.workers.dev';
+const DEFAULT_LOGIN_UI = 'https://agentconnect.staging.polygon.technology';
 
 /**
  * Base URL of OUR OIDC handoff + login relay (packages/oidc-relay). Read from
