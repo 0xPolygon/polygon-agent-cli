@@ -52,6 +52,14 @@ export function LoginPage() {
   }, []);
   const redirected = useRef(false);
 
+  // Once the session is established the user should land on their wallet
+  // without another click; the success card shows briefly, then we move on.
+  useEffect(() => {
+    if (state.kind !== 'success') return;
+    const timer = setTimeout(() => window.location.assign(WALLET_URL), 1800);
+    return () => clearTimeout(timer);
+  }, [state.kind]);
+
   // Poll the relay for CLI-published status; redirect once when the auth url
   // arrives (a side effect the reducer deliberately does not model).
   useEffect(() => {
@@ -112,11 +120,6 @@ function renderState(state: MachineState, session: string, dispatch: (e: Machine
             });
           }}
           onEmail={() => dispatch({ type: 'choose-email' })}
-          onCancel={() => {
-            // The CLI consumes the cancel, publishes an error status, and exits;
-            // the next poll moves this page to the failed state.
-            void postAction(session, { type: 'cancel' });
-          }}
         />
       );
     case 'google-wait':
@@ -167,13 +170,13 @@ function renderState(state: MachineState, session: string, dispatch: (e: Machine
           <h1 className="text-xl font-semibold text-[#141635]">You're signed in</h1>
           <p className="mt-2 text-sm text-[#64708f] break-all">Wallet {state.walletAddress}</p>
           <p className="mt-2 text-sm text-[#64708f]">
-            Your terminal session is ready. You can close this tab.
+            Your terminal session is ready. Taking you to your wallet.
           </p>
           <a
             href={WALLET_URL}
-            className="mt-6 inline-block rounded-xl bg-[#141635] px-5 py-2.5 text-sm font-medium text-white hover:bg-[#1e2155]"
+            className="mt-6 inline-block text-sm text-[#64708f] hover:text-[#141635] underline"
           >
-            Manage your wallet
+            Not redirected? Open your wallet
           </a>
         </div>
       );
@@ -203,27 +206,45 @@ function renderState(state: MachineState, session: string, dispatch: (e: Machine
   }
 }
 
-function MethodChoice({
-  onGoogle,
-  onEmail,
-  onCancel
-}: {
-  onGoogle: () => void;
-  onEmail: () => void;
-  onCancel: () => void;
-}) {
+function GoogleLogo() {
+  return (
+    <svg viewBox="0 0 48 48" className="h-4 w-4" aria-hidden="true">
+      <path
+        fill="#EA4335"
+        d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
+      />
+      <path
+        fill="#4285F4"
+        d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
+      />
+      <path
+        fill="#34A853"
+        d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
+      />
+    </svg>
+  );
+}
+
+function MethodChoice({ onGoogle, onEmail }: { onGoogle: () => void; onEmail: () => void }) {
   return (
     <div>
       <h1 className="text-xl font-semibold text-[#141635] text-center">
         Sign in to your agent wallet
       </h1>
       <p className="mt-2 text-sm text-[#64708f] text-center">
-        This connects the polygon-agent CLI in your terminal.
+        This connects to your agent in your terminal.
       </p>
       <button
         onClick={onGoogle}
-        className="mt-6 w-full rounded-xl bg-[#141635] px-5 py-3 text-sm font-medium text-white hover:bg-[#1e2155]"
+        className="mt-6 w-full rounded-xl bg-[#141635] px-5 py-3 text-sm font-medium text-white hover:bg-[#1e2155] flex items-center justify-center gap-2.5"
       >
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white">
+          <GoogleLogo />
+        </span>
         Continue with Google
       </button>
       <button
@@ -231,13 +252,6 @@ function MethodChoice({
         className="mt-3 w-full rounded-xl border border-[#c8cfe1] px-5 py-3 text-sm font-medium text-[#141635] hover:bg-[#f5f6fb]"
       >
         Continue with email
-      </button>
-      <button
-        type="button"
-        onClick={onCancel}
-        className="mt-3 w-full text-sm text-[#64708f] hover:text-[#141635]"
-      >
-        Cancel this login
       </button>
     </div>
   );
