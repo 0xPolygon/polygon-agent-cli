@@ -24,6 +24,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { FundingScreen } from './components/FundingScreen.js';
 import { fetchTotalUsdBalance } from './indexer';
+import { LoginPage } from './login/LoginPage.js';
 
 type View = 'fund' | 'dashboard';
 
@@ -166,7 +167,7 @@ const SECTIONS: { name: string; skillUrl: string; items: UseCase[] }[] = [
 ];
 
 // Shared logo header used on every screen.
-function LogoBadge() {
+export function LogoBadge() {
   return (
     <div className="flex items-center gap-2.5">
       <img src="/polygon-logo-full.webp" alt="Polygon" className="h-7 w-auto" />
@@ -457,6 +458,10 @@ function MissingWalletNotice() {
 
 // ── Main App ──
 function App() {
+  if (window.location.pathname === '/login') {
+    return <LoginPage />;
+  }
+
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const walletAddress = params.get('wallet') || '';
   const chainId = Number(params.get('chain') || '137');
