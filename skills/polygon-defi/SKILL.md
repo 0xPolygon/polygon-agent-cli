@@ -54,6 +54,7 @@ Use `getEarnPools` to discover live yield opportunities across protocols before 
 curl --request POST \
   --url https://trails-api.sequence.app/rpc/Trails/GetEarnPools \
   --header 'Content-Type: application/json' \
+  --header "X-Access-Key: $TRAILS_API_KEY" \
   --data '{"chainIds": [137]}'
 ```
 
@@ -66,14 +67,21 @@ All request fields are optional — omit any you don't need to filter on.
 | `minTvl` | `number` | Minimum TVL in USD |
 | `maxApy` | `number` | Maximum APY (useful to exclude outlier/at-risk pools) |
 
-### Fetch (agent code)
+### API key
 
-No API key is required for this public endpoint (an optional `TRAILS_API_KEY` can be set for higher rate limits).
+Trails officially requires an API key on every request, passed as an `X-Access-Key` header (get one at https://dashboard.trails.build; rate limits are per key: 50 requests/s, burst 100, 20 QuoteIntent/min). `GetEarnPools` currently answers without a key, but do not rely on that.
+
+You normally do not need to set anything: the CLI resolves the key automatically as `TRAILS_API_KEY`, else the Sequence access key stored by `polygon-agent setup` (in `builder.json`), which Trails accepts. Set `TRAILS_API_KEY` only to use a dedicated Trails key.
+
+### Fetch (agent code)
 
 ```typescript
 const res = await fetch('https://trails-api.sequence.app/rpc/Trails/GetEarnPools', {
   method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
+  headers: {
+    'Content-Type': 'application/json',
+    'X-Access-Key': process.env.TRAILS_API_KEY ?? ''
+  },
   body: JSON.stringify({ chainIds: [137] }),
 });
 const { pools } = await res.json();
@@ -113,6 +121,20 @@ interface PoolTokenInfo {
 ```
 
 > **Tip:** `wrappedTokenGatewayAddress` is set on Aave markets that accept a wrapped native token (WPOL, WETH). Pass this address instead of `depositAddress` when depositing POL/ETH directly.
+
+### Current Trails earn surface (Yield API)
+
+`GetEarnPools` is the endpoint the CLI's `deposit` command uses today and it remains live, but Trails' current generation earn surface is the **Yield API** at the same base URL: `YieldGetMarkets`, `YieldGetProviders`, `YieldCreateEnterAction`, `YieldCreateExitAction`, and `YieldGetAggregateBalances` (docs: https://docs.trails.build). Query `YieldGetMarkets` when you need markets beyond the Aave and Morpho pools that `GetEarnPools` returns:
+
+```bash
+curl --request POST \
+  --url https://trails-api.sequence.app/rpc/Trails/YieldGetMarkets \
+  --header 'Content-Type: application/json' \
+  --header "X-Access-Key: $TRAILS_API_KEY" \
+  --data '{}'
+```
+
+The response is `{ items: [...] }` with per-market `inputTokens`, provider, and network fields. Note that Trails' intent protocol is now v1.5 (HydrateProxy executor); the API still serves the v1 flow that `polygon-agent swap` uses, so existing commands are unaffected.
 
 ---
 
