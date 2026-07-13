@@ -210,7 +210,7 @@ export default {
       const stub = env.OIDC_RELAY.get(env.OIDC_RELAY.idFromName(state));
       const inner = new URL('https://do/capture');
       inner.search = url.search; // forward code/state/error
-      return stub.fetch(new Request(inner.toString()));
+      return stub.fetch(new Request(inner.toString(), { redirect: 'manual' }));
     }
 
     // GET /api/oidc/poll?state=...  (CLI polls for the result)
