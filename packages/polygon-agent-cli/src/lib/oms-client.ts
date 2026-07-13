@@ -58,15 +58,25 @@ export function oidcRelayRedirectUri(): string | undefined {
   return process.env.SEQUENCE_OIDC_RELAY_URI || undefined;
 }
 
+// Production defaults for the browser-login flow. The relay custom domain and
+// the Sequence allowlist entry for its /api/oidc/cb are deploy prerequisites
+// (see docs/superpowers/specs/2026-07-13-browser-login-design.md). Override per
+// environment with POLYGON_AGENT_OIDC_RELAY / POLYGON_AGENT_LOGIN_UI.
+const DEFAULT_OIDC_RELAY = 'https://oidc-relay.polygon.technology';
+const DEFAULT_LOGIN_UI = 'https://agentconnect.polygon.technology';
+
 /**
- * Base URL of OUR OIDC handoff relay (packages/oidc-relay), used by the `--remote`
- * browser-login path when a localhost callback can't be reached. This is a
- * DIFFERENT relay from oidcRelayRedirectUri(): that one overrides the OMS
- * relay Google redirects to; this is our public bounce target the CLI polls.
- * Read from POLYGON_AGENT_OIDC_RELAY; the `--relay-url` flag overrides per-run.
- * Trailing slash trimmed so callers can append `/api/oidc/...` cleanly.
+ * Base URL of OUR OIDC handoff + login relay (packages/oidc-relay). Read from
+ * POLYGON_AGENT_OIDC_RELAY with a production default; `--relay-url` overrides
+ * per-run. Trailing slash trimmed so callers can append `/api/...` cleanly.
  */
-export function oidcRelayBaseUrl(): string | undefined {
+export function oidcRelayBaseUrl(): string {
   const v = process.env.POLYGON_AGENT_OIDC_RELAY;
-  return v ? v.replace(/\/+$/, '') : undefined;
+  return v ? v.replace(/\/+$/, '') : DEFAULT_OIDC_RELAY;
+}
+
+/** Base URL of the agentconnect login page. POLYGON_AGENT_LOGIN_UI overrides. */
+export function loginUiBaseUrl(): string {
+  const v = process.env.POLYGON_AGENT_LOGIN_UI;
+  return v ? v.replace(/\/+$/, '') : DEFAULT_LOGIN_UI;
 }

@@ -77,10 +77,13 @@ Once installed via skills or npm, run the following. If running from source, pre
 # 1. Setup: save your OMS Builder publishable key (persisted to ~/.polygon-agent/builder.json)
 polygon-agent setup --oms-publishable-key <key>
 
-# 2. Log in to your embedded wallet with Google in the browser
+# 2. Log in to your embedded wallet in the browser
 polygon-agent wallet login
-# Opens a Google sign-in URL; after you sign in, the embedded wallet is created/unlocked.
-# On a headless/remote host add --remote (uses a public OIDC relay).
+# Prints a login page URL and opens it in a browser. Choose Google or email
+# on the page; once you finish, the embedded wallet is created or unlocked.
+# This works whether the browser is on this machine or elsewhere, so there
+# is no separate remote mode to enable. Use --local for the older loopback
+# flow, which needs the browser on this same machine.
 
 # 3. Fund the wallet
 polygon-agent fund
@@ -161,7 +164,7 @@ See [`SKILL.md`](skills/SKILL.md) for the full agent-consumable reference and [`
 
 ```bash
 polygon-agent setup --oms-publishable-key <key>  # Save OMS Builder credentials
-polygon-agent wallet login [--name <n>] [--remote] [--no-fund] [--force]  # Log in with Google in the browser (add --remote for headless hosts)
+polygon-agent wallet login [--name <n>] [--local] [--no-fund] [--force]  # Log in in the browser (Google or email); --local keeps the old loopback flow, --remote is deprecated
 polygon-agent wallet logout [--name <n>]           # Log out of a wallet
 polygon-agent wallet list                          # Show all wallets
 polygon-agent wallet address [--name <n>]          # Show wallet address (same on every chain)
@@ -219,9 +222,10 @@ export SEQUENCE_PUBLISHABLE_KEY=<publishable-key-from-builder>
 
 **Optional:**
 
-| Variable          | Default | Description                                                                  |
-| ----------------- | ------- | ---------------------------------------------------------------------------- |
-| `TRAILS_API_KEY`  | —       | Optional Trails API key for higher rate limits on swap / bridge / earn calls. |
+| Variable                  | Default                                | Description                                                                  |
+| ------------------------- | --------------------------------------- | ---------------------------------------------------------------------------- |
+| `TRAILS_API_KEY`          | —                                       | Optional Trails API key for higher rate limits on swap / bridge / earn calls. |
+| `POLYGON_AGENT_LOGIN_UI`  | `https://agentconnect.polygon.technology` | Base URL of the browser login page opened by `wallet login`.                 |
 
 ---
 

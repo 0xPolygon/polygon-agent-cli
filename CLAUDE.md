@@ -34,6 +34,6 @@ published with the CLI package but are not source code.
 
 ## Wallet auth (OMS V3)
 
-- `polygon-agent wallet login` — logs in with Google in the browser; prints/opens a Google sign-in URL, and once you sign in the embedded wallet is created/unlocked. Add `--remote` for headless hosts (uses a public OIDC relay; needs `POLYGON_AGENT_OIDC_RELAY` or `--relay-url`). Other flags: `--name <n>` (default "main"), `--no-fund`, `--force`. Session persists ~1 week under `~/.polygon-agent/oms/<name>/`.
+- `polygon-agent wallet login`: by default opens the agentconnect login page (`POLYGON_AGENT_LOGIN_UI`, default `https://agentconnect.polygon.technology`), where the user chooses Google or email; works whether the browser is local or remote. `--local` falls back to the older loopback flow (raw Google URL + localhost callback; browser must be on this machine). `--remote` is deprecated now that the default flow already works remotely. Relay base URL is `POLYGON_AGENT_OIDC_RELAY` or `--relay-url` (default `https://oidc-relay.polygon.technology`). Other flags: `--name <n>` (default "main"), `--no-fund`, `--force`. Session persists ~1 week under `~/.polygon-agent/oms/<name>/`.
 - Requires `SEQUENCE_PUBLISHABLE_KEY` (from the OMS Builder dashboard), via env or `builder.json` (set with `setup --oms-publishable-key`). `--oms-project-id` is accepted but optional — the SDK identifies the project from the publishable key alone.
 - `lib/tx-dispatch.ts` `runTx` is the single tx primitive (wraps `runOmsTx`). All commands submit through it.

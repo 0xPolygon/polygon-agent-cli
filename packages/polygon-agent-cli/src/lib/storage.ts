@@ -30,8 +30,8 @@ export interface OmsConfig {
   omsProjectId?: string;
 }
 
-/** How a wallet session was established. Browser (Google OIDC) is the only login flow. */
-export type OmsLoginMethod = 'google';
+/** How a wallet session was established: Google or email, both chosen on the browser login page. */
+export type OmsLoginMethod = 'google' | 'email';
 
 /** Pointer record for an OMS wallet (the SDK persists the real session in its StorageManager). */
 export interface OmsWalletPointer {
