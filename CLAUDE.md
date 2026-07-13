@@ -13,7 +13,7 @@ This is a pnpm workspace monorepo. The primary package is:
 - `packages/polygon-agent-cli/` — CLI tool for on-chain agent operations on Polygon
 
 Wallets use the OMS (Open Money Stack) V3 embedded-wallet model (`@0xsequence/typescript-sdk`,
-`OMSClient`): the CLI authenticates via Google browser login (`wallet login`) and
+`OMSClient`): the CLI authenticates via browser login with Google or email (`wallet login`) and
 holds the credential on disk.
 
 Static assets (ABI JSON in `contracts/`, Claude skills in `skills/`) are

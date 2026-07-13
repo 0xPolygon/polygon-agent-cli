@@ -289,7 +289,7 @@ export const walletCommand: CommandModule = {
     yargs
       .command({
         command: 'login',
-        describe: 'Log in in the browser (choose Google or email on the login page)',
+        describe: 'Log in from the browser (choose Google or email on the login page)',
         builder: (y) =>
           y
             .option('name', {
@@ -305,7 +305,7 @@ export const walletCommand: CommandModule = {
             .option('port', {
               type: 'number',
               default: 8765,
-              describe: 'Localhost callback port for the local (non-remote) flow; default 8765'
+              describe: 'Localhost callback port for the --local loopback flow; default 8765'
             })
             .option('timeout', {
               type: 'number',
