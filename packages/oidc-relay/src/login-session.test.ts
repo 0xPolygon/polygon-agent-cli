@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { SessionStore } from './login-session.ts';
 
-import { LoginSessionCore, validLoginStatus } from './login-session.ts';
+import { LoginSessionCore, parseLoginStatus } from './login-session.ts';
 
 function memoryStore(): SessionStore {
   const map = new Map<string, unknown>();
@@ -91,33 +91,65 @@ describe('LoginSessionCore', () => {
   });
 });
 
-describe('validLoginStatus', () => {
-  it('accepts every valid status shape', () => {
-    expect(validLoginStatus({ status: 'awaiting-method' })).toBe(true);
-    expect(validLoginStatus({ status: 'auth-url', url: 'https://accounts.google.com' })).toBe(true);
-    expect(validLoginStatus({ status: 'otp-sent' })).toBe(true);
-    expect(validLoginStatus({ status: 'otp-invalid' })).toBe(true);
-    expect(validLoginStatus({ status: 'otp-invalid', attemptsLeft: 2 })).toBe(true);
-    expect(validLoginStatus({ status: 'done', walletAddress: '0xabc' })).toBe(true);
-    expect(validLoginStatus({ status: 'error', message: 'boom' })).toBe(true);
+describe('parseLoginStatus', () => {
+  it('parses and normalizes every valid status shape', () => {
+    expect(parseLoginStatus({ status: 'awaiting-method' })).toEqual({
+      status: 'awaiting-method'
+    });
+    expect(parseLoginStatus({ status: 'auth-url', url: 'https://accounts.google.com' })).toEqual({
+      status: 'auth-url',
+      url: 'https://accounts.google.com'
+    });
+    expect(parseLoginStatus({ status: 'otp-sent' })).toEqual({ status: 'otp-sent' });
+    expect(parseLoginStatus({ status: 'otp-invalid' })).toEqual({
+      status: 'otp-invalid'
+    });
+    expect(parseLoginStatus({ status: 'otp-invalid', attemptsLeft: 2 })).toEqual({
+      status: 'otp-invalid',
+      attemptsLeft: 2
+    });
+    expect(parseLoginStatus({ status: 'done', walletAddress: '0xabc' })).toEqual({
+      status: 'done',
+      walletAddress: '0xabc'
+    });
+    expect(parseLoginStatus({ status: 'error', message: 'boom' })).toEqual({
+      status: 'error',
+      message: 'boom'
+    });
   });
 
   it('rejects auth-url missing its url', () => {
-    expect(validLoginStatus({ status: 'auth-url' })).toBe(false);
+    expect(parseLoginStatus({ status: 'auth-url' })).toEqual(null);
   });
 
   it('rejects a non-string message', () => {
-    expect(validLoginStatus({ status: 'error', message: 123 })).toBe(false);
+    expect(parseLoginStatus({ status: 'error', message: 123 })).toEqual(null);
   });
 
   it('rejects an unknown status string', () => {
-    expect(validLoginStatus({ status: 'bogus' })).toBe(false);
+    expect(parseLoginStatus({ status: 'bogus' })).toEqual(null);
   });
 
   it('rejects non-object input', () => {
-    expect(validLoginStatus(null)).toBe(false);
-    expect(validLoginStatus('done')).toBe(false);
-    expect(validLoginStatus(42)).toBe(false);
-    expect(validLoginStatus(undefined)).toBe(false);
+    expect(parseLoginStatus(null)).toEqual(null);
+    expect(parseLoginStatus('done')).toEqual(null);
+    expect(parseLoginStatus(42)).toEqual(null);
+    expect(parseLoginStatus(undefined)).toEqual(null);
+  });
+
+  it('strips extra properties not part of the status shape', () => {
+    expect(parseLoginStatus({ status: 'otp-sent', junk: 'x' })).toEqual({
+      status: 'otp-sent'
+    });
+    expect(parseLoginStatus({ status: 'auth-url', url: 'https://example.com', junk: 'x' })).toEqual(
+      {
+        status: 'auth-url',
+        url: 'https://example.com'
+      }
+    );
+    expect(parseLoginStatus({ status: 'done', walletAddress: '0xabc', junk: 'x' })).toEqual({
+      status: 'done',
+      walletAddress: '0xabc'
+    });
   });
 });

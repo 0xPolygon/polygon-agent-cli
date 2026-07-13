@@ -30,36 +30,55 @@ const VALID_STATUS_VALUES = new Set([
   'error'
 ]);
 
-// Shape-check a browser/CLI-submitted status before it reaches the DO. Bounds
-// every optional string field so a misbehaving caller can't stash an
-// unbounded payload in durable storage, and requires the field a given
-// status actually needs (url for auth-url, walletAddress for done, message
-// for error).
-export function validLoginStatus(s: unknown): s is LoginStatus {
-  if (typeof s !== 'object' || s === null) return false;
+// Validate and normalize a browser/CLI-submitted status before it reaches the DO.
+// Performs per-field validation (status enum, string length bounds, required fields
+// per status kind) and returns a reconstructed object containing only the known fields
+// for that status type, preventing junk properties from reaching durable storage.
+// Returns null if the input is invalid.
+export function parseLoginStatus(s: unknown): LoginStatus | null {
+  if (typeof s !== 'object' || s === null) return null;
   const status = (s as { status?: unknown }).status;
-  if (typeof status !== 'string' || !VALID_STATUS_VALUES.has(status)) return false;
+  if (typeof status !== 'string' || !VALID_STATUS_VALUES.has(status)) return null;
 
+  // Extract and validate optional fields
   const url = (s as { url?: unknown }).url;
-  if (url !== undefined && (typeof url !== 'string' || url.length > 2048)) return false;
-  if (status === 'auth-url' && typeof url !== 'string') return false;
+  if (url !== undefined && (typeof url !== 'string' || url.length > 2048)) return null;
 
   const walletAddress = (s as { walletAddress?: unknown }).walletAddress;
   if (
     walletAddress !== undefined &&
     (typeof walletAddress !== 'string' || walletAddress.length > 128)
   )
-    return false;
-  if (status === 'done' && typeof walletAddress !== 'string') return false;
+    return null;
 
   const message = (s as { message?: unknown }).message;
-  if (message !== undefined && (typeof message !== 'string' || message.length > 512)) return false;
-  if (status === 'error' && typeof message !== 'string') return false;
+  if (message !== undefined && (typeof message !== 'string' || message.length > 512)) return null;
 
   const attemptsLeft = (s as { attemptsLeft?: unknown }).attemptsLeft;
-  if (attemptsLeft !== undefined && typeof attemptsLeft !== 'number') return false;
+  if (attemptsLeft !== undefined && typeof attemptsLeft !== 'number') return null;
 
-  return true;
+  // Reconstruct with only valid fields for this status
+  switch (status) {
+    case 'awaiting-method':
+      return { status: 'awaiting-method' };
+    case 'auth-url':
+      if (typeof url !== 'string') return null;
+      return { status: 'auth-url', url };
+    case 'otp-sent':
+      return { status: 'otp-sent' };
+    case 'otp-invalid':
+      return typeof attemptsLeft === 'number'
+        ? { status: 'otp-invalid', attemptsLeft }
+        : { status: 'otp-invalid' };
+    case 'done':
+      if (typeof walletAddress !== 'string') return null;
+      return { status: 'done', walletAddress };
+    case 'error':
+      if (typeof message !== 'string') return null;
+      return { status: 'error', message };
+    default:
+      return null;
+  }
 }
 
 export interface SessionStore {

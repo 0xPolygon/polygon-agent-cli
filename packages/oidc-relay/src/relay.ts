@@ -22,7 +22,7 @@
 
 import type { LoginAction } from './login-session.ts';
 
-import { LoginSession, validLoginStatus } from './login-session.ts';
+import { LoginSession, parseLoginStatus } from './login-session.ts';
 import { validReturnTo } from './return-to.ts';
 
 export { LoginSession };
@@ -277,13 +277,14 @@ export default {
         return json({ error: 'invalid json' }, 400);
       }
       const session = typeof body.session === 'string' ? body.session : null;
-      if (!validSession(session) || !validLoginStatus(body.status)) {
+      const parsed = parseLoginStatus(body.status);
+      if (!validSession(session) || parsed === null) {
         return json({ error: 'invalid request' }, 400);
       }
       const res = await loginStub(session).fetch(
         new Request('https://do/set-status', {
           method: 'POST',
-          body: JSON.stringify(body.status)
+          body: JSON.stringify(parsed)
         })
       );
       return cors(res);
