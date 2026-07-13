@@ -23,6 +23,7 @@
 import type { LoginAction } from './login-session.ts';
 
 import { LoginSession } from './login-session.ts';
+import { validReturnTo } from './return-to.ts';
 
 export { LoginSession };
 
@@ -106,7 +107,9 @@ export class OidcHandoff {
     const op = url.pathname; // internal path set by the router below
 
     if (op === '/register') {
+      const returnTo = url.searchParams.get('returnTo');
       await this.state.storage.put('status', 'pending');
+      if (returnTo) await this.state.storage.put('returnTo', returnTo);
       await this.state.storage.setAlarm(Date.now() + SESSION_TTL_MS);
       return new Response(null, { status: 204 });
     }
@@ -116,17 +119,19 @@ export class OidcHandoff {
       const state = url.searchParams.get('state');
       const error = url.searchParams.get('error');
       const status = await this.state.storage.get<string>('status');
-      // No session: the CLI already consumed it (refresh/duplicate callback) or it
-      // expired. Serve a neutral page instead of a scary error — the terminal is
-      // the source of truth for success/failure.
       if (!status)
         return new Response(CLOSE_HTML, { status: 200, headers: { 'Content-Type': 'text/html' } });
+      const returnTo = await this.state.storage.get<string>('returnTo');
       if (error) {
         await this.state.storage.put({ status: 'error', error });
+        // With a returnTo the branded page renders the failure (the CLI publishes
+        // an error status); without one, keep the legacy inline page.
+        if (returnTo) return Response.redirect(returnTo, 302);
         return new Response(FAIL_HTML, { status: 200, headers: { 'Content-Type': 'text/html' } });
       }
       if (!code || !state) return new Response('missing code or state', { status: 400 });
       await this.state.storage.put({ status: 'ready', code, state });
+      if (returnTo) return Response.redirect(returnTo, 302);
       return new Response(DONE_HTML, { status: 200, headers: { 'Content-Type': 'text/html' } });
     }
 
@@ -186,8 +191,14 @@ export default {
       if (!validState(typeof state === 'string' ? state : null)) {
         return json({ error: 'invalid state' }, 400);
       }
+      const returnTo = (body as { returnTo?: unknown } | null)?.returnTo;
+      if (returnTo !== undefined && !validReturnTo(returnTo)) {
+        return json({ error: 'invalid returnTo' }, 400);
+      }
       const stub = env.OIDC_RELAY.get(env.OIDC_RELAY.idFromName(state as string));
-      await stub.fetch(new Request('https://do/register', { method: 'POST' }));
+      const inner = new URL('https://do/register');
+      if (returnTo) inner.searchParams.set('returnTo', returnTo as string);
+      await stub.fetch(new Request(inner.toString(), { method: 'POST' }));
       return cors(new Response(null, { status: 204 }));
     }
 
