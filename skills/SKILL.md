@@ -25,7 +25,7 @@ npm install -g @polygonlabs/agent-cli@latest   # upgrade
 
 ## Architecture
 
-The CLI uses the **OMS (Open Money Stack) V3 embedded-wallet** model (`@0xsequence/typescript-sdk`). The agent authenticates with **Google browser login** via `wallet login`; the command prints/opens a Google sign-in URL, and once the user signs in the wallet is created/unlocked and the session credential is stored encrypted on disk. There is no on-chain permission scoping.
+The CLI uses the **OMS (Open Money Stack) V3 embedded-wallet** model (`@0xsequence/typescript-sdk`). By default, `wallet login` opens the agentconnect login page (`POLYGON_AGENT_LOGIN_UI`, default `https://agentconnect.polygon.technology`), where the user chooses Google or email (email sends a 6-digit code to the user's inbox, entered on the page). This works whether the browser is on this machine or a different one, so there is no separate headless mode. `--local` falls back to the legacy loopback flow (raw Google sign-in URL plus a localhost callback; browser must be on this same machine; Google only). `--remote` is deprecated and is now a no-op that prints a notice. Once the user signs in, the wallet is created or unlocked and the session credential is stored encrypted on disk. There is no on-chain permission scoping.
 
 | Wallet | Created by | Purpose | Fund? |
 |--------|-----------|---------|-------|
@@ -53,6 +53,8 @@ polygon-agent setup --oms-publishable-key <key>
 ### Optional overrides
 | Variable | Default |
 |----------|---------|
+| `POLYGON_AGENT_LOGIN_UI` | Base URL of the browser login page opened by `wallet login` (default `https://agentconnect.polygon.technology`) |
+| `POLYGON_AGENT_OIDC_RELAY` | Base URL of the OIDC relay used by `wallet login` (default `https://oidc-relay.polygon.technology`); also settable per run with `--relay-url` |
 | `SEQUENCE_PROJECT_ACCESS_KEY` | Used only as the Trails API key for DeFi earn-pool lookups (optional) |
 | `TRAILS_TOKEN_MAP_JSON` | Token-directory lookup |
 | `POLYGON_AGENT_DEBUG_FETCH` | Off — logs HTTP to `~/.polygon-agent/fetch-debug.log` |
@@ -66,11 +68,14 @@ polygon-agent setup --oms-publishable-key <key>
 # → stores publishableKey to ~/.polygon-agent/builder.json
 # → all subsequent commands auto-load it from disk — no export needed
 
-# Step 2: Log in with Google in the browser
+# Step 2: Log in in the browser
 polygon-agent wallet login
-# → prints/opens a Google sign-in URL
-# → after the user signs in, the embedded wallet is created/unlocked
-# → on a headless/remote host add --remote (uses a public OIDC relay)
+# → opens the agentconnect login page; choose Google or email (email sends
+#   a 6-digit code to the user's inbox, entered on the page)
+# → works whether the browser is on this machine or elsewhere, so there is
+#   no separate headless mode
+# → --local falls back to the legacy loopback flow (Google only, browser
+#   must be on this machine)
 # → session saved to ~/.polygon-agent/oms/main/; prints the walletAddress
 
 # Step 3: Fund wallet
@@ -103,7 +108,7 @@ For specific workflows, fetch and load the relevant sub-skill **before attemptin
 > **IMPORTANT — x402 calls:** If the user asks to use x402 to fetch data (Twitter/X profiles, web search, news, AI images, code review, etc.), follow these steps in order before making any request:
 >
 > 1. Fetch and read the discovery skill: `GET https://agentconnect.polygon.technology/polygon-discovery/SKILL.md`
-> 2. Run `polygon-agent wallet list` — if no wallet exists, log in: `polygon-agent setup --oms-publishable-key <key>` (if not already done), then `polygon-agent wallet login` and sign in with Google in the browser, then fund the wallet before continuing.
+> 2. Run `polygon-agent wallet list` — if no wallet exists, log in: `polygon-agent setup --oms-publishable-key <key>` (if not already done), then `polygon-agent wallet login` and sign in on the login page (Google or email), then fund the wallet before continuing.
 > 3. Run `polygon-agent balances` — confirm USDC is available before proceeding; x402 calls will fail with an EOA funding error if the wallet is empty
 >
 > Do not guess endpoints or search the web for x402 providers. The discovery skill documents the correct, working endpoints with exact URL formats.
@@ -122,9 +127,9 @@ polygon-agent setup [--name <name>] [--force]
 Valid `--chain` values for operations: `polygon` (default/mainnet), `amoy` (Polygon testnet), `mainnet` (Ethereum), `arbitrum`, `optimism`, `base`. ERC-8004 agent operations only support `polygon`. The embedded wallet address is the same on every chain.
 
 ```bash
-polygon-agent wallet login [--name <n>] [--remote] [--no-fund] [--force]
-# Logs in with Google in the browser: prints/opens a Google sign-in URL; after sign-in the wallet is created/unlocked.
-# Add --remote on headless/remote hosts (uses a public OIDC relay; needs POLYGON_AGENT_OIDC_RELAY or --relay-url).
+polygon-agent wallet login [--name <n>] [--local] [--no-fund] [--force]
+# Opens the agentconnect login page; choose Google or email. Works whether the browser is local or remote, so there is no separate headless mode.
+# --local falls back to the legacy loopback flow (raw Google URL + localhost callback; browser must be on this machine; Google only). --remote is deprecated (now a no-op with a notice).
 polygon-agent wallet logout [--name <n>]   # clears the local session
 polygon-agent wallet list
 polygon-agent wallet address [--name <n>]
