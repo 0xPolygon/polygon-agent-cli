@@ -139,4 +139,22 @@ describe('runBrowserLogin', () => {
     };
     await expect(runBrowserLogin(deps, OPTS)).rejects.toThrow(/Relay register failed/);
   });
+
+  it('publishes an error status when the provider auth start fails', async () => {
+    const { deps, statuses } = makeFakes([{ type: 'google' }]);
+    deps.wallet.startOidcRedirectAuth = async () => {
+      throw new Error('provider down');
+    };
+    await expect(runBrowserLogin(deps, OPTS)).rejects.toThrow(/provider down/);
+    expect(statuses.at(-1)).toEqual({ status: 'error', message: 'provider down' });
+  });
+
+  it('publishes an error status when the relay action poll fails', async () => {
+    const { deps, statuses } = makeFakes([]);
+    deps.relay.nextAction = async () => {
+      throw new Error('Relay poll failed (500)');
+    };
+    await expect(runBrowserLogin(deps, OPTS)).rejects.toThrow(/Relay poll failed/);
+    expect(statuses.at(-1)).toEqual({ status: 'error', message: 'Relay poll failed (500)' });
+  });
 });

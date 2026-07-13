@@ -70,38 +70,31 @@ export async function runBrowserLogin(
   await relay.registerSession(session);
   await deps.announce(pageUrl);
 
-  // Publish a terminal error so the page does not sit on a spinner, then throw.
-  const fail = async (message: string): Promise<never> => {
-    try {
-      await relay.setStatus(session, { status: 'error', message });
-    } catch {
-      // Best-effort: the CLI error below is the source of truth.
-    }
-    throw new Error(message);
-  };
+  const runActionLoop = async (): Promise<{
+    walletAddress: string;
+    loginMethod: 'google' | 'email';
+  }> => {
+    let otpFailures = 0;
 
-  let otpFailures = 0;
+    while (deps.now() < deadline) {
+      const action = await relay.nextAction(session);
+      if (!action) {
+        await deps.sleep(interval);
+        continue;
+      }
 
-  while (deps.now() < deadline) {
-    const action = await relay.nextAction(session);
-    if (!action) {
-      await deps.sleep(interval);
-      continue;
-    }
+      if (action.type === 'cancel') {
+        throw new Error('Login cancelled in the browser.');
+      }
 
-    if (action.type === 'cancel') {
-      return fail('Login cancelled in the browser.');
-    }
-
-    if (action.type === 'google') {
-      const { url, state } = await wallet.startOidcRedirectAuth({
-        provider: 'google',
-        redirectUri: `${opts.relayBase}/api/oidc/cb`,
-        ...(opts.seqRelay ? { relayRedirectUri: opts.seqRelay } : {})
-      });
-      await relay.registerOidcHandoff(state, pageUrl);
-      await relay.setStatus(session, { status: 'auth-url', url });
-      try {
+      if (action.type === 'google') {
+        const { url, state } = await wallet.startOidcRedirectAuth({
+          provider: 'google',
+          redirectUri: `${opts.relayBase}/api/oidc/cb`,
+          ...(opts.seqRelay ? { relayRedirectUri: opts.seqRelay } : {})
+        });
+        await relay.registerOidcHandoff(state, pageUrl);
+        await relay.setStatus(session, { status: 'auth-url', url });
         const cb = await relay.pollOidcCallback(state, Math.max(deadline - deps.now(), 1));
         const callbackUrl = `${opts.relayBase}/api/oidc/cb?code=${encodeURIComponent(cb.code)}&state=${encodeURIComponent(cb.state)}`;
         const result = await wallet.completeOidcRedirectAuth({
@@ -110,41 +103,47 @@ export async function runBrowserLogin(
         });
         await relay.setStatus(session, { status: 'done', walletAddress: result.walletAddress });
         return { walletAddress: result.walletAddress, loginMethod: 'google' };
-      } catch (error) {
-        return fail((error as Error).message);
       }
-    }
 
-    if (action.type === 'email') {
-      try {
+      if (action.type === 'email') {
         await wallet.startEmailAuth({ email: action.email });
         otpFailures = 0;
         await relay.setStatus(session, { status: 'otp-sent' });
-      } catch (error) {
-        return fail((error as Error).message);
+        continue;
       }
-      continue;
+
+      // action.type === 'otp'
+      try {
+        const result = await wallet.completeEmailAuth({
+          code: action.code,
+          walletSelection: 'automatic'
+        });
+        await relay.setStatus(session, { status: 'done', walletAddress: result.walletAddress });
+        return { walletAddress: result.walletAddress, loginMethod: 'email' };
+      } catch {
+        otpFailures += 1;
+        if (otpFailures >= MAX_OTP_ATTEMPTS) {
+          throw new Error('Login failed: too many invalid codes.');
+        }
+        await relay.setStatus(session, {
+          status: 'otp-invalid',
+          attemptsLeft: MAX_OTP_ATTEMPTS - otpFailures
+        });
+      }
     }
 
-    // action.type === 'otp'
+    throw new Error('Timed out waiting for browser login. Re-run, or use `wallet login --local`.');
+  };
+
+  try {
+    return await runActionLoop();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     try {
-      const result = await wallet.completeEmailAuth({
-        code: action.code,
-        walletSelection: 'automatic'
-      });
-      await relay.setStatus(session, { status: 'done', walletAddress: result.walletAddress });
-      return { walletAddress: result.walletAddress, loginMethod: 'email' };
+      await relay.setStatus(session, { status: 'error', message });
     } catch {
-      otpFailures += 1;
-      if (otpFailures >= MAX_OTP_ATTEMPTS) {
-        return fail('Login failed: too many invalid codes.');
-      }
-      await relay.setStatus(session, {
-        status: 'otp-invalid',
-        attemptsLeft: MAX_OTP_ATTEMPTS - otpFailures
-      });
+      // Best-effort: the thrown error below is the source of truth.
     }
+    throw error instanceof Error ? error : new Error(message);
   }
-
-  return fail('Timed out waiting for browser login. Re-run, or use `wallet login --local`.');
 }
