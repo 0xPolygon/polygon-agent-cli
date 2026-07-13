@@ -69,4 +69,35 @@ describe('login machine', () => {
       )
     ).toEqual({ kind: 'google-wait' });
   });
+
+  it('terminal states absorb any later status or event', () => {
+    const success: MachineState = { kind: 'success', walletAddress: '0xW' };
+    expect(reduce(success, { type: 'status', status: { status: 'otp-sent' } })).toEqual(success);
+    expect(
+      reduce(
+        { kind: 'failed', message: 'boom' },
+        { type: 'status', status: { status: 'done', walletAddress: '0xW' } }
+      )
+    ).toEqual({ kind: 'failed', message: 'boom' });
+    expect(reduce({ kind: 'expired' }, { type: 'choose-google' })).toEqual({ kind: 'expired' });
+  });
+
+  it('user events from illegal states are no-ops', () => {
+    expect(reduce({ kind: 'email-entry' }, { type: 'submit-otp', code: '123456' })).toEqual({
+      kind: 'email-entry'
+    });
+    expect(reduce({ kind: 'otp-entry', email: 'a@b.co' }, { type: 'choose-google' })).toEqual({
+      kind: 'otp-entry',
+      email: 'a@b.co'
+    });
+    expect(reduce(initialState, { type: 'submit-email', email: 'a@b.co' })).toEqual({
+      kind: 'method'
+    });
+    expect(
+      reduce(
+        { kind: 'email-wait', email: 'a@b.co' },
+        { type: 'status', status: { status: 'otp-invalid' } }
+      )
+    ).toEqual({ kind: 'email-wait', email: 'a@b.co' });
+  });
 });

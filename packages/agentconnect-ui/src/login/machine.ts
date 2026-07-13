@@ -38,6 +38,12 @@ function emailOf(state: MachineState): string {
 }
 
 export function reduce(state: MachineState, event: MachineEvent): MachineState {
+  // Terminal states absorb everything: a stale or duplicate poll response must
+  // never regress the ui once the flow has resolved.
+  if (state.kind === 'success' || state.kind === 'expired' || state.kind === 'failed') {
+    return state;
+  }
+
   if (event.type === 'status') {
     const s = event.status;
     // Terminal statuses win from anywhere.
