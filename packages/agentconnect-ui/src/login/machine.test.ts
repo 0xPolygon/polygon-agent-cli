@@ -51,6 +51,13 @@ describe('login machine', () => {
     expect(
       reduce(initialState, { type: 'status', status: { status: 'done', walletAddress: '0xW' } })
     ).toEqual({ kind: 'success', walletAddress: '0xW' });
+    // A refresh can also land after an invalid code was already reported;
+    // the poll snaps straight to the otp form with the invalid flag set.
+    expect(reduce(initialState, { type: 'status', status: { status: 'otp-invalid' } })).toEqual({
+      kind: 'otp-entry',
+      email: '',
+      invalid: true
+    });
   });
 
   it('back returns from email entry to method choice', () => {
@@ -61,13 +68,29 @@ describe('login machine', () => {
     expect(
       reduce({ kind: 'email-entry' }, { type: 'status', status: { status: 'awaiting-method' } })
     ).toEqual({ kind: 'email-entry' });
-    // auth-url is handled as a side effect (redirect); state is unchanged.
+    // From google-wait the component auto-redirects as a side effect; state is unchanged.
     expect(
       reduce(
         { kind: 'google-wait' },
         { type: 'status', status: { status: 'auth-url', url: 'https://x' } }
       )
     ).toEqual({ kind: 'google-wait' });
+  });
+
+  it('auth-url from method moves to auth-pending with the url', () => {
+    expect(
+      reduce(initialState, { type: 'status', status: { status: 'auth-url', url: 'https://x' } })
+    ).toEqual({ kind: 'auth-pending', url: 'https://x' });
+  });
+
+  it('auth-pending only exits via a terminal status', () => {
+    const authPending: MachineState = { kind: 'auth-pending', url: 'https://x' };
+    expect(
+      reduce(authPending, { type: 'status', status: { status: 'done', walletAddress: '0xW' } })
+    ).toEqual({ kind: 'success', walletAddress: '0xW' });
+    expect(reduce(authPending, { type: 'status', status: { status: 'otp-sent' } })).toEqual(
+      authPending
+    );
   });
 
   it('terminal states absorb any later status or event', () => {
@@ -93,11 +116,5 @@ describe('login machine', () => {
     expect(reduce(initialState, { type: 'submit-email', email: 'a@b.co' })).toEqual({
       kind: 'method'
     });
-    expect(
-      reduce(
-        { kind: 'email-wait', email: 'a@b.co' },
-        { type: 'status', status: { status: 'otp-invalid' } }
-      )
-    ).toEqual({ kind: 'email-wait', email: 'a@b.co' });
   });
 });

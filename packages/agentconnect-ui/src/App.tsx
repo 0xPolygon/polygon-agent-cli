@@ -458,16 +458,16 @@ function MissingWalletNotice() {
 
 // ── Main App ──
 function App() {
-  if (window.location.pathname === '/login') {
-    return <LoginPage />;
-  }
-
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const walletAddress = params.get('wallet') || '';
   const chainId = Number(params.get('chain') || '137');
 
   const initialView: View = params.get('view') === 'fund' ? 'fund' : 'dashboard';
   const [view, setView] = useState<View>(initialView);
+
+  if (window.location.pathname === '/login') {
+    return <LoginPage />;
+  }
 
   if (!walletAddress) {
     return <MissingWalletNotice />;

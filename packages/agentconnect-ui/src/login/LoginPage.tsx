@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { MachineEvent, MachineState, RelayStatus } from './machine.js';
+import type { LoginAction, MachineEvent, MachineState, RelayStatus } from './machine.js';
 
 import { LogoBadge } from '../App.js';
 import { oidcRelayUrl } from '../config';
@@ -8,12 +8,6 @@ import { initialState, reduce } from './machine.js';
 
 const WALLET_URL = 'https://wallet.polygon.technology';
 const POLL_MS = 1500;
-
-type LoginAction =
-  | { type: 'google' }
-  | { type: 'email'; email: string }
-  | { type: 'otp'; code: string }
-  | { type: 'cancel' };
 
 // Optimistic ui transitions must only happen after the relay has acknowledged
 // the action. Returns true only when the POST actually landed, so call sites
@@ -127,6 +121,19 @@ function renderState(state: MachineState, session: string, dispatch: (e: Machine
       );
     case 'google-wait':
       return <Waiting text="Sending you to Google sign in" />;
+    case 'auth-pending':
+      return (
+        <div className="text-center">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-[#c8cfe1] border-t-[#141635]" />
+          <p className="mt-4 text-sm text-[#64708f]">Finishing sign in</p>
+          <a
+            href={state.url}
+            className="mt-6 inline-block text-sm text-[#64708f] hover:text-[#141635] underline"
+          >
+            Not redirected? Continue with Google
+          </a>
+        </div>
+      );
     case 'email-entry':
       return (
         <EmailForm

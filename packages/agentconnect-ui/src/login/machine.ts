@@ -15,6 +15,7 @@ export type RelayStatus = LoginStatus | { status: 'expired' };
 export type MachineState =
   | { kind: 'method' }
   | { kind: 'google-wait' }
+  | { kind: 'auth-pending'; url: string }
   | { kind: 'email-entry' }
   | { kind: 'email-wait'; email: string }
   | { kind: 'otp-entry'; email: string; invalid?: boolean; attemptsLeft?: number }
@@ -30,6 +31,12 @@ export type MachineEvent =
   | { type: 'submit-email'; email: string }
   | { type: 'submit-otp'; code: string }
   | { type: 'back' };
+
+export type LoginAction =
+  | { type: 'google' }
+  | { type: 'email'; email: string }
+  | { type: 'otp'; code: string }
+  | { type: 'cancel' };
 
 export const initialState: MachineState = { kind: 'method' };
 
@@ -50,15 +57,37 @@ export function reduce(state: MachineState, event: MachineEvent): MachineState {
     if (s.status === 'expired') return { kind: 'expired' };
     if (s.status === 'error') return { kind: 'failed', message: s.message };
     if (s.status === 'done') return { kind: 'success', walletAddress: s.walletAddress };
+
+    // auth-pending only exits via a terminal status (handled above): once the
+    // page is waiting out the Google redirect there is nothing else worth
+    // reacting to until sign-in finishes or fails.
+    if (state.kind === 'auth-pending') return state;
+
     // otp-sent snaps forward (also reconciles a refreshed page).
     if (s.status === 'otp-sent') {
       if (state.kind === 'otp-entry' || state.kind === 'otp-wait') return state;
       return { kind: 'otp-entry', email: emailOf(state) };
     }
-    if (s.status === 'otp-invalid' && state.kind === 'otp-wait') {
-      return { kind: 'otp-entry', email: state.email, invalid: true, attemptsLeft: s.attemptsLeft };
+    // otp-invalid snaps forward from anywhere that isn't already on the otp
+    // form, reconciling a refreshed or lagging page onto the invalid-code
+    // message instead of leaving it stuck on an earlier step.
+    if (s.status === 'otp-invalid') {
+      if (state.kind === 'otp-entry') return state;
+      return {
+        kind: 'otp-entry',
+        email: emailOf(state),
+        invalid: true,
+        attemptsLeft: s.attemptsLeft
+      };
     }
-    // awaiting-method and auth-url never regress the ui.
+    // auth-url on a fresh or refreshed page (still at `method`) must not show
+    // the live method buttons while a Google redirect is in flight, so it
+    // moves to a distinct waiting state with a manual fallback link. From
+    // google-wait the component itself auto-redirects, so state is unchanged.
+    if (s.status === 'auth-url' && state.kind === 'method') {
+      return { kind: 'auth-pending', url: s.url };
+    }
+    // awaiting-method and auth-url (from any other state) never regress the ui.
     return state;
   }
 
