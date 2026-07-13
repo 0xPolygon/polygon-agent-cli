@@ -1,5 +1,5 @@
 // Polymarket CLI commands
-// Architecture: Sequence smart wallet → Polymarket proxy wallet → CLOB
+// Architecture: OMS smart wallet → Polymarket proxy wallet → CLOB
 // - `approve`: sets on-chain approvals on proxy wallet (one-time)
 // - `clob-buy`: funds proxy wallet from smart wallet, then places CLOB BUY order
 // - CLOB orders: maker=proxyWallet, signer=EOA, signatureType=POLY_PROXY

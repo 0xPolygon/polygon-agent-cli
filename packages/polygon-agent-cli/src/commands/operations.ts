@@ -332,7 +332,7 @@ function fundingUiBase(): string | undefined {
 
 /**
  * Post-login funding step, balance-aware. Checks the wallet's USD balance via the
- * Sequence indexer and routes: funded (>0) -> dashboard, empty -> funding. On a
+ * OMS indexer and routes: funded (>0) -> dashboard, empty -> funding. On a
  * human's machine (local, incl. under Claude Code / a harness) it opens the page;
  * headless or --remote just returns the URL + balance on the CLI. Skipped by
  * --no-fund. Falls back to wallet.polygon.technology if no hosted page is configured.

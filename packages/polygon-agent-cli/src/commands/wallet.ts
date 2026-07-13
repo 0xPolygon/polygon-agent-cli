@@ -53,7 +53,7 @@ async function announceAuthUrl(url: string): Promise<void> {
 //     handoff for this `state`, open the URL, then POLL the relay for code+state.
 //     Works when the browser and CLI are on different machines.
 //   - local:  a short-lived loopback server; the relay bounces the browser to it.
-// Google only ever sees the Sequence relay (relayRedirectUri); our redirectUri
+// Google only ever sees the OMS relay (relayRedirectUri); our redirectUri
 // rides inside the signed state either way.
 async function obtainBrowserCallbackUrl(
   oms: ReturnType<typeof getOmsClient>,
@@ -324,7 +324,7 @@ export const walletCommand: CommandModule = {
       })
       .command({
         command: 'logout',
-        describe: 'Log out and clear the local Sequence V3 session',
+        describe: 'Log out and clear the local OMS V3 session',
         builder: (y) =>
           y.option('name', {
             type: 'string',

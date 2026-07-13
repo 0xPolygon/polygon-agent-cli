@@ -32,27 +32,29 @@ export const setupCommand: CommandModule<object, SetupArgs> = {
       })
       .option('oms-publishable-key', {
         type: 'string',
-        describe: 'Sequence V3 OMS publishable key (from Sequence Builder dashboard)'
+        describe: 'OMS (Open Money Stack) publishable key (from the OMS Builder dashboard)'
       })
       .option('oms-project-id', {
         type: 'string',
-        describe: 'Sequence V3 OMS project id (e.g. proj_...)'
+        describe: 'OMS project id (e.g. proj_...) — optional, legacy display field only'
       }),
   handler: async (argv) => {
     const name = argv.name || generateAgentName();
 
-    // If OMS credentials are supplied, persist them (independent of the legacy
-    // builder/access-key flow). Used by the V3 `wallet login` path.
+    // If an OMS publishable key is supplied, persist it (independent of the legacy
+    // builder/access-key flow). Used by the V3 `wallet login` path. The project id
+    // is optional legacy metadata — the SDK identifies the project from the
+    // publishable key alone.
     const omsPk = argv['oms-publishable-key'];
     const omsProj = argv['oms-project-id'];
-    if (omsPk && omsProj) {
+    if (omsPk) {
       await saveOmsConfig({ publishableKey: omsPk, omsProjectId: omsProj });
       if (!isTTY()) {
         console.log(
           JSON.stringify(
             {
               ok: true,
-              message: 'OMS (Sequence V3) credentials saved to ~/.polygon-agent/builder.json'
+              message: 'OMS credentials saved to ~/.polygon-agent/builder.json'
             },
             null,
             2

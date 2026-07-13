@@ -1,4 +1,4 @@
-// OMSClient factory — builds a per-process, per-wallet Sequence V3 client backed
+// OMSClient factory — builds a per-process, per-wallet OMS V3 client backed
 // by file storage + a persisted credential signer, so sessions survive restarts.
 
 import { EthereumPrivateKeyCredentialSigner, OMSClient } from '@0xsequence/typescript-sdk';
@@ -23,7 +23,7 @@ export function getOmsClient(walletName: string): OMSClient {
   if (!cfg) {
     throw new Error(
       'OMS credentials not configured. Set SEQUENCE_PUBLISHABLE_KEY ' +
-        '(or run `polygon-agent setup`). Get it from the Sequence Builder dashboard.'
+        '(or run `polygon-agent setup`). Get it from the OMS Builder dashboard.'
     );
   }
 
@@ -61,7 +61,7 @@ export function oidcRelayRedirectUri(): string | undefined {
 /**
  * Base URL of OUR OIDC handoff relay (packages/oidc-relay), used by the `--remote`
  * browser-login path when a localhost callback can't be reached. This is a
- * DIFFERENT relay from oidcRelayRedirectUri(): that one overrides the Sequence
+ * DIFFERENT relay from oidcRelayRedirectUri(): that one overrides the OMS
  * relay Google redirects to; this is our public bounce target the CLI polls.
  * Read from POLYGON_AGENT_OIDC_RELAY; the `--relay-url` flag overrides per-run.
  * Trailing slash trimmed so callers can append `/api/oidc/...` cleanly.

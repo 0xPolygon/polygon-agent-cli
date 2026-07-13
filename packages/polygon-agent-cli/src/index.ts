@@ -28,7 +28,7 @@ import { bootstrapOmsConfig } from './lib/storage.ts';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8'));
 
-// Auto-load OMS (Sequence V3) credentials from builder.json if not already in env
+// Auto-load OMS V3 credentials from builder.json if not already in env
 bootstrapOmsConfig();
 
 // Legacy aliases — hidden commands that map to the new structure

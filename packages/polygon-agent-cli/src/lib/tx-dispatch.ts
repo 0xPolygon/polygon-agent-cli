@@ -1,4 +1,4 @@
-// Transaction dispatch — submits via the OMS (Sequence V3) primitive.
+// Transaction dispatch — submits via the OMS V3 primitive.
 //
 // Command call sites import `runTx` from here. (Kept as a thin indirection so
 // call sites don't import oms-tx directly, leaving room for future routing.)
