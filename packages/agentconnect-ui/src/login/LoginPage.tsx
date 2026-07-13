@@ -15,20 +15,37 @@ type LoginAction =
   | { type: 'otp'; code: string }
   | { type: 'cancel' };
 
-async function postAction(session: string, action: LoginAction): Promise<void> {
-  await fetch(`${oidcRelayUrl}/api/login/action`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ session, action })
-  });
+// Optimistic ui transitions must only happen after the relay has acknowledged
+// the action. Returns true only when the POST actually landed, so call sites
+// can stay put and let the user retry when it did not.
+async function postAction(session: string, action: LoginAction): Promise<boolean> {
+  try {
+    const res = await fetch(`${oidcRelayUrl}/api/login/action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ session, action })
+    });
+    return res.ok || res.status === 204;
+  } catch {
+    return false;
+  }
 }
 
-async function fetchStatus(session: string): Promise<RelayStatus> {
-  const res = await fetch(
-    `${oidcRelayUrl}/api/login/status?session=${encodeURIComponent(session)}`
-  );
-  if (!res.ok) return { status: 'expired' };
-  return (await res.json()) as RelayStatus;
+// A transient relay failure (network error or a 5xx) must not terminate the
+// session, so it returns null and the polling effect just skips that tick.
+// Only a 400 (an invalid session id, which never becomes valid) maps to the
+// terminal expired state.
+async function fetchStatus(session: string): Promise<RelayStatus | null> {
+  try {
+    const res = await fetch(
+      `${oidcRelayUrl}/api/login/status?session=${encodeURIComponent(session)}`
+    );
+    if (res.ok) return (await res.json()) as RelayStatus;
+    if (res.status === 400) return { status: 'expired' };
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 const TERMINAL: MachineState['kind'][] = ['success', 'expired', 'failed'];
@@ -47,6 +64,7 @@ export function LoginPage() {
     if (!session || TERMINAL.includes(state.kind)) return;
     const timer = setInterval(() => {
       void fetchStatus(session).then((status) => {
+        if (status === null) return; // transient failure; keep polling
         if (status.status === 'auth-url' && !redirected.current && state.kind === 'google-wait') {
           redirected.current = true;
           window.location.assign(status.url);
@@ -95,8 +113,9 @@ function renderState(state: MachineState, session: string, dispatch: (e: Machine
       return (
         <MethodChoice
           onGoogle={() => {
-            void postAction(session, { type: 'google' });
-            dispatch({ type: 'choose-google' });
+            void postAction(session, { type: 'google' }).then((ok) => {
+              if (ok) dispatch({ type: 'choose-google' });
+            });
           }}
           onEmail={() => dispatch({ type: 'choose-email' })}
           onCancel={() => {
@@ -112,8 +131,9 @@ function renderState(state: MachineState, session: string, dispatch: (e: Machine
       return (
         <EmailForm
           onSubmit={(email) => {
-            void postAction(session, { type: 'email', email });
-            dispatch({ type: 'submit-email', email });
+            void postAction(session, { type: 'email', email }).then((ok) => {
+              if (ok) dispatch({ type: 'submit-email', email });
+            });
           }}
           onBack={() => dispatch({ type: 'back' })}
         />
@@ -126,8 +146,9 @@ function renderState(state: MachineState, session: string, dispatch: (e: Machine
           invalid={state.invalid}
           attemptsLeft={state.attemptsLeft}
           onSubmit={(code) => {
-            void postAction(session, { type: 'otp', code });
-            dispatch({ type: 'submit-otp', code });
+            void postAction(session, { type: 'otp', code }).then((ok) => {
+              if (ok) dispatch({ type: 'submit-otp', code });
+            });
           }}
         />
       );
