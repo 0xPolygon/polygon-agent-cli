@@ -222,10 +222,11 @@ export SEQUENCE_PUBLISHABLE_KEY=<publishable-key-from-builder>
 
 **Optional:**
 
-| Variable                  | Default                                | Description                                                                  |
-| ------------------------- | --------------------------------------- | ---------------------------------------------------------------------------- |
-| `TRAILS_API_KEY`          | —                                       | Optional Trails API key for higher rate limits on swap / bridge / earn calls. |
-| `POLYGON_AGENT_LOGIN_UI`  | `https://agentconnect.polygon.technology` | Base URL of the browser login page opened by `wallet login`.                 |
+| Variable                   | Default                                    | Description                                                                    |
+| -------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------- |
+| `TRAILS_API_KEY`           | —                                           | Optional Trails API key for higher rate limits on swap / bridge / earn calls.   |
+| `POLYGON_AGENT_LOGIN_UI`   | `https://agentconnect.polygon.technology`   | Base URL of the browser login page opened by `wallet login`.                   |
+| `POLYGON_AGENT_OIDC_RELAY` | `https://oidc-relay.polygon.technology`     | Base URL of the OIDC handoff and login relay used by `wallet login`.           |
 
 ---
 
