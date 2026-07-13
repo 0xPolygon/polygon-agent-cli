@@ -66,3 +66,54 @@ export class LoginSessionCore {
     return (await this.store.get<LoginStatus>('status')) ?? { status: 'expired' };
   }
 }
+
+const SESSION_TTL_MS = 10 * 60 * 1000; // matches OidcHandoff
+
+function doStore(storage: DurableObjectStorage): SessionStore {
+  return {
+    get: (key) => storage.get(key),
+    put: (entries) => storage.put(entries),
+    delete: (key) => storage.delete(key),
+    deleteAll: () => storage.deleteAll()
+  };
+}
+
+// --- Durable Object: one instance per login session id ---
+export class LoginSession {
+  private readonly core: LoginSessionCore;
+  constructor(private readonly state: DurableObjectState) {
+    this.core = new LoginSessionCore(doStore(state.storage));
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const op = url.pathname; // internal path set by the router in relay.ts
+
+    if (op === '/register') {
+      await this.core.register();
+      await this.state.storage.setAlarm(Date.now() + SESSION_TTL_MS);
+      return new Response(null, { status: 204 });
+    }
+    if (op === '/action') {
+      const action = (await request.json()) as LoginAction;
+      const result = await this.core.submitAction(action);
+      if (!result.ok) return Response.json({ error: result.error }, { status: 410 });
+      return new Response(null, { status: 204 });
+    }
+    if (op === '/next-action') {
+      return Response.json(await this.core.nextAction());
+    }
+    if (op === '/set-status') {
+      await this.core.setStatus(await request.json());
+      return new Response(null, { status: 204 });
+    }
+    if (op === '/get-status') {
+      return Response.json(await this.core.getStatus());
+    }
+    return new Response('not found', { status: 404 });
+  }
+
+  async alarm(): Promise<void> {
+    await this.state.storage.deleteAll();
+  }
+}

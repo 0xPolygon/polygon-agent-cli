@@ -20,10 +20,17 @@
 //   GET  /cb?code&state  (or ?error&state)      (browser: the redirect lands here)
 //   GET  /poll?state  -> { status, code?, state?, error? }   (CLI: poll for result)
 
+import type { LoginAction } from './login-session.ts';
+
+import { LoginSession } from './login-session.ts';
+
+export { LoginSession };
+
 const SESSION_TTL_MS = 10 * 60 * 1000; // 10 minutes to complete the login
 
 interface Env {
   OIDC_RELAY: DurableObjectNamespace;
+  LOGIN_SESSION: DurableObjectNamespace;
 }
 
 function cors(res: Response): Response {
@@ -42,6 +49,28 @@ function json(data: unknown, status = 200): Response {
 // isn't the shape we expect before using it as a DO name.
 function validState(s: string | null): s is string {
   return typeof s === 'string' && s.length > 0 && s.length <= 4096 && /^[A-Za-z0-9_-]+$/.test(s);
+}
+
+function validSession(s: string | null): s is string {
+  return typeof s === 'string' && /^[A-Za-z0-9_-]{16,64}$/.test(s);
+}
+
+// Shape-check browser-submitted actions before they reach the DO.
+function validAction(a: unknown): a is LoginAction {
+  if (typeof a !== 'object' || a === null) return false;
+  const t = (a as { type?: unknown }).type;
+  if (t === 'google' || t === 'cancel') return true;
+  if (t === 'email') {
+    const email = (a as { email?: unknown }).email;
+    return (
+      typeof email === 'string' && email.length >= 3 && email.length <= 320 && email.includes('@')
+    );
+  }
+  if (t === 'otp') {
+    const code = (a as { code?: unknown }).code;
+    return typeof code === 'string' && code.length >= 4 && code.length <= 16;
+  }
+  return false;
 }
 
 const DONE_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>Login complete</title>
@@ -180,6 +209,80 @@ export default {
       const stub = env.OIDC_RELAY.get(env.OIDC_RELAY.idFromName(state));
       const res = await stub.fetch(new Request('https://do/poll'));
       return cors(res);
+    }
+
+    // --- Browser-login pairing sessions (/api/login/*) ---
+    const loginStub = (session: string) =>
+      env.LOGIN_SESSION.get(env.LOGIN_SESSION.idFromName(session));
+
+    // POST /api/login/register { session } -> arm a pairing session (CLI).
+    if (request.method === 'POST' && url.pathname === '/api/login/register') {
+      let body: { session?: unknown };
+      try {
+        body = (await request.json()) as { session?: unknown };
+      } catch {
+        return json({ error: 'invalid json' }, 400);
+      }
+      const session = typeof body.session === 'string' ? body.session : null;
+      if (!validSession(session)) return json({ error: 'invalid session' }, 400);
+      await loginStub(session).fetch(new Request('https://do/register', { method: 'POST' }));
+      return cors(new Response(null, { status: 204 }));
+    }
+
+    // POST /api/login/action { session, action } -> browser submits user input.
+    if (request.method === 'POST' && url.pathname === '/api/login/action') {
+      let body: { session?: unknown; action?: unknown };
+      try {
+        body = (await request.json()) as { session?: unknown; action?: unknown };
+      } catch {
+        return json({ error: 'invalid json' }, 400);
+      }
+      const session = typeof body.session === 'string' ? body.session : null;
+      if (!validSession(session) || !validAction(body.action)) {
+        return json({ error: 'invalid request' }, 400);
+      }
+      const res = await loginStub(session).fetch(
+        new Request('https://do/action', {
+          method: 'POST',
+          body: JSON.stringify(body.action)
+        })
+      );
+      return cors(res);
+    }
+
+    // GET /api/login/next-action?session= -> CLI polls for user input (one-time read).
+    if (request.method === 'GET' && url.pathname === '/api/login/next-action') {
+      const session = url.searchParams.get('session');
+      if (!validSession(session)) return json({ error: 'invalid session' }, 400);
+      return cors(await loginStub(session).fetch(new Request('https://do/next-action')));
+    }
+
+    // POST /api/login/status { session, ...LoginStatus } -> CLI publishes state.
+    if (request.method === 'POST' && url.pathname === '/api/login/status') {
+      let body: { session?: unknown; status?: unknown };
+      try {
+        body = (await request.json()) as { session?: unknown; status?: unknown };
+      } catch {
+        return json({ error: 'invalid json' }, 400);
+      }
+      const session = typeof body.session === 'string' ? body.session : null;
+      if (!validSession(session) || typeof body.status !== 'object' || body.status === null) {
+        return json({ error: 'invalid request' }, 400);
+      }
+      await loginStub(session).fetch(
+        new Request('https://do/set-status', {
+          method: 'POST',
+          body: JSON.stringify(body.status)
+        })
+      );
+      return cors(new Response(null, { status: 204 }));
+    }
+
+    // GET /api/login/status?session= -> browser polls state (repeat-readable).
+    if (request.method === 'GET' && url.pathname === '/api/login/status') {
+      const session = url.searchParams.get('session');
+      if (!validSession(session)) return json({ status: 'error', message: 'invalid session' }, 400);
+      return cors(await loginStub(session).fetch(new Request('https://do/get-status')));
     }
 
     return new Response('not found', { status: 404 });

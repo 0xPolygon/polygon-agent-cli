@@ -9,9 +9,17 @@ main = "src/relay.ts"
 name = "OIDC_RELAY"
 class_name = "OidcHandoff"
 
+[[durable_objects.bindings]]
+name = "LOGIN_SESSION"
+class_name = "LoginSession"
+
 [[migrations]]
 tag = "v1"
 new_classes = ["OidcHandoff"]
+
+[[migrations]]
+tag = "v2"
+new_classes = ["LoginSession"]
 
 # Staging: a workers.dev URL is fine to start; swap to a custom domain for prod.
 [env.staging]
@@ -22,9 +30,17 @@ workers_dev = true
 name = "OIDC_RELAY"
 class_name = "OidcHandoff"
 
+[[env.staging.durable_objects.bindings]]
+name = "LOGIN_SESSION"
+class_name = "LoginSession"
+
 [[env.staging.migrations]]
 tag = "v1"
 new_classes = ["OidcHandoff"]
+
+[[env.staging.migrations]]
+tag = "v2"
+new_classes = ["LoginSession"]
 
 [env.production]
 name = "oidc-relay-production"
@@ -38,6 +54,14 @@ workers_dev = false
 name = "OIDC_RELAY"
 class_name = "OidcHandoff"
 
+[[env.production.durable_objects.bindings]]
+name = "LOGIN_SESSION"
+class_name = "LoginSession"
+
 [[env.production.migrations]]
 tag = "v1"
 new_classes = ["OidcHandoff"]
+
+[[env.production.migrations]]
+tag = "v2"
+new_classes = ["LoginSession"]
