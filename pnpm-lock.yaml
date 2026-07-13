@@ -173,6 +173,9 @@ importers:
       esbuild:
         specifier: ^0.28.0
         version: 0.28.0
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@22.19.13)(lightningcss@1.32.0)(terser@5.46.1)
 
 packages:
 
@@ -11443,7 +11446,7 @@ snapshots:
   eslint-scope@9.1.2:
     dependencies:
       '@types/esrecurse': 4.3.1
-      '@types/estree': 1.0.8
+      '@types/estree': 1.0.9
       esrecurse: 4.3.0
       estraverse: 5.3.0
 
