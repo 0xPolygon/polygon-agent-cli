@@ -16,7 +16,7 @@
 - [Overview](#overview)
 - [Quickstart](#quickstart)
 - [Core Components](#core-components)
-  - [Sequence: Wallet Infrastructure](#sequence-wallet-infrastructure)
+  - [OMS: Wallet Infrastructure](#oms-wallet-infrastructure)
   - [Trails: Swapping, Bridging, and onchain actions](#trails-swapping-bridging-and-defi-actions)
   - [Onchain Identity](#onchain-agentic-identity)
 - [Plugins & Skills](#plugins--skills)
@@ -32,7 +32,7 @@
 
 Polygon Agent CLI gives AI agents everything they need to operate onchain:
 
-- **Create and manage wallets** Google-login embedded smart wallets, no private keys to manage and no keys exposed to your agent's context.
+- **Create and manage wallets** browser-login embedded smart wallets, no private keys to manage and no keys exposed to your agent's context.
 - **Send tokens, swap, bridge or any action** pay in any token for any onchain action. Built-in swapping, bridging, deposits, DeFi primitives, and more.
 - **Register agent identity** and build reputation via ERC-8004
 - **Integrated APIs** query cross-chain balances, transaction history and or query nodes via dedicated RPCs
@@ -74,13 +74,16 @@ pnpm polygon-agent --help
 Once installed via skills or npm, run the following. If running from source, prefix `polygon-agent` commands with `pnpm` and run them from the root of the repository (e.g., `pnpm polygon-agent setup --name "MyAgent"`).
 
 ```bash
-# 1. Setup: save your Sequence Builder credentials (persisted to ~/.polygon-agent/builder.json)
-polygon-agent setup --oms-publishable-key <key> --oms-project-id <proj_...>
+# 1. Setup: save your OMS Builder publishable key (persisted to ~/.polygon-agent/builder.json)
+polygon-agent setup --oms-publishable-key <key>
 
-# 2. Log in to your embedded wallet with Google in the browser
+# 2. Log in to your embedded wallet in the browser
 polygon-agent wallet login
-# Opens a Google sign-in URL; after you sign in, the embedded wallet is created/unlocked.
-# On a headless/remote host add --remote (uses a public OIDC relay).
+# Prints a login page URL and opens it in a browser. Choose Google or email
+# on the page; once you finish, the embedded wallet is created or unlocked.
+# This works whether the browser is on this machine or elsewhere, so there
+# is no separate remote mode to enable. Use --local for the older loopback
+# flow, which needs the browser on this same machine.
 
 # 3. Fund the wallet
 polygon-agent fund
@@ -102,17 +105,17 @@ polygon-agent agent register --name "MyAgent"
 
 The CLI is built on three pillars to enable end to end onchain payments with your agents.
 
-### Sequence: Wallet Infrastructure
+### OMS: Wallet Infrastructure
 
-[Sequence](https://sequence.xyz) powers all wallet operations, RPC access, and indexing.
+[OMS (Open Money Stack)](https://sequence.xyz) powers all wallet operations, RPC access, and indexing.
 
 | Capability  | What it does                                                                                | CLI command                     |
 | ----------- | ------------------------------------------------------------------------------------------- | ------------------------------- |
-| **Wallets** | Google-login embedded smart wallets (Account Abstraction), chain-agnostic address           | `wallet login`, `wallet list`   |
+| **Wallets** | browser-login embedded smart wallets (Account Abstraction), chain-agnostic address           | `wallet login`, `wallet list`   |
 | **RPCs**    | Load balanced RPCs cross-chain for onchain interactions and node queries                    | Used internally by all commands |
 | **Indexer** | Token balance queries and transaction history across ERC-20/721/1155                        | `balances`                      |
 
-Wallets are created and unlocked via Google browser login. The embedded wallet can call any contract and spend any amount it holds; there is no contract whitelist or per-token spend limit. The wallet address is the same across every supported chain, and sessions last about a week before you re-run `wallet login`.
+Wallets are created and unlocked via browser login (Google or email). The embedded wallet can call any contract and spend any amount it holds; there is no contract whitelist or per-token spend limit. The wallet address is the same across every supported chain, and sessions last about a week before you re-run `wallet login`.
 
 ### Trails: Swapping, Bridging, and DeFi Actions
 
@@ -160,8 +163,8 @@ See [`SKILL.md`](skills/SKILL.md) for the full agent-consumable reference and [`
 ### Setup & Wallets
 
 ```bash
-polygon-agent setup --oms-publishable-key <key> --oms-project-id <proj_...>  # Save Builder credentials
-polygon-agent wallet login [--name <n>] [--remote] [--no-fund] [--force]  # Log in with Google in the browser (add --remote for headless hosts)
+polygon-agent setup --oms-publishable-key <key>  # Save OMS Builder credentials
+polygon-agent wallet login [--name <n>] [--local] [--no-fund] [--force]  # Log in from the browser (choose Google or email on the login page)
 polygon-agent wallet logout [--name <n>]           # Log out of a wallet
 polygon-agent wallet list                          # Show all wallets
 polygon-agent wallet address [--name <n>]          # Show wallet address (same on every chain)
@@ -211,24 +214,25 @@ polygon-agent agent reviews --agent-id <id>
 
 ## Environment Variables
 
-**Required credentials** come from the [Sequence Builder](https://sequence.build) dashboard. Pass them to `setup` (which persists them to `~/.polygon-agent/builder.json`), or export them:
+**Required credential** comes from the [OMS Builder](https://sequence.build) dashboard. Pass it to `setup` (which persists it to `~/.polygon-agent/builder.json`), or export it:
 
 ```bash
 export SEQUENCE_PUBLISHABLE_KEY=<publishable-key-from-builder>
-export SEQUENCE_OMS_PROJECT_ID=<proj_...>
 ```
 
 **Optional:**
 
-| Variable          | Default | Description                                                                  |
-| ----------------- | ------- | ---------------------------------------------------------------------------- |
-| `TRAILS_API_KEY`  | —       | Optional Trails API key for higher rate limits on swap / bridge / earn calls. |
+| Variable                   | Default                                    | Description                                                                    |
+| -------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------- |
+| `TRAILS_API_KEY`           | —                                           | Optional Trails API key for higher rate limits on swap / bridge / earn calls.   |
+| `POLYGON_AGENT_LOGIN_UI`   | `https://agentconnect.polygon.technology`   | Base URL of the browser login page opened by `wallet login`.                   |
+| `POLYGON_AGENT_OIDC_RELAY` | `https://oidc-relay.polygon.technology`     | Base URL of the OIDC handoff and login relay used by `wallet login`.           |
 
 ---
 
 ## Security
 
-- **No keys to manage.** The embedded wallet is unlocked via Google browser login; there are no private keys exposed to the agent's context. Credentials are stored in `~/.polygon-agent/`.
+- **No keys to manage.** The embedded wallet is unlocked via browser login (Google or email); there are no private keys exposed to the agent's context. Credentials are stored in `~/.polygon-agent/`.
 - **Sessions expire.** Wallet sessions last about a week, after which you re-run `wallet login`.
 
 ---
@@ -237,7 +241,7 @@ export SEQUENCE_OMS_PROJECT_ID=<proj_...>
 
 | Issue                                       | Fix                                              |
 | ------------------------------------------- | ------------------------------------------------ |
-| Missing Builder credentials                 | Run `setup` with `--oms-publishable-key` / `--oms-project-id`, or export `SEQUENCE_PUBLISHABLE_KEY` / `SEQUENCE_OMS_PROJECT_ID` |
+| Missing OMS Builder credential               | Run `setup` with `--oms-publishable-key`, or export `SEQUENCE_PUBLISHABLE_KEY` |
 | Not logged in                               | Run `polygon-agent wallet login`                 |
 | Session expired                             | Run `polygon-agent wallet login`                 |
 | Insufficient funds / can't pay gas          | Run `fund`; for a native-only wallet pass `--prefer-native-fee` on `call` |

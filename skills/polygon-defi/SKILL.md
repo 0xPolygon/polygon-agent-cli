@@ -13,7 +13,7 @@ description: DeFi operations on Polygon using the Polygon Agent CLI. Covers same
 polygon-agent wallet login
 ```
 
-This logs in with Google in the browser: the command prints/opens a Google sign-in URL, and after you sign in the embedded wallet is created/unlocked. On a headless/remote host add `--remote` (uses a public OIDC relay). The wallet address is the same across all chains. Sessions last about a week; if calls start failing with an expired-session error, just re-run `wallet login`.
+This opens the agentconnect login page in the browser; choose Google or email, and once you sign in the embedded wallet is created or unlocked. This works whether the browser is local or remote, so no extra flags are needed on headless hosts. The wallet address is the same across all chains. Sessions last about a week; if calls start failing with an expired-session error, just re-run `wallet login`.
 
 ---
 

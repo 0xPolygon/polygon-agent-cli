@@ -1,8 +1,8 @@
 // Polymarket integration library — CLOB V2
 // Covers: Gamma API (market discovery), CLOB V2 API (trading via @polymarket/clob-client-v2), on-chain ops
 //
-// Architecture: Sequence smart wallet → Polymarket proxy wallet → CLOB
-// - Sequence smart wallet funds the Polymarket proxy wallet (USDC.e transfer)
+// Architecture: OMS smart wallet → Polymarket proxy wallet → CLOB
+// - OMS smart wallet funds the Polymarket proxy wallet (USDC.e transfer)
 // - Proxy wallet wraps USDC.e → pUSD via CollateralOnramp before trading
 // - EOA calls proxy.execute([approve, wrap]) to run on-chain ops FROM the proxy wallet
 // - CLOB orders use maker=proxyWallet, signer=EOA, signatureType=POLY_PROXY

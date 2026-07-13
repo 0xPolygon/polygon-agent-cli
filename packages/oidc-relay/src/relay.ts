@@ -20,10 +20,18 @@
 //   GET  /cb?code&state  (or ?error&state)      (browser: the redirect lands here)
 //   GET  /poll?state  -> { status, code?, state?, error? }   (CLI: poll for result)
 
+import type { LoginAction } from './login-session.ts';
+
+import { LoginSession, parseLoginStatus } from './login-session.ts';
+import { validReturnTo } from './return-to.ts';
+
+export { LoginSession };
+
 const SESSION_TTL_MS = 10 * 60 * 1000; // 10 minutes to complete the login
 
 interface Env {
   OIDC_RELAY: DurableObjectNamespace;
+  LOGIN_SESSION: DurableObjectNamespace;
 }
 
 function cors(res: Response): Response {
@@ -42,6 +50,28 @@ function json(data: unknown, status = 200): Response {
 // isn't the shape we expect before using it as a DO name.
 function validState(s: string | null): s is string {
   return typeof s === 'string' && s.length > 0 && s.length <= 4096 && /^[A-Za-z0-9_-]+$/.test(s);
+}
+
+function validSession(s: string | null): s is string {
+  return typeof s === 'string' && /^[A-Za-z0-9_-]{16,64}$/.test(s);
+}
+
+// Shape-check browser-submitted actions before they reach the DO.
+function validAction(a: unknown): a is LoginAction {
+  if (typeof a !== 'object' || a === null) return false;
+  const t = (a as { type?: unknown }).type;
+  if (t === 'google' || t === 'cancel') return true;
+  if (t === 'email') {
+    const email = (a as { email?: unknown }).email;
+    return (
+      typeof email === 'string' && email.length >= 3 && email.length <= 320 && email.includes('@')
+    );
+  }
+  if (t === 'otp') {
+    const code = (a as { code?: unknown }).code;
+    return typeof code === 'string' && code.length >= 4 && code.length <= 16;
+  }
+  return false;
 }
 
 const DONE_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>Login complete</title>
@@ -77,7 +107,9 @@ export class OidcHandoff {
     const op = url.pathname; // internal path set by the router below
 
     if (op === '/register') {
+      const returnTo = url.searchParams.get('returnTo');
       await this.state.storage.put('status', 'pending');
+      if (returnTo) await this.state.storage.put('returnTo', returnTo);
       await this.state.storage.setAlarm(Date.now() + SESSION_TTL_MS);
       return new Response(null, { status: 204 });
     }
@@ -87,17 +119,19 @@ export class OidcHandoff {
       const state = url.searchParams.get('state');
       const error = url.searchParams.get('error');
       const status = await this.state.storage.get<string>('status');
-      // No session: the CLI already consumed it (refresh/duplicate callback) or it
-      // expired. Serve a neutral page instead of a scary error — the terminal is
-      // the source of truth for success/failure.
       if (!status)
         return new Response(CLOSE_HTML, { status: 200, headers: { 'Content-Type': 'text/html' } });
+      const returnTo = await this.state.storage.get<string>('returnTo');
       if (error) {
         await this.state.storage.put({ status: 'error', error });
+        // With a returnTo the branded page renders the failure (the CLI publishes
+        // an error status); without one, keep the legacy inline page.
+        if (returnTo) return Response.redirect(returnTo, 302);
         return new Response(FAIL_HTML, { status: 200, headers: { 'Content-Type': 'text/html' } });
       }
       if (!code || !state) return new Response('missing code or state', { status: 400 });
       await this.state.storage.put({ status: 'ready', code, state });
+      if (returnTo) return Response.redirect(returnTo, 302);
       return new Response(DONE_HTML, { status: 200, headers: { 'Content-Type': 'text/html' } });
     }
 
@@ -157,8 +191,14 @@ export default {
       if (!validState(typeof state === 'string' ? state : null)) {
         return json({ error: 'invalid state' }, 400);
       }
+      const returnTo = (body as { returnTo?: unknown } | null)?.returnTo;
+      if (returnTo !== undefined && !validReturnTo(returnTo)) {
+        return json({ error: 'invalid returnTo' }, 400);
+      }
       const stub = env.OIDC_RELAY.get(env.OIDC_RELAY.idFromName(state as string));
-      await stub.fetch(new Request('https://do/register', { method: 'POST' }));
+      const inner = new URL('https://do/register');
+      if (returnTo) inner.searchParams.set('returnTo', returnTo as string);
+      await stub.fetch(new Request(inner.toString(), { method: 'POST' }));
       return cors(new Response(null, { status: 204 }));
     }
 
@@ -170,7 +210,7 @@ export default {
       const stub = env.OIDC_RELAY.get(env.OIDC_RELAY.idFromName(state));
       const inner = new URL('https://do/capture');
       inner.search = url.search; // forward code/state/error
-      return stub.fetch(new Request(inner.toString()));
+      return stub.fetch(new Request(inner.toString(), { redirect: 'manual' }));
     }
 
     // GET /api/oidc/poll?state=...  (CLI polls for the result)
@@ -180,6 +220,81 @@ export default {
       const stub = env.OIDC_RELAY.get(env.OIDC_RELAY.idFromName(state));
       const res = await stub.fetch(new Request('https://do/poll'));
       return cors(res);
+    }
+
+    // --- Browser-login pairing sessions (/api/login/*) ---
+    const loginStub = (session: string) =>
+      env.LOGIN_SESSION.get(env.LOGIN_SESSION.idFromName(session));
+
+    // POST /api/login/register { session } -> arm a pairing session (CLI).
+    if (request.method === 'POST' && url.pathname === '/api/login/register') {
+      let body: { session?: unknown };
+      try {
+        body = (await request.json()) as { session?: unknown };
+      } catch {
+        return json({ error: 'invalid json' }, 400);
+      }
+      const session = typeof body.session === 'string' ? body.session : null;
+      if (!validSession(session)) return json({ error: 'invalid session' }, 400);
+      await loginStub(session).fetch(new Request('https://do/register', { method: 'POST' }));
+      return cors(new Response(null, { status: 204 }));
+    }
+
+    // POST /api/login/action { session, action } -> browser submits user input.
+    if (request.method === 'POST' && url.pathname === '/api/login/action') {
+      let body: { session?: unknown; action?: unknown };
+      try {
+        body = (await request.json()) as { session?: unknown; action?: unknown };
+      } catch {
+        return json({ error: 'invalid json' }, 400);
+      }
+      const session = typeof body.session === 'string' ? body.session : null;
+      if (!validSession(session) || !validAction(body.action)) {
+        return json({ error: 'invalid request' }, 400);
+      }
+      const res = await loginStub(session).fetch(
+        new Request('https://do/action', {
+          method: 'POST',
+          body: JSON.stringify(body.action)
+        })
+      );
+      return cors(res);
+    }
+
+    // GET /api/login/next-action?session= -> CLI polls for user input (one-time read).
+    if (request.method === 'GET' && url.pathname === '/api/login/next-action') {
+      const session = url.searchParams.get('session');
+      if (!validSession(session)) return json({ error: 'invalid session' }, 400);
+      return cors(await loginStub(session).fetch(new Request('https://do/next-action')));
+    }
+
+    // POST /api/login/status { session, ...LoginStatus } -> CLI publishes state.
+    if (request.method === 'POST' && url.pathname === '/api/login/status') {
+      let body: { session?: unknown; status?: unknown };
+      try {
+        body = (await request.json()) as { session?: unknown; status?: unknown };
+      } catch {
+        return json({ error: 'invalid json' }, 400);
+      }
+      const session = typeof body.session === 'string' ? body.session : null;
+      const parsed = parseLoginStatus(body.status);
+      if (!validSession(session) || parsed === null) {
+        return json({ error: 'invalid request' }, 400);
+      }
+      const res = await loginStub(session).fetch(
+        new Request('https://do/set-status', {
+          method: 'POST',
+          body: JSON.stringify(parsed)
+        })
+      );
+      return cors(res);
+    }
+
+    // GET /api/login/status?session= -> browser polls state (repeat-readable).
+    if (request.method === 'GET' && url.pathname === '/api/login/status') {
+      const session = url.searchParams.get('session');
+      if (!validSession(session)) return json({ status: 'error', message: 'invalid session' }, 400);
+      return cors(await loginStub(session).fetch(new Request('https://do/get-status')));
     }
 
     return new Response('not found', { status: 404 });

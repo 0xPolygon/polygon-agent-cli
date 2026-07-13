@@ -79,14 +79,14 @@ export function getIndexerUrl(): string {
   );
 }
 
-/** Get RPC URL for a network via Sequence nodes */
+/** Get RPC URL for a network via OMS nodes */
 export function getRpcUrl(network: NetworkMetadata): string {
   const accessKey = process.env.SEQUENCE_PROJECT_ACCESS_KEY || '';
   return `https://nodes.sequence.app/${network.name}/${accessKey}`;
 }
 
 // Public RPC fallbacks per chain — used for read-only calls (e.g. tx receipt
-// polling) when no Sequence project access key is available (the OMS path uses
+// polling) when no OMS project access key is available (the OMS path uses
 // publishableKey/projectId, not a nodes.sequence.app access key).
 const PUBLIC_RPC_BY_CHAIN_ID: Record<number, string> = {
   137: 'https://polygon-rpc.com',
@@ -99,7 +99,7 @@ const PUBLIC_RPC_BY_CHAIN_ID: Record<number, string> = {
 };
 
 /**
- * Read-only RPC URL. Prefers the Sequence nodes endpoint when a project access
+ * Read-only RPC URL. Prefers the OMS nodes endpoint when a project access
  * key is configured; otherwise falls back to a public RPC for the chain. Safe
  * for both the legacy (dapp-client) and OMS (typescript-sdk) paths.
  */

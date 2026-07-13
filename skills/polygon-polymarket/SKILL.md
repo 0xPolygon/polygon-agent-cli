@@ -25,9 +25,9 @@ Every Polymarket user has three addresses. Do not confuse them:
 |------|-----------|---------|
 | EOA | Private key owner. Shown as `eoaAddress` in CLI output | Signs transactions and CLOB orders. Needs POL for gas only when running `approve` |
 | Proxy Wallet | Shown as `proxyWalletAddress` in CLI output. This is what Polymarket shows as "your address" in the UI | Holds pUSD and outcome tokens. The CLOB `maker` |
-| Smart Wallet | The Sequence wallet (`polygon-agent wallet`) | Funds the proxy wallet with USDC.e per trade (auto-wrapped to pUSD) |
+| Smart Wallet | The OMS wallet (`polygon-agent wallet`) | Funds the proxy wallet with USDC.e per trade (auto-wrapped to pUSD) |
 
-**For trading:** USDC.e flows from the Sequence smart wallet → proxy wallet → auto-wrapped to pUSD → CLOB orders. The proxy wallet is the trading identity.
+**For trading:** USDC.e flows from the OMS smart wallet → proxy wallet → auto-wrapped to pUSD → CLOB orders. The proxy wallet is the trading identity.
 
 ---
 
@@ -196,7 +196,7 @@ polygon-agent polymarket clob-buy <conditionId> YES <usdcAmount> --price 0.45 --
 ```
 
 **How it works:**
-1. Smart wallet transfers `usdcAmount` USDC.e to the proxy wallet (Sequence tx)
+1. Smart wallet transfers `usdcAmount` USDC.e to the proxy wallet (OMS tx)
 2. Proxy wallet wraps USDC.e → pUSD via CollateralOnramp (on-chain, EOA gas)
 3. Posts CLOB BUY order: maker=proxy wallet, signer=EOA (off-chain, no gas)
 4. Tokens arrive in proxy wallet on fill
@@ -347,7 +347,7 @@ When deciding whether to sell:
 - **All commands are dry-run by default.** `approve`, `clob-buy`, `sell` do nothing without `--broadcast`.
 - **V2 approvals are required for all users.** V1 approvals on old exchange contracts do not carry over. Run `approve --broadcast` once after migration.
 - **`clob-buy` handles the full flow automatically:** transfers USDC.e from smart wallet → proxy wallet, wraps USDC.e → pUSD, then places the CLOB order (unless `--skip-fund`).
-- **Positions live in the proxy wallet**, not the Sequence smart wallet. `positions` queries the proxy wallet.
+- **Positions live in the proxy wallet**, not the OMS smart wallet. `positions` queries the proxy wallet.
 - **Sell is free.** No gas, no on-chain tx. Selling via CLOB is a signed off-chain message only. Proceeds are pUSD.
 - **`orderStatus: "matched"`** means the trade filled. `"unmatched"` means FOK failed (no liquidity).
 - **Fees are protocol-determined at match time.** Makers never pay fees — only takers. No `feeRateBps` on orders.

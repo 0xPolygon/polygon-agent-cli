@@ -1,4 +1,4 @@
-// OMSClient factory — builds a per-process, per-wallet Sequence V3 client backed
+// OMSClient factory — builds a per-process, per-wallet OMS V3 client backed
 // by file storage + a persisted credential signer, so sessions survive restarts.
 
 import { EthereumPrivateKeyCredentialSigner, OMSClient } from '@0xsequence/typescript-sdk';
@@ -23,7 +23,7 @@ export function getOmsClient(walletName: string): OMSClient {
   if (!cfg) {
     throw new Error(
       'OMS credentials not configured. Set SEQUENCE_PUBLISHABLE_KEY ' +
-        '(or run `polygon-agent setup`). Get it from the Sequence Builder dashboard.'
+        '(or run `polygon-agent setup`). Get it from the OMS Builder dashboard.'
     );
   }
 
@@ -58,15 +58,27 @@ export function oidcRelayRedirectUri(): string | undefined {
   return process.env.SEQUENCE_OIDC_RELAY_URI || undefined;
 }
 
+// Baked-in defaults for the browser-login flow so `wallet login` needs no env
+// vars. STAGING values while this ships from the staging branch; flip to the
+// production domains (oidc-relay.polygon.technology / agentconnect.polygon.technology)
+// before the npm release, once the relay custom domain is live and Sequence has
+// allowlisted its /api/oidc/cb (see docs/superpowers/specs/2026-07-13-browser-login-design.md).
+// Override per environment with POLYGON_AGENT_OIDC_RELAY / POLYGON_AGENT_LOGIN_UI.
+const DEFAULT_OIDC_RELAY = 'https://oidc-relay-staging.polygon-technology.workers.dev';
+const DEFAULT_LOGIN_UI = 'https://agentconnect.staging.polygon.technology';
+
 /**
- * Base URL of OUR OIDC handoff relay (packages/oidc-relay), used by the `--remote`
- * browser-login path when a localhost callback can't be reached. This is a
- * DIFFERENT relay from oidcRelayRedirectUri(): that one overrides the Sequence
- * relay Google redirects to; this is our public bounce target the CLI polls.
- * Read from POLYGON_AGENT_OIDC_RELAY; the `--relay-url` flag overrides per-run.
- * Trailing slash trimmed so callers can append `/api/oidc/...` cleanly.
+ * Base URL of OUR OIDC handoff + login relay (packages/oidc-relay). Read from
+ * POLYGON_AGENT_OIDC_RELAY with a production default; `--relay-url` overrides
+ * per-run. Trailing slash trimmed so callers can append `/api/...` cleanly.
  */
-export function oidcRelayBaseUrl(): string | undefined {
+export function oidcRelayBaseUrl(): string {
   const v = process.env.POLYGON_AGENT_OIDC_RELAY;
-  return v ? v.replace(/\/+$/, '') : undefined;
+  return v ? v.replace(/\/+$/, '') : DEFAULT_OIDC_RELAY;
+}
+
+/** Base URL of the agentconnect login page. POLYGON_AGENT_LOGIN_UI overrides. */
+export function loginUiBaseUrl(): string {
+  const v = process.env.POLYGON_AGENT_LOGIN_UI;
+  return v ? v.replace(/\/+$/, '') : DEFAULT_LOGIN_UI;
 }

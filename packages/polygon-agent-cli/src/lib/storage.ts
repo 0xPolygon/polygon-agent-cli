@@ -20,7 +20,7 @@ export interface BuilderConfig {
 }
 
 /**
- * OMS (Sequence V3 "Open Money Stack") credentials for the typescript-sdk path.
+ * OMS (Open Money Stack) V3 credentials for the typescript-sdk path.
  * As of SDK 0.1.0-alpha.4 the publishableKey alone identifies the project;
  * omsProjectId is retained as optional for backward compat / display only.
  * Stored alongside builder.json so `wallet login` and tx submission can read it.
@@ -30,8 +30,8 @@ export interface OmsConfig {
   omsProjectId?: string;
 }
 
-/** How a wallet session was established. Browser (Google OIDC) is the only login flow. */
-export type OmsLoginMethod = 'google';
+/** How a wallet session was established: Google or email, both chosen on the browser login page. */
+export type OmsLoginMethod = 'google' | 'email';
 
 /** Pointer record for an OMS wallet (the SDK persists the real session in its StorageManager). */
 export interface OmsWalletPointer {
@@ -182,7 +182,7 @@ export async function loadPolymarketKey(): Promise<string> {
   );
 }
 
-// ─── OMS (Sequence V3 / typescript-sdk) config + session storage ──────────────
+// ─── OMS (Open Money Stack V3 / typescript-sdk) config + session storage ──────
 
 /** Directory holding the OMS SDK's per-wallet storage + credential key. */
 export function omsWalletDir(name: string): string {
@@ -243,7 +243,7 @@ export function bootstrapOmsConfig(): void {
       process.env.SEQUENCE_OMS_PROJECT_ID = cfg.omsProjectId;
   }
 
-  // Also bootstrap the Sequence project access key (used by Trails swap/bridge
+  // Also bootstrap the OMS project access key (used by Trails swap/bridge
   // and the indexer) from builder.json into the env, if present — env always
   // wins. This is separate from the OMS wallet credentials above.
   if (!process.env.SEQUENCE_PROJECT_ACCESS_KEY) {

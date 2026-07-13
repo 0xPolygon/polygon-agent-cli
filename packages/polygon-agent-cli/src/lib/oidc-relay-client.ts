@@ -19,11 +19,15 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
  * Arm a handoff for this OIDC `state` so the relay tracks it (and /poll returns
  * `pending` until the browser callback lands). Call right after startOidcRedirectAuth.
  */
-export async function registerRelaySession(relayBase: string, state: string): Promise<void> {
+export async function registerRelaySession(
+  relayBase: string,
+  state: string,
+  returnTo?: string
+): Promise<void> {
   const res = await fetch(`${relayBase}/api/oidc/register`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ state })
+    body: JSON.stringify(returnTo ? { state, returnTo } : { state })
   });
   if (!res.ok && res.status !== 204) {
     throw new Error(
