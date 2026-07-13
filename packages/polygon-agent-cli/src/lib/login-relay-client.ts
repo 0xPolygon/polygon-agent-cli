@@ -34,13 +34,19 @@ export function makeLoginRelay(relayBase: string): BrowserLoginDeps['relay'] {
     },
 
     async setStatus(session: string, status: LoginStatus): Promise<void> {
-      const res = await fetch(`${relayBase}/api/login/status`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ session, status })
-      });
-      if (!res.ok && res.status !== 204)
-        throw new Error(`Relay status update failed (${res.status})`);
+      // Best effort: the status channel is a courtesy signal to the page, not
+      // the source of truth (the CLI's own return value is that). A relay
+      // hiccup or an expired session (the DO now 410s once it is no longer
+      // armed) must not fail a login that has already completed.
+      try {
+        await fetch(`${relayBase}/api/login/status`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ session, status })
+        });
+      } catch {
+        // network error; nothing to do, the CLI result stands on its own.
+      }
     },
 
     registerOidcHandoff(state: string, returnTo: string): Promise<void> {

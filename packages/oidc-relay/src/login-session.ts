@@ -21,6 +21,47 @@ export type LoginStatus =
   | { status: 'done'; walletAddress: string }
   | { status: 'error'; message: string };
 
+const VALID_STATUS_VALUES = new Set([
+  'awaiting-method',
+  'auth-url',
+  'otp-sent',
+  'otp-invalid',
+  'done',
+  'error'
+]);
+
+// Shape-check a browser/CLI-submitted status before it reaches the DO. Bounds
+// every optional string field so a misbehaving caller can't stash an
+// unbounded payload in durable storage, and requires the field a given
+// status actually needs (url for auth-url, walletAddress for done, message
+// for error).
+export function validLoginStatus(s: unknown): s is LoginStatus {
+  if (typeof s !== 'object' || s === null) return false;
+  const status = (s as { status?: unknown }).status;
+  if (typeof status !== 'string' || !VALID_STATUS_VALUES.has(status)) return false;
+
+  const url = (s as { url?: unknown }).url;
+  if (url !== undefined && (typeof url !== 'string' || url.length > 2048)) return false;
+  if (status === 'auth-url' && typeof url !== 'string') return false;
+
+  const walletAddress = (s as { walletAddress?: unknown }).walletAddress;
+  if (
+    walletAddress !== undefined &&
+    (typeof walletAddress !== 'string' || walletAddress.length > 128)
+  )
+    return false;
+  if (status === 'done' && typeof walletAddress !== 'string') return false;
+
+  const message = (s as { message?: unknown }).message;
+  if (message !== undefined && (typeof message !== 'string' || message.length > 512)) return false;
+  if (status === 'error' && typeof message !== 'string') return false;
+
+  const attemptsLeft = (s as { attemptsLeft?: unknown }).attemptsLeft;
+  if (attemptsLeft !== undefined && typeof attemptsLeft !== 'number') return false;
+
+  return true;
+}
+
 export interface SessionStore {
   get<T>(key: string): Promise<T | undefined>;
   put(entries: Record<string, unknown>): Promise<void>;
@@ -57,8 +98,10 @@ export class LoginSessionCore {
     return { state: 'action', action };
   }
 
-  async setStatus(status: LoginStatus): Promise<void> {
+  async setStatus(status: LoginStatus): Promise<{ ok: boolean }> {
+    if (!(await this.store.get<boolean>('armed'))) return { ok: false };
     await this.store.put({ status });
+    return { ok: true };
   }
 
   async getStatus(): Promise<LoginStatus | { status: 'expired' }> {
@@ -104,7 +147,8 @@ export class LoginSession {
       return Response.json(await this.core.nextAction());
     }
     if (op === '/set-status') {
-      await this.core.setStatus(await request.json());
+      const result = await this.core.setStatus(await request.json());
+      if (!result.ok) return Response.json({ error: 'expired' }, { status: 410 });
       return new Response(null, { status: 204 });
     }
     if (op === '/get-status') {

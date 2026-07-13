@@ -22,7 +22,7 @@
 
 import type { LoginAction } from './login-session.ts';
 
-import { LoginSession } from './login-session.ts';
+import { LoginSession, validLoginStatus } from './login-session.ts';
 import { validReturnTo } from './return-to.ts';
 
 export { LoginSession };
@@ -277,16 +277,16 @@ export default {
         return json({ error: 'invalid json' }, 400);
       }
       const session = typeof body.session === 'string' ? body.session : null;
-      if (!validSession(session) || typeof body.status !== 'object' || body.status === null) {
+      if (!validSession(session) || !validLoginStatus(body.status)) {
         return json({ error: 'invalid request' }, 400);
       }
-      await loginStub(session).fetch(
+      const res = await loginStub(session).fetch(
         new Request('https://do/set-status', {
           method: 'POST',
           body: JSON.stringify(body.status)
         })
       );
-      return cors(new Response(null, { status: 204 }));
+      return cors(res);
     }
 
     // GET /api/login/status?session= -> browser polls state (repeat-readable).

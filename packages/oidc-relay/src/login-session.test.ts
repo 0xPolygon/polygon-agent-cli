@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { SessionStore } from './login-session.ts';
 
-import { LoginSessionCore } from './login-session.ts';
+import { LoginSessionCore, validLoginStatus } from './login-session.ts';
 
 function memoryStore(): SessionStore {
   const map = new Map<string, unknown>();
@@ -75,5 +75,49 @@ describe('LoginSessionCore', () => {
     await core.register();
     await store.deleteAll();
     expect(await core.getStatus()).toEqual({ status: 'expired' });
+  });
+
+  it('setStatus before register does not write and leaves getStatus expired', async () => {
+    const core = new LoginSessionCore(memoryStore());
+    expect(await core.setStatus({ status: 'otp-sent' })).toEqual({ ok: false });
+    expect(await core.getStatus()).toEqual({ status: 'expired' });
+  });
+
+  it('setStatus after register writes and reports ok', async () => {
+    const core = new LoginSessionCore(memoryStore());
+    await core.register();
+    expect(await core.setStatus({ status: 'otp-sent' })).toEqual({ ok: true });
+    expect(await core.getStatus()).toEqual({ status: 'otp-sent' });
+  });
+});
+
+describe('validLoginStatus', () => {
+  it('accepts every valid status shape', () => {
+    expect(validLoginStatus({ status: 'awaiting-method' })).toBe(true);
+    expect(validLoginStatus({ status: 'auth-url', url: 'https://accounts.google.com' })).toBe(true);
+    expect(validLoginStatus({ status: 'otp-sent' })).toBe(true);
+    expect(validLoginStatus({ status: 'otp-invalid' })).toBe(true);
+    expect(validLoginStatus({ status: 'otp-invalid', attemptsLeft: 2 })).toBe(true);
+    expect(validLoginStatus({ status: 'done', walletAddress: '0xabc' })).toBe(true);
+    expect(validLoginStatus({ status: 'error', message: 'boom' })).toBe(true);
+  });
+
+  it('rejects auth-url missing its url', () => {
+    expect(validLoginStatus({ status: 'auth-url' })).toBe(false);
+  });
+
+  it('rejects a non-string message', () => {
+    expect(validLoginStatus({ status: 'error', message: 123 })).toBe(false);
+  });
+
+  it('rejects an unknown status string', () => {
+    expect(validLoginStatus({ status: 'bogus' })).toBe(false);
+  });
+
+  it('rejects non-object input', () => {
+    expect(validLoginStatus(null)).toBe(false);
+    expect(validLoginStatus('done')).toBe(false);
+    expect(validLoginStatus(42)).toBe(false);
+    expect(validLoginStatus(undefined)).toBe(false);
   });
 });
