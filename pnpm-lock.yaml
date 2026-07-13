@@ -97,6 +97,9 @@ importers:
       vite:
         specifier: ^5.4.0
         version: 5.4.21(@types/node@22.19.13)(lightningcss@1.32.0)(terser@5.46.1)
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@22.19.13)(lightningcss@1.32.0)(terser@5.46.1)
 
   packages/oidc-relay:
     devDependencies:
