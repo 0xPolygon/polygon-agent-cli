@@ -57,6 +57,9 @@ jobs:
           VITE_TRAILS_API_KEY: ${{ secrets.VITE_TRAILS_API_KEY }}
           VITE_INDEXER_ACCESS_KEY: ${{ secrets.VITE_INDEXER_ACCESS_KEY }}
           VITE_PROJECT_ACCESS_KEY: ${{ secrets.VITE_PROJECT_ACCESS_KEY }}
+          # Login-page relay base URL (per-environment GitHub variable; empty
+          # falls back to the production default in src/config.ts).
+          VITE_OIDC_RELAY_URL: ${{ vars.VITE_OIDC_RELAY_URL }}
 
       - name: Deploy to staging
         run: npx -y wrangler@4 deploy --env staging
@@ -92,6 +95,9 @@ jobs:
           VITE_TRAILS_API_KEY: ${{ secrets.VITE_TRAILS_API_KEY }}
           VITE_INDEXER_ACCESS_KEY: ${{ secrets.VITE_INDEXER_ACCESS_KEY }}
           VITE_PROJECT_ACCESS_KEY: ${{ secrets.VITE_PROJECT_ACCESS_KEY }}
+          # Login-page relay base URL (per-environment GitHub variable; empty
+          # falls back to the production default in src/config.ts).
+          VITE_OIDC_RELAY_URL: ${{ vars.VITE_OIDC_RELAY_URL }}
 
       - name: Deploy to production
         run: npx -y wrangler@4 deploy --env production
