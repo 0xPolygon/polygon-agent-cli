@@ -85,4 +85,16 @@ describe('ensureBuilderAccessKey', () => {
     });
     expect(saved).toEqual([]);
   });
+
+  it('catches a throwing createEoa without rejecting', async () => {
+    const { deps } = makeFakes({
+      createEoa: () => {
+        throw new Error('entropy unavailable');
+      }
+    });
+    await expect(ensureBuilderAccessKey(WALLET, deps)).resolves.toEqual({
+      provisioned: false,
+      reason: 'eoa: entropy unavailable'
+    });
+  });
 });

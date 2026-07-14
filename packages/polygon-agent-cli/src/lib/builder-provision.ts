@@ -57,7 +57,12 @@ export async function ensureBuilderAccessKey(
     // An unreadable config is treated as absent; provisioning may repair it.
   }
 
-  const eoa = deps.createEoa();
+  let eoa: { privateKey: string; address: string };
+  try {
+    eoa = deps.createEoa();
+  } catch (error) {
+    return { provisioned: false, reason: `eoa: ${(error as Error).message}` };
+  }
 
   let jwt: string;
   try {
