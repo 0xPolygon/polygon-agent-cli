@@ -7,6 +7,7 @@ import React from 'react';
 import type { OmsLoginMethod } from '../lib/storage.ts';
 
 import { runBrowserLogin } from '../lib/browser-login.ts';
+import { ensureBuilderAccessKey, makeDefaultProvisionDeps } from '../lib/builder-provision.ts';
 import { makeLoginRelay } from '../lib/login-relay-client.ts';
 import { startOidcCallbackServer } from '../lib/oidc-callback-server.ts';
 import {
@@ -147,7 +148,19 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
       createdAt: new Date().toISOString()
     });
 
-    jsonOut({ ok: true, walletName: argv.name, walletAddress, loginMethod });
+    // Zero-setup onboarding: give this agent its own Builder project + access
+    // key (indexer and Trails quota). Best-effort: a failure never fails the
+    // login and provisioning retries on the next login.
+    const provision = await ensureBuilderAccessKey(walletAddress, makeDefaultProvisionDeps());
+    const builderProvisioned = provision.provisioned || provision.reason === 'existing';
+    if (!builderProvisioned) {
+      process.stderr.write(
+        `Note: Builder provisioning failed (${provision.reason}). ` +
+          'Indexer and Trails calls fall back to shared defaults; it will retry on the next login.\n'
+      );
+    }
+
+    jsonOut({ ok: true, walletName: argv.name, walletAddress, loginMethod, builderProvisioned });
 
     // Funding: the login page's success screen already directs the user onward,
     // so the browser flow only prints the panel; --local keeps opening the page.

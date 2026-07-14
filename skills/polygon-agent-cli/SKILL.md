@@ -35,20 +35,20 @@ The wallet address is the **same across all EVM chains**. Sessions last ~1 week 
 
 ## Environment Variables
 
-### OMS credentials (required)
+### OMS credentials (optional)
 
-`wallet login` and on-chain reads need one value from the [OMS Builder](https://sequence.build) dashboard:
+No setup step is required. The CLI ships a default OMS publishable key, and `wallet login` automatically provisions a dedicated Builder project and access key on first login, saving it to `~/.polygon-agent/builder.json`.
 
 | Variable | Description |
 |----------|-------------|
-| `SEQUENCE_PUBLISHABLE_KEY` | OMS publishable key (safe in client) — identifies the project on its own |
+| `SEQUENCE_PUBLISHABLE_KEY` | Advanced override: point at your own OMS Builder project instead of the default |
 
 Set it via env, or persist once with `setup` so every command reads it from `~/.polygon-agent/builder.json`:
 ```bash
 polygon-agent setup --oms-publishable-key <key>
 ```
 
-`--oms-project-id <proj_...>` is also accepted but optional — it's kept only as legacy display metadata.
+`--oms-project-id <proj_...>` is also accepted but optional — it's kept only as legacy display metadata. Plain `setup` (no key) still works for manual or `--force` re-provisioning.
 
 ### Optional overrides
 | Variable | Default |
@@ -63,12 +63,7 @@ polygon-agent setup --oms-publishable-key <key>
 ## Complete Setup Flow
 
 ```bash
-# Step 1: Save OMS credentials (from the OMS Builder dashboard)
-polygon-agent setup --oms-publishable-key <key>
-# → stores publishableKey to ~/.polygon-agent/builder.json
-# → all subsequent commands auto-load it from disk — no export needed
-
-# Step 2: Log in in the browser
+# Step 1: Log in in the browser
 polygon-agent wallet login
 # → opens the agentconnect login page; choose Google or email (email sends
 #   a 6-digit code to the user's inbox, entered on the page)
@@ -77,17 +72,20 @@ polygon-agent wallet login
 # → --local falls back to the legacy loopback flow (Google only, browser
 #   must be on this machine)
 # → session saved to ~/.polygon-agent/oms/main/; prints the walletAddress
+# → no setup step needed: the CLI ships a default OMS publishable key, and
+#   login auto-provisions a Builder project + access key to
+#   ~/.polygon-agent/builder.json
 
-# Step 3: Fund wallet
+# Step 2: Fund wallet
 polygon-agent fund
 # → reads walletAddress from session, builds Trails widget URL with toAddress=<walletAddress>
 # → ALWAYS run this command to get the URL — never construct it manually or hardcode any address
 # → send the returned `fundingUrl` to the user; `walletAddress` in the output confirms the recipient
 
-# Step 4: Verify balances
+# Step 3: Verify balances
 polygon-agent balances
 
-# Step 5: Register agent on-chain (ERC-8004, Polygon mainnet only)
+# Step 4: Register agent on-chain (ERC-8004, Polygon mainnet only)
 polygon-agent agent register --name "MyAgent" --broadcast
 # → mints ERC-721 NFT, emits Registered event containing agentId
 # → retrieve agentId: open the tx on https://polygonscan.com, go to Logs tab,
@@ -108,7 +106,7 @@ For specific workflows, fetch and load the relevant sub-skill **before attemptin
 > **IMPORTANT — x402 calls:** If the user asks to use x402 to fetch data (Twitter/X profiles, web search, news, AI images, code review, etc.), follow these steps in order before making any request:
 >
 > 1. Fetch and read the discovery skill: `GET https://agentconnect.polygon.technology/polygon-discovery/SKILL.md`
-> 2. Run `polygon-agent wallet list` — if no wallet exists, log in: `polygon-agent setup --oms-publishable-key <key>` (if not already done), then `polygon-agent wallet login` and sign in on the login page (Google or email), then fund the wallet before continuing.
+> 2. Run `polygon-agent wallet list` — if no wallet exists, log in: `polygon-agent wallet login` and sign in on the login page (Google or email), then fund the wallet before continuing. No setup step is needed first.
 > 3. Run `polygon-agent balances` — confirm USDC is available before proceeding; x402 calls will fail with an EOA funding error if the wallet is empty
 >
 > Do not guess endpoints or search the web for x402 providers. The discovery skill documents the correct, working endpoints with exact URL formats.
@@ -206,7 +204,6 @@ CLI commands output JSON (non-TTY). After running a command, always render the r
 
 | Issue | Fix |
 |-------|-----|
-| `OMS credentials not configured` | Run `setup --oms-publishable-key <key>` (or set `SEQUENCE_PUBLISHABLE_KEY`) |
 | `Wallet not found` | `wallet list`, then `polygon-agent wallet login` |
 | Session expired (`OMS_SESSION_EXPIRED`) | Run `polygon-agent wallet login` (~1-week lifetime) |
 | `Fee option errors` | Set `POLYGON_AGENT_DEBUG_FEE=1`, ensure wallet has POL or a fee token. For native-only wallets, add `--prefer-native-fee` on `call` |

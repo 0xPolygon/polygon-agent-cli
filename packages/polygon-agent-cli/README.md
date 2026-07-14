@@ -74,26 +74,27 @@ pnpm polygon-agent --help
 Once installed via skills or npm, run the following. If running from source, prefix `polygon-agent` commands with `pnpm` and run them from the root of the repository (e.g., `pnpm polygon-agent setup --name "MyAgent"`).
 
 ```bash
-# 1. Setup: save your OMS Builder publishable key (persisted to ~/.polygon-agent/builder.json)
-polygon-agent setup --oms-publishable-key <key>
-
-# 2. Log in to your embedded wallet in the browser
+# 1. Log in to your embedded wallet in the browser
 polygon-agent wallet login
 # Prints a login page URL and opens it in a browser. Choose Google or email
 # on the page; once you finish, the embedded wallet is created or unlocked.
 # This works whether the browser is on this machine or elsewhere, so there
 # is no separate remote mode to enable. Use --local for the older loopback
 # flow, which needs the browser on this same machine.
+#
+# No setup step needed: the CLI ships a default OMS Builder publishable key,
+# and login automatically provisions your own Builder project + access key
+# (saved to ~/.polygon-agent/builder.json) for indexer and Trails quota.
 
-# 3. Fund the wallet
+# 2. Fund the wallet
 polygon-agent fund
 
-# 4. Start operating
+# 3. Start operating
 polygon-agent balances
 polygon-agent send --to 0x... --amount 1.0
 polygon-agent swap --from USDC --to USDT --amount 5
 
-# 5. Register your agent on-chain
+# 4. Register your agent on-chain
 polygon-agent agent register --name "MyAgent"
 ```
 
@@ -163,8 +164,8 @@ See [`SKILL.md`](skills/SKILL.md) for the full agent-consumable reference and [`
 ### Setup & Wallets
 
 ```bash
-polygon-agent setup --oms-publishable-key <key>  # Save OMS Builder credentials
-polygon-agent wallet login [--name <n>] [--local] [--no-fund] [--force]  # Log in from the browser (choose Google or email on the login page)
+polygon-agent wallet login [--name <n>] [--local] [--no-fund] [--force]  # Log in from the browser (choose Google or email on the login page); auto-provisions Builder credentials
+polygon-agent setup --oms-publishable-key <key>  # Advanced: point at your own OMS Builder project instead of the default
 polygon-agent wallet logout [--name <n>]           # Log out of a wallet
 polygon-agent wallet list                          # Show all wallets
 polygon-agent wallet address [--name <n>]          # Show wallet address (same on every chain)
@@ -214,16 +215,13 @@ polygon-agent agent reviews --agent-id <id>
 
 ## Environment Variables
 
-**Required credential** comes from the [OMS Builder](https://sequence.build) dashboard. Pass it to `setup` (which persists it to `~/.polygon-agent/builder.json`), or export it:
+No environment variables are required. The CLI ships a default OMS Builder publishable key, and `wallet login` automatically provisions your own Builder project and access key on first login, saving it to `~/.polygon-agent/builder.json`.
 
-```bash
-export SEQUENCE_PUBLISHABLE_KEY=<publishable-key-from-builder>
-```
-
-**Optional:**
+**Advanced overrides:**
 
 | Variable                   | Default                                    | Description                                                                    |
 | -------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------- |
+| `SEQUENCE_PUBLISHABLE_KEY` | Baked-in default                            | Point at your own OMS Builder project instead of the default. Can also be set via `setup --oms-publishable-key <key>` (persists to `~/.polygon-agent/builder.json`). |
 | `TRAILS_API_KEY`           | —                                           | Optional Trails API key for higher rate limits on swap / bridge / earn calls.   |
 | `POLYGON_AGENT_LOGIN_UI`   | `https://agentconnect.polygon.technology`   | Base URL of the browser login page opened by `wallet login`.                   |
 | `POLYGON_AGENT_OIDC_RELAY` | `https://oidc-relay.polygon.technology`     | Base URL of the OIDC handoff and login relay used by `wallet login`.           |
