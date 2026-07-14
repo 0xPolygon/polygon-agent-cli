@@ -209,11 +209,17 @@ export async function saveOmsConfig(config: OmsConfig): Promise<void> {
   fs.writeFileSync(configPath, JSON.stringify(data, null, 2), { mode: 0o600 });
 }
 
+// Default OMS publishable key so `wallet login` works with zero setup.
+// Publishable keys are client-embeddable by design; users are wallets inside
+// the CLI's shared OMS project. Currently the sandbox project key; swap to the
+// production project key at the staging-to-production cutover. Override with
+// SEQUENCE_PUBLISHABLE_KEY or `setup --oms-publishable-key`.
+export const DEFAULT_SEQUENCE_PUBLISHABLE_KEY = 'pk_sdbx_01kqfw9zaykks_01kwvkkzs5e2wb6rfas2y2njm8';
+
 /**
- * Resolve OMS credentials. Priority: env vars → builder.json.
- * Returns null if neither key is available.
+ * Resolve OMS credentials. Priority: env vars → builder.json → baked-in default.
  */
-export function loadOmsConfig(): OmsConfig | null {
+export function loadOmsConfig(): OmsConfig {
   // SDK 0.1.0-alpha.4: only the publishableKey is required (it identifies the
   // project). omsProjectId is read if present but no longer mandatory.
   const envPk = process.env.SEQUENCE_PUBLISHABLE_KEY;
@@ -230,7 +236,7 @@ export function loadOmsConfig(): OmsConfig | null {
       // ignore malformed config
     }
   }
-  return null;
+  return { publishableKey: DEFAULT_SEQUENCE_PUBLISHABLE_KEY, omsProjectId: envProj };
 }
 
 /** Populate OMS env vars from builder.json at startup. */
