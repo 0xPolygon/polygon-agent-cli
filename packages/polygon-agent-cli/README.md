@@ -98,7 +98,7 @@ polygon-agent swap --from USDC --to USDT --amount 5
 polygon-agent agent register --name "MyAgent"
 ```
 
-> Omit `--broadcast` on any command to preview without sending. See [`QUICKSTART.md`](skills/QUICKSTART.md) for the full step-by-step walkthrough.
+> Omit `--broadcast` on any command to preview without sending. See [`SKILL.md`](skills/SKILL.md) for the full agent-consumable reference.
 
 ---
 
@@ -155,7 +155,7 @@ The CLI ships with agent-friendly documentation designed to be consumed directly
 
 Once installed, the agent receives the full skill context — including wallet setup, token operations, and ERC-8004 registration, and can execute autonomously.
 
-See [`SKILL.md`](skills/SKILL.md) for the full agent-consumable reference and [`QUICKSTART.md`](skills/QUICKSTART.md) for the 4-phase setup guide.
+See [`SKILL.md`](skills/SKILL.md) for the full agent-consumable reference.
 
 ---
 
@@ -269,7 +269,7 @@ polygon-agent-cli/
 │       │   ├── lib/        # Shared utils (storage, ethauth, tokens)
 │       │   └── types.d.ts  # Ambient declarations for untyped deps
 │       ├── contracts/      # ERC-8004 ABIs
-│       └── skills/         # Agent-friendly docs (SKILL.md, QUICKSTART.md)
+│       └── skills/         # Agent-friendly docs (SKILL.md)
 ├── pnpm-workspace.yaml
 └── package.json
 ```
