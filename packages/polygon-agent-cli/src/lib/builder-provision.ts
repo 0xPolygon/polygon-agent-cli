@@ -8,7 +8,10 @@ import { ethers } from 'ethers';
 
 import { getAuthToken, createProject, getDefaultAccessKey } from './builder-api.ts';
 import { generateEthAuthProof } from './ethauth.ts';
-import { loadBuilderConfig, saveBuilderConfig } from './storage.ts';
+import { loadBuilderConfigRaw, saveBuilderConfig } from './storage.ts';
+
+/** Normalize any thrown value to a message string, even for non-Error throws. */
+const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 export interface ProvisionDeps {
   loadBuilderConfig(): Promise<{ accessKey?: string } | null>;
@@ -32,7 +35,7 @@ export interface ProvisionResult {
 
 export function makeDefaultProvisionDeps(): ProvisionDeps {
   return {
-    loadBuilderConfig,
+    loadBuilderConfig: async () => loadBuilderConfigRaw(),
     saveBuilderConfig,
     createEoa: () => {
       const wallet = ethers.Wallet.createRandom();
@@ -61,7 +64,7 @@ export async function ensureBuilderAccessKey(
   try {
     eoa = deps.createEoa();
   } catch (error) {
-    return { provisioned: false, reason: `eoa: ${(error as Error).message}` };
+    return { provisioned: false, reason: `eoa: ${msg(error)}` };
   }
 
   let jwt: string;
@@ -69,7 +72,7 @@ export async function ensureBuilderAccessKey(
     const proof = await deps.generateProof(eoa.privateKey);
     jwt = await deps.getAuthToken(proof);
   } catch (error) {
-    return { provisioned: false, reason: `auth: ${(error as Error).message}` };
+    return { provisioned: false, reason: `auth: ${msg(error)}` };
   }
 
   const projectName = `polygon-agent-${walletAddress.slice(2, 10).toLowerCase()}`;
@@ -79,7 +82,7 @@ export async function ensureBuilderAccessKey(
     const project = await deps.createProject(projectName, jwt);
     projectId = project.id;
   } catch (error) {
-    return { provisioned: false, reason: `project: ${(error as Error).message}` };
+    return { provisioned: false, reason: `project: ${msg(error)}` };
   }
 
   try {
@@ -92,6 +95,6 @@ export async function ensureBuilderAccessKey(
     });
     return { provisioned: true };
   } catch (error) {
-    return { provisioned: false, reason: `access-key: ${(error as Error).message}` };
+    return { provisioned: false, reason: `access-key: ${msg(error)}` };
   }
 }

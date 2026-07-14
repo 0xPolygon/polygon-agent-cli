@@ -104,12 +104,17 @@ export async function saveBuilderConfig(config: BuilderConfig): Promise<void> {
   const configPath = path.join(STORAGE_DIR, 'builder.json');
   const encryptedKey = encrypt(config.privateKey);
 
-  const data = {
-    privateKey: encryptedKey,
-    eoaAddress: config.eoaAddress,
-    accessKey: config.accessKey,
-    projectId: config.projectId
-  };
+  let data: Record<string, unknown> = {};
+  try {
+    data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  } catch {
+    // File doesn't exist yet, or is unreadable. Start fresh.
+  }
+
+  data.privateKey = encryptedKey;
+  data.eoaAddress = config.eoaAddress;
+  data.accessKey = config.accessKey;
+  data.projectId = config.projectId;
 
   fs.writeFileSync(configPath, JSON.stringify(data, null, 2), {
     mode: 0o600
@@ -132,6 +137,27 @@ export async function loadBuilderConfig(): Promise<BuilderConfig | null> {
     accessKey: data.accessKey,
     projectId: data.projectId
   };
+}
+
+/**
+ * Read builder.json's accessKey without decrypting the privateKey blob.
+ * The provisioning short-circuit must honor an existing project even when
+ * the encrypted privateKey blob is unreadable (e.g. a stale or missing
+ * encryption key). This reads only the plaintext accessKey field.
+ */
+export function loadBuilderConfigRaw(): { accessKey?: string } | null {
+  const configPath = path.join(STORAGE_DIR, 'builder.json');
+
+  if (!fs.existsSync(configPath)) {
+    return null;
+  }
+
+  try {
+    const data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    return { accessKey: data.accessKey };
+  } catch {
+    return null;
+  }
 }
 
 export async function listWallets(): Promise<string[]> {
@@ -242,12 +268,10 @@ export function loadOmsConfig(): OmsConfig {
 /** Populate OMS env vars from builder.json at startup. */
 export function bootstrapOmsConfig(): void {
   const cfg = loadOmsConfig();
-  if (cfg) {
-    if (!process.env.SEQUENCE_PUBLISHABLE_KEY)
-      process.env.SEQUENCE_PUBLISHABLE_KEY = cfg.publishableKey;
-    if (!process.env.SEQUENCE_OMS_PROJECT_ID && cfg.omsProjectId)
-      process.env.SEQUENCE_OMS_PROJECT_ID = cfg.omsProjectId;
-  }
+  if (!process.env.SEQUENCE_PUBLISHABLE_KEY)
+    process.env.SEQUENCE_PUBLISHABLE_KEY = cfg.publishableKey;
+  if (!process.env.SEQUENCE_OMS_PROJECT_ID && cfg.omsProjectId)
+    process.env.SEQUENCE_OMS_PROJECT_ID = cfg.omsProjectId;
 
   // Also bootstrap the OMS project access key (used by Trails swap/bridge
   // and the indexer) from builder.json into the env, if present — env always

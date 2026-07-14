@@ -44,3 +44,59 @@ describe('loadOmsConfig resolution order', () => {
     expect(storage.loadOmsConfig().publishableKey).toBe('pk_test_fromenv');
   });
 });
+
+describe('saveBuilderConfig merging', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it('merges new fields into builder.json instead of clobbering it', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-home-'));
+    const configDir = path.join(home, '.polygon-agent');
+    fs.mkdirSync(configDir, { recursive: true });
+    const configPath = path.join(configDir, 'builder.json');
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({ publishableKey: 'pk_test_keep', polymarketPrivateKey: 'enc_keep' })
+    );
+
+    const storage = await freshStorage(home);
+    await storage.saveBuilderConfig({
+      privateKey: '0xabc',
+      eoaAddress: '0x1',
+      accessKey: 'AQ_new',
+      projectId: 7
+    });
+
+    const data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    expect(data.publishableKey).toBe('pk_test_keep');
+    expect(data.polymarketPrivateKey).toBe('enc_keep');
+    expect(data.accessKey).toBe('AQ_new');
+    expect(data.projectId).toBe(7);
+  });
+
+  it('loadBuilderConfigRaw reads the accessKey without decrypting, and is null-safe', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-home-'));
+    const configDir = path.join(home, '.polygon-agent');
+    fs.mkdirSync(configDir, { recursive: true });
+    const configPath = path.join(configDir, 'builder.json');
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({ publishableKey: 'pk_test_keep', polymarketPrivateKey: 'enc_keep' })
+    );
+
+    const storage = await freshStorage(home);
+    await storage.saveBuilderConfig({
+      privateKey: '0xabc',
+      eoaAddress: '0x1',
+      accessKey: 'AQ_new',
+      projectId: 7
+    });
+    expect(storage.loadBuilderConfigRaw()).toEqual({ accessKey: 'AQ_new' });
+
+    const emptyHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-home-'));
+    const emptyStorage = await freshStorage(emptyHome);
+    expect(emptyStorage.loadBuilderConfigRaw()).toBeNull();
+  });
+});

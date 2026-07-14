@@ -97,4 +97,29 @@ describe('ensureBuilderAccessKey', () => {
       reason: 'eoa: entropy unavailable'
     });
   });
+
+  it('reports the access-key stage failure without throwing, and saves nothing', async () => {
+    const { deps, saved } = makeFakes({
+      getDefaultAccessKey: async () => {
+        throw new Error('GetDefaultAccessKey failed: 500');
+      }
+    });
+    await expect(ensureBuilderAccessKey(WALLET, deps)).resolves.toEqual({
+      provisioned: false,
+      reason: 'access-key: GetDefaultAccessKey failed: 500'
+    });
+    expect(saved).toEqual([]);
+  });
+
+  it('normalizes a non-Error throw to its string form', async () => {
+    const { deps } = makeFakes({
+      getAuthToken: async () => {
+        throw 'boom';
+      }
+    });
+    await expect(ensureBuilderAccessKey(WALLET, deps)).resolves.toEqual({
+      provisioned: false,
+      reason: 'auth: boom'
+    });
+  });
 });
