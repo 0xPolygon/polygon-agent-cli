@@ -239,7 +239,7 @@ No environment variables are required. The CLI ships a default OMS Builder publi
 
 | Issue                                       | Fix                                              |
 | ------------------------------------------- | ------------------------------------------------ |
-| Missing OMS Builder credential               | Run `setup` with `--oms-publishable-key`, or export `SEQUENCE_PUBLISHABLE_KEY` |
+| Builder provisioning failed during login (see the stderr note) | It retries on the next `wallet login`; or run `setup` manually. Custom projects: export `SEQUENCE_PUBLISHABLE_KEY` |
 | Not logged in                               | Run `polygon-agent wallet login`                 |
 | Session expired                             | Run `polygon-agent wallet login`                 |
 | Insufficient funds / can't pay gas          | Run `fund`; for a native-only wallet pass `--prefer-native-fee` on `call` |
