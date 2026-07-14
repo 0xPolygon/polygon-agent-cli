@@ -2185,12 +2185,52 @@ export const x402PayCommand: CommandModule = {
         (n: string) => probe.headers.get(n),
         {}
       );
-      const req = paymentRequired.accepts[0];
+      // Providers may advertise many payment options across chains — testnets
+      // and non-standard batched/gateway schemes included — and accepts[0] is
+      // not necessarily Polygon (QuickNode, e.g., lists Base Sepolia first).
+      // Select the cheapest plain-USDC transfer on the preferred chain (default
+      // Polygon 137, or --chain) so we pay ~$0.001 on Polygon, not whatever is
+      // first. The same selector is handed to the payment client below so the
+      // funded amount/asset/chain match what actually gets paid.
+      const chainArg = argv.chain as string | undefined;
+      let preferredChainId = 137;
+      if (chainArg) {
+        try {
+          preferredChainId = resolveNetwork(chainArg).chainId;
+        } catch {
+          preferredChainId = 137;
+        }
+      }
+      // A plain EIP-3009 transfer (what ExactEvmScheme signs), not a batched /
+      // gateway-wallet scheme that uses a different signing domain.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const isPlainTransfer = (r: any): boolean => {
+        const name = String(r?.extra?.name || '').toLowerCase();
+        return !name.includes('gateway') && !name.includes('batched');
+      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const cheapest = (list: any[]): any =>
+        [...list].sort((a, b) => (BigInt(a.amount) < BigInt(b.amount) ? -1 : 1))[0];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const selectAccept = (_version: number, accepts: any[]): any => {
+        const evm = (accepts || []).filter(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (r: any) => typeof r?.network === 'string' && r.network.startsWith('eip155:')
+        );
+        const preferred = evm.filter((r) => r.network === `eip155:${preferredChainId}`);
+        const preferredPlain = preferred.filter(isPlainTransfer);
+        const evmPlain = evm.filter(isPlainTransfer);
+        if (preferredPlain.length) return cheapest(preferredPlain);
+        if (preferred.length) return cheapest(preferred);
+        if (evmPlain.length) return cheapest(evmPlain);
+        return accepts?.[0];
+      };
+
+      const req = selectAccept(paymentRequired.x402Version ?? 2, paymentRequired.accepts);
       if (!req) throw new Error('No payment requirements in 402 response');
 
       const { amount, asset, network: paymentNetwork } = req;
 
-      const chainArg = argv.chain as string | undefined;
       const chainFromPayment = paymentNetwork?.startsWith('eip155:')
         ? paymentNetwork.split(':')[1]
         : null;
@@ -2211,14 +2251,22 @@ export const x402PayCommand: CommandModule = {
       });
       process.stderr.write(`Funded via tx: ${fundResult.txHash}\n`);
 
-      const client = new x402Client();
+      const client = new x402Client(selectAccept);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       client.register('eip155:*', new ExactEvmScheme(eoaAccount as any));
       const fetchWithPayment = wrapFetchWithPayment(fetch, client);
 
+      // Ensure a JSON body is parseable upstream: set Content-Type when a body is
+      // present and the caller didn't specify one (mirrors the bazaar path).
+      // Without this, proxied POST services reject the body ("expected object").
+      const retryHeaders: Record<string, string> = { ...headers };
+      if (body && !Object.keys(retryHeaders).some((h) => h.toLowerCase() === 'content-type')) {
+        retryHeaders['Content-Type'] = 'application/json';
+      }
+
       const response = await fetchWithPayment(url, {
         method,
-        headers: Object.keys(headers).length ? headers : undefined,
+        headers: Object.keys(retryHeaders).length ? retryHeaders : undefined,
         body: body || undefined
       });
 
