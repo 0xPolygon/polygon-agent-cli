@@ -42,8 +42,7 @@ export function BalancesUI({ walletName, chainOverride }: BalancesUIProps) {
     void (async () => {
       try {
         const pointer = await loadOmsWalletPointer(walletName);
-        if (!pointer)
-          throw new Error(`Wallet not found: ${walletName}. Run: polygon-agent wallet login`);
+        if (!pointer) throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login`);
         const addr = pointer.walletAddress;
 
         const network = resolveNetwork(chainOverride || 'polygon');

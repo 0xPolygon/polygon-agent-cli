@@ -199,13 +199,11 @@ export async function loadPolymarketKey(): Promise<string> {
   try {
     data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   } catch {
-    throw new Error('No builder config found. Run: polygon-agent setup');
+    throw new Error('No builder config found. Run: agent setup');
   }
   if (data.polymarketPrivateKey) return decrypt(data.polymarketPrivateKey as CipherData);
   if (data.privateKey) return decrypt(data.privateKey as CipherData);
-  throw new Error(
-    'No EOA key found. Run: polygon-agent setup or polygon-agent polymarket set-key <privateKey>'
-  );
+  throw new Error('No EOA key found. Run: agent setup or agent polymarket set-key <privateKey>');
 }
 
 // ─── OMS (Open Money Stack V3 / typescript-sdk) config + session storage ──────

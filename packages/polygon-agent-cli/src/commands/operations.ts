@@ -205,7 +205,7 @@ export const balancesCommand: CommandModule = {
       try {
         const pointer = await loadOmsWalletPointer(walletName);
         if (!pointer) {
-          throw new Error(`Wallet not found: ${walletName}. Run: polygon-agent wallet login`);
+          throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login`);
         }
         const walletAddress = pointer.walletAddress;
 
@@ -265,7 +265,7 @@ export const balancesCommand: CommandModule = {
       try {
         const pointer = await loadOmsWalletPointer(walletName);
         if (!pointer) {
-          throw new Error(`Wallet not found: ${walletName}. Run: polygon-agent wallet login`);
+          throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login`);
         }
 
         const chainSpec = (argv.chain as string) || 'polygon';
@@ -401,7 +401,7 @@ export const fundCommand: CommandModule = {
     try {
       const session = await loadOmsWalletPointer(walletName);
       if (!session) {
-        throw new Error(`Wallet not found: ${walletName}. Run: polygon-agent wallet login`);
+        throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login`);
       }
 
       await showFunding(walletName, session.walletAddress, 137, { openBrowser: true });
@@ -517,8 +517,7 @@ async function handleSendNative(argv: {
     walletAddress?: string;
   }> {
     const session = await loadOmsWalletPointer(walletName);
-    if (!session)
-      throw new Error(`Wallet not found: ${walletName}. Run: polygon-agent wallet login`);
+    if (!session) throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login`);
 
     const network = resolveNetwork((argv.chain as string) || 'polygon');
     const decimals = network.nativeToken?.decimals ?? 18;
@@ -554,8 +553,7 @@ async function handleSendNative(argv: {
     // Non-TTY: original JSON output
     try {
       const session = await loadOmsWalletPointer(walletName);
-      if (!session)
-        throw new Error(`Wallet not found: ${walletName}. Run: polygon-agent wallet login`);
+      if (!session) throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login`);
 
       const network = resolveNetwork((argv.chain as string) || 'polygon');
       const decimals = network.nativeToken?.decimals ?? 18;
@@ -706,8 +704,7 @@ async function handleSendToken(argv: {
     network: ReturnType<typeof resolveNetwork>;
   }> {
     const session = await loadOmsWalletPointer(walletName);
-    if (!session)
-      throw new Error(`Wallet not found: ${walletName}. Run: polygon-agent wallet login`);
+    if (!session) throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login`);
 
     const network = resolveNetwork((argv.chain as string) || 'polygon');
     let token = tokenAddress;
@@ -854,7 +851,7 @@ async function handleCall(argv: {
   }
 
   const session = await loadOmsWalletPointer(walletName);
-  if (!session) throw new Error(`Wallet not found: ${walletName}. Run: polygon-agent wallet login`);
+  if (!session) throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login`);
 
   const network = resolveNetwork(argv.chain || 'polygon');
   const decimals = network.nativeToken?.decimals ?? 18;
@@ -968,7 +965,7 @@ export const swapCommand: CommandModule = {
     try {
       const session = await loadOmsWalletPointer(walletName);
       if (!session) {
-        throw new Error(`Wallet not found: ${walletName}. Run: polygon-agent wallet login`);
+        throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login`);
       }
 
       const originNetwork = resolveNetwork((argv.chain as string) || 'polygon');
@@ -1195,8 +1192,7 @@ export const depositCommand: CommandModule = {
 
     try {
       const session = await loadOmsWalletPointer(walletName);
-      if (!session)
-        throw new Error(`Wallet not found: ${walletName}. Run: polygon-agent wallet login`);
+      if (!session) throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login`);
 
       const network = resolveNetwork((argv.chain as string) || 'polygon');
       const { chainId } = network;
@@ -1240,8 +1236,8 @@ export const depositCommand: CommandModule = {
         throw new Error(
           `No active ${assetSymbol} earn pools found on ${network.name}` +
             (protocolFilter ? ` (protocol: ${protocolFilter})` : '') +
-            `. Confirm wallet state: polygon-agent balances. ` +
-            `Alternative: polygon-agent swap --from ${assetSymbol} --to <yield-token>.`
+            `. Confirm wallet state: agent balances. ` +
+            `Alternative: agent swap --from ${assetSymbol} --to <yield-token>.`
         );
       }
 
@@ -1277,7 +1273,7 @@ export const depositCommand: CommandModule = {
           const available = viemFormatUnits(usdcBal, asset.decimals);
           throw new Error(
             `Insufficient ${assetSymbol}: wallet has ${available} ${assetSymbol}, deposit requires ${amountArg}. ` +
-              `Run: polygon-agent balances`
+              `Run: agent balances`
           );
         }
         if (nativeBal < POL_GAS_RESERVE && requestedUnits + USDC_GAS_RESERVE > usdcBal) {
@@ -1286,7 +1282,7 @@ export const depositCommand: CommandModule = {
           if (adjusted <= 0n) {
             throw new Error(
               `Insufficient ${assetSymbol} for deposit plus 0.1 gas reserve. ` +
-                `Fund with at least 0.1 POL for native gas or ensure USDC balance exceeds deposit by 0.1: polygon-agent fund`
+                `Fund with at least 0.1 POL for native gas or ensure USDC balance exceeds deposit by 0.1: agent fund`
             );
           }
           amountArg = viemFormatUnits(adjusted, asset.decimals);
@@ -1388,7 +1384,7 @@ export const depositCommand: CommandModule = {
       } else {
         throw new Error(
           `Protocol "${pool.protocol}" from Trails is not yet supported for direct deposit encoding. ` +
-            `Supported: aave, morpho. Open an issue or use 'polygon-agent swap' to obtain the yield-bearing token.`
+            `Supported: aave, morpho. Open an issue or use 'agent swap' to obtain the yield-bearing token.`
         );
       }
 
@@ -1630,8 +1626,7 @@ export const withdrawCommand: CommandModule = {
 
     try {
       const session = await loadOmsWalletPointer(walletName);
-      if (!session)
-        throw new Error(`Wallet not found: ${walletName}. Run: polygon-agent wallet login`);
+      if (!session) throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login`);
 
       const network = resolveNetwork((argv.chain as string) || 'polygon');
       const { chainId } = network;
@@ -1992,10 +1987,8 @@ export const x402PayCommand: CommandModule = {
         loadOmsWalletPointer(walletName),
         loadBuilderConfig()
       ]);
-      if (!session)
-        throw new Error(`Wallet not found: ${walletName}. Run: polygon-agent wallet login`);
-      if (!builderConfig?.privateKey)
-        throw new Error('Builder EOA not found. Run: polygon-agent setup');
+      if (!session) throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login`);
+      if (!builderConfig?.privateKey) throw new Error('Builder EOA not found. Run: agent setup');
 
       const { privateKeyToAccount } = await import('viem/accounts');
       const { wrapFetchWithPayment, x402Client, x402HTTPClient, decodePaymentResponseHeader } =

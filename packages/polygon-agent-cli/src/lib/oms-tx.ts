@@ -58,7 +58,7 @@ function makeFeeSelector(preferNativeFee: boolean) {
     if (!pick) {
       throw new Error(
         'Unable to pay gas: wallet has no native token and no usable fee token. ' +
-          'Fund with POL (polygon-agent fund), or hold USDC for fees.'
+          'Fund with POL (agent fund), or hold USDC for fees.'
       );
     }
     return { token: pick.feeOption.token.symbol };
@@ -71,9 +71,7 @@ export async function runOmsTx(params: OmsTxParams): Promise<OmsTxResult> {
   const oms = getOmsClient(walletName);
   const walletAddress = oms.wallet.walletAddress;
   if (!walletAddress) {
-    throw new Error(
-      `No active session for wallet '${walletName}'. Run: polygon-agent wallet login`
-    );
+    throw new Error(`No active session for wallet '${walletName}'. Run: agent wallet login`);
   }
 
   // Dry-run: print the same JSON shape the legacy primitive produced and return.
@@ -117,8 +115,7 @@ export async function runOmsTx(params: OmsTxParams): Promise<OmsTxResult> {
         (e.code === 'OMS_SESSION_EXPIRED' || e.code === 'OMS_SESSION_MISSING')
       ) {
         throw new Error(
-          `Session expired or missing for wallet '${walletName}'. ` +
-            `Run: polygon-agent wallet login`
+          `Session expired or missing for wallet '${walletName}'. ` + `Run: agent wallet login`
         );
       }
       throw e;

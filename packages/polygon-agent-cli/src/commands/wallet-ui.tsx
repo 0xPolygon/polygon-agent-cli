@@ -17,7 +17,7 @@ export function WalletListUI({ wallets }: { wallets: WalletInfo[] }) {
       {wallets.length === 0 ? (
         <Box marginTop={1} gap={1}>
           <Text dimColor>No wallets found. Run:</Text>
-          <Text>polygon-agent wallet login --email &lt;addr&gt;</Text>
+          <Text>agent wallet login</Text>
         </Box>
       ) : (
         <Box flexDirection="column" marginTop={1}>

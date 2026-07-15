@@ -250,7 +250,7 @@ async function handleAddress(argv: AddressArgs): Promise<void> {
   try {
     const pointer = await loadOmsWalletPointer(name);
     if (!pointer) {
-      throw new Error(`Wallet not found: ${name}. Run: polygon-agent wallet login`);
+      throw new Error(`Wallet not found: ${name}. Run: agent wallet login`);
     }
 
     if (!isTTY()) {
