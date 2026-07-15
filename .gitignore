@@ -8,3 +8,11 @@ dist/
 .nx/
 */**/.nx
 .gstack/
+
+# Build and dev artifacts
+.wrangler/
+*.tsbuildinfo
+
+# Superpowers scratch (plans/specs live in docs/superpowers, not here)
+.superpowers/
+.entire/
