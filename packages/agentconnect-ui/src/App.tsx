@@ -28,7 +28,6 @@ import { LoginPage } from './login/LoginPage.js';
 
 type View = 'fund' | 'dashboard';
 
-const WALLET_URL = 'https://wallet.polygon.technology';
 const SKILL_URL = 'https://agentconnect.polygon.technology/SKILL.md';
 // x402 services catalog skill: Services/Search prompts point the agent here so it
 // knows which service routes to call (not the agentconnect/CLI skill).
@@ -193,6 +192,7 @@ function Dashboard({
   const [selectedUseCase, setSelectedUseCase] = useState(0);
   const [selectedAgent, setSelectedAgent] = useState<string>('claude');
   const [copied, setCopied] = useState(false);
+  const [addrCopied, setAddrCopied] = useState(false);
 
   const items = SECTIONS[selectedSection].items;
 
@@ -218,15 +218,22 @@ function Dashboard({
       {/* Nav */}
       <nav className="bg-white border-b border-[#c8cfe1] px-6 py-3.5 flex items-center justify-between">
         <LogoBadge />
-        <a
-          href={WALLET_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-2 bg-[#f5f6fb] hover:bg-[#eef0f8] border border-[#c8cfe1] rounded-full px-3 py-1.5 transition-colors no-underline"
+        <button
+          type="button"
+          title="Copy address"
+          onClick={() => {
+            void navigator.clipboard.writeText(walletAddress).then(() => {
+              setAddrCopied(true);
+              setTimeout(() => setAddrCopied(false), 1500);
+            });
+          }}
+          className="flex items-center gap-2 bg-[#f5f6fb] hover:bg-[#eef0f8] border border-[#c8cfe1] rounded-full px-3 py-1.5 transition-colors cursor-pointer"
         >
           <div className="w-5 h-5 rounded-full bg-gradient-to-br from-[#7c3aed] to-[#a78bfa] flex-shrink-0" />
-          <span className="font-mono text-sm text-[#141635]">{shortAddr}</span>
-        </a>
+          <span className="font-mono text-sm text-[#141635]">
+            {addrCopied ? 'Copied' : shortAddr}
+          </span>
+        </button>
       </nav>
 
       <main className="max-w-4xl mx-auto px-6 py-8">

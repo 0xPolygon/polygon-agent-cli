@@ -7,7 +7,7 @@ import type { TokenBalance } from '@0xsequence/typescript-sdk';
 import { findNetworkById } from '@0xsequence/typescript-sdk';
 
 import { isWalletFunded } from '../lib/indexer.ts';
-import { getOmsClient } from '../lib/oms-client.ts';
+import { getOmsClient, loginUiBaseUrl } from '../lib/oms-client.ts';
 import { loadOmsWalletPointer, loadBuilderConfig } from '../lib/storage.ts';
 import { resolveErc20BySymbol } from '../lib/token-directory.ts';
 import { runTx as runDappClientTx } from '../lib/tx-dispatch.ts';
@@ -318,16 +318,12 @@ export const balancesCommand: CommandModule = {
 };
 
 // The wallet funding page (Trails on-ramp + swap). Single source of truth so
-// the `fund` command and the post-login step show the same thing.
-// wallet.polygon.technology — the fallback funding page and the dashboard's
-// "open wallet" link. Our hosted funding/dashboard page (POLYGON_AGENT_FUNDING_UI)
-// is preferred when set.
-export const FUNDING_URL = 'https://wallet.polygon.technology';
-
-/** Base URL of our hosted funding/dashboard page (which reads ?wallet&chain&view). */
-function fundingUiBase(): string | undefined {
+// the `fund` command and the post-login step show the same thing: the
+// agentconnect dashboard (same host as the login page), which reads
+// ?wallet&chain&view. POLYGON_AGENT_FUNDING_UI overrides per environment.
+function fundingUiBase(): string {
   const v = process.env.POLYGON_AGENT_FUNDING_UI;
-  return v ? v.replace(/\/+$/, '') : undefined;
+  return v ? v.replace(/\/+$/, '') : loginUiBaseUrl();
 }
 
 /**
@@ -347,7 +343,7 @@ export async function showFunding(
   const view = funded ? 'dashboard' : 'fund';
 
   const base = fundingUiBase();
-  const url = base ? `${base}/?wallet=${walletAddress}&chain=${chainId}&view=${view}` : FUNDING_URL;
+  const url = `${base}/?wallet=${walletAddress}&chain=${chainId}&view=${view}`;
 
   // Human path (local, incl. under Claude Code / a harness where stdout is piped
   // so there is no TTY): open the page. Headless or --remote (browser elsewhere):

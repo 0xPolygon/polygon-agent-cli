@@ -6,8 +6,13 @@ import { LogoBadge } from '../App.js';
 import { oidcRelayUrl } from '../config';
 import { initialState, reduce } from './machine.js';
 
-const WALLET_URL = 'https://wallet.polygon.technology';
 const POLL_MS = 1500;
+
+// Post-login destination: the dashboard in this same app, wallet prefilled.
+// Same-origin, so it tracks whichever environment served the login page.
+function dashboardUrl(walletAddress: string): string {
+  return `/?wallet=${walletAddress}&chain=137`;
+}
 
 // Optimistic ui transitions must only happen after the relay has acknowledged
 // the action. Returns true only when the POST actually landed, so call sites
@@ -52,13 +57,14 @@ export function LoginPage() {
   }, []);
   const redirected = useRef(false);
 
-  // Once the session is established the user should land on their wallet
+  // Once the session is established the user should land on their dashboard
   // without another click; the success card shows briefly, then we move on.
   useEffect(() => {
     if (state.kind !== 'success') return;
-    const timer = setTimeout(() => window.location.assign(WALLET_URL), 1800);
+    const target = dashboardUrl(state.walletAddress);
+    const timer = setTimeout(() => window.location.assign(target), 1800);
     return () => clearTimeout(timer);
-  }, [state.kind]);
+  }, [state]);
 
   // Poll the relay for CLI-published status; redirect once when the auth url
   // arrives (a side effect the reducer deliberately does not model).
@@ -170,13 +176,13 @@ function renderState(state: MachineState, session: string, dispatch: (e: Machine
           <h1 className="text-xl font-semibold text-[#141635]">You're signed in</h1>
           <p className="mt-2 text-sm text-[#64708f] break-all">Wallet {state.walletAddress}</p>
           <p className="mt-2 text-sm text-[#64708f]">
-            Your terminal session is ready. Taking you to your wallet.
+            Your terminal session is ready. Taking you to your dashboard.
           </p>
           <a
-            href={WALLET_URL}
+            href={dashboardUrl(state.walletAddress)}
             className="mt-6 inline-block text-sm text-[#64708f] hover:text-[#141635] underline"
           >
-            Not redirected? Open your wallet
+            Not redirected? Open your dashboard
           </a>
         </div>
       );
