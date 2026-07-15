@@ -12,6 +12,7 @@
     "access": "public"
   },
   "bin": {
+    "agent": "dist/index.js",
     "polygon-agent": "dist/index.js"
   },
   "files": [

@@ -83,8 +83,12 @@ const legacyAliases = [
   }
 ];
 
+// The CLI ships two bin names ("agent" is the primary, "polygon-agent" the
+// long-form alias); help and usage text follow whichever one was invoked.
+const invokedAs = path.basename(process.argv[1] ?? '');
+
 const parser = yargs(hideBin(process.argv))
-  .scriptName('polygon-agent')
+  .scriptName(invokedAs === 'agent' ? 'agent' : 'polygon-agent')
   .version(pkg.version)
   .command(setupCommand)
   .command(walletCommand)
