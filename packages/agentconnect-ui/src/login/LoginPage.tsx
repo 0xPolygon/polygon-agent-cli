@@ -85,7 +85,7 @@ export function LoginPage() {
         <p className="mt-2 text-sm text-[#64708f]">
           Open this page from the polygon-agent CLI: run
           <code className="mx-1 rounded bg-[#eef0f8] px-1.5 py-0.5 text-xs">
-            polygon-agent wallet login
+            agent wallet login
           </code>
           in your terminal.
         </p>
@@ -186,9 +186,7 @@ function renderState(state: MachineState, session: string, dispatch: (e: Machine
           <h1 className="text-xl font-semibold text-[#141635]">This link has expired</h1>
           <p className="mt-2 text-sm text-[#64708f]">
             Run{' '}
-            <code className="rounded bg-[#eef0f8] px-1.5 py-0.5 text-xs">
-              polygon-agent wallet login
-            </code>{' '}
+            <code className="rounded bg-[#eef0f8] px-1.5 py-0.5 text-xs">agent wallet login</code>{' '}
             again to get a fresh link.
           </p>
         </div>
