@@ -26,14 +26,14 @@ signs the exact payment, and retries automatically.
 Every call spends USDC from a funded Polygon wallet. Before running `x402-pay`:
 
 ```bash
-polygon-agent wallet list        # is a wallet configured?
+agent wallet list        # is a wallet configured?
 ```
 
 If no wallet is listed, set one up:
 
-1. `polygon-agent wallet login`: opens the agentconnect login page in the browser; sign in with Google or email (works on headless hosts too, no extra flags needed). No setup step is needed first: keys are defaulted, and login auto-provisions Builder credentials.
-2. `polygon-agent wallet address`: get the address, then fund it (`polygon-agent fund`)
-3. `polygon-agent balances`: confirm USDC is available on Polygon (chain 137) before calling any x402 endpoint
+1. `agent wallet login`: opens the agentconnect login page in the browser; sign in with Google or email (works on headless hosts too, no extra flags needed). No setup step is needed first: keys are defaulted, and login auto-provisions Builder credentials.
+2. `agent wallet address`: get the address, then fund it (`agent fund`)
+3. `agent balances`: confirm USDC is available on Polygon (chain 137) before calling any x402 endpoint
 
 If a wallet exists but `balances` shows 0 USDC, direct the user to fund it — `x402-pay`
 will otherwise fail with an EOA funding error. All services settle in **USDC on Polygon**
@@ -48,23 +48,23 @@ upstream provider's own API.
 
 ```bash
 # POST with a JSON body (e.g. Exa web search)
-polygon-agent x402-pay \
+agent x402-pay \
   --url "https://agentic-services.polygon.technology/api/proxy/exa/search" \
   --wallet main --method POST \
   --body '{"query": "polygon agentic payments", "numResults": 5}'
 
 # GET with query params (e.g. SearchApi Google search)
-polygon-agent x402-pay \
+agent x402-pay \
   --url "https://agentic-services.polygon.technology/api/proxy/searchapi/google?q=<query>" \
   --wallet main --method GET
 
 # Scrape a page to clean markdown (Firecrawl)
-polygon-agent x402-pay \
+agent x402-pay \
   --url "https://agentic-services.polygon.technology/api/proxy/firecrawl/scrape" \
   --wallet main --method POST --body '{"url": "https://example.com"}'
 
 # LLM inference (Llama 3.3 70B, OpenAI-compatible chat body)
-polygon-agent x402-pay \
+agent x402-pay \
   --url "https://agentic-services.polygon.technology/api/proxy/nim/llama-3.3-70b/chat" \
   --wallet main --method POST \
   --body '{"messages": [{"role": "user", "content": "Summarize Polygon in one line."}]}'
@@ -124,7 +124,7 @@ exactly the same way. Pass the full URL below as `--url`.
 | Bitcoin | `btc-mainnet` | | Tron | `tron-mainnet` |
 
 ```bash
-polygon-agent x402-pay \
+agent x402-pay \
   --url "https://x402.quicknode.com/matic-mainnet/" \
   --wallet main --method POST \
   --body '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
