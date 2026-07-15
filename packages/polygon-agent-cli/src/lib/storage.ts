@@ -237,8 +237,8 @@ export async function saveOmsConfig(config: OmsConfig): Promise<void> {
 
 // Default OMS publishable key so `wallet login` works with zero setup.
 // Publishable keys are client-embeddable by design; users are wallets inside
-// the CLI's shared OMS project. Currently the sandbox project key; swap to the
-// production project key at the staging-to-production cutover. Override with
+// the CLI's shared OMS project. This is the intended production project key
+// (the sdbx prefix is just how the project's keys are labeled). Override with
 // SEQUENCE_PUBLISHABLE_KEY or `setup --oms-publishable-key`.
 export const DEFAULT_SEQUENCE_PUBLISHABLE_KEY = 'pk_sdbx_01kqfw9zaykks_01kwvkkzs5e2wb6rfas2y2njm8';
 
