@@ -87,16 +87,34 @@ async function obtainLoopbackCallbackUrl(
 async function handleLogin(argv: LoginArgs): Promise<void> {
   try {
     const oms = getOmsClient(argv.name);
+    // Zero-setup onboarding: give this agent its own Builder project + access
+    // key (indexer and Trails quota). Best-effort: a failure never fails the
+    // login; re-running `wallet login` retries it, no fresh browser auth needed.
+    async function provisionBuilder(walletAddress: string): Promise<boolean> {
+      const provision = await ensureBuilderAccessKey(walletAddress, makeDefaultProvisionDeps());
+      const ok = provision.provisioned || provision.reason === 'existing';
+      if (!ok) {
+        process.stderr.write(
+          `Note: Builder provisioning failed (${provision.reason}). ` +
+            'Indexer and Trails calls fall back to shared defaults; re-run `wallet login` to retry.\n'
+        );
+      }
+      return ok;
+    }
 
     // Short-circuit if already logged in (the SDK restores the session from
     // storage on construction). Starting a new auth would clearSession(), so
-    // re-login is opt-in via --force.
+    // re-login is opt-in via --force. Builder provisioning still runs here:
+    // a transient failure during the original login must be repairable by
+    // re-running `wallet login` without forcing a fresh browser auth.
     if (!argv.force && oms.wallet.walletAddress) {
+      const builderProvisioned = await provisionBuilder(oms.wallet.walletAddress);
       jsonOut({
         ok: true,
         walletName: argv.name,
         walletAddress: oms.wallet.walletAddress,
-        alreadyLoggedIn: true
+        alreadyLoggedIn: true,
+        builderProvisioned
       });
       return;
     }
@@ -148,17 +166,7 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
       createdAt: new Date().toISOString()
     });
 
-    // Zero-setup onboarding: give this agent its own Builder project + access
-    // key (indexer and Trails quota). Best-effort: a failure never fails the
-    // login and provisioning retries on the next login.
-    const provision = await ensureBuilderAccessKey(walletAddress, makeDefaultProvisionDeps());
-    const builderProvisioned = provision.provisioned || provision.reason === 'existing';
-    if (!builderProvisioned) {
-      process.stderr.write(
-        `Note: Builder provisioning failed (${provision.reason}). ` +
-          'Indexer and Trails calls fall back to shared defaults; it will retry on the next login.\n'
-      );
-    }
+    const builderProvisioned = await provisionBuilder(walletAddress);
 
     jsonOut({ ok: true, walletName: argv.name, walletAddress, loginMethod, builderProvisioned });
 
