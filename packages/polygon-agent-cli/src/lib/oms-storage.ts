@@ -55,7 +55,12 @@ export class FileStorageManager implements StorageManager {
 
   delete(key: string): void {
     const file = keyToFile(this.dir, key);
-    if (fs.existsSync(file)) fs.unlinkSync(file);
+    // Unlink directly and ignore "already gone" rather than check-then-delete.
+    try {
+      fs.unlinkSync(file);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
   }
 }
 
@@ -67,13 +72,24 @@ const CREDENTIAL_KEY_FILE = 'credential.key.enc';
  */
 export function loadOrCreateCredentialKey(walletName: string): Uint8Array {
   const file = path.join(omsWalletDir(walletName), CREDENTIAL_KEY_FILE);
-  if (fs.existsSync(file)) {
-    const cipher = JSON.parse(fs.readFileSync(file, 'utf8')) as CipherData;
-    return Uint8Array.from(Buffer.from(decrypt(cipher), 'hex'));
+  // Read-or-create without a check-then-use race: try to read; on ENOENT create
+  // the file exclusively (wx), and if a concurrent run won that race, loop back
+  // and read the key it wrote.
+  for (;;) {
+    try {
+      const cipher = JSON.parse(fs.readFileSync(file, 'utf8')) as CipherData;
+      return Uint8Array.from(Buffer.from(decrypt(cipher), 'hex'));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
+    const keyHex = Buffer.from(randomBytes(32)).toString('hex');
+    try {
+      fs.writeFileSync(file, JSON.stringify(encrypt(keyHex)), { mode: 0o600, flag: 'wx' });
+      return Uint8Array.from(Buffer.from(keyHex, 'hex'));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    }
   }
-  const keyHex = Buffer.from(randomBytes(32)).toString('hex');
-  fs.writeFileSync(file, JSON.stringify(encrypt(keyHex)), { mode: 0o600 });
-  return Uint8Array.from(Buffer.from(keyHex, 'hex'));
 }
 
 /** True if a credential key has already been persisted for this wallet. */
