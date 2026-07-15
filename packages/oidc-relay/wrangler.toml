@@ -45,10 +45,11 @@ new_classes = ["LoginSession"]
 [env.production]
 name = "oidc-relay-production"
 workers_dev = false
-# Set a custom domain for production and have Sequence allowlist its /api/oidc/cb
-# as a redirect target on their relay (Google only ever sees Sequence's relay, so
-# no Google-client change is needed). Same allowlist add as localhost:8765 was.
-# routes = [{ pattern = "oidc-relay.polygon.technology", custom_domain = true }]
+# Custom domain provisioned by wrangler on deploy (polygon.technology zone must be
+# on this Cloudflare account). Sequence must allowlist this /api/oidc/cb as a
+# redirect target on their relay (Google only ever sees Sequence's relay, so no
+# Google-client change is needed).
+routes = [{ pattern = "oidc-relay.polygon.technology", custom_domain = true }]
 
 [[env.production.durable_objects.bindings]]
 name = "OIDC_RELAY"
