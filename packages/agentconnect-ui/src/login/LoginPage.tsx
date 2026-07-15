@@ -6,7 +6,17 @@ import { LogoBadge } from '../App.js';
 import { oidcRelayUrl } from '../config';
 import { initialState, reduce } from './machine.js';
 
-const POLL_MS = 1500;
+// Poll fast while waiting on the CLI (returning from the provider, checking a
+// code) so the transition to the dashboard feels immediate; poll slower while
+// waiting on the user, to keep idle load light.
+const ACTIVE_POLL_MS = 600;
+const IDLE_POLL_MS = 1200;
+const ACTIVE_WAIT: MachineState['kind'][] = [
+  'google-wait',
+  'auth-pending',
+  'email-wait',
+  'otp-wait'
+];
 
 // Post-login destination: the dashboard in this same app, wallet prefilled.
 // Same-origin, so it tracks whichever environment served the login page.
@@ -70,17 +80,20 @@ export function LoginPage() {
   // arrives (a side effect the reducer deliberately does not model).
   useEffect(() => {
     if (!session || TERMINAL.includes(state.kind)) return;
-    const timer = setInterval(() => {
-      void fetchStatus(session).then((status) => {
-        if (status === null) return; // transient failure; keep polling
-        if (status.status === 'auth-url' && !redirected.current && state.kind === 'google-wait') {
-          redirected.current = true;
-          window.location.assign(status.url);
-          return;
-        }
-        dispatch({ type: 'status', status });
-      });
-    }, POLL_MS);
+    const timer = setInterval(
+      () => {
+        void fetchStatus(session).then((status) => {
+          if (status === null) return; // transient failure; keep polling
+          if (status.status === 'auth-url' && !redirected.current && state.kind === 'google-wait') {
+            redirected.current = true;
+            window.location.assign(status.url);
+            return;
+          }
+          dispatch({ type: 'status', status });
+        });
+      },
+      ACTIVE_WAIT.includes(state.kind) ? ACTIVE_POLL_MS : IDLE_POLL_MS
+    );
     return () => clearInterval(timer);
   }, [session, state.kind, dispatch]);
 

@@ -26,8 +26,6 @@ import { FundingScreen } from './components/FundingScreen.js';
 import { fetchTotalUsdBalance } from './indexer';
 import { LoginPage } from './login/LoginPage.js';
 
-type View = 'fund' | 'dashboard';
-
 const SKILL_URL = 'https://agentconnect.polygon.technology/SKILL.md';
 // x402 services catalog skill: Services/Search prompts point the agent here so it
 // knows which service routes to call (not the agentconnect/CLI skill).
@@ -181,11 +179,11 @@ export function LogoBadge() {
 function Dashboard({
   walletAddress,
   chainId,
-  onAddFunds
+  initialFundOpen
 }: {
   walletAddress: string;
   chainId: number;
-  onAddFunds: () => void;
+  initialFundOpen: boolean;
 }) {
   const [totalUsd, setTotalUsd] = useState<number | null>(null);
   const [selectedSection, setSelectedSection] = useState(0);
@@ -193,6 +191,7 @@ function Dashboard({
   const [selectedAgent, setSelectedAgent] = useState<string>('claude');
   const [copied, setCopied] = useState(false);
   const [addrCopied, setAddrCopied] = useState(false);
+  const [fundOpen, setFundOpen] = useState(initialFundOpen);
 
   const items = SECTIONS[selectedSection].items;
 
@@ -256,7 +255,7 @@ function Dashboard({
             </div>
           </div>
           <button
-            onClick={onAddFunds}
+            onClick={() => setFundOpen(true)}
             className="btn-press flex items-center gap-2 bg-[#141635] hover:bg-[#1e2155] text-white font-bold px-5 py-2.5 rounded-xl transition-colors cursor-pointer border-0 text-sm"
           >
             <Plus className="w-4 h-4" />
@@ -267,10 +266,6 @@ function Dashboard({
         {/* Section header */}
         <div className="flex items-center gap-3 mb-4">
           <h2 className="text-base font-bold text-[#141635]">Use your wallet with agents</h2>
-          <span className="flex items-center gap-1.5 text-xs text-[#16a34a] bg-[#f0fdf4] border border-[#bbf7d0] px-2.5 py-1 rounded-full font-medium">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#16a34a] inline-block" />
-            polygon-agent connected
-          </span>
         </div>
 
         {/* Section nav bar */}
@@ -399,8 +394,8 @@ function Dashboard({
               href: 'https://docs.polygon.technology/payment-services/agentic-payments/polygon-agent-cli'
             },
             {
-              title: 'Agentic Services',
-              desc: 'Browse the x402 services catalog your agent can pay for: RPC, on-chain data, search, inference, and email.',
+              title: 'Add your Service for Agents',
+              desc: 'List your API as an x402 service that agents can discover and pay for per call.',
               href: 'https://agentic-services.polygon.technology/discover'
             }
           ].map((card) => (
@@ -439,6 +434,21 @@ function Dashboard({
           Powered by Polygon
         </div>
       </main>
+
+      {fundOpen && (
+        <div
+          className="fixed inset-0 z-[100000] flex items-center justify-center px-4 bg-[#141635]/40 backdrop-blur-sm"
+          onClick={() => setFundOpen(false)}
+        >
+          <div onClick={(e) => e.stopPropagation()}>
+            <FundingScreen
+              walletAddress={walletAddress}
+              chainId={chainId}
+              onSkip={() => setFundOpen(false)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -469,9 +479,6 @@ function App() {
   const walletAddress = params.get('wallet') || '';
   const chainId = Number(params.get('chain') || '137');
 
-  const initialView: View = params.get('view') === 'fund' ? 'fund' : 'dashboard';
-  const [view, setView] = useState<View>(initialView);
-
   if (window.location.pathname === '/login') {
     return <LoginPage />;
   }
@@ -480,23 +487,14 @@ function App() {
     return <MissingWalletNotice />;
   }
 
-  if (view === 'fund') {
-    return (
-      <div className="min-h-screen bg-[#f5f6fb] flex flex-col items-center justify-center px-4">
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[99999]">
-          <LogoBadge />
-        </div>
-        <FundingScreen
-          walletAddress={walletAddress}
-          chainId={chainId}
-          onSkip={() => setView('dashboard')}
-        />
-      </div>
-    );
-  }
-
+  // `?view=fund` (the CLI's `fund` deep link) opens the dashboard with the
+  // funding widget already popped up, rather than a separate page.
   return (
-    <Dashboard walletAddress={walletAddress} chainId={chainId} onAddFunds={() => setView('fund')} />
+    <Dashboard
+      walletAddress={walletAddress}
+      chainId={chainId}
+      initialFundOpen={params.get('view') === 'fund'}
+    />
   );
 }
 

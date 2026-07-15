@@ -45,7 +45,10 @@ export async function pollRelayForCallback(
   state: string,
   opts: { timeoutMs: number; intervalMs?: number }
 ): Promise<RelayCallback> {
-  const intervalMs = opts.intervalMs ?? 2000;
+  // Poll briskly: this runs after the browser has returned from the provider,
+  // so the captured code is usually already waiting and a tight interval keeps
+  // the "finishing sign in" screen short.
+  const intervalMs = opts.intervalMs ?? 800;
   const deadline = Date.now() + opts.timeoutMs;
   while (Date.now() < deadline) {
     const res = await fetch(`${relayBase}/api/oidc/poll?state=${encodeURIComponent(state)}`);
