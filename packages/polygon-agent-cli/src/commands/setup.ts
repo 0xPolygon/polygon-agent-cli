@@ -3,11 +3,12 @@ import type { CommandModule } from 'yargs';
 import { ethers } from 'ethers';
 import React from 'react';
 
+import { getAuthToken, createProject, getDefaultAccessKey } from '../lib/builder-api.ts';
 import { generateEthAuthProof } from '../lib/ethauth.ts';
 import { saveBuilderConfig, loadBuilderConfig, saveOmsConfig } from '../lib/storage.ts';
 import { generateAgentName } from '../lib/utils.ts';
 import { isTTY, inkRender } from '../ui/render.js';
-import { SetupUI, getAuthToken, createProject, getDefaultAccessKey } from './setup-ui.js';
+import { SetupUI } from './setup-ui.js';
 
 interface SetupArgs {
   name?: string;

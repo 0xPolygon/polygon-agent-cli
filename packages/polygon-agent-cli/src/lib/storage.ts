@@ -104,12 +104,17 @@ export async function saveBuilderConfig(config: BuilderConfig): Promise<void> {
   const configPath = path.join(STORAGE_DIR, 'builder.json');
   const encryptedKey = encrypt(config.privateKey);
 
-  const data = {
-    privateKey: encryptedKey,
-    eoaAddress: config.eoaAddress,
-    accessKey: config.accessKey,
-    projectId: config.projectId
-  };
+  let data: Record<string, unknown> = {};
+  try {
+    data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  } catch {
+    // File doesn't exist yet, or is unreadable. Start fresh.
+  }
+
+  data.privateKey = encryptedKey;
+  data.eoaAddress = config.eoaAddress;
+  data.accessKey = config.accessKey;
+  data.projectId = config.projectId;
 
   fs.writeFileSync(configPath, JSON.stringify(data, null, 2), {
     mode: 0o600
@@ -132,6 +137,27 @@ export async function loadBuilderConfig(): Promise<BuilderConfig | null> {
     accessKey: data.accessKey,
     projectId: data.projectId
   };
+}
+
+/**
+ * Read builder.json's accessKey without decrypting the privateKey blob.
+ * The provisioning short-circuit must honor an existing project even when
+ * the encrypted privateKey blob is unreadable (e.g. a stale or missing
+ * encryption key). This reads only the plaintext accessKey field.
+ */
+export function loadBuilderConfigRaw(): { accessKey?: string } | null {
+  const configPath = path.join(STORAGE_DIR, 'builder.json');
+
+  if (!fs.existsSync(configPath)) {
+    return null;
+  }
+
+  try {
+    const data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    return { accessKey: data.accessKey };
+  } catch {
+    return null;
+  }
 }
 
 export async function listWallets(): Promise<string[]> {
@@ -209,11 +235,17 @@ export async function saveOmsConfig(config: OmsConfig): Promise<void> {
   fs.writeFileSync(configPath, JSON.stringify(data, null, 2), { mode: 0o600 });
 }
 
+// Default OMS publishable key so `wallet login` works with zero setup.
+// Publishable keys are client-embeddable by design; users are wallets inside
+// the CLI's shared OMS project. This is the intended production project key
+// (the sdbx prefix is just how the project's keys are labeled). Override with
+// SEQUENCE_PUBLISHABLE_KEY or `setup --oms-publishable-key`.
+export const DEFAULT_SEQUENCE_PUBLISHABLE_KEY = 'pk_sdbx_01kqfw9zaykks_01kwvkkzs5e2wb6rfas2y2njm8';
+
 /**
- * Resolve OMS credentials. Priority: env vars → builder.json.
- * Returns null if neither key is available.
+ * Resolve OMS credentials. Priority: env vars → builder.json → baked-in default.
  */
-export function loadOmsConfig(): OmsConfig | null {
+export function loadOmsConfig(): OmsConfig {
   // SDK 0.1.0-alpha.4: only the publishableKey is required (it identifies the
   // project). omsProjectId is read if present but no longer mandatory.
   const envPk = process.env.SEQUENCE_PUBLISHABLE_KEY;
@@ -230,18 +262,16 @@ export function loadOmsConfig(): OmsConfig | null {
       // ignore malformed config
     }
   }
-  return null;
+  return { publishableKey: DEFAULT_SEQUENCE_PUBLISHABLE_KEY, omsProjectId: envProj };
 }
 
 /** Populate OMS env vars from builder.json at startup. */
 export function bootstrapOmsConfig(): void {
   const cfg = loadOmsConfig();
-  if (cfg) {
-    if (!process.env.SEQUENCE_PUBLISHABLE_KEY)
-      process.env.SEQUENCE_PUBLISHABLE_KEY = cfg.publishableKey;
-    if (!process.env.SEQUENCE_OMS_PROJECT_ID && cfg.omsProjectId)
-      process.env.SEQUENCE_OMS_PROJECT_ID = cfg.omsProjectId;
-  }
+  if (!process.env.SEQUENCE_PUBLISHABLE_KEY)
+    process.env.SEQUENCE_PUBLISHABLE_KEY = cfg.publishableKey;
+  if (!process.env.SEQUENCE_OMS_PROJECT_ID && cfg.omsProjectId)
+    process.env.SEQUENCE_OMS_PROJECT_ID = cfg.omsProjectId;
 
   // Also bootstrap the OMS project access key (used by Trails swap/bridge
   // and the indexer) from builder.json into the env, if present — env always

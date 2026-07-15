@@ -31,9 +31,9 @@ polygon-agent wallet list        # is a wallet configured?
 
 If no wallet is listed, set one up:
 
-1. `polygon-agent setup --oms-publishable-key <key>` — saves OMS credentials (from the OMS Builder dashboard)
-2. `polygon-agent wallet login` — opens the agentconnect login page in the browser; sign in with Google or email (works on headless hosts too, no extra flags)
-3. `polygon-agent balances` — confirm USDC is available on Polygon (chain 137)
+1. `polygon-agent wallet login`: opens the agentconnect login page in the browser; sign in with Google or email (works on headless hosts too, no extra flags needed). No setup step is needed first: keys are defaulted, and login auto-provisions Builder credentials.
+2. `polygon-agent wallet address`: get the address, then fund it (`polygon-agent fund`)
+3. `polygon-agent balances`: confirm USDC is available on Polygon (chain 137) before calling any x402 endpoint
 
 If a wallet exists but `balances` shows 0 USDC, direct the user to fund it — `x402-pay`
 will otherwise fail with an EOA funding error. All services settle in **USDC on Polygon**

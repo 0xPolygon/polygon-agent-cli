@@ -12,20 +12,14 @@ const cache = new Map<string, OMSClient>();
  * Get (or build) the OMSClient for a wallet name. Cached per-process so repeated
  * calls within one CLI invocation reuse the same client + storage handle.
  *
- * Reads publishableKey + projectId from env or builder.json (loadOmsConfig).
- * Throws a clear error if OMS credentials are not configured.
+ * Reads publishableKey + projectId from env or builder.json (loadOmsConfig),
+ * falling back to the baked-in default publishable key.
  */
 export function getOmsClient(walletName: string): OMSClient {
   const cached = cache.get(walletName);
   if (cached) return cached;
 
   const cfg = loadOmsConfig();
-  if (!cfg) {
-    throw new Error(
-      'OMS credentials not configured. Set SEQUENCE_PUBLISHABLE_KEY ' +
-        '(or run `polygon-agent setup`). Get it from the OMS Builder dashboard.'
-    );
-  }
 
   const credentialSigner = new EthereumPrivateKeyCredentialSigner(
     loadOrCreateCredentialKey(walletName)
