@@ -18,10 +18,10 @@ describe('loadOmsConfig resolution order', () => {
 
   it('falls back to the baked-in default when neither env nor file exist', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-home-'));
-    vi.stubEnv('SEQUENCE_PUBLISHABLE_KEY', '');
+    vi.stubEnv('OMS_PUBLISHABLE_KEY', '');
     const storage = await freshStorage(home);
     const cfg = storage.loadOmsConfig();
-    expect(cfg.publishableKey).toBe(storage.DEFAULT_SEQUENCE_PUBLISHABLE_KEY);
+    expect(cfg.publishableKey).toBe(storage.DEFAULT_OMS_PUBLISHABLE_KEY);
     expect(cfg.publishableKey.startsWith('pk_')).toBe(true);
   });
 
@@ -32,14 +32,14 @@ describe('loadOmsConfig resolution order', () => {
       path.join(home, '.polygon-agent', 'builder.json'),
       JSON.stringify({ publishableKey: 'pk_test_fromfile' })
     );
-    vi.stubEnv('SEQUENCE_PUBLISHABLE_KEY', '');
+    vi.stubEnv('OMS_PUBLISHABLE_KEY', '');
     const storage = await freshStorage(home);
     expect(storage.loadOmsConfig().publishableKey).toBe('pk_test_fromfile');
   });
 
   it('prefers the env var over everything', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-home-'));
-    vi.stubEnv('SEQUENCE_PUBLISHABLE_KEY', 'pk_test_fromenv');
+    vi.stubEnv('OMS_PUBLISHABLE_KEY', 'pk_test_fromenv');
     const storage = await freshStorage(home);
     expect(storage.loadOmsConfig().publishableKey).toBe('pk_test_fromenv');
   });

@@ -239,8 +239,8 @@ export async function saveOmsConfig(config: OmsConfig): Promise<void> {
 // Publishable keys are client-embeddable by design; users are wallets inside
 // the CLI's shared OMS project. This is the intended production project key
 // (the sdbx prefix is just how the project's keys are labeled). Override with
-// SEQUENCE_PUBLISHABLE_KEY or `setup --oms-publishable-key`.
-export const DEFAULT_SEQUENCE_PUBLISHABLE_KEY = 'pk_sdbx_01kqfw9zaykks_01kwvkkzs5e2wb6rfas2y2njm8';
+// OMS_PUBLISHABLE_KEY or `setup --oms-publishable-key`.
+export const DEFAULT_OMS_PUBLISHABLE_KEY = 'pk_sdbx_01kqfw9zaykks_01kwvkkzs5e2wb6rfas2y2njm8';
 
 /**
  * Resolve OMS credentials. Priority: env vars → builder.json → baked-in default.
@@ -248,7 +248,7 @@ export const DEFAULT_SEQUENCE_PUBLISHABLE_KEY = 'pk_sdbx_01kqfw9zaykks_01kwvkkzs
 export function loadOmsConfig(): OmsConfig {
   // SDK 0.1.0-alpha.4: only the publishableKey is required (it identifies the
   // project). omsProjectId is read if present but no longer mandatory.
-  const envPk = process.env.SEQUENCE_PUBLISHABLE_KEY;
+  const envPk = process.env.OMS_PUBLISHABLE_KEY;
   const envProj = process.env.SEQUENCE_OMS_PROJECT_ID;
   if (envPk) return { publishableKey: envPk, omsProjectId: envProj };
 
@@ -262,14 +262,13 @@ export function loadOmsConfig(): OmsConfig {
       // ignore malformed config
     }
   }
-  return { publishableKey: DEFAULT_SEQUENCE_PUBLISHABLE_KEY, omsProjectId: envProj };
+  return { publishableKey: DEFAULT_OMS_PUBLISHABLE_KEY, omsProjectId: envProj };
 }
 
 /** Populate OMS env vars from builder.json at startup. */
 export function bootstrapOmsConfig(): void {
   const cfg = loadOmsConfig();
-  if (!process.env.SEQUENCE_PUBLISHABLE_KEY)
-    process.env.SEQUENCE_PUBLISHABLE_KEY = cfg.publishableKey;
+  if (!process.env.OMS_PUBLISHABLE_KEY) process.env.OMS_PUBLISHABLE_KEY = cfg.publishableKey;
   if (!process.env.SEQUENCE_OMS_PROJECT_ID && cfg.omsProjectId)
     process.env.SEQUENCE_OMS_PROJECT_ID = cfg.omsProjectId;
 

@@ -41,7 +41,7 @@ No setup step is required. The CLI ships a default OMS publishable key, and `wal
 
 | Variable | Description |
 |----------|-------------|
-| `SEQUENCE_PUBLISHABLE_KEY` | Advanced override: point at your own OMS Builder project instead of the default |
+| `OMS_PUBLISHABLE_KEY` | Advanced override: point at your own OMS Builder project instead of the default |
 
 Set it via env, or persist once with `setup` so every command reads it from `~/.polygon-agent/builder.json`:
 ```bash

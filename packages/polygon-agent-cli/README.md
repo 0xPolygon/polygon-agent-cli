@@ -221,7 +221,7 @@ No environment variables are required. The CLI ships a default OMS Builder publi
 
 | Variable                   | Default                                    | Description                                                                    |
 | -------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------- |
-| `SEQUENCE_PUBLISHABLE_KEY` | Baked-in default                            | Point at your own OMS Builder project instead of the default. Can also be set via `setup --oms-publishable-key <key>` (persists to `~/.polygon-agent/builder.json`). |
+| `OMS_PUBLISHABLE_KEY` | Baked-in default                            | Point at your own OMS Builder project instead of the default. Can also be set via `setup --oms-publishable-key <key>` (persists to `~/.polygon-agent/builder.json`). |
 | `TRAILS_API_KEY`           | —                                           | Optional Trails API key for higher rate limits on swap / bridge / earn calls.   |
 | `POLYGON_AGENT_LOGIN_UI`   | `https://agentconnect.polygon.technology`   | Base URL of the browser login page opened by `wallet login`.                   |
 | `POLYGON_AGENT_OIDC_RELAY` | `https://oidc-relay.polygon.technology`     | Base URL of the OIDC handoff and login relay used by `wallet login`.           |
@@ -239,7 +239,7 @@ No environment variables are required. The CLI ships a default OMS Builder publi
 
 | Issue                                       | Fix                                              |
 | ------------------------------------------- | ------------------------------------------------ |
-| Builder provisioning failed during login (see the stderr note) | It retries on the next `wallet login`; or run `setup` manually. Custom projects: export `SEQUENCE_PUBLISHABLE_KEY` |
+| Builder provisioning failed during login (see the stderr note) | It retries on the next `wallet login`; or run `setup` manually. Custom projects: export `OMS_PUBLISHABLE_KEY` |
 | Not logged in                               | Run `agent wallet login`                 |
 | Session expired                             | Run `agent wallet login`                 |
 | Insufficient funds / can't pay gas          | Run `fund`; for a native-only wallet pass `--prefer-native-fee` on `call` |
