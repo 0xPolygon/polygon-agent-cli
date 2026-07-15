@@ -2,6 +2,7 @@
   "name": "@polygonlabs/agent-cli",
   "version": "0.11.0",
   "description": "CLI + Agent Skills for building on-chain agents on Polygon",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/0xPolygon/polygon-agent-cli",
