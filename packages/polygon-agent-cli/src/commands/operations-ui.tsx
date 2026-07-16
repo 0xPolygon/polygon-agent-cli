@@ -2,9 +2,9 @@ import { Box, Text, useApp } from 'ink';
 import Spinner from 'ink-spinner';
 import React, { useState, useEffect } from 'react';
 
-import type { TokenBalance } from '@0xsequence/typescript-sdk';
+import type { ContractTokenBalance } from '@polygonlabs/oms-wallet';
 
-import { findNetworkById } from '@0xsequence/typescript-sdk';
+import { findNetworkById } from '@polygonlabs/oms-wallet';
 
 import { getOmsClient } from '../lib/oms-client.ts';
 import { loadOmsWalletPointer } from '../lib/storage.ts';
@@ -68,7 +68,7 @@ export function BalancesUI({ walletName, chainOverride }: BalancesUIProps) {
           }
         ];
 
-        for (const b of (res.balances || []) as TokenBalance[]) {
+        for (const b of (res.balances || []) as ContractTokenBalance[]) {
           const sym = b.contractInfo?.symbol || 'ERC20';
           const dec = b.contractInfo?.decimals ?? 18;
           const tokenAddr = b.contractAddress ? shortAddr(b.contractAddress) : '';

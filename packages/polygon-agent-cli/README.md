@@ -274,7 +274,7 @@ polygon-agent-cli/
 └── package.json
 ```
 
-**Requirements:** Node.js 20+
+**Requirements:** Node.js 22+
 
 ---
 

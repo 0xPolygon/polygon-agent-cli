@@ -5,6 +5,7 @@
 
 export type LoginAction =
   | { type: 'google' }
+  | { type: 'oidc-callback'; callbackUrl: string }
   | { type: 'email'; email: string }
   | { type: 'otp'; code: string }
   | { type: 'cancel' };
@@ -22,15 +23,12 @@ export interface BrowserLoginDeps {
     registerSession(session: string): Promise<void>;
     nextAction(session: string): Promise<LoginAction | null>;
     setStatus(session: string, status: LoginStatus): Promise<void>;
-    registerOidcHandoff(state: string, returnTo: string): Promise<void>;
-    pollOidcCallback(state: string, timeoutMs: number): Promise<{ code: string; state: string }>;
   };
   wallet: {
     startOidcRedirectAuth(p: {
-      provider: 'google';
-      redirectUri: string;
-      relayRedirectUri?: string;
-    }): Promise<{ url: string; state: string }>;
+      provider: unknown;
+      omsRelayReturnUri: string;
+    }): Promise<{ authorizationUrl: string }>;
     completeOidcRedirectAuth(p: {
       callbackUrl: string;
       walletSelection: 'automatic';
@@ -41,6 +39,9 @@ export interface BrowserLoginDeps {
       walletSelection: 'automatic';
     }): Promise<{ walletAddress: string }>;
   };
+  // The SDK's opaque Google provider value (OmsRelayOidcProviders.google), injected
+  // so this file stays SDK-agnostic and unit tests can fake it with a sentinel.
+  oidcProviderGoogle: unknown;
   announce(url: string): Promise<void>;
   sleep(ms: number): Promise<void>;
   now(): number;
@@ -50,7 +51,6 @@ export interface BrowserLoginDeps {
 export interface BrowserLoginOpts {
   relayBase: string;
   uiBase: string;
-  seqRelay?: string;
   timeoutMs: number;
   pollIntervalMs?: number;
 }
@@ -88,17 +88,21 @@ export async function runBrowserLogin(
       }
 
       if (action.type === 'google') {
-        const { url, state } = await wallet.startOidcRedirectAuth({
-          provider: 'google',
-          redirectUri: `${opts.relayBase}/api/oidc/cb`,
-          ...(opts.seqRelay ? { relayRedirectUri: opts.seqRelay } : {})
+        // The relay's return page carries this pairing session (`s`) so it
+        // survives the OAuth round-trip; the OMS relay owns the Google
+        // callback and bounces the browser back to that page, which posts
+        // its full URL back to us as an `oidc-callback` action below.
+        const { authorizationUrl } = await wallet.startOidcRedirectAuth({
+          provider: deps.oidcProviderGoogle,
+          omsRelayReturnUri: `${opts.uiBase}/login?s=${session}`
         });
-        await relay.registerOidcHandoff(state, pageUrl);
-        await relay.setStatus(session, { status: 'auth-url', url });
-        const cb = await relay.pollOidcCallback(state, Math.max(deadline - deps.now(), 1));
-        const callbackUrl = `${opts.relayBase}/api/oidc/cb?code=${encodeURIComponent(cb.code)}&state=${encodeURIComponent(cb.state)}`;
+        await relay.setStatus(session, { status: 'auth-url', url: authorizationUrl });
+        continue;
+      }
+
+      if (action.type === 'oidc-callback') {
         const result = await wallet.completeOidcRedirectAuth({
-          callbackUrl,
+          callbackUrl: action.callbackUrl,
           walletSelection: 'automatic'
         });
         await relay.setStatus(session, { status: 'done', walletAddress: result.walletAddress });

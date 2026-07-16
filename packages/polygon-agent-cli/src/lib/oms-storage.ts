@@ -11,7 +11,7 @@ import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import type { StorageManager } from '@0xsequence/typescript-sdk';
+import type { StorageManager } from '@polygonlabs/oms-wallet';
 
 import type { CipherData } from './storage.ts';
 

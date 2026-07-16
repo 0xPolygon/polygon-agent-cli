@@ -118,12 +118,12 @@ importers:
       '@0xsequence/network':
         specifier: ^2.3.40
         version: 2.3.41(ethers@6.16.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))
-      '@0xsequence/typescript-sdk':
-        specifier: 0.1.0-alpha.4
-        version: 0.1.0-alpha.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)
       '@0xtrails/api':
         specifier: ^0.10.4
         version: 0.10.4
+      '@polygonlabs/oms-wallet':
+        specifier: 0.2.0
+        version: 0.2.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)
       '@polymarket/clob-client-v2':
         specifier: ^1.0.0
         version: 1.0.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)
@@ -161,8 +161,8 @@ importers:
         specifier: ^18.3.1
         version: 18.3.1
       viem:
-        specifier: ^2.45.3
-        version: 2.46.3(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)
+        specifier: ^2.48.4
+        version: 2.53.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)
       yargs:
         specifier: ^17.7.2
         version: 17.7.2
@@ -330,9 +330,6 @@ packages:
     resolution: {integrity: sha512-gv75IoRFhEbhpBCpJ/TR0fUmfBfn/gf9Lvdsy3fLVIFMsm5x9krzbCC1rbmGyFSX/aijuFsnLN2rdJaR0wRM2g==}
     peerDependencies:
       ethers: '>=6'
-
-  '@0xsequence/typescript-sdk@0.1.0-alpha.4':
-    resolution: {integrity: sha512-l1xi8OXgcwQ05HeNqt11TFLddGI6NIZ5ObKe930kgAnM4UcLTZ1DNf+bvKQoRQ16hEZUJDS5nE0BkI85vdYGDQ==}
 
   '@0xsequence/utils@2.3.41':
     resolution: {integrity: sha512-wikEOiYxfq+Iqsfb9JF6xHnpyXHaUre+2FUQpk3teo7/FXy0xtHdzxtfbhGn5/EcMnlSErk1nt6isrcxlkkHuQ==}
@@ -1547,6 +1544,10 @@ packages:
     peerDependenciesMeta:
       typescript:
         optional: true
+
+  '@polygonlabs/oms-wallet@0.2.0':
+    resolution: {integrity: sha512-kLsBfrwXK8m7Zd2CzQ6+p/rOQE5ckeEN//Lc1F7Jq9E80ve/EXoVjWujK+DP4weMfhaHwWiK8+VllviuUvZgVA==}
+    engines: {node: '>=22'}
 
   '@polymarket/clob-client-v2@1.0.2':
     resolution: {integrity: sha512-lC80Esug6s6y3uV8D5HnkxoXVZUnATjyP6PcK2IXO740iGDuLlp9Dvvkx3+VVygHahN+M3NY7JiYiTQkDfWoeQ==}
@@ -5050,14 +5051,6 @@ packages:
   outdent@0.5.0:
     resolution: {integrity: sha512-/jHxFIzoMXdqPzTaCpFzAAWhpkSjZPF4Vsn6jAfNpmbH/ymsmd7Qc6VE9BGn0L6YMj6uwpQLxCECpus4ukKS9Q==}
 
-  ox@0.12.4:
-    resolution: {integrity: sha512-+P+C7QzuwPV8lu79dOwjBKfB2CbnbEXe/hfyyrff1drrO1nOOj3Hc87svHfcW1yneRr3WXaKr6nz11nq+/DF9Q==}
-    peerDependencies:
-      typescript: '>=5.4.0'
-    peerDependenciesMeta:
-      typescript:
-        optional: true
-
   ox@0.13.1:
     resolution: {integrity: sha512-S6XU/Chz7HSSlAp7KYZigW8iwSyfS9M+GKTbyDQuZDsqC8S8GUFB2bLBLLB2SfHw8eE2MfymQazVXoLNljLycg==}
     peerDependencies:
@@ -5943,14 +5936,6 @@ packages:
       typescript:
         optional: true
 
-  viem@2.46.3:
-    resolution: {integrity: sha512-2LJS+Hyh2sYjHXQtzfv1kU9pZx9dxFzvoU/ZKIcn0FNtOU0HQuIICuYdWtUDFHaGXbAdVo8J1eCvmjkL9JVGwg==}
-    peerDependencies:
-      typescript: '>=5.0.4'
-    peerDependenciesMeta:
-      typescript:
-        optional: true
-
   viem@2.53.1:
     resolution: {integrity: sha512-FhfJ/SW73CVosiyVLmIMVgKDRKYV1AGCLzZoHYvmNayyVff63Qi1ocPCk59LqC/cNw244RbBJjHnmxqXkE7NpA==}
     peerDependencies:
@@ -6109,18 +6094,6 @@ packages:
 
   ws@8.18.0:
     resolution: {integrity: sha512-8VbfWfHLbbwu3+N6OKsOMpBdT4kXPDDB9cJk2bJ6mh9ucxdlnNvH1e+roYkKmN9Nxw2yjz7VzeO9oOz2zJ04Pw==}
-    engines: {node: '>=10.0.0'}
-    peerDependencies:
-      bufferutil: ^4.0.1
-      utf-8-validate: '>=5.0.2'
-    peerDependenciesMeta:
-      bufferutil:
-        optional: true
-      utf-8-validate:
-        optional: true
-
-  ws@8.18.3:
-    resolution: {integrity: sha512-PEIGCY5tSlUt50cqyMXfCzX+oOPqN0vuGqWzbcJ2xvnkzkq46oOpz7dQaTDBdfICb4N14+GARUDw2XV2N4tvzg==}
     engines: {node: '>=10.0.0'}
     peerDependencies:
       bufferutil: ^4.0.1
@@ -6560,15 +6533,6 @@ snapshots:
     dependencies:
       '@0xsequence/core': 2.3.44(ethers@6.16.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))
       ethers: 6.16.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
-
-  '@0xsequence/typescript-sdk@0.1.0-alpha.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)':
-    dependencies:
-      viem: 2.53.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)
-    transitivePeerDependencies:
-      - bufferutil
-      - typescript
-      - utf-8-validate
-      - zod
 
   '@0xsequence/utils@2.3.41(ethers@6.16.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))':
     dependencies:
@@ -8085,6 +8049,15 @@ snapshots:
       - eslint-plugin-import
       - supports-color
 
+  '@polygonlabs/oms-wallet@0.2.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)':
+    dependencies:
+      viem: 2.53.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)
+    transitivePeerDependencies:
+      - bufferutil
+      - typescript
+      - utf-8-validate
+      - zod
+
   '@polymarket/clob-client-v2@1.0.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)':
     dependencies:
       '@ethersproject/providers': 5.8.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
@@ -8092,7 +8065,7 @@ snapshots:
       axios: 1.13.6
       browser-or-node: 3.0.0
       tslib: 2.8.1
-      viem: 2.46.3(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)
+      viem: 2.53.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)
     transitivePeerDependencies:
       - bufferutil
       - debug
@@ -10678,7 +10651,7 @@ snapshots:
     dependencies:
       '@x402/core': 2.5.0
       '@x402/extensions': 2.5.0(bufferutil@4.1.0)(ethers@6.16.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(typescript@5.9.3)(utf-8-validate@6.0.6)
-      viem: 2.46.3(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
+      viem: 2.53.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
       zod: 3.25.76
     transitivePeerDependencies:
       - bufferutil
@@ -10693,7 +10666,7 @@ snapshots:
       ajv: 8.18.0
       siwe: 2.3.2(ethers@6.16.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))
       tweetnacl: 1.0.3
-      viem: 2.46.3(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
+      viem: 2.53.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
       zod: 3.25.76
     transitivePeerDependencies:
       - bufferutil
@@ -10704,7 +10677,7 @@ snapshots:
   '@x402/fetch@2.5.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)':
     dependencies:
       '@x402/core': 2.5.0
-      viem: 2.46.3(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
+      viem: 2.53.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
       zod: 3.25.76
     transitivePeerDependencies:
       - bufferutil
@@ -12003,10 +11976,6 @@ snapshots:
     dependencies:
       ws: 8.18.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
 
-  isows@1.0.7(ws@8.18.3(bufferutil@4.1.0)(utf-8-validate@6.0.6)):
-    dependencies:
-      ws: 8.18.3(bufferutil@4.1.0)(utf-8-validate@6.0.6)
-
   isows@1.0.7(ws@8.20.1(bufferutil@4.1.0)(utf-8-validate@6.0.6)):
     dependencies:
       ws: 8.20.1(bufferutil@4.1.0)(utf-8-validate@6.0.6)
@@ -12382,36 +12351,6 @@ snapshots:
       word-wrap: 1.2.5
 
   outdent@0.5.0: {}
-
-  ox@0.12.4(typescript@5.9.3)(zod@3.25.76):
-    dependencies:
-      '@adraffy/ens-normalize': 1.11.1
-      '@noble/ciphers': 1.3.0
-      '@noble/curves': 1.9.7
-      '@noble/hashes': 1.8.0
-      '@scure/bip32': 1.7.0
-      '@scure/bip39': 1.6.0
-      abitype: 1.2.3(typescript@5.9.3)(zod@3.25.76)
-      eventemitter3: 5.0.1
-    optionalDependencies:
-      typescript: 5.9.3
-    transitivePeerDependencies:
-      - zod
-
-  ox@0.12.4(typescript@5.9.3)(zod@4.3.6):
-    dependencies:
-      '@adraffy/ens-normalize': 1.11.1
-      '@noble/ciphers': 1.3.0
-      '@noble/curves': 1.9.7
-      '@noble/hashes': 1.8.0
-      '@scure/bip32': 1.7.0
-      '@scure/bip39': 1.6.0
-      abitype: 1.2.3(typescript@5.9.3)(zod@4.3.6)
-      eventemitter3: 5.0.1
-    optionalDependencies:
-      typescript: 5.9.3
-    transitivePeerDependencies:
-      - zod
 
   ox@0.13.1(typescript@5.9.3)(zod@3.25.76):
     dependencies:
@@ -12848,7 +12787,7 @@ snapshots:
       buffer: 6.0.3
       eventemitter3: 5.0.1
       uuid: 14.0.1
-      ws: 8.20.1(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+      ws: 8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
     optionalDependencies:
       bufferutil: 4.1.0
       utf-8-validate: 6.0.6
@@ -13298,40 +13237,6 @@ snapshots:
       - utf-8-validate
       - zod
 
-  viem@2.46.3(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76):
-    dependencies:
-      '@noble/curves': 1.9.7
-      '@noble/hashes': 1.8.0
-      '@scure/bip32': 1.7.0
-      '@scure/bip39': 1.6.0
-      abitype: 1.2.3(typescript@5.9.3)(zod@3.25.76)
-      isows: 1.0.7(ws@8.18.3(bufferutil@4.1.0)(utf-8-validate@6.0.6))
-      ox: 0.12.4(typescript@5.9.3)(zod@3.25.76)
-      ws: 8.18.3(bufferutil@4.1.0)(utf-8-validate@6.0.6)
-    optionalDependencies:
-      typescript: 5.9.3
-    transitivePeerDependencies:
-      - bufferutil
-      - utf-8-validate
-      - zod
-
-  viem@2.46.3(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6):
-    dependencies:
-      '@noble/curves': 1.9.7
-      '@noble/hashes': 1.8.0
-      '@scure/bip32': 1.7.0
-      '@scure/bip39': 1.6.0
-      abitype: 1.2.3(typescript@5.9.3)(zod@4.3.6)
-      isows: 1.0.7(ws@8.18.3(bufferutil@4.1.0)(utf-8-validate@6.0.6))
-      ox: 0.12.4(typescript@5.9.3)(zod@4.3.6)
-      ws: 8.18.3(bufferutil@4.1.0)(utf-8-validate@6.0.6)
-    optionalDependencies:
-      typescript: 5.9.3
-    transitivePeerDependencies:
-      - bufferutil
-      - utf-8-validate
-      - zod
-
   viem@2.53.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.22.4):
     dependencies:
       '@noble/curves': 1.9.7
@@ -13563,11 +13468,6 @@ snapshots:
       utf-8-validate: 6.0.6
 
   ws@8.18.0(bufferutil@4.1.0)(utf-8-validate@6.0.6):
-    optionalDependencies:
-      bufferutil: 4.1.0
-      utf-8-validate: 6.0.6
-
-  ws@8.18.3(bufferutil@4.1.0)(utf-8-validate@6.0.6):
     optionalDependencies:
       bufferutil: 4.1.0
       utf-8-validate: 6.0.6

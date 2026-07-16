@@ -5,9 +5,9 @@
 // existing command call sites need only swap which implementation they call (via
 // the runTx dispatch). Internally maps onto oms.wallet.sendTransaction.
 
-import type { FeeOptionWithBalance } from '@0xsequence/typescript-sdk';
+import type { FeeOptionWithBalance } from '@polygonlabs/oms-wallet';
 
-import { findNetworkById, isOmsSdkError, TransactionMode } from '@0xsequence/typescript-sdk';
+import { findNetworkById, isOMSWalletError, TransactionMode } from '@polygonlabs/oms-wallet';
 
 import { getOmsClient } from './oms-client.ts';
 
@@ -111,7 +111,7 @@ export async function runOmsTx(params: OmsTxParams): Promise<OmsTxResult> {
       lastTxHash = res.txnHash ?? lastTxHash;
     } catch (e) {
       if (
-        isOmsSdkError(e) &&
+        isOMSWalletError(e) &&
         (e.code === 'OMS_SESSION_EXPIRED' || e.code === 'OMS_SESSION_MISSING')
       ) {
         throw new Error(

@@ -11,7 +11,8 @@ export type LoginAction =
   | { type: 'google' }
   | { type: 'email'; email: string }
   | { type: 'otp'; code: string }
-  | { type: 'cancel' };
+  | { type: 'cancel' }
+  | { type: 'oidc-callback'; callbackUrl: string };
 
 export type LoginStatus =
   | { status: 'awaiting-method' }
@@ -129,7 +130,7 @@ export class LoginSessionCore {
   }
 }
 
-const SESSION_TTL_MS = 10 * 60 * 1000; // matches OidcHandoff
+const SESSION_TTL_MS = 10 * 60 * 1000; // 10 minutes to complete the login
 
 function doStore(storage: DurableObjectStorage): SessionStore {
   return {

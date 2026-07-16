@@ -6,7 +6,7 @@ description: "Complete Polygon agent toolkit for on-chain operations on Polygon.
 # Polygon Agentic CLI
 
 ## Prerequisites
-- Node.js 20+
+- Node.js 22+
 - Install globally: `npm install -g @polygonlabs/agent-cli` (reinstall to update)
 - Entry point: `agent <command>`
 - Storage: `~/.polygon-agent/` (AES-256-GCM encrypted)
@@ -25,7 +25,7 @@ npm install -g @polygonlabs/agent-cli@latest   # upgrade
 
 ## Architecture
 
-The CLI uses the **OMS (Open Money Stack) V3 embedded-wallet** model (`@0xsequence/typescript-sdk`). By default, `wallet login` opens the agentconnect login page (`POLYGON_AGENT_LOGIN_UI`, default `https://agentconnect.polygon.technology`), where the user chooses Google or email (email sends a 6-digit code to the user's inbox, entered on the page). This works whether the browser is on this machine or a different one, so there is no separate headless mode. `--local` falls back to the legacy loopback flow (raw Google sign-in URL plus a localhost callback; browser must be on this same machine; Google only). `--remote` is deprecated and is now a no-op that prints a notice. Once the user signs in, the wallet is created or unlocked and the session credential is stored encrypted on disk. There is no on-chain permission scoping.
+The CLI uses the **OMS (Open Money Stack) V3 embedded-wallet** model (`@polygonlabs/oms-wallet`). By default, `wallet login` opens the agentconnect login page (`POLYGON_AGENT_LOGIN_UI`, default `https://agentconnect.polygon.technology`), where the user chooses Google or email (email sends a 6-digit code to the user's inbox, entered on the page). This works whether the browser is on this machine or a different one, so there is no separate headless mode. `--local` falls back to the legacy loopback flow (raw Google sign-in URL plus a localhost callback; browser must be on this same machine; Google only). `--remote` is deprecated and is now a no-op that prints a notice. Once the user signs in, the wallet is created or unlocked and the session credential is stored encrypted on disk. There is no on-chain permission scoping.
 
 | Wallet | Created by | Purpose | Fund? |
 |--------|-----------|---------|-------|
