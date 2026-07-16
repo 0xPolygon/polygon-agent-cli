@@ -2,6 +2,7 @@
   "name": "polygon-agent-sdk",
   "version": "0.2.0",
   "description": "CLI + Agent Skills for building on-chain agents on Polygon",
+  "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@10.30.3",
   "scripts": {
