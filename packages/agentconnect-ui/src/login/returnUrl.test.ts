@@ -25,32 +25,28 @@ describe('isRelayReturn', () => {
     expect(isRelayReturn('#abc')).toBe(false);
   });
 
-  it('is false for a bare `s` with no other query keys', () => {
-    expect(isRelayReturn('?s=abc')).toBe(false);
+  it('is true for a bare oauth callback param, no `s` needed', () => {
+    expect(isRelayReturn('?code=xyz')).toBe(true);
   });
 
-  it('is true once a relay callback param joins `s`', () => {
+  it('is true when `s` and an oauth callback param are both present', () => {
     expect(isRelayReturn('?s=abc&code=xyz')).toBe(true);
   });
 
-  it('is true with multiple relay callback params alongside `s`', () => {
-    expect(isRelayReturn('?s=abc&state=1&code=2')).toBe(true);
+  it('is true for a bare `state` param', () => {
+    expect(isRelayReturn('?state=1')).toBe(true);
   });
 
   it('is true when the relay reports an oauth error', () => {
-    expect(isRelayReturn('?s=abc&error=access_denied')).toBe(true);
+    expect(isRelayReturn('?error=access_denied')).toBe(true);
   });
 
-  it('is false when a link wrapper appends utm params to a pasted link', () => {
+  it('is false for `s` alongside a non-oauth query param', () => {
     expect(isRelayReturn('?s=abc&utm_source=x')).toBe(false);
   });
 
-  it('is false when a link wrapper appends a gclid param to a pasted link', () => {
-    expect(isRelayReturn('?s=abc&gclid=x')).toBe(false);
-  });
-
-  it('is false when `s` is missing, even with other query keys', () => {
-    expect(isRelayReturn('?code=xyz')).toBe(false);
+  it('is false for a non-oauth query param with no `s`', () => {
+    expect(isRelayReturn('?utm_source=x')).toBe(false);
   });
 
   it('is false for an empty query string', () => {

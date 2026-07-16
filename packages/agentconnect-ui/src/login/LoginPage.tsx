@@ -60,9 +60,36 @@ async function fetchStatus(session: string): Promise<RelayStatus | null> {
 
 const TERMINAL: MachineState['kind'][] = ['success', 'expired', 'failed'];
 
+// The OMS relay return URI is now the bare, static `/login` (required to
+// match its allowlist exactly), so it can no longer carry the pairing
+// session as a query param. Instead, the session is stashed here before the
+// redirect to Google and recovered from here on the bounce back, since a
+// sessionStorage entry survives that round trip on the same origin.
+const SESSION_STORE_KEY = 'oms_login_session';
+
 export function LoginPage() {
-  const session = getSessionId(window.location.search, window.location.hash);
   const relayReturn = isRelayReturn(window.location.search);
+  // Resolve the session from the url first (fresh CLI announce, or the
+  // legacy `?s=` shape); fall back to whatever was stashed before the
+  // redirect to Google. Runs once per mount via the lazy state initializer,
+  // so the sessionStorage write on a fresh url load never thrashes.
+  const [session] = useState<string>(() => {
+    const fromUrl = getSessionId(window.location.search, window.location.hash);
+    if (fromUrl) {
+      try {
+        window.sessionStorage.setItem(SESSION_STORE_KEY, fromUrl);
+      } catch {
+        // Best-effort: storage may be unavailable (private browsing, etc).
+        // This load still has the session; it just won't survive a redirect.
+      }
+      return fromUrl;
+    }
+    try {
+      return window.sessionStorage.getItem(SESSION_STORE_KEY) ?? '';
+    } catch {
+      return '';
+    }
+  });
   const [state, setState] = useState<MachineState>(() =>
     relayReturn ? reduce(initialState, { type: 'relay-return' }) : initialState
   );
@@ -78,10 +105,23 @@ export function LoginPage() {
   // A failed post (a network error, or a 410 for a session that already
   // expired) must not leave the user stuck on the "finishing sign in"
   // spinner until the ~10-minute poll timeout, so a false result dispatches
-  // the terminal failed state right away.
+  // the terminal failed state right away. If the session could not be
+  // recovered at all (sessionStorage empty, e.g. a different browser or a
+  // cleared session), there is nothing to post against, so it fails fast
+  // instead of posting an empty session to the relay.
   useEffect(() => {
-    if (postedRelayCallback.current || !session || !relayReturn) return;
+    if (postedRelayCallback.current || !relayReturn) return;
     postedRelayCallback.current = true;
+    if (!session) {
+      dispatch({
+        type: 'status',
+        status: {
+          status: 'error',
+          message: 'Could not recover the login session. Re-run wallet login in your terminal.'
+        }
+      });
+      return;
+    }
     void postAction(session, { type: 'oidc-callback', callbackUrl: window.location.href }).then(
       (ok) => {
         if (ok) return;
