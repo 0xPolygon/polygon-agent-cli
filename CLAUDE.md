@@ -12,8 +12,8 @@ This is a pnpm workspace monorepo. The primary package is:
 
 - `packages/polygon-agent-cli/` — CLI tool for on-chain agent operations on Polygon
 
-Wallets use the OMS (Open Money Stack) V3 embedded-wallet model (`@0xsequence/typescript-sdk`,
-`OMSClient`): the CLI authenticates via browser login with Google or email (`wallet login`) and
+Wallets use the OMS (Open Money Stack) V3 embedded-wallet model (`@polygonlabs/oms-wallet`,
+`OMSWallet`): the CLI authenticates via browser login with Google or email (`wallet login`) and
 holds the credential on disk.
 
 Static assets (ABI JSON in `contracts/`, Claude skills in `skills/`) are
@@ -21,9 +21,9 @@ published with the CLI package but are not source code.
 
 ## Development
 
-- Dev environment requires Node 24+ (`.nvmrc`). The published CLI supports Node 20+.
+- Dev environment requires Node 24+ (`.nvmrc`). The published CLI supports Node 22+.
 - `tsx packages/polygon-agent-cli/src/index.ts` runs the CLI directly from source (tsx handles `.js`→`.ts` remapping for workspace packages).
-- `pnpm run build` compiles TypeScript to `dist/` (targeting es2023 for Node 20 compat).
+- `pnpm run build` compiles TypeScript to `dist/` (targeting es2023 for Node 22 compat).
 - The CLI uses yargs with the `CommandModule` builder/handler pattern.
 
 ## Key Directories
