@@ -62,10 +62,9 @@ const TERMINAL: MachineState['kind'][] = ['success', 'expired', 'failed'];
 
 export function LoginPage() {
   const session = getSessionId(window.location.search, window.location.hash);
+  const relayReturn = isRelayReturn(window.location.search);
   const [state, setState] = useState<MachineState>(() =>
-    isRelayReturn(window.location.search)
-      ? reduce(initialState, { type: 'relay-return' })
-      : initialState
+    relayReturn ? reduce(initialState, { type: 'relay-return' }) : initialState
   );
   const dispatch = useCallback((event: MachineEvent) => {
     setState((s) => reduce(s, event));
@@ -76,11 +75,26 @@ export function LoginPage() {
   // On return from the OMS relay, hand the full callback url back to the CLI
   // over the pairing channel once; the CLI exchanges it for the wallet and
   // publishes `done`, which the poll below picks up like any other status.
+  // A failed post (a network error, or a 410 for a session that already
+  // expired) must not leave the user stuck on the "finishing sign in"
+  // spinner until the ~10-minute poll timeout, so a false result dispatches
+  // the terminal failed state right away.
   useEffect(() => {
-    if (postedRelayCallback.current || !session || !isRelayReturn(window.location.search)) return;
+    if (postedRelayCallback.current || !session || !relayReturn) return;
     postedRelayCallback.current = true;
-    void postAction(session, { type: 'oidc-callback', callbackUrl: window.location.href });
-  }, [session]);
+    void postAction(session, { type: 'oidc-callback', callbackUrl: window.location.href }).then(
+      (ok) => {
+        if (ok) return;
+        dispatch({
+          type: 'status',
+          status: {
+            status: 'error',
+            message: 'Could not reach the login relay. Re-run wallet login in your terminal.'
+          }
+        });
+      }
+    );
+  }, [session, relayReturn, dispatch]);
 
   // Once the session is established the user should land on their dashboard
   // without another click; the success card shows briefly, then we move on.

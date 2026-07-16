@@ -22,16 +22,21 @@ export function getSessionId(search: string, hash: string): string {
   return hash.slice(1);
 }
 
+// The OAuth callback params the OMS relay appends to the return URL once
+// Google sign-in bounces back through it. The SDK consumes these directly
+// from the query string, so their presence is what actually distinguishes a
+// relay return from a fresh open.
+const OAUTH_CALLBACK_PARAMS = ['code', 'state', 'error'];
+
 // True when this load is the browser bouncing back from the OMS relay after
-// Google sign-in, not a fresh open. The CLI's announce URL is a bare
-// `/login#<session>` fragment with no query string at all, so any query key
-// besides `s` showing up alongside it means the OMS relay appended its own
-// callback params on the way back.
+// Google sign-in, not a fresh open. We key specifically on the OAuth callback
+// params (`code`, `state`, `error`) the relay appends alongside `s`, rather
+// than on "any other query key present": a link wrapper or ad click can
+// append tracking params (`utm_*`, `gclid`, etc.) to a pasted `/login?s=...`
+// link, and that must not be mistaken for a relay return that posts a bogus
+// callback to the relay.
 export function isRelayReturn(search: string): boolean {
   const params = new URLSearchParams(search);
   if (!params.get('s')) return false;
-  for (const key of params.keys()) {
-    if (key !== 's') return true;
-  }
-  return false;
+  return OAUTH_CALLBACK_PARAMS.some((key) => params.has(key));
 }

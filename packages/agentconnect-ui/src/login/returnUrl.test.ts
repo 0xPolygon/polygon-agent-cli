@@ -37,6 +37,18 @@ describe('isRelayReturn', () => {
     expect(isRelayReturn('?s=abc&state=1&code=2')).toBe(true);
   });
 
+  it('is true when the relay reports an oauth error', () => {
+    expect(isRelayReturn('?s=abc&error=access_denied')).toBe(true);
+  });
+
+  it('is false when a link wrapper appends utm params to a pasted link', () => {
+    expect(isRelayReturn('?s=abc&utm_source=x')).toBe(false);
+  });
+
+  it('is false when a link wrapper appends a gclid param to a pasted link', () => {
+    expect(isRelayReturn('?s=abc&gclid=x')).toBe(false);
+  });
+
   it('is false when `s` is missing, even with other query keys', () => {
     expect(isRelayReturn('?code=xyz')).toBe(false);
   });
