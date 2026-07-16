@@ -5,6 +5,7 @@ import type { LoginAction, MachineEvent, MachineState, RelayStatus } from './mac
 import { LogoBadge } from '../App.js';
 import { oidcRelayUrl } from '../config';
 import { initialState, reduce } from './machine.js';
+import { getSessionId, isRelayReturn } from './returnUrl.js';
 
 // Poll fast while waiting on the CLI (returning from the provider, checking a
 // code) so the transition to the dashboard feels immediate; poll slower while
@@ -59,33 +60,12 @@ async function fetchStatus(session: string): Promise<RelayStatus | null> {
 
 const TERMINAL: MachineState['kind'][] = ['success', 'expired', 'failed'];
 
-// Session id lives in the `?s=` query param (used for the OMS relay return
-// URI, since fragments may be consumed by the relay); the `#` fragment is
-// kept as a fallback for older announce links.
-function getSessionId(): string {
-  const fromQuery = new URLSearchParams(window.location.search).get('s');
-  if (fromQuery) return fromQuery;
-  return window.location.hash.slice(1);
-}
-
-// True when this load is the browser bouncing back from the OMS relay after
-// Google sign-in, not a fresh open. The CLI's announce URL is a bare
-// `/login#<session>` fragment with no query string at all, so any query key
-// besides `s` showing up alongside it means the OMS relay appended its own
-// callback params on the way back.
-function isRelayReturn(): boolean {
-  const params = new URLSearchParams(window.location.search);
-  if (!params.get('s')) return false;
-  for (const key of params.keys()) {
-    if (key !== 's') return true;
-  }
-  return false;
-}
-
 export function LoginPage() {
-  const session = getSessionId();
+  const session = getSessionId(window.location.search, window.location.hash);
   const [state, setState] = useState<MachineState>(() =>
-    isRelayReturn() ? reduce(initialState, { type: 'relay-return' }) : initialState
+    isRelayReturn(window.location.search)
+      ? reduce(initialState, { type: 'relay-return' })
+      : initialState
   );
   const dispatch = useCallback((event: MachineEvent) => {
     setState((s) => reduce(s, event));
@@ -97,7 +77,7 @@ export function LoginPage() {
   // over the pairing channel once; the CLI exchanges it for the wallet and
   // publishes `done`, which the poll below picks up like any other status.
   useEffect(() => {
-    if (postedRelayCallback.current || !session || !isRelayReturn()) return;
+    if (postedRelayCallback.current || !session || !isRelayReturn(window.location.search)) return;
     postedRelayCallback.current = true;
     void postAction(session, { type: 'oidc-callback', callbackUrl: window.location.href });
   }, [session]);
