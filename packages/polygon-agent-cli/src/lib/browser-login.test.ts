@@ -76,7 +76,7 @@ describe('runBrowserLogin', () => {
 
     expect(result).toEqual({ walletAddress: '0xW', loginMethod: 'google' });
     expect(calls).toContain('announce:https://ui.test/login#sessionid12345678');
-    expect(calls).toContain('startOidc:true:https://ui.test/login?s=sessionid12345678');
+    expect(calls).toContain('startOidc:true:https://ui.test/login');
     expect(calls).toContain('completeOidc:https://ui.test/login?s=sessionid12345678');
     expect(statuses).toEqual([
       { status: 'auth-url', url: 'https://accounts.google.com/auth' },

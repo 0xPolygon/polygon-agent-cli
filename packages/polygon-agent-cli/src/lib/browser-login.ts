@@ -88,13 +88,17 @@ export async function runBrowserLogin(
       }
 
       if (action.type === 'google') {
-        // The relay's return page carries this pairing session (`s`) so it
-        // survives the OAuth round-trip; the OMS relay owns the Google
-        // callback and bounces the browser back to that page, which posts
-        // its full URL back to us as an `oidc-callback` action below.
+        // The OMS relay validates this return URI against the project's
+        // allowlist with an exact string match, so it must stay the bare,
+        // static `/login` (no query): a per-login `?s=` would never match a
+        // static registration. The pairing session instead survives the
+        // OAuth round trip via sessionStorage on the page itself, which the
+        // relay bounces back to with its own callback params appended; the
+        // page then posts the full return URL back to us as an
+        // `oidc-callback` action below.
         const { authorizationUrl } = await wallet.startOidcRedirectAuth({
           provider: deps.oidcProviderGoogle,
-          omsRelayReturnUri: `${opts.uiBase}/login?s=${session}`
+          omsRelayReturnUri: `${opts.uiBase}/login`
         });
         await relay.setStatus(session, { status: 'auth-url', url: authorizationUrl });
         continue;
