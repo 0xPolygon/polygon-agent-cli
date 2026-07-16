@@ -93,6 +93,29 @@ describe('login machine', () => {
     );
   });
 
+  it('relay-return on initial load moves straight to auth-pending, no url', () => {
+    expect(reduce(initialState, { type: 'relay-return' })).toEqual({ kind: 'auth-pending' });
+  });
+
+  it('relay-return is a no-op once past the method chooser', () => {
+    expect(reduce({ kind: 'google-wait' }, { type: 'relay-return' })).toEqual({
+      kind: 'google-wait'
+    });
+    expect(reduce({ kind: 'email-entry' }, { type: 'relay-return' })).toEqual({
+      kind: 'email-entry'
+    });
+  });
+
+  it('the finishing state reached via relay-return only exits via a terminal status', () => {
+    const finishing: MachineState = reduce(initialState, { type: 'relay-return' });
+    expect(
+      reduce(finishing, { type: 'status', status: { status: 'done', walletAddress: '0xW' } })
+    ).toEqual({ kind: 'success', walletAddress: '0xW' });
+    expect(reduce(finishing, { type: 'status', status: { status: 'otp-sent' } })).toEqual(
+      finishing
+    );
+  });
+
   it('terminal states absorb any later status or event', () => {
     const success: MachineState = { kind: 'success', walletAddress: '0xW' };
     expect(reduce(success, { type: 'status', status: { status: 'otp-sent' } })).toEqual(success);

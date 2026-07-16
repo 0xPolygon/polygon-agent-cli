@@ -15,7 +15,10 @@ export type RelayStatus = LoginStatus | { status: 'expired' };
 export type MachineState =
   | { kind: 'method' }
   | { kind: 'google-wait' }
-  | { kind: 'auth-pending'; url: string }
+  // `url` is present when this came from a live `auth-url` status (offers a
+  // manual fallback link); absent when the page detected a relay return on
+  // load, since there is nothing left to link to at that point.
+  | { kind: 'auth-pending'; url?: string }
   | { kind: 'email-entry' }
   | { kind: 'email-wait'; email: string }
   | { kind: 'otp-entry'; email: string; invalid?: boolean; attemptsLeft?: number }
@@ -30,13 +33,18 @@ export type MachineEvent =
   | { type: 'choose-email' }
   | { type: 'submit-email'; email: string }
   | { type: 'submit-otp'; code: string }
-  | { type: 'back' };
+  | { type: 'back' }
+  // Fired once on initial mount when the page detects it was just returned to
+  // from the OMS relay (as opposed to a fresh open). Skips the method chooser
+  // and goes straight to the finishing spinner.
+  | { type: 'relay-return' };
 
 export type LoginAction =
   | { type: 'google' }
   | { type: 'email'; email: string }
   | { type: 'otp'; code: string }
-  | { type: 'cancel' };
+  | { type: 'cancel' }
+  | { type: 'oidc-callback'; callbackUrl: string };
 
 export const initialState: MachineState = { kind: 'method' };
 
@@ -102,5 +110,7 @@ export function reduce(state: MachineState, event: MachineEvent): MachineState {
       return state.kind === 'otp-entry' ? { kind: 'otp-wait', email: state.email } : state;
     case 'back':
       return state.kind === 'email-entry' ? { kind: 'method' } : state;
+    case 'relay-return':
+      return state.kind === 'method' ? { kind: 'auth-pending' } : state;
   }
 }

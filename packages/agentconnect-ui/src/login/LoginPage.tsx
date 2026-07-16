@@ -59,13 +59,48 @@ async function fetchStatus(session: string): Promise<RelayStatus | null> {
 
 const TERMINAL: MachineState['kind'][] = ['success', 'expired', 'failed'];
 
+// Session id lives in the `?s=` query param (used for the OMS relay return
+// URI, since fragments may be consumed by the relay); the `#` fragment is
+// kept as a fallback for older announce links.
+function getSessionId(): string {
+  const fromQuery = new URLSearchParams(window.location.search).get('s');
+  if (fromQuery) return fromQuery;
+  return window.location.hash.slice(1);
+}
+
+// True when this load is the browser bouncing back from the OMS relay after
+// Google sign-in, not a fresh open. The CLI's announce URL is a bare
+// `/login#<session>` fragment with no query string at all, so any query key
+// besides `s` showing up alongside it means the OMS relay appended its own
+// callback params on the way back.
+function isRelayReturn(): boolean {
+  const params = new URLSearchParams(window.location.search);
+  if (!params.get('s')) return false;
+  for (const key of params.keys()) {
+    if (key !== 's') return true;
+  }
+  return false;
+}
+
 export function LoginPage() {
-  const session = window.location.hash.slice(1);
-  const [state, setState] = useState<MachineState>(initialState);
+  const session = getSessionId();
+  const [state, setState] = useState<MachineState>(() =>
+    isRelayReturn() ? reduce(initialState, { type: 'relay-return' }) : initialState
+  );
   const dispatch = useCallback((event: MachineEvent) => {
     setState((s) => reduce(s, event));
   }, []);
   const redirected = useRef(false);
+  const postedRelayCallback = useRef(false);
+
+  // On return from the OMS relay, hand the full callback url back to the CLI
+  // over the pairing channel once; the CLI exchanges it for the wallet and
+  // publishes `done`, which the poll below picks up like any other status.
+  useEffect(() => {
+    if (postedRelayCallback.current || !session || !isRelayReturn()) return;
+    postedRelayCallback.current = true;
+    void postAction(session, { type: 'oidc-callback', callbackUrl: window.location.href });
+  }, [session]);
 
   // Once the session is established the user should land on their dashboard
   // without another click; the success card shows briefly, then we move on.
@@ -148,12 +183,14 @@ function renderState(state: MachineState, session: string, dispatch: (e: Machine
         <div className="text-center">
           <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-[#c8cfe1] border-t-[#141635]" />
           <p className="mt-4 text-sm text-[#64708f]">Finishing sign in</p>
-          <a
-            href={state.url}
-            className="mt-6 inline-block text-sm text-[#64708f] hover:text-[#141635] underline"
-          >
-            Not redirected? Continue with Google
-          </a>
+          {state.url && (
+            <a
+              href={state.url}
+              className="mt-6 inline-block text-sm text-[#64708f] hover:text-[#141635] underline"
+            >
+              Not redirected? Continue with Google
+            </a>
+          )}
         </div>
       );
     case 'email-entry':
