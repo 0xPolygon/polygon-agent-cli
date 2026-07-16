@@ -40,22 +40,35 @@ function validSession(s: string | null): s is string {
   return typeof s === 'string' && /^[A-Za-z0-9_-]{16,64}$/.test(s);
 }
 
+// Host allowlist for the oidc-callback URL. The callbackUrl is always our own
+// agentconnect /login page (the omsRelayReturnUri) that the OMS relay returned
+// the browser to, so only those hosts (plus localhost for dev) are accepted.
+const ALLOWED_RETURN_HOSTS = new Set([
+  'agentconnect.polygon.technology',
+  'agentconnect.staging.polygon.technology',
+  'localhost',
+  '127.0.0.1'
+]);
+
 // Bound the callback URL the browser hands back after the OMS relay finishes the
 // Google OAuth leg. It must be an https URL, or an http localhost/127.0.0.1 URL
-// for local dev, so a junk value can't be smuggled through as an action.
-function validCallbackUrl(u: unknown): u is string {
-  return (
-    typeof u === 'string' &&
-    u.length > 0 &&
-    u.length <= 2048 &&
-    (u.startsWith('https://') ||
-      u.startsWith('http://localhost') ||
-      u.startsWith('http://127.0.0.1'))
-  );
+// for local dev, on one of the allowlisted hosts, so a junk or spoofed value
+// can't be smuggled through as an action.
+export function validCallbackUrl(u: unknown): u is string {
+  if (typeof u !== 'string' || u.length === 0 || u.length > 2048) return false;
+  let url: URL;
+  try {
+    url = new URL(u);
+  } catch {
+    return false;
+  }
+  const isLocal = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+  if (url.protocol !== 'https:' && !(isLocal && url.protocol === 'http:')) return false;
+  return ALLOWED_RETURN_HOSTS.has(url.hostname);
 }
 
 // Shape-check browser-submitted actions before they reach the DO.
-function validAction(a: unknown): a is LoginAction {
+export function validAction(a: unknown): a is LoginAction {
   if (typeof a !== 'object' || a === null) return false;
   const t = (a as { type?: unknown }).type;
   if (t === 'google' || t === 'cancel') return true;
