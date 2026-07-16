@@ -30,8 +30,8 @@
   },
   "dependencies": {
     "@0xsequence/network": "^2.3.40",
-    "@0xsequence/typescript-sdk": "0.1.0-alpha.4",
     "@0xtrails/api": "^0.10.4",
+    "@polygonlabs/oms-wallet": "0.2.0",
     "@polymarket/clob-client-v2": "^1.0.0",
     "@polymarket/sdk": "^6.0.1",
     "@x402/core": "^2.3.1",
@@ -44,7 +44,7 @@
     "ink-spinner": "^5.0.0",
     "open": "^10.1.0",
     "react": "^18.3.1",
-    "viem": "^2.45.3",
+    "viem": "^2.48.4",
     "yargs": "^17.7.2"
   },
   "devDependencies": {
@@ -54,6 +54,6 @@
     "vitest": "^3.0.0"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22"
   }
 }

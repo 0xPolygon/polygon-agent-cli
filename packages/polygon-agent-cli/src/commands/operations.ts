@@ -2,9 +2,9 @@ import type { CommandModule, Argv } from 'yargs';
 
 import React from 'react';
 
-import type { TokenBalance } from '@0xsequence/typescript-sdk';
+import type { ContractTokenBalance } from '@polygonlabs/oms-wallet';
 
-import { findNetworkById } from '@0xsequence/typescript-sdk';
+import { findNetworkById } from '@polygonlabs/oms-wallet';
 
 import { isWalletFunded } from '../lib/indexer.ts';
 import { getOmsClient, loginUiBaseUrl } from '../lib/oms-client.ts';
@@ -153,8 +153,8 @@ async function fetchBalancesRowsForChain(
   ];
 
   const erc20: BalanceRowJson[] = (res.balances || [])
-    .filter((b: TokenBalance) => !!b.contractAddress)
-    .map((b: TokenBalance) => ({
+    .filter((b: ContractTokenBalance) => !!b.contractAddress)
+    .map((b: ContractTokenBalance) => ({
       type: 'erc20' as const,
       symbol: b.contractInfo?.symbol || 'ERC20',
       name: b.contractInfo?.name || undefined,

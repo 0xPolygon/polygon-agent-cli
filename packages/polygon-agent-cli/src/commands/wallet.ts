@@ -4,18 +4,17 @@ import { randomBytes } from 'node:crypto';
 
 import React from 'react';
 
+import type { OmsRelayOidcProvider } from '@polygonlabs/oms-wallet';
+
+import { OmsRelayOidcProviders } from '@polygonlabs/oms-wallet';
+
 import type { OmsLoginMethod } from '../lib/storage.ts';
 
 import { runBrowserLogin } from '../lib/browser-login.ts';
 import { ensureBuilderAccessKey, makeDefaultProvisionDeps } from '../lib/builder-provision.ts';
 import { makeLoginRelay } from '../lib/login-relay-client.ts';
 import { startOidcCallbackServer } from '../lib/oidc-callback-server.ts';
-import {
-  getOmsClient,
-  loginUiBaseUrl,
-  oidcRelayBaseUrl,
-  oidcRelayRedirectUri
-} from '../lib/oms-client.ts';
+import { getOmsClient, loginUiBaseUrl, oidcRelayBaseUrl } from '../lib/oms-client.ts';
 import {
   listWallets,
   deleteWallet,
@@ -59,25 +58,24 @@ async function announceAuthUrl(url: string): Promise<void> {
   }
 }
 
-// Legacy --local flow: a short-lived loopback server; the relay bounces the
-// browser to it. Only works when the browser runs on this machine.
+// Legacy --local flow: a short-lived loopback server. The OMS relay now owns
+// the Google OAuth callback and bounces the browser back to our nominated
+// `omsRelayReturnUri`, which we set to this loopback URL. Only works when the
+// browser runs on this machine (and the OMS relay allows a localhost return URI).
 async function obtainLoopbackCallbackUrl(
   oms: ReturnType<typeof getOmsClient>,
-  provider: 'google',
   argv: LoginArgs
 ): Promise<string> {
-  const seqRelay = oidcRelayRedirectUri();
   const server = await startOidcCallbackServer({
     port: argv.port,
     timeoutMs: argv.timeout * 1000
   });
   try {
-    const { url } = await oms.wallet.startOidcRedirectAuth({
-      provider,
-      redirectUri: server.redirectUri,
-      ...(seqRelay ? { relayRedirectUri: seqRelay } : {})
+    const { authorizationUrl } = await oms.wallet.startOidcRedirectAuth({
+      provider: OmsRelayOidcProviders.google,
+      omsRelayReturnUri: server.redirectUri
     });
-    await announceAuthUrl(url);
+    await announceAuthUrl(authorizationUrl);
     return await server.waitForCallbackUrl;
   } finally {
     server.close();
@@ -128,11 +126,14 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
           `Unsupported provider "${argv.provider}". Only "google" works with --local.`
         );
       }
-      const callbackUrl = await obtainLoopbackCallbackUrl(oms, 'google', argv);
+      const callbackUrl = await obtainLoopbackCallbackUrl(oms, argv);
       const result = await oms.wallet.completeOidcRedirectAuth({
         callbackUrl,
         walletSelection: 'automatic'
       });
+      if (!result) {
+        throw new Error('OIDC login did not complete: no wallet result returned.');
+      }
       walletAddress = result.walletAddress;
       loginMethod = 'google';
     } else {
@@ -143,7 +144,23 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
       const result = await runBrowserLogin(
         {
           relay: makeLoginRelay(relayBase),
-          wallet: oms.wallet,
+          wallet: {
+            startOidcRedirectAuth: (p) =>
+              oms.wallet.startOidcRedirectAuth({
+                provider: p.provider as OmsRelayOidcProvider,
+                omsRelayReturnUri: p.omsRelayReturnUri
+              }),
+            completeOidcRedirectAuth: async (p) => {
+              const r = await oms.wallet.completeOidcRedirectAuth(p);
+              if (!r) {
+                throw new Error('OIDC login did not complete: no wallet result returned.');
+              }
+              return { walletAddress: r.walletAddress };
+            },
+            startEmailAuth: (p) => oms.wallet.startEmailAuth(p),
+            completeEmailAuth: (p) => oms.wallet.completeEmailAuth(p)
+          },
+          oidcProviderGoogle: OmsRelayOidcProviders.google,
           announce: announceAuthUrl,
           sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
           now: () => Date.now(),
@@ -152,7 +169,6 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
         {
           relayBase,
           uiBase: loginUiBaseUrl(),
-          seqRelay: oidcRelayRedirectUri(),
           timeoutMs: argv.timeout * 1000
         }
       );

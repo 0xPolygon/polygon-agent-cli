@@ -1,10 +1,9 @@
 // HTTP client for the relay's /api/login pairing routes (packages/oidc-relay).
-// Produces the `relay` dependency for runBrowserLogin; the OIDC handoff pieces
-// reuse the existing oidc-relay-client functions.
+// Produces the `relay` dependency for runBrowserLogin. The Google OAuth
+// callback itself is now handled by the OMS relay, not this client; the
+// pairing session only ever carries session/action/status.
 
 import type { BrowserLoginDeps, LoginAction, LoginStatus } from './browser-login.ts';
-
-import { pollRelayForCallback, registerRelaySession } from './oidc-relay-client.ts';
 
 export function makeLoginRelay(relayBase: string): BrowserLoginDeps['relay'] {
   return {
@@ -47,14 +46,6 @@ export function makeLoginRelay(relayBase: string): BrowserLoginDeps['relay'] {
       } catch {
         // network error; nothing to do, the CLI result stands on its own.
       }
-    },
-
-    registerOidcHandoff(state: string, returnTo: string): Promise<void> {
-      return registerRelaySession(relayBase, state, returnTo);
-    },
-
-    pollOidcCallback(state: string, timeoutMs: number): Promise<{ code: string; state: string }> {
-      return pollRelayForCallback(relayBase, state, { timeoutMs });
     }
   };
 }

@@ -7,7 +7,7 @@
 // empty. Any error returns false so callers fall through to the funding page
 // rather than erroring.
 
-import { findNetworkById } from '@0xsequence/typescript-sdk';
+import { findNetworkById } from '@polygonlabs/oms-wallet';
 
 import { getOmsClient } from './oms-client.ts';
 

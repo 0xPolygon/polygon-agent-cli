@@ -9,6 +9,9 @@ import type {
 
 import { runBrowserLogin } from './browser-login.ts';
 
+// A sentinel standing in for the SDK's opaque OmsRelayOidcProviders.google value.
+const GOOGLE_PROVIDER = Symbol('oms-relay-oidc-provider-google');
+
 // A scripted fake: nextAction() pops the queue (null = pending tick), and every
 // published status is recorded for assertions.
 function makeFakes(actionQueue: Array<LoginAction | null>) {
@@ -24,17 +27,13 @@ function makeFakes(actionQueue: Array<LoginAction | null>) {
       nextAction: async () => (actionQueue.length > 0 ? (actionQueue.shift() ?? null) : null),
       setStatus: async (_s, status) => {
         statuses.push(status);
-      },
-      registerOidcHandoff: async (state, returnTo) => {
-        calls.push(`registerOidcHandoff:${state}:${returnTo}`);
-      },
-      pollOidcCallback: async () => ({ code: 'CODE1', state: 'STATE1' })
+      }
     },
     wallet: {
-      startOidcRedirectAuth: async () => ({
-        url: 'https://accounts.google.com/auth',
-        state: 'STATE1'
-      }),
+      startOidcRedirectAuth: async (p) => {
+        calls.push(`startOidc:${String(p.provider === GOOGLE_PROVIDER)}:${p.omsRelayReturnUri}`);
+        return { authorizationUrl: 'https://accounts.google.com/auth' };
+      },
       completeOidcRedirectAuth: async (p) => {
         calls.push(`completeOidc:${p.callbackUrl}`);
         return { walletAddress: '0xW' };
@@ -48,6 +47,7 @@ function makeFakes(actionQueue: Array<LoginAction | null>) {
         return { walletAddress: '0xW' };
       }
     },
+    oidcProviderGoogle: GOOGLE_PROVIDER,
     announce: async (url) => {
       calls.push(`announce:${url}`);
     },
@@ -68,13 +68,16 @@ const OPTS: BrowserLoginOpts = {
 
 describe('runBrowserLogin', () => {
   it('completes the google flow', async () => {
-    const { deps, statuses, calls } = makeFakes([{ type: 'google' }]);
+    const { deps, statuses, calls } = makeFakes([
+      { type: 'google' },
+      { type: 'oidc-callback', callbackUrl: 'https://ui.test/login?s=sessionid12345678' }
+    ]);
     const result = await runBrowserLogin(deps, OPTS);
 
     expect(result).toEqual({ walletAddress: '0xW', loginMethod: 'google' });
     expect(calls).toContain('announce:https://ui.test/login#sessionid12345678');
-    expect(calls).toContain('registerOidcHandoff:STATE1:https://ui.test/login#sessionid12345678');
-    expect(calls).toContain('completeOidc:https://relay.test/api/oidc/cb?code=CODE1&state=STATE1');
+    expect(calls).toContain('startOidc:true:https://ui.test/login?s=sessionid12345678');
+    expect(calls).toContain('completeOidc:https://ui.test/login?s=sessionid12345678');
     expect(statuses).toEqual([
       { status: 'auth-url', url: 'https://accounts.google.com/auth' },
       { status: 'done', walletAddress: '0xW' }
@@ -123,6 +126,12 @@ describe('runBrowserLogin', () => {
 
   it('throws when the user cancels on the page', async () => {
     const { deps, statuses } = makeFakes([{ type: 'cancel' }]);
+    await expect(runBrowserLogin(deps, OPTS)).rejects.toThrow(/cancelled/i);
+    expect(statuses.at(-1)).toMatchObject({ status: 'error' });
+  });
+
+  it('cancels while waiting for the oidc callback', async () => {
+    const { deps, statuses } = makeFakes([{ type: 'google' }, { type: 'cancel' }]);
     await expect(runBrowserLogin(deps, OPTS)).rejects.toThrow(/cancelled/i);
     expect(statuses.at(-1)).toMatchObject({ status: 'error' });
   });
