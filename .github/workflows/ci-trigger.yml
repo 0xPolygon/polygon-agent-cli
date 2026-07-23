@@ -19,5 +19,12 @@ jobs:
       # broken bundle would land on `main` before the production deploy
       # surfaces it. The CLI's esbuild bundle is also validated here rather
       # than waiting for `prepublishOnly` at release time.
-      - run: pnpm run --if-present build
+      #
+      # Gated to match the shared `ci` action, which skips every step (pnpm
+      # setup included) on `changeset-release/*` branches. Those branches carry
+      # only version bumps and changelog edits, so there is nothing to build,
+      # and without this guard the step runs with no pnpm on PATH and fails
+      # with "pnpm: command not found".
+      - if: "!startsWith(github.head_ref, 'changeset-release/')"
+        run: pnpm run --if-present build
         shell: bash

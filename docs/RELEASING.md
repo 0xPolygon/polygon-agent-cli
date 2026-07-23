@@ -1,89 +1,88 @@
 # Releasing
 
-This repository uses [Changesets](https://github.com/changesets/changesets) with
-[conventional commits](https://www.conventionalcommits.org/) to automate
-versioning, changelog generation, GitHub releases, and npm publishing.
+This repository uses [Changesets](https://github.com/changesets/changesets) to
+automate versioning, changelog generation, GitHub releases, and npm publishing.
+Releases run through the shared `0xPolygon/pipelines` GitHub Actions workflows.
 
-## Triggering a release
+## Adding a changeset
 
-1. Open the [**Actions** tab](https://github.com/0xPolygon/polygon-agent-cli/actions)
-2. Click [**Publish / Release NPM Packages**](https://github.com/0xPolygon/polygon-agent-cli/actions/workflows/release.yml)
-   (left sidebar)
-4. Click **Run workflow** (top-right button, next to "This workflow has a
-   workflow\_dispatch event trigger")
-5. Select the **channel**: `latest` (stable), `beta`, or `dev` (prerelease)
-6. Select the **branch** (defaults to `main`)
-7. Click **Run workflow**
+Every PR that changes a published package should include a changeset. Run:
 
-You can ship `dev` or `beta` prereleases from any branch for testing.
-**Never ship `latest` from a branch other than `main`.**
+```
+pnpm changeset
+```
 
-## What happens
+Pick the affected package(s) and the bump level (`patch`, `minor`, or
+`major`), and write a short summary. This writes a file under `.changeset/`
+that you commit with your PR; the summary becomes the changelog entry. A
+"Require changeset" check enforces this on PRs to `main`.
 
-The workflow runs Changesets, which:
+The bump level comes from the changeset, not from your commit messages.
 
-1. **Determines the next version** from conventional commit messages
-   since the last release (`feat` → minor bump, `fix` → patch bump,
-   `BREAKING CHANGE` in the commit body → major bump).
-2. **Creates a commit** containing:
-   - Updated `version` fields in `package.json` files
-   - Updated `CHANGELOG.md` entries computed from conventional commit
-     messages
-3. **Tags** the commit with per-package git tags (e.g.,
-   `@polygonlabs/agent-cli@0.2.0`).
-4. **Creates a GitHub release** with the changelog as the body.
-5. **Publishes** any packages that don't have `"private": true` to npm
-   (using OIDC trusted publishing — no long-lived npm tokens).
+## Cutting a release
 
-Changelogs are maintained on a per-package basis, automatically:
+Releases are automated by the **Release** workflow
+(`.github/workflows/npm-release-trigger.yml`, which calls the shared
+`0xPolygon/pipelines/.github/workflows/apps-npm-release.yml`). There is no
+"run the workflow and pick a channel" step.
 
-- [agent-cli changelog](../../packages/polygon-agent-cli/CHANGELOG.md)
+1. **Merge changes to `main`.** On each push to `main`, the Release workflow
+   collects the pending changesets and opens (or updates) a **"Version
+   Packages" PR** on the `changeset-release/main` branch. That PR:
+   - bumps the `version` in each affected `package.json`,
+   - writes the `CHANGELOG.md` entries from the changesets,
+   - deletes the consumed changeset files.
+2. **Review and merge the Version Packages PR.** Merging it re-runs the
+   Release workflow, which now:
+   - publishes every public package to npm via **OIDC trusted publishing**
+     (no long-lived npm token),
+   - creates a per-package git tag (e.g. `@polygonlabs/agent-cli@0.12.0`),
+   - creates a GitHub Release with the changelog as the body.
 
-The workflow lives in `.github/workflows/release.yml`.
+Private packages (`"private": true`) are versioned and git-tagged but never
+published to npm.
 
-## Channels
+If a publish step fails (for example, npm trusted publishing has not yet been
+configured for a package), fix the cause and re-run the failed release run.
+`changeset publish` is idempotent: it publishes any version that is on `main`
+but not yet on npm, so no version re-bump is needed.
 
-| Channel  | Version example       | npm install                              |
-|----------|-----------------------|------------------------------------------|
-| latest   | 0.2.0                 | `npm i @polygonlabs/agent-cli`           |
-| beta     | 0.3.0-beta.1          | `npm i @polygonlabs/agent-cli@beta`      |
-| dev      | 0.3.0-dev.1           | `npm i @polygonlabs/agent-cli@dev`       |
+## Snapshot prereleases
+
+To ship a throwaway prerelease that a downstream consumer can install ahead of
+the matching real release, run the Release workflow manually
+(**Actions → Release → Run workflow**) and set a **non-semver** `snapshot_tag`
+(for example `canary` or `pre-3.9.8`). This publishes under that npm dist-tag
+only and skips the lockfile commit, git tag, and GitHub Release. Semver-shaped
+values (`3.9.8`, `v3.9.8`, `3.9.8-beta.1`) are rejected.
 
 ## Rules
 
 ### Never edit `version` in `package.json` manually
 
-The release bot manages all version fields. Manual edits will cause the
-release workflow to produce incorrect versions or fail entirely. See
-[this commit](https://github.com/0xPolygon/polygon-agent-cli/commit/631d8145febe0932cb511ec98ebd83fbe006fcd5)
-for what a bot-managed release commit looks like.
+Changesets manages every version field through the Version Packages PR. Manual
+edits conflict with it or produce incorrect versions.
 
-### Commit messages matter
+### Commit messages
 
-Commit messages drive both version bumps and changelog content. Every
-commit that lands on `main` should follow the conventional commit format:
+Commit messages do **not** drive version bumps (changesets do), but the repo
+still enforces the [conventional commit](https://www.conventionalcommits.org/)
+format via a commitlint hook (Husky):
 
 ```
 type(optional-scope): description
 ```
 
 Common types: `feat`, `fix`, `chore`, `refactor`, `docs`, `test`, `ci`.
-
-Only `feat` and `fix` appear in the changelog and influence version
-bumps. Use `chore`, `refactor`, etc. for changes that shouldn't be
-user-visible in release notes.
-
-This is enforced by a commitlint hook via Husky — commits that don't
-follow the format will be rejected locally.
-
-Remember: your commit messages are written into the official GitHub
-Release and `CHANGELOG.md` files and describe changes for consumers
-of the repo and packages.
+Commits that don't follow the format are rejected locally.
 
 ### Private packages
 
-`@polygonlabs/agentconnect-ui` (the browser-login web app) is marked
-`"private": true` and is never published to npm.
+`@polygonlabs/agentconnect-ui` (the browser-login web app) and
+`@polygonlabs/oidc-relay` (the login pairing relay) are marked
+`"private": true` and are never published to npm. They deploy as Cloudflare
+Workers via their own `deploy-*` workflows; Changesets only versions and
+git-tags them.
 
 ## Viewing releases
 
