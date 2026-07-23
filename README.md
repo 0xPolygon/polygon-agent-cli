@@ -28,7 +28,8 @@ npx @polygonlabs/agent-cli --help
 
 This repository also contains supporting packages:
 
-- **[`packages/connector-ui/`](packages/connector-ui/)** — React app that bridges wallet session approval between the browser and the CLI
+- **[`packages/agentconnect-ui/`](packages/agentconnect-ui/)** — React app (served at `agentconnect.polygon.technology`) that the CLI opens for browser-based wallet login with Google or email
+- **[`packages/oidc-relay/`](packages/oidc-relay/)** — Cloudflare Worker that pairs the login page with the CLI during browser login
 
 ## Development
 

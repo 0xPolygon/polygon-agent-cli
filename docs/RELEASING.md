@@ -1,6 +1,6 @@
 # Releasing
 
-This repository uses [Lerna](https://lerna.js.org/) with
+This repository uses [Changesets](https://github.com/changesets/changesets) with
 [conventional commits](https://www.conventionalcommits.org/) to automate
 versioning, changelog generation, GitHub releases, and npm publishing.
 
@@ -20,7 +20,7 @@ You can ship `dev` or `beta` prereleases from any branch for testing.
 
 ## What happens
 
-The workflow runs Lerna, which:
+The workflow runs Changesets, which:
 
 1. **Determines the next version** from conventional commit messages
    since the last release (`feat` → minor bump, `fix` → patch bump,
@@ -38,7 +38,6 @@ The workflow runs Lerna, which:
 Changelogs are maintained on a per-package basis, automatically:
 
 - [agent-cli changelog](../../packages/polygon-agent-cli/CHANGELOG.md)
-- [connector-ui changelog](../../packages/connector-ui/CHANGELOG.md)
 
 The workflow lives in `.github/workflows/release.yml`.
 
@@ -83,9 +82,8 @@ of the repo and packages.
 
 ### Private packages
 
-`@polygonlabs/agent-connector-ui` is marked `"private": true` and is
-never published to npm. Lerna still tracks its version and changelog
-for internal reference.
+`@polygonlabs/agentconnect-ui` (the browser-login web app) is marked
+`"private": true` and is never published to npm.
 
 ## Viewing releases
 
