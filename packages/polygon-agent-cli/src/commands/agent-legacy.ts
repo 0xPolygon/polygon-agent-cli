@@ -7,7 +7,7 @@ import { Contract, Interface, JsonRpcProvider } from 'ethers';
 
 import IDENTITY_ABI from '../../contracts/IdentityRegistry.json' with { type: 'json' };
 import REPUTATION_ABI from '../../contracts/ReputationRegistry.json' with { type: 'json' };
-import { runDappClientTx } from '../lib/dapp-client.ts';
+import { runTx as runDappClientTx } from '../lib/tx-dispatch.ts';
 import {
   resolveNetwork,
   formatUnits,

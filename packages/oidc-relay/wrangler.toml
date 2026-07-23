@@ -1,0 +1,67 @@
+name = "oidc-relay"
+compatibility_date = "2024-09-23"
+workers_dev = true
+send_metrics = false
+
+main = "src/relay.ts"
+
+[[durable_objects.bindings]]
+name = "LOGIN_SESSION"
+class_name = "LoginSession"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["OidcHandoff"]
+
+[[migrations]]
+tag = "v2"
+new_classes = ["LoginSession"]
+
+[[migrations]]
+tag = "v3"
+deleted_classes = ["OidcHandoff"]
+
+# Staging: a workers.dev URL is fine to start; swap to a custom domain for prod.
+[env.staging]
+name = "oidc-relay-staging"
+workers_dev = true
+
+[[env.staging.durable_objects.bindings]]
+name = "LOGIN_SESSION"
+class_name = "LoginSession"
+
+[[env.staging.migrations]]
+tag = "v1"
+new_classes = ["OidcHandoff"]
+
+[[env.staging.migrations]]
+tag = "v2"
+new_classes = ["LoginSession"]
+
+[[env.staging.migrations]]
+tag = "v3"
+deleted_classes = ["OidcHandoff"]
+
+[env.production]
+name = "oidc-relay-production"
+workers_dev = false
+# Custom domain provisioned by wrangler on deploy (polygon.technology zone must be
+# on this Cloudflare account). The Sequence/OMS allowlist target is now the
+# agentconnect `omsRelayReturnUri`, not this worker (see design doc).
+routes = [{ pattern = "oidc-relay.polygon.technology", custom_domain = true }]
+
+[[env.production.durable_objects.bindings]]
+name = "LOGIN_SESSION"
+class_name = "LoginSession"
+
+[[env.production.migrations]]
+tag = "v1"
+new_classes = ["OidcHandoff"]
+
+[[env.production.migrations]]
+tag = "v2"
+new_classes = ["LoginSession"]
+
+[[env.production.migrations]]
+tag = "v3"
+deleted_classes = ["OidcHandoff"]

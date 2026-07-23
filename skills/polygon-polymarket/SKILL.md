@@ -10,7 +10,7 @@ description: Place bets on Polymarket prediction markets using the Polygon Agent
 Before any polymarket command, verify the Polymarket key is set:
 
 ```bash
-polygon-agent polymarket proxy-wallet
+agent polymarket proxy-wallet
 ```
 
 If this returns `ok: true` with an `eoaAddress` and `proxyWalletAddress`, the key is configured and you can proceed directly to trading. If it errors, the user needs to run `set-key` (see Onboarding below).
@@ -25,9 +25,9 @@ Every Polymarket user has three addresses. Do not confuse them:
 |------|-----------|---------|
 | EOA | Private key owner. Shown as `eoaAddress` in CLI output | Signs transactions and CLOB orders. Needs POL for gas only when running `approve` |
 | Proxy Wallet | Shown as `proxyWalletAddress` in CLI output. This is what Polymarket shows as "your address" in the UI | Holds pUSD and outcome tokens. The CLOB `maker` |
-| Smart Wallet | The Sequence wallet (`polygon-agent wallet`) | Funds the proxy wallet with USDC.e per trade (auto-wrapped to pUSD) |
+| Smart Wallet | The OMS wallet (`agent wallet`) | Funds the proxy wallet with USDC.e per trade (auto-wrapped to pUSD) |
 
-**For trading:** USDC.e flows from the Sequence smart wallet → proxy wallet → auto-wrapped to pUSD → CLOB orders. The proxy wallet is the trading identity.
+**For trading:** USDC.e flows from the OMS smart wallet → proxy wallet → auto-wrapped to pUSD → CLOB orders. The proxy wallet is the trading identity.
 
 ---
 
@@ -37,7 +37,7 @@ Before placing a trade, verify these four things in order:
 
 **1. EOA key is configured**
 ```bash
-polygon-agent polymarket proxy-wallet
+agent polymarket proxy-wallet
 # → must return ok: true with eoaAddress and proxyWalletAddress
 ```
 
@@ -53,7 +53,7 @@ polygon-agent polymarket proxy-wallet
 
 **4. Smart wallet has USDC.e** ← required per trade, minimum $1
 ```bash
-polygon-agent balances
+agent balances
 # → check USDC.e balance (0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174)
 # → must have at least $1 USDC.e to place any order
 # → USDC.e is auto-wrapped to pUSD during the buy flow
@@ -74,19 +74,19 @@ polygon-agent balances
 
 **Step 2: Import the key into the CLI**
 ```bash
-polygon-agent polymarket set-key <privateKey>
+agent polymarket set-key <privateKey>
 ```
 Output confirms the `eoaAddress` and `proxyWalletAddress`.
 
 **Step 3: Show the user their addresses**
 ```bash
-polygon-agent polymarket proxy-wallet
+agent polymarket proxy-wallet
 ```
 Tell the user: "Your EOA is `<eoaAddress>` — this needs a small amount of POL for the one-time approval step. Your Polymarket trading address (proxy wallet) is `<proxyWalletAddress>` — this is where your pUSD and outcome tokens live."
 
 **Step 4: Fund EOA with POL for gas (approval step only)**
 ```bash
-polygon-agent send-native --to <eoaAddress> --amount 0.1 --broadcast
+agent send-native --to <eoaAddress> --amount 0.1 --broadcast
 ```
 The EOA only needs POL for the one-time `approve` transaction. After that, trading requires no gas from the EOA.
 
@@ -99,7 +99,7 @@ The EOA only needs POL for the one-time `approve` transaction. After that, tradi
 
 **Step 6: Set proxy wallet approvals for V2 (one-time, permanent)**
 ```bash
-polygon-agent polymarket approve --broadcast
+agent polymarket approve --broadcast
 ```
 This sets approvals for the V2 exchange contracts and CollateralOnramp. Permanent on-chain — never needs to be run again for this EOA.
 
@@ -107,7 +107,7 @@ This sets approvals for the V2 exchange contracts and CollateralOnramp. Permanen
 
 **Step 1: Confirm addresses**
 ```bash
-polygon-agent polymarket proxy-wallet
+agent polymarket proxy-wallet
 ```
 
 **Step 2: Accept Terms of Service (required)**
@@ -119,12 +119,12 @@ polygon-agent polymarket proxy-wallet
 
 **Step 3: Fund EOA with POL for gas**
 ```bash
-polygon-agent send-native --to <eoaAddress> --amount 0.1 --broadcast
+agent send-native --to <eoaAddress> --amount 0.1 --broadcast
 ```
 
 **Step 4: Set proxy wallet approvals for V2 (one-time)**
 ```bash
-polygon-agent polymarket approve --broadcast
+agent polymarket approve --broadcast
 ```
 
 ---
@@ -135,13 +135,13 @@ polygon-agent polymarket approve --broadcast
 
 ```bash
 # List top markets by volume
-polygon-agent polymarket markets
+agent polymarket markets
 
 # Search by keyword
-polygon-agent polymarket markets --search "bitcoin" --limit 10
+agent polymarket markets --search "bitcoin" --limit 10
 
 # Paginate
-polygon-agent polymarket markets --limit 20 --offset 20
+agent polymarket markets --limit 20 --offset 20
 ```
 
 Key output fields per market:
@@ -154,7 +154,7 @@ Key output fields per market:
 ### Get a Single Market
 
 ```bash
-polygon-agent polymarket market <conditionId>
+agent polymarket market <conditionId>
 ```
 
 Use this to confirm prices and token IDs before placing an order.
@@ -162,7 +162,7 @@ Use this to confirm prices and token IDs before placing an order.
 ### Show Proxy Wallet Address
 
 ```bash
-polygon-agent polymarket proxy-wallet
+agent polymarket proxy-wallet
 ```
 
 Confirms which EOA and proxy wallet are active. The proxy wallet is where pUSD and tokens are held.
@@ -171,10 +171,10 @@ Confirms which EOA and proxy wallet are active. The proxy wallet is where pUSD a
 
 ```bash
 # Standard markets
-polygon-agent polymarket approve --broadcast
+agent polymarket approve --broadcast
 
 # Neg-risk markets (only if you see negRisk: true on a market you want to trade)
-polygon-agent polymarket approve --neg-risk --broadcast
+agent polymarket approve --neg-risk --broadcast
 ```
 
 **All users must run this after the V2 migration** — previous V1 approvals on old exchange contracts do not carry over. V2 approvals cover: pUSD → V2 exchange, CTF → V2 exchange, and USDC.e → CollateralOnramp (for wrapping). Once set, they are permanent on-chain.
@@ -183,20 +183,20 @@ polygon-agent polymarket approve --neg-risk --broadcast
 
 ```bash
 # Dry-run first — always check before executing
-polygon-agent polymarket clob-buy <conditionId> YES|NO <usdcAmount>
+agent polymarket clob-buy <conditionId> YES|NO <usdcAmount>
 
 # Execute — funds proxy wallet, wraps USDC.e → pUSD, then places order
-polygon-agent polymarket clob-buy <conditionId> YES|NO <usdcAmount> --broadcast
+agent polymarket clob-buy <conditionId> YES|NO <usdcAmount> --broadcast
 
 # If proxy wallet already has pUSD from a previous failed order (skip the funding step)
-polygon-agent polymarket clob-buy <conditionId> YES|NO <usdcAmount> --skip-fund --broadcast
+agent polymarket clob-buy <conditionId> YES|NO <usdcAmount> --skip-fund --broadcast
 
 # Limit order — fill only at this price or better
-polygon-agent polymarket clob-buy <conditionId> YES <usdcAmount> --price 0.45 --broadcast
+agent polymarket clob-buy <conditionId> YES <usdcAmount> --price 0.45 --broadcast
 ```
 
 **How it works:**
-1. Smart wallet transfers `usdcAmount` USDC.e to the proxy wallet (Sequence tx)
+1. Smart wallet transfers `usdcAmount` USDC.e to the proxy wallet (OMS tx)
 2. Proxy wallet wraps USDC.e → pUSD via CollateralOnramp (on-chain, EOA gas)
 3. Posts CLOB BUY order: maker=proxy wallet, signer=EOA (off-chain, no gas)
 4. Tokens arrive in proxy wallet on fill
@@ -212,13 +212,13 @@ polygon-agent polymarket clob-buy <conditionId> YES <usdcAmount> --price 0.45 --
 
 ```bash
 # Dry-run first
-polygon-agent polymarket sell <conditionId> YES|NO <shares>
+agent polymarket sell <conditionId> YES|NO <shares>
 
 # Execute
-polygon-agent polymarket sell <conditionId> YES|NO <shares> --broadcast
+agent polymarket sell <conditionId> YES|NO <shares> --broadcast
 
 # Limit sell
-polygon-agent polymarket sell <conditionId> YES <shares> --price 0.80 --broadcast
+agent polymarket sell <conditionId> YES <shares> --price 0.80 --broadcast
 ```
 
 `<shares>` is the number of outcome tokens (not USD). Get share count from `positions`.
@@ -227,7 +227,7 @@ Selling is pure off-chain — no gas, no on-chain tx. Proceeds are received as p
 ### Check Positions
 
 ```bash
-polygon-agent polymarket positions
+agent polymarket positions
 ```
 
 Shows all open positions in the proxy wallet with current value, P&L, and outcome.
@@ -235,7 +235,7 @@ Shows all open positions in the proxy wallet with current value, P&L, and outcom
 ### Check Open Orders
 
 ```bash
-polygon-agent polymarket orders
+agent polymarket orders
 ```
 
 Lists GTC limit orders that are still open (FOK/FAK orders are never "open" — they fill or cancel immediately).
@@ -243,7 +243,7 @@ Lists GTC limit orders that are still open (FOK/FAK orders are never "open" — 
 ### Cancel an Order
 
 ```bash
-polygon-agent polymarket cancel <orderId>
+agent polymarket cancel <orderId>
 ```
 
 Get `orderId` from the `orders` command or from the `orderId` field in `clob-buy` output.
@@ -256,16 +256,16 @@ Get `orderId` from the `orders` command or from the `orderId` field in `clob-buy
 # ── FIRST TIME (run once per EOA) ──────────────────────────────────────
 
 # 1. Import Polymarket private key
-polygon-agent polymarket set-key 0x<yourPrivateKey>
+agent polymarket set-key 0x<yourPrivateKey>
 # → save eoaAddress and proxyWalletAddress
 
 # 2. Accept ToS at https://polymarket.com (connect EOA, accept when prompted)
 
 # 3. Fund EOA with POL for the one-time approval tx
-polygon-agent send-native --to <eoaAddress> --amount 0.1 --broadcast
+agent send-native --to <eoaAddress> --amount 0.1 --broadcast
 
 # 4. Set V2 approvals (one-time, permanent — covers pUSD, CTF, and CollateralOnramp)
-polygon-agent polymarket approve --broadcast
+agent polymarket approve --broadcast
 
 # ── RETURNING USER ──────────────────────────────────────────────────────
 # If V2 approvals were already set: skip steps 1-4, go straight to trading.
@@ -274,31 +274,31 @@ polygon-agent polymarket approve --broadcast
 # ── FIND A MARKET ────────────────────────────────────────────────────────
 
 # 5. Search for markets
-polygon-agent polymarket markets --search "bitcoin" --limit 10
+agent polymarket markets --search "bitcoin" --limit 10
 
 # 6. Get details on a specific market
-polygon-agent polymarket market 0x<conditionId>
+agent polymarket market 0x<conditionId>
 # → check: yesPrice, noPrice, negRisk, endDate
 # → if negRisk: true → run approve --neg-risk --broadcast first
 
 # ── ENTER A POSITION ────────────────────────────────────────────────────
 
 # 7. Dry-run to confirm
-polygon-agent polymarket clob-buy 0x<conditionId> YES 5
+agent polymarket clob-buy 0x<conditionId> YES 5
 # → review: currentPrice, proxyWalletAddress, flow (includes pUSD wrapping)
 
 # 8. Execute
-polygon-agent polymarket clob-buy 0x<conditionId> YES 5 --broadcast
+agent polymarket clob-buy 0x<conditionId> YES 5 --broadcast
 # → check: orderStatus === "matched"
 
 # ── MANAGE ──────────────────────────────────────────────────────────────
 
 # 9. Check positions
-polygon-agent polymarket positions
+agent polymarket positions
 # → review: size (shares), curPrice, cashPnl
 
 # 10. Sell when ready
-polygon-agent polymarket sell 0x<conditionId> YES <shares> --broadcast
+agent polymarket sell 0x<conditionId> YES <shares> --broadcast
 # → orderStatus === "matched" means pUSD is back in proxy wallet
 ```
 
@@ -327,17 +327,17 @@ When deciding whether to sell:
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `No EOA key found` | `set-key` not run | Run `polygon-agent polymarket set-key <pk>` |
+| `No EOA key found` | `set-key` not run | Run `agent polymarket set-key <pk>` |
 | `Could not create api key` (stderr only) | ToS not accepted | Non-fatal — CLI retries with `deriveApiKey` and may still succeed. If orders fail too, visit polymarket.com and accept ToS with the EOA |
 | `CLOB order error: not authorized` | ToS not accepted | Visit polymarket.com, connect EOA wallet, accept terms |
-| `insufficient funds for gas` | EOA has no POL | `polygon-agent send-native --to <eoaAddress> --amount 0.1 --broadcast` |
+| `insufficient funds for gas` | EOA has no POL | `agent send-native --to <eoaAddress> --amount 0.1 --broadcast` |
 | `Market not found` | Low-volume or closed market | Market may have resolved; try `--search` with different terms |
 | `Market has no tokenIds` | Closed market | Check `endDate` — market resolved |
 | `orderStatus: "unmatched"` on FOK | No liquidity at market price | Try `--fak` for partial fill, or `--price 0.x` for limit order |
 | `invalid amount for a marketable BUY order ($X), min size: $1` | Amount below CLOB minimum | Use at least $1. If pUSD was already funded, retry with `--skip-fund` |
-| `Wallet not found: main` | No Sequence wallet | Run `polygon-agent wallet create` |
-| `No signer supported for call` | Wallet session missing USDC.e whitelist | Re-create wallet session: `polygon-agent wallet create --name main` |
-| Approvals tx reverts after V2 migration | V1 approvals — wrong exchange contracts | Re-run `polygon-agent polymarket approve --broadcast` for V2 contracts |
+| `Wallet not found: main` | Not logged in | Run `agent wallet login` |
+| Session expired (`OMS_SESSION_EXPIRED`) | Login session lapsed (~1 week) | Run `agent wallet login` |
+| Approvals tx reverts after V2 migration | V1 approvals — wrong exchange contracts | Re-run `agent polymarket approve --broadcast` for V2 contracts |
 
 ---
 
@@ -347,7 +347,7 @@ When deciding whether to sell:
 - **All commands are dry-run by default.** `approve`, `clob-buy`, `sell` do nothing without `--broadcast`.
 - **V2 approvals are required for all users.** V1 approvals on old exchange contracts do not carry over. Run `approve --broadcast` once after migration.
 - **`clob-buy` handles the full flow automatically:** transfers USDC.e from smart wallet → proxy wallet, wraps USDC.e → pUSD, then places the CLOB order (unless `--skip-fund`).
-- **Positions live in the proxy wallet**, not the Sequence smart wallet. `positions` queries the proxy wallet.
+- **Positions live in the proxy wallet**, not the OMS smart wallet. `positions` queries the proxy wallet.
 - **Sell is free.** No gas, no on-chain tx. Selling via CLOB is a signed off-chain message only. Proceeds are pUSD.
 - **`orderStatus: "matched"`** means the trade filled. `"unmatched"` means FOK failed (no liquidity).
 - **Fees are protocol-determined at match time.** Makers never pay fees — only takers. No `feeRateBps` on orders.

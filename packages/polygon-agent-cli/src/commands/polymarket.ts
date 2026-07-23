@@ -1,12 +1,11 @@
 // Polymarket CLI commands
-// Architecture: Sequence smart wallet → Polymarket proxy wallet → CLOB
+// Architecture: OMS smart wallet → Polymarket proxy wallet → CLOB
 // - `approve`: sets on-chain approvals on proxy wallet (one-time)
 // - `clob-buy`: funds proxy wallet from smart wallet, then places CLOB BUY order
 // - CLOB orders: maker=proxyWallet, signer=EOA, signatureType=POLY_PROXY
 
 import type { CommandModule } from 'yargs';
 
-import { runDappClientTx } from '../lib/dapp-client.ts';
 import {
   getMarkets,
   getMarket,
@@ -25,7 +24,8 @@ import {
   NEG_RISK_ADAPTER,
   COLLATERAL_ONRAMP
 } from '../lib/polymarket.ts';
-import { loadWalletSession, savePolymarketKey, loadPolymarketKey } from '../lib/storage.ts';
+import { loadOmsWalletPointer, savePolymarketKey, loadPolymarketKey } from '../lib/storage.ts';
+import { runTx as runDappClientTx } from '../lib/tx-dispatch.ts';
 
 // ─── handlers ────────────────────────────────────────────────────────────────
 
@@ -321,10 +321,10 @@ async function handleClobBuy(argv: {
     }
 
     const [session, privateKey] = await Promise.all([
-      loadWalletSession(walletName),
+      loadOmsWalletPointer(walletName),
       loadPolymarketKey()
     ]);
-    if (!session) throw new Error(`Wallet not found: ${walletName}`);
+    if (!session) throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login`);
 
     const { privateKeyToAccount } = await import('viem/accounts');
     const account = privateKeyToAccount(privateKey as `0x${string}`);

@@ -16,7 +16,7 @@
 - [Overview](#overview)
 - [Quickstart](#quickstart)
 - [Core Components](#core-components)
-  - [Sequence: Wallet Infrastructure](#sequence-wallet-infrastructure)
+  - [OMS: Wallet Infrastructure](#oms-wallet-infrastructure)
   - [Trails: Swapping, Bridging, and onchain actions](#trails-swapping-bridging-and-defi-actions)
   - [Onchain Identity](#onchain-agentic-identity)
 - [Plugins & Skills](#plugins--skills)
@@ -32,7 +32,7 @@
 
 Polygon Agent CLI gives AI agents everything they need to operate onchain:
 
-- **Create and manage wallets** define allowances, session limits, and contract permissions in order to transact securely. Mitigates risk of prompt injection attacks. Private keys never leave the device and have to be exposed to your agent's context.
+- **Create and manage wallets** browser-login embedded smart wallets, no private keys to manage and no keys exposed to your agent's context.
 - **Send tokens, swap, bridge or any action** pay in any token for any onchain action. Built-in swapping, bridging, deposits, DeFi primitives, and more.
 - **Register agent identity** and build reputation via ERC-8004
 - **Integrated APIs** query cross-chain balances, transaction history and or query nodes via dedicated RPCs
@@ -50,7 +50,7 @@ Install the Polygon Agent CLI as a skill your agent can use — works with Claud
 npx skills add https://github.com/0xPolygon/polygon-agent-cli
 ```
 
-Once installed, your agent has access to wallet management, token operations, DEX swaps, and on-chain identity, all through the `polygon-agent` CLI.
+Once installed, your agent has access to wallet management, token operations, DEX swaps, and on-chain identity, all through the `agent` CLI. The long-form `polygon-agent` command name remains available as an alias, so both work.
 
 ### Manual Install
 
@@ -60,7 +60,7 @@ Once installed, your agent has access to wallet management, token operations, DE
 npm install -g @polygonlabs/agent-cli
 ```
 
-**From source** — for contributors or local development. Use `pnpm polygon-agent` instead of `polygon-agent` for all commands.
+**From source** — for contributors or local development. Use `pnpm polygon-agent` instead of `agent` for all commands.
 
 ```bash
 git clone https://github.com/0xPolygon/polygon-agent-cli.git
@@ -71,32 +71,34 @@ pnpm polygon-agent --help
 
 ### After install: get your agent running
 
-Once installed via skills or npm, run the following. If running from source, prefix `polygon-agent` commands with `pnpm` and run them from the root of the repository (e.g., `pnpm polygon-agent setup --name "MyAgent"`).
+Once installed via skills or npm, run the following. If running from source, run `agent` commands via `pnpm polygon-agent` from the root of the repository (e.g., `pnpm polygon-agent setup --name "MyAgent"`).
 
 ```bash
-# 1. Setup: creates EOA, authenticates, gets project access key
-polygon-agent setup --name "MyAgent"
+# 1. Log in to your embedded wallet in the browser
+agent wallet login
+# Prints a login page URL and opens it in a browser. Choose Google or email
+# on the page; once you finish, the embedded wallet is created or unlocked.
+# This works whether the browser is on this machine or elsewhere, so there
+# is no separate remote mode to enable. Use --local for the older loopback
+# flow, which needs the browser on this same machine.
+#
+# No setup step needed: the CLI ships a default OMS Builder publishable key,
+# and login automatically provisions your own Builder project + access key
+# (saved to ~/.polygon-agent/builder.json) for indexer and Trails quota.
 
-# 2. Set your access key
-export SEQUENCE_PROJECT_ACCESS_KEY=<access-key>
+# 2. Fund the wallet
+agent fund
 
-# 3. Create a wallet (opens browser, auto-waits for approval)
-polygon-agent wallet create
+# 3. Start operating
+agent balances
+agent send --to 0x... --amount 1.0
+agent swap --from USDC --to USDT --amount 5
 
-# 4. Fund the wallet
-polygon-agent fund
-
-# 5. Start operating (SEQUENCE_INDEXER_ACCESS_KEY is the same as your project access key)
-export SEQUENCE_INDEXER_ACCESS_KEY=$SEQUENCE_PROJECT_ACCESS_KEY
-polygon-agent balances
-polygon-agent send --to 0x... --amount 1.0
-polygon-agent swap --from USDC --to USDT --amount 5
-
-# 6. Register your agent on-chain
-polygon-agent agent register --name "MyAgent"
+# 4. Register your agent on-chain
+agent agent register --name "MyAgent"
 ```
 
-> Omit `--broadcast` on any command to preview without sending. See [`QUICKSTART.md`](skills/QUICKSTART.md) for the full step-by-step walkthrough.
+> Omit `--broadcast` on any command to preview without sending. See [`SKILL.md`](skills/SKILL.md) for the full agent-consumable reference.
 
 ---
 
@@ -104,17 +106,17 @@ polygon-agent agent register --name "MyAgent"
 
 The CLI is built on three pillars to enable end to end onchain payments with your agents.
 
-### Sequence: Wallet Infrastructure
+### OMS: Wallet Infrastructure
 
-[Sequence](https://sequence.xyz) powers all wallet operations, RPC access, and indexing.
+[OMS (Open Money Stack)](https://sequence.xyz) powers all wallet operations, RPC access, and indexing.
 
 | Capability  | What it does                                                                                | CLI command                     |
 | ----------- | ------------------------------------------------------------------------------------------- | ------------------------------- |
-| **Wallets** | Session-based smart contract wallets (Account Abstraction) with scoped spending permissions | `wallet create`, `wallet list`  |
+| **Wallets** | browser-login embedded smart wallets (Account Abstraction), chain-agnostic address           | `wallet login`, `wallet list`   |
 | **RPCs**    | Load balanced RPCs cross-chain for onchain interactions and node queries                    | Used internally by all commands |
 | **Indexer** | Token balance queries and transaction history across ERC-20/721/1155                        | `balances`                      |
 
-Wallet sessions are created through a secure handshake between the CLI, the Connector UI, and the Sequence Ecosystem Wallet. Session permissions let you cap spending per token, whitelist contracts, and set time-based expiry and to mitigate against prompt injection attacks.
+Wallets are created and unlocked via browser login (Google or email). The embedded wallet can call any contract and spend any amount it holds; there is no contract whitelist or per-token spend limit. The wallet address is the same across every supported chain, and sessions last about a week before you re-run `wallet login`.
 
 ### Trails: Swapping, Bridging, and DeFi Actions
 
@@ -134,7 +136,7 @@ Native contracts for agent identity, reputation, and emerging payment standards.
 | --------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------ |
 | **ERC-8004**    | Register agents as ERC-721 NFTs with metadata and on-chain reputation            | `agent register`, `agent reputation`, `agent feedback` |
 | **x402**        | HTTP-native micropayment protocol for agentic payments to your favorite services | `x402-pay`                                             |
-| **Native Apps** | Direct interaction with smart contracts                                          | Via `--contract` whitelisting                          |
+| **Native Apps** | Direct interaction with any smart contract                                       | `call`                                                 |
 
 **ERC-8004 contracts on Polygon:**
 
@@ -153,7 +155,7 @@ The CLI ships with agent-friendly documentation designed to be consumed directly
 
 Once installed, the agent receives the full skill context — including wallet setup, token operations, and ERC-8004 registration, and can execute autonomously.
 
-See [`SKILL.md`](skills/SKILL.md) for the full agent-consumable reference and [`QUICKSTART.md`](skills/QUICKSTART.md) for the 4-phase setup guide.
+See [`SKILL.md`](skills/SKILL.md) for the full agent-consumable reference.
 
 ---
 
@@ -162,38 +164,42 @@ See [`SKILL.md`](skills/SKILL.md) for the full agent-consumable reference and [`
 ### Setup & Wallets
 
 ```bash
-polygon-agent setup --name <name>                 # Create EOA + project
-polygon-agent wallet create                        # Create wallet (auto-wait)
-polygon-agent wallet create --no-wait              # Manual approval flow
-polygon-agent wallet list                          # Show all wallets
-polygon-agent wallet address                       # Show wallet address
-polygon-agent fund                                 # Open funding widget
+agent wallet login [--name <n>] [--local] [--no-fund] [--force]  # Log in from the browser (choose Google or email on the login page); auto-provisions Builder credentials
+agent setup --oms-publishable-key <key>  # Advanced: point at your own OMS Builder project instead of the default
+agent wallet logout [--name <n>]           # Log out of a wallet
+agent wallet list                          # Show all wallets
+agent wallet address [--name <n>]          # Show wallet address (same on every chain)
+agent wallet remove [--name <n>]           # Remove a stored wallet
+agent fund                                 # Open funding widget
 ```
 
 ### Token Operations
 
 ```bash
-polygon-agent balances                             # Balances on session default chain
-polygon-agent balances --chain arbitrum            # Single chain override
-polygon-agent balances --chains polygon,base,arbitrum  # Same wallet, multiple chains (JSON)
-polygon-agent send --to 0x... --amount 1.0         # Send POL (dry-run)
-polygon-agent send --symbol USDC --to 0x... --amount 10 --broadcast
-polygon-agent swap --from USDC --to USDT --amount 5 --broadcast
-polygon-agent withdraw --position <aToken-or-vault> --amount max [--chain <chain>]   # dry-run; add --broadcast
-polygon-agent withdraw --position <aToken> --amount 0.5 --chain mainnet --broadcast   # partial (underlying units)
+agent balances                             # Balances on session default chain
+agent balances --chain arbitrum            # Single chain override
+agent balances --chains polygon,base,arbitrum  # Same wallet, multiple chains (JSON)
+agent send --to 0x... --amount 1.0         # Send POL (dry-run)
+agent send --symbol USDC --to 0x... --amount 10 --broadcast
+agent swap --from USDC --to USDT --amount 5 --broadcast
+agent withdraw --position <aToken-or-vault> --amount max [--chain <chain>]   # dry-run; add --broadcast
+agent withdraw --position <aToken> --amount 0.5 --chain mainnet --broadcast   # partial (underlying units)
+agent call --to 0x... --data 0x... [--value <amt>] [--prefer-native-fee] [--broadcast]   # arbitrary contract call
 ```
 
 **`withdraw`** exits **Aave v3** positions using your **aToken** address (`POOL()` + `UNDERLYING_ASSET_ADDRESS()` → `Pool.withdraw`), or **ERC-4626** vaults (e.g. Morpho) via `redeem`. Dry-run prints `poolAddress` / `vault` and calldata.
 
-For **`--broadcast`**, the session must allow the **pool or vault** and (on that chain) **fee / underlying ERC-20** touches — use `wallet create --chain <same-as-tx> --contract <pool> --contract <underlying-USDC-or-asset>`. If your default session is Polygon but you transact on **mainnet**, create or extend a **mainnet** session for that chain.
+The embedded wallet can call any contract on any chain, so no pre-authorization is needed — just ensure the wallet holds a little POL or USDC for gas on the target chain. To transact on a chain other than Polygon, pass `--chain <name>` on the command itself.
+
+**`call`** sends a raw transaction to any contract. The relayer takes its gas fee in USDC or POL, whichever the wallet can afford; for a native-only wallet, pass `--prefer-native-fee`.
 
 ### Agent Registry (ERC-8004)
 
 ```bash
-polygon-agent agent register --name "MyAgent" --broadcast
-polygon-agent agent reputation --agent-id <id>
-polygon-agent agent feedback --agent-id <id> --value 4.5 --broadcast
-polygon-agent agent reviews --agent-id <id>
+agent agent register --name "MyAgent" --broadcast
+agent agent reputation --agent-id <id>
+agent agent feedback --agent-id <id> --value 4.5 --broadcast
+agent agent reviews --agent-id <id>
 ```
 
 ### Smart Defaults
@@ -203,46 +209,41 @@ polygon-agent agent reviews --agent-id <id>
 | Wallet name   | `main`                 | `--name <name>`      |
 | Chain         | `polygon`              | `--chain <name\|id>` |
 | Multi-chain balances | —                 | `--chains <csv>` (comma-separated, max 20; overrides `--chain`) |
-| Wallet create | Auto-wait for approval | `--no-wait`          |
 | Broadcast     | Dry-run (preview)      | `--broadcast`        |
 
 ---
 
 ## Environment Variables
 
-**One key covers everything:** `SEQUENCE_INDEXER_ACCESS_KEY` and `TRAILS_API_KEY` are the same value as `SEQUENCE_PROJECT_ACCESS_KEY`:
+No environment variables are required. The CLI ships a default OMS Builder publishable key, and `wallet login` automatically provisions your own Builder project and access key on first login, saving it to `~/.polygon-agent/builder.json`.
 
-```bash
-export SEQUENCE_PROJECT_ACCESS_KEY=<access-key-from-setup>
-export SEQUENCE_INDEXER_ACCESS_KEY=$SEQUENCE_PROJECT_ACCESS_KEY
-export TRAILS_API_KEY=$SEQUENCE_PROJECT_ACCESS_KEY
-```
+**Advanced overrides:**
 
-**Optional:**
-
-| Variable                           | Default                                    | Description                                                                                                                                                                |
-| ---------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SEQUENCE_ECOSYSTEM_CONNECTOR_URL` | `https://agentconnect.polygon.technology/` | URL of the Connector UI that users open in a browser to approve wallet sessions. Override to point at a local dev server (`http://localhost:4444`) or a custom deployment. |
-| `SEQUENCE_DAPP_ORIGIN`             | `https://agentconnect.polygon.technology`  | Origin passed to the wallet during session creation. Identifies which dapp is requesting access. Override only if running the connector under a different domain.          |
+| Variable                   | Default                                    | Description                                                                    |
+| -------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------- |
+| `OMS_PUBLISHABLE_KEY` | Baked-in default                            | Point at your own OMS Builder project instead of the default. Can also be set via `setup --oms-publishable-key <key>` (persists to `~/.polygon-agent/builder.json`). |
+| `TRAILS_API_KEY`           | —                                           | Optional Trails API key for higher rate limits on swap / bridge / earn calls.   |
+| `POLYGON_AGENT_LOGIN_UI`   | `https://agentconnect.polygon.technology`   | Base URL of the browser login page opened by `wallet login`.                   |
+| `POLYGON_AGENT_OIDC_RELAY` | `https://oidc-relay.polygon.technology`     | Base URL of the OIDC handoff and login relay used by `wallet login`.           |
 
 ---
 
 ## Security
 
-- **Keys never leave the device.** Credentials are encrypted at rest in `~/.polygon-agent/`. Importantly, keys don't have to be exposed to the agent's context.
-- **Session permissions are scoped.** Per-session spending limits, contract whitelists, and 24-hour expiry.
+- **No keys to manage.** The embedded wallet is unlocked via browser login (Google or email); there are no private keys exposed to the agent's context. Credentials are stored in `~/.polygon-agent/`.
+- **Sessions expire.** Wallet sessions last about a week, after which you re-run `wallet login`.
 
 ---
 
 ## Troubleshooting
 
-| Issue                                 | Fix                                 |
-| ------------------------------------- | ----------------------------------- |
-| `Missing SEQUENCE_PROJECT_ACCESS_KEY` | Run `setup` first                   |
-| Session expired                       | Re-run `wallet create`              |
-| Insufficient funds                    | Run `fund` to top up your wallet    |
-| Transaction failed                    | Omit `--broadcast` to dry-run first |
-| Callback timeout                      | Increase with `--timeout 600`       |
+| Issue                                       | Fix                                              |
+| ------------------------------------------- | ------------------------------------------------ |
+| Builder provisioning failed during login (see the stderr note) | It retries on the next `wallet login`; or run `setup` manually. Custom projects: export `OMS_PUBLISHABLE_KEY` |
+| Not logged in                               | Run `agent wallet login`                 |
+| Session expired                             | Run `agent wallet login`                 |
+| Insufficient funds / can't pay gas          | Run `fund`; for a native-only wallet pass `--prefer-native-fee` on `call` |
+| Transaction failed                          | Omit `--broadcast` to dry-run first              |
 
 ---
 
@@ -254,9 +255,6 @@ pnpm install
 
 # CLI (via root script)
 pnpm polygon-agent --help
-
-# Connector UI
-cd packages/connector-ui && pnpm dev
 ```
 
 ### Project Structure
@@ -264,20 +262,19 @@ cd packages/connector-ui && pnpm dev
 ```text
 polygon-agent-cli/
 ├── packages/
-│   ├── polygon-agent-cli/  # CLI package (@polygonlabs/agent-cli)
-│   │   ├── src/            # TypeScript source
-│   │   │   ├── index.ts    # yargs entry point
-│   │   │   ├── commands/   # Command modules (setup, wallet, operations, agent)
-│   │   │   ├── lib/        # Shared utils (storage, ethauth, tokens, dapp-client)
-│   │   │   └── types.d.ts  # Ambient declarations for untyped deps
-│   │   ├── contracts/      # ERC-8004 ABIs
-│   │   └── skills/         # Agent-friendly docs (SKILL.md, QUICKSTART.md)
-│   └── connector-ui/       # React app, wallet connect bridge
+│   └── polygon-agent-cli/  # CLI package (@polygonlabs/agent-cli)
+│       ├── src/            # TypeScript source
+│       │   ├── index.ts    # yargs entry point
+│       │   ├── commands/   # Command modules (setup, wallet, operations, agent)
+│       │   ├── lib/        # Shared utils (storage, ethauth, tokens)
+│       │   └── types.d.ts  # Ambient declarations for untyped deps
+│       ├── contracts/      # ERC-8004 ABIs
+│       └── skills/         # Agent-friendly docs (SKILL.md)
 ├── pnpm-workspace.yaml
 └── package.json
 ```
 
-**Requirements:** Node.js 20+
+**Requirements:** Node.js 22+
 
 ---
 

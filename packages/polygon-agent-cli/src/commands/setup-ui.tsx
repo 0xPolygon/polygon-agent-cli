@@ -2,94 +2,13 @@ import { ethers } from 'ethers';
 import { Box, Text, useApp } from 'ink';
 import React, { useState, useEffect } from 'react';
 
+import { getAuthToken, createProject, getDefaultAccessKey } from '../lib/builder-api.ts';
 import { generateEthAuthProof } from '../lib/ethauth.ts';
 import { saveBuilderConfig, loadBuilderConfig } from '../lib/storage.ts';
 import { Header, Step, KV, Hint, Err } from '../ui/components.js';
 
 // Re-export API helpers used by setup.ts
-export async function getAuthToken(proofString: string): Promise<string> {
-  const apiUrl = process.env.SEQUENCE_BUILDER_API_URL || 'https://api.sequence.build';
-  const url = `${apiUrl}/rpc/Builder/GetAuthToken`;
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ethauthProof: proofString })
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`GetAuthToken failed: ${response.status} ${errorText}`);
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const data: any = await response.json();
-
-  if (!data.ok || !data.auth?.jwtToken) {
-    throw new Error('GetAuthToken returned invalid response');
-  }
-
-  return data.auth.jwtToken;
-}
-
-export async function createProject(
-  name: string,
-  jwtToken: string
-): Promise<{ id: number; name: string }> {
-  const apiUrl = process.env.SEQUENCE_BUILDER_API_URL || 'https://api.sequence.build';
-  const url = `${apiUrl}/rpc/Builder/CreateProject`;
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${jwtToken}`
-    },
-    body: JSON.stringify({ name })
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`CreateProject failed: ${response.status} ${errorText}`);
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const data: any = await response.json();
-
-  if (!data.project) {
-    throw new Error('CreateProject returned invalid response');
-  }
-
-  return data.project;
-}
-
-export async function getDefaultAccessKey(projectId: number, jwtToken: string): Promise<string> {
-  const apiUrl = process.env.SEQUENCE_BUILDER_API_URL || 'https://api.sequence.build';
-  const url = `${apiUrl}/rpc/QuotaControl/GetDefaultAccessKey`;
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${jwtToken}`
-    },
-    body: JSON.stringify({ projectID: projectId })
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`GetDefaultAccessKey failed: ${response.status} ${errorText}`);
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const data: any = await response.json();
-
-  if (!data.accessKey?.accessKey) {
-    throw new Error('GetDefaultAccessKey returned invalid response');
-  }
-
-  return data.accessKey.accessKey;
-}
+export { getAuthToken, createProject, getDefaultAccessKey } from '../lib/builder-api.ts';
 
 type Phase =
   | 'checking'
@@ -186,14 +105,14 @@ export function SetupUI({ name, force }: { name: string; force: boolean }) {
           <KV k="address" v={`${result.eoaAddress.slice(0, 6)}···${result.eoaAddress.slice(-4)}`} />
           <KV k="key" v={`${result.accessKey.slice(0, 12)}···`} />
           <KV k="project" v={String(result.projectId)} />
-          <Hint>Next: polygon-agent wallet create</Hint>
+          <Hint>Next: agent wallet login</Hint>
         </Box>
       )}
       {phase === 'existing' && result && (
         <Box flexDirection="column" marginTop={1}>
           <Text color="gray">Already configured</Text>
           <KV k="address" v={`${result.eoaAddress.slice(0, 6)}···${result.eoaAddress.slice(-4)}`} />
-          <Hint>Next: polygon-agent wallet create</Hint>
+          <Hint>Next: agent wallet login</Hint>
         </Box>
       )}
       {phase === 'error' && <Err message={error} />}

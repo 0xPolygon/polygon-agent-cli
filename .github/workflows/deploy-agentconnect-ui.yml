@@ -1,0 +1,106 @@
+name: Deploy agentconnect UI to Cloudflare
+
+# Builds the funding/dashboard SPA and deploys it to the agentconnect domain
+# (replacing the retired connector-ui): merge to `staging` -> staging,
+# merge to `main` -> production. wrangler runs via npx (not a workspace dep, to
+# respect the repo trust policy); the `[assets]` worker serves the built SPA and
+# the wrangler.toml v2 migration drops connector-ui's SessionRelay Durable Object.
+# Reuses the same CF_WORKER_* + VITE_* secrets/environments as connector-ui.
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+    paths:
+      - 'packages/agentconnect-ui/**'
+      - '.github/workflows/deploy-agentconnect-ui.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to deploy
+        type: choice
+        options:
+          - staging
+          - production
+        default: staging
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-staging:
+    name: Deploy (staging)
+    if: github.ref == 'refs/heads/staging' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging')
+    runs-on: ubuntu-latest
+    environment: staging
+    defaults:
+      run:
+        working-directory: packages/agentconnect-ui
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: .
+
+      - name: Build
+        run: pnpm run build
+        env:
+          VITE_TRAILS_API_KEY: ${{ secrets.VITE_TRAILS_API_KEY }}
+          VITE_INDEXER_ACCESS_KEY: ${{ secrets.VITE_INDEXER_ACCESS_KEY }}
+          VITE_PROJECT_ACCESS_KEY: ${{ secrets.VITE_PROJECT_ACCESS_KEY }}
+          # Login-page relay base URL (per-environment GitHub variable; empty
+          # falls back to the production default in src/config.ts).
+          VITE_OIDC_RELAY_URL: ${{ vars.VITE_OIDC_RELAY_URL }}
+
+      - name: Deploy to staging
+        run: npx -y wrangler@4 deploy --env staging
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_WORKER_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_WORKER_ACCOUNT_ID }}
+
+  deploy-production:
+    name: Deploy (production)
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'production')
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: packages/agentconnect-ui
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: .
+
+      - name: Build
+        run: pnpm run build
+        env:
+          VITE_TRAILS_API_KEY: ${{ secrets.VITE_TRAILS_API_KEY }}
+          VITE_INDEXER_ACCESS_KEY: ${{ secrets.VITE_INDEXER_ACCESS_KEY }}
+          VITE_PROJECT_ACCESS_KEY: ${{ secrets.VITE_PROJECT_ACCESS_KEY }}
+          # Login-page relay base URL (per-environment GitHub variable; empty
+          # falls back to the production default in src/config.ts).
+          VITE_OIDC_RELAY_URL: ${{ vars.VITE_OIDC_RELAY_URL }}
+
+      - name: Deploy to production
+        run: npx -y wrangler@4 deploy --env production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_WORKER_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_WORKER_ACCOUNT_ID }}

@@ -23,13 +23,13 @@ import {
 import { polymarketCommand } from './commands/polymarket.ts';
 import { setupCommand } from './commands/setup.ts';
 import { walletCommand } from './commands/wallet.ts';
-import { bootstrapAccessKey } from './lib/storage.ts';
+import { bootstrapOmsConfig } from './lib/storage.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8'));
 
-// Auto-load access key from ~/.polygon-agent/builder.json if not already in env
-bootstrapAccessKey();
+// Auto-load OMS V3 credentials from builder.json if not already in env
+bootstrapOmsConfig();
 
 // Legacy aliases — hidden commands that map to the new structure
 const legacyAliases = [
@@ -83,8 +83,12 @@ const legacyAliases = [
   }
 ];
 
+// The CLI ships two bin names ("agent" is the primary, "polygon-agent" the
+// long-form alias); help and usage text follow whichever one was invoked.
+const invokedAs = path.basename(process.argv[1] ?? '');
+
 const parser = yargs(hideBin(process.argv))
-  .scriptName('polygon-agent')
+  .scriptName(invokedAs === 'agent' ? 'agent' : 'polygon-agent')
   .version(pkg.version)
   .command(setupCommand)
   .command(walletCommand)

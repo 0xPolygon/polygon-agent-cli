@@ -12,6 +12,7 @@
     "access": "public"
   },
   "bin": {
+    "agent": "dist/index.js",
     "polygon-agent": "dist/index.js"
   },
   "files": [
@@ -23,25 +24,14 @@
     "prepublishOnly": "pnpm run build",
     "dev": "tsx src/index.ts",
     "lint": "eslint .",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist node_modules *.tsbuildinfo"
   },
   "dependencies": {
-    "@0xsequence/abi": "3.0.0-beta.17",
-    "@0xsequence/api": "3.0.0-beta.17",
-    "@0xsequence/builder": "3.0.0-beta.17",
-    "@0xsequence/dapp-client": "3.0.0-beta.17",
-    "@0xsequence/dapp-client-cli": "0.1.5",
-    "@0xsequence/indexer": "^2.3.40",
     "@0xsequence/network": "^2.3.40",
-    "@0xsequence/relayer": "3.0.0-beta.17",
-    "@0xsequence/wallet-core": "3.0.0-beta.17",
-    "@0xsequence/wallet-primitives": "3.0.0-beta.17",
-    "@0xsequence/wallet-wdk": "3.0.0-beta.17",
     "@0xtrails/api": "^0.10.4",
-    "@noble/ciphers": "^1.2.1",
-    "@noble/curves": "^1.8.1",
-    "@noble/hashes": "^1.7.2",
+    "@polygonlabs/oms-wallet": "0.2.0",
     "@polymarket/clob-client-v2": "^1.0.0",
     "@polymarket/sdk": "^6.0.1",
     "@x402/core": "^2.3.1",
@@ -54,18 +44,16 @@
     "ink-spinner": "^5.0.0",
     "open": "^10.1.0",
     "react": "^18.3.1",
-    "tweetnacl": "^1.0.3",
-    "tweetnacl-sealedbox-js": "^1.2.0",
-    "viem": "^2.45.3",
+    "viem": "^2.48.4",
     "yargs": "^17.7.2"
   },
   "devDependencies": {
-    "@polygonlabs/agent-shared": "workspace:*",
     "@types/react": "^18.3.1",
     "@types/yargs": "^17.0.33",
-    "esbuild": "^0.28.0"
+    "esbuild": "^0.28.0",
+    "vitest": "^3.0.0"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22"
   }
 }

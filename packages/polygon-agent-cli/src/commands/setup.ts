@@ -3,15 +3,18 @@ import type { CommandModule } from 'yargs';
 import { ethers } from 'ethers';
 import React from 'react';
 
+import { getAuthToken, createProject, getDefaultAccessKey } from '../lib/builder-api.ts';
 import { generateEthAuthProof } from '../lib/ethauth.ts';
-import { saveBuilderConfig, loadBuilderConfig } from '../lib/storage.ts';
+import { saveBuilderConfig, loadBuilderConfig, saveOmsConfig } from '../lib/storage.ts';
 import { generateAgentName } from '../lib/utils.ts';
 import { isTTY, inkRender } from '../ui/render.js';
-import { SetupUI, getAuthToken, createProject, getDefaultAccessKey } from './setup-ui.js';
+import { SetupUI } from './setup-ui.js';
 
 interface SetupArgs {
   name?: string;
   force?: boolean;
+  'oms-publishable-key'?: string;
+  'oms-project-id'?: string;
 }
 
 export const setupCommand: CommandModule<object, SetupArgs> = {
@@ -27,9 +30,40 @@ export const setupCommand: CommandModule<object, SetupArgs> = {
         type: 'boolean',
         describe: 'Recreate even if already configured',
         default: false
+      })
+      .option('oms-publishable-key', {
+        type: 'string',
+        describe: 'OMS (Open Money Stack) publishable key (from the OMS Builder dashboard)'
+      })
+      .option('oms-project-id', {
+        type: 'string',
+        describe: 'OMS project id (e.g. proj_...) — optional, legacy display field only'
       }),
   handler: async (argv) => {
     const name = argv.name || generateAgentName();
+
+    // If an OMS publishable key is supplied, persist it (independent of the legacy
+    // builder/access-key flow). Used by the V3 `wallet login` path. The project id
+    // is optional legacy metadata — the SDK identifies the project from the
+    // publishable key alone.
+    const omsPk = argv['oms-publishable-key'];
+    const omsProj = argv['oms-project-id'];
+    if (omsPk) {
+      await saveOmsConfig({ publishableKey: omsPk, omsProjectId: omsProj });
+      if (!isTTY()) {
+        console.log(
+          JSON.stringify(
+            {
+              ok: true,
+              message: 'OMS credentials saved to ~/.polygon-agent/builder.json'
+            },
+            null,
+            2
+          )
+        );
+        return;
+      }
+    }
 
     if (!isTTY()) {
       // Non-TTY fallback: original JSON output

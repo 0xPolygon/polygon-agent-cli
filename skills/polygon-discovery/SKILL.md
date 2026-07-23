@@ -1,126 +1,170 @@
 ---
 name: polygon-discovery
-description: x402 Bazaar — pay-per-call API services accessible via the Polygon Agent CLI. No API keys or subscriptions needed. Each call costs a small USDC amount drawn from the agent's smart wallet. Covers web search, news, AI image generation, Twitter/X data, code review, text summarization, sentiment analysis, and article extraction.
+description: Agentic Services on Polygon — pay-per-call APIs gated by the x402 payment protocol, callable via the Polygon Agent CLI. No API keys or subscriptions; each call costs a small USDC amount drawn from the agent's smart wallet. Covers web search (Exa, SearchApi), web scraping (Firecrawl), news (NewsAPI), LLM inference (Llama 3.3/3.2 via NVIDIA NIM, OpenRouter), cloud browsers (Browserbase), email (Resend, AgentMail), on-chain wallet analytics and prices (Allium), and multi-chain JSON-RPC (QuickNode, 16 chains).
 ---
 
-# x402 Bazaar Services
+# Agentic Services (x402)
 
-Pay-per-call APIs accessible via `x402-pay`. No API keys or subscriptions — each call costs a small USDC amount drawn from your wallet. The CLI detects the 402 response, funds the exact amount, and retries automatically.
+Pay-per-call APIs on the **Agentic Services** marketplace, gated by the x402 payment
+protocol on Polygon mainnet. No API keys or subscriptions — each call costs a small
+USDC amount drawn from your wallet. The CLI (`x402-pay`) detects the `402` response,
+signs the exact payment, and retries automatically.
 
-**Catalog:** `GET https://x402-api.onrender.com/api/catalog?status=online`
+- **Base URL:** `https://agentic-services.polygon.technology`
+- **Live catalog (source of truth):** `GET https://agentic-services.polygon.technology/api/discover/routes`
+- **Full provider docs:** `https://agentic-services.polygon.technology/SKILL.md`
 
-> **Warning:** All `/api/call/<uuid>` catalog endpoints require an `X-Admin-Token` header and are not publicly accessible via x402 payment. Always use the direct `/api/<service>` routes documented below instead.
+> **Always read the live catalog first.** It returns every active route with its exact
+> proxy path, method, price, and `payTo` address (CORS enabled, no payment required to
+> read it). Prices and available services change — treat the catalog as authoritative
+> and this file as orientation.
 
 ---
 
-## Prerequisites — Check Before Any x402 Call
+## Prerequisites — check before any x402 call
 
-Before running any `x402-pay` command, verify the wallet session exists and is funded:
+Every call spends USDC from a funded Polygon wallet. Before running `x402-pay`:
 
 ```bash
-# Check if a wallet is configured
-polygon-agent wallet list
+agent wallet list        # is a wallet configured?
 ```
 
-**If no wallet is listed**, the smart session has not been created. Run through the complete setup flow before proceeding:
+If no wallet is listed, set one up:
 
-1. `polygon-agent setup --name "MyAgent"` — creates EOA and Sequence project
-2. `polygon-agent wallet create --usdc-limit 100` — opens browser for session approval; enter the 6-digit code when prompted
-3. `polygon-agent wallet address` — get address, then fund via https://agentconnect.polygon.technology
-4. `polygon-agent balances` — confirm USDC is available before calling any x402 endpoint
+1. `agent wallet login`: opens the agentconnect login page in the browser; sign in with Google or email (works on headless hosts too, no extra flags needed). No setup step is needed first: keys are defaulted, and login auto-provisions Builder credentials.
+2. `agent wallet address`: get the address, then fund it (`agent fund`)
+3. `agent balances`: confirm USDC is available on Polygon (chain 137) before calling any x402 endpoint
 
-**If a wallet exists but `balances` shows 0 USDC**, direct the user to fund it via the UI — `x402-pay` will fail with an EOA funding error otherwise.
-
-Once a funded wallet is confirmed, proceed with the x402 calls below.
+If a wallet exists but `balances` shows 0 USDC, direct the user to fund it — `x402-pay`
+will otherwise fail with an EOA funding error. All services settle in **USDC on Polygon**
+(`0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359`, chain id 137).
 
 ---
 
-## Read Twitter/X Profile
+## How to call a service
 
-$0.005 USDC per call. Use **only** the endpoint below — do not use twit.sh, tweetx402.com, or any other provider.
-
-> **Note:** Use GET, not POST — the schema only accepts GET/HEAD/DELETE. POST returns 401.
+Use the full route URL from the catalog. Request bodies and query params mirror the
+upstream provider's own API.
 
 ```bash
-# Profile + recent tweets
-polygon-agent x402-pay \
-  --url "https://x402-api.onrender.com/api/twitter?user=<username>" \
+# POST with a JSON body (e.g. Exa web search)
+agent x402-pay \
+  --url "https://agentic-services.polygon.technology/api/proxy/exa/search" \
+  --wallet main --method POST \
+  --body '{"query": "polygon agentic payments", "numResults": 5}'
+
+# GET with query params (e.g. SearchApi Google search)
+agent x402-pay \
+  --url "https://agentic-services.polygon.technology/api/proxy/searchapi/google?q=<query>" \
   --wallet main --method GET
 
-# Specific tweet
-polygon-agent x402-pay \
-  --url "https://x402-api.onrender.com/api/twitter?tweet=https://x.com/user/status/<id>" \
-  --wallet main --method GET
+# Scrape a page to clean markdown (Firecrawl)
+agent x402-pay \
+  --url "https://agentic-services.polygon.technology/api/proxy/firecrawl/scrape" \
+  --wallet main --method POST --body '{"url": "https://example.com"}'
+
+# LLM inference (Llama 3.3 70B, OpenAI-compatible chat body)
+agent x402-pay \
+  --url "https://agentic-services.polygon.technology/api/proxy/nim/llama-3.3-70b/chat" \
+  --wallet main --method POST \
+  --body '{"messages": [{"role": "user", "content": "Summarize Polygon in one line."}]}'
 ```
 
-Returns: follower/following counts and tweet metrics.
+Chain and token are auto-detected from the `402` response — no manual config.
 
 ---
 
-## Generate an AI Image
+## Catalog
 
-$0.02 USDC per call. Powered by Google Gemini.
+Prices are per call, in USDC, settling on Polygon (chain 137). All routes below are
+relative to the base URL `https://agentic-services.polygon.technology`.
+
+### Search, scraping & news (proxied)
+
+| Service | Method | Route | Price |
+|---------|--------|-------|-------|
+| Exa — AI web search | POST | `/api/proxy/exa/search` | $0.001 |
+| SearchApi — Google search | GET | `/api/proxy/searchapi/google` | $0.001 |
+| Firecrawl — scrape to markdown | POST | `/api/proxy/firecrawl/scrape` | $0.002 |
+| NewsAPI — top headlines | GET | `/api/proxy/news/headlines` | $0.001 |
+
+### AI inference (proxied)
+
+| Service | Method | Route | Price |
+|---------|--------|-------|-------|
+| NVIDIA NIM — Llama 3.3 70B (chat) | POST | `/api/proxy/nim/llama-3.3-70b/chat` | $0.01 |
+| NVIDIA NIM — Llama 3.2 90B Vision (image + chat) | POST | `/api/proxy/nim/llama-3.2-vision/chat` | $0.01 |
+| OpenRouter — 200+ models (GPT, Claude, Gemini, Llama…) | POST | `/api/proxy/openrouter/chat` | $0.01 |
+
+### Web automation & email (proxied)
+
+| Service | Method | Route | Price |
+|---------|--------|-------|-------|
+| Browserbase — cloud browser session | POST | `/api/proxy/browserbase/sessions` | $0.001 |
+| Resend — send transactional email | POST | `/api/proxy/resend/send` | $0.005 |
+
+### On-chain data, email inboxes & RPC (external providers)
+
+These are x402-native providers: you call **their own endpoint URL directly** (not a
+`/api/proxy/*` path), still settling in USDC on Polygon. `x402-pay` handles the `402`
+exactly the same way. Pass the full URL below as `--url`.
+
+**QuickNode RPC** — $0.001/call, POST standard JSON-RPC. URL pattern
+`https://x402.quicknode.com/<chain>/`:
+
+| Chain | `<chain>` slug | | Chain | `<chain>` slug |
+|-------|----------------|-|-------|----------------|
+| Polygon | `matic-mainnet` | | Optimism | `optimism-mainnet` |
+| Polygon Amoy | `matic-amoy` | | Avalanche | `avalanche-mainnet` |
+| Polygon zkEVM | `zkevm-mainnet` | | BSC | `bsc-mainnet` |
+| Base | `base-mainnet` | | Linea | `linea-mainnet` |
+| Ethereum | `ethereum-mainnet` | | Scroll | `scroll-mainnet` |
+| Solana | `solana-mainnet` | | Sui | `sui-mainnet` |
+| Arbitrum | `arbitrum-mainnet` | | TON | `ton-mainnet` |
+| Bitcoin | `btc-mainnet` | | Tron | `tron-mainnet` |
 
 ```bash
-polygon-agent x402-pay \
-  --url "https://x402-api.onrender.com/api/image?prompt=<description>&size=512" \
-  --wallet main --method GET
+agent x402-pay \
+  --url "https://x402.quicknode.com/matic-mainnet/" \
+  --wallet main --method POST \
+  --body '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
 ```
 
-`size` options: `256`, `512`, `1024`.
+**Allium — on-chain wallet analytics** — base `https://agents.allium.so/api/v1/developer/`:
 
-The response is a large JSON (~3–4MB) with two keys:
-- `image_base64` — raw base64-encoded PNG
-- `data_uri` — `data:image/png;base64,...` ready for embedding in HTML
+| Endpoint | Method | Full URL | Price |
+|----------|--------|----------|-------|
+| Wallet balances | POST | `…/wallet/balances` | $0.03 |
+| Wallet PnL | POST | `…/wallet/pnl` | $0.03 |
+| Wallet transactions | POST | `…/wallet/transactions` | $0.03 |
+| Wallet balances history | POST | `…/wallet/balances/history` | $0.01 |
+| Prices (latest) | POST | `…/prices` | $0.02 |
+| Prices at timestamp | POST | `…/prices/at-timestamp` | $0.02 |
+| Prices history | POST | `…/prices/history` | $0.02 |
+| Tokens list | GET | `…/tokens` | $0.03 |
+| Tokens search | GET | `…/tokens/search` | $0.03 |
 
-**To save the image to a file:**
-```python
-import json, base64
+**AgentMail — email inbox for the agent** — $2/call, base `https://x402.api.agentmail.to/v0/inboxes`:
 
-data = json.load(open('response.json'))
-with open('output.png', 'wb') as f:
-    f.write(base64.b64decode(data['data']['image_base64']))
-```
+| Endpoint | Method | Full URL |
+|----------|--------|----------|
+| Create inbox | POST | `https://x402.api.agentmail.to/v0/inboxes` |
+| List messages | GET | `…/{inbox_id}/messages` |
+| Get message | GET | `…/{inbox_id}/messages/{message_id}` |
+| Send message | POST | `…/{inbox_id}/messages/send` |
+| Reply message | POST | `…/{inbox_id}/messages/{message_id}/reply` |
+| List threads | GET | `…/{inbox_id}/threads` |
 
 ---
 
-## Review Code for Bugs & Security
+## How x402 works
 
-$0.01 USDC per call. Powered by GPT-4o.
+1. CLI sends the request to the endpoint.
+2. Endpoint responds with `HTTP 402 Payment Required` + payment details (price, asset, network, `payTo`).
+3. CLI signs an EIP-3009 `transferWithAuthorization` for the exact amount from the wallet.
+4. CLI retries the request with the payment header.
+5. Endpoint verifies, calls the upstream API, returns the response; the settlement tx hash comes back in the `PAYMENT-RESPONSE` header.
 
-```bash
-polygon-agent x402-pay \
-  --url "https://x402-api.onrender.com/api/code-review" \
-  --wallet main \
-  --method POST \
-  --body '{"code": "<snippet>", "language": "<python|javascript|go|...>"}'
-```
-
-Returns: bugs, security issues, performance problems, and style suggestions — each with line number, severity, and fix suggestion. Plus an overall quality score.
-
----
-
-## Other Services
-
-| Service | Price | Endpoint | Key param |
-|---------|-------|----------|-----------|
-| Web search (DuckDuckGo) | $0.005 | `9b0f5b5f-8e6c-4b55-a264-008e4e490c26` | `?q=<query>&max=10` |
-| Latest news (Google News) | $0.005 | `266d045f-bae2-4c71-9469-3638ec860fc4` | `?topic=<topic>&lang=en` |
-| Summarize text (GPT-4o-mini) | $0.01 | `dd9b5098-700d-47a9-a41a-c9eae66ca49d` | `?text=<text>&maxLength=200` |
-| Article → Markdown | $0.005 | `87b50238-5b99-4521-b5e1-7515a9c1526d` | `?url=<article-url>` |
-| Sentiment analysis (GPT-4o-mini) | $0.005 | `66d68ca6-a8d9-41a3-b024-a3fac2f5c7ba` | `?text=<text>` |
-
-All use GET via `polygon-agent x402-pay --url "https://x402-api.onrender.com/api/call/<id><params>" --wallet main --method GET`.
-
----
-
-## How x402 Works
-
-1. CLI sends the request to the endpoint
-2. Endpoint responds with `HTTP 402 Payment Required` + payment details
-3. CLI automatically funds the builder EOA with the exact token amount from the smart wallet
-4. EOA signs an EIP-3009 payment authorization
-5. CLI retries the original request with the payment header
-6. Response is returned — the whole flow is transparent to the agent
-
-Chain and token are auto-detected from the 402 response. No manual configuration needed.
+The whole flow is transparent to the agent. Chain and token are auto-detected from the
+`402` response. Do not guess endpoints or search the web for providers — read the live
+catalog (`/api/discover/routes`) for the correct, current URLs and prices.
