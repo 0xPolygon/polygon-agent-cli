@@ -8,11 +8,13 @@ import type { OmsRelayOidcProvider } from '@polygonlabs/oms-wallet';
 
 import { OmsRelayOidcProviders } from '@polygonlabs/oms-wallet';
 
+import type { TxMode } from '../lib/mode.ts';
 import type { OmsLoginMethod } from '../lib/storage.ts';
 
 import { runBrowserLogin } from '../lib/browser-login.ts';
 import { ensureBuilderAccessKey, makeDefaultProvisionDeps } from '../lib/builder-provision.ts';
 import { makeLoginRelay } from '../lib/login-relay-client.ts';
+import { isTxModeSet, loadTxMode, saveTxMode } from '../lib/mode.ts';
 import { startOidcCallbackServer } from '../lib/oidc-callback-server.ts';
 import { getOmsClient, loginUiBaseUrl, oidcRelayBaseUrl } from '../lib/oms-client.ts';
 import {
@@ -29,6 +31,30 @@ import { WalletListUI, WalletAddressUI } from './wallet-ui.js';
 // Compact JSON output for AI agent consumers (single line, no stack traces)
 function jsonOut(data: Record<string, unknown>): void {
   console.log(JSON.stringify(data));
+}
+
+const MODE_PROMPT =
+  'Transaction mode is not set. Ask the user: enable auto mode (write commands ' +
+  'broadcast immediately, no dry-run preview)? If yes run `agent mode auto`; ' +
+  'if no run `agent mode dry-run`. Either choice stops this prompt.';
+
+// Ask once, interactively, whether to enable auto mode. Returns the resolved
+// mode, or null when the session is non-interactive (caller emits modePrompt).
+async function maybeAskTxMode(): Promise<TxMode | null> {
+  if (isTxModeSet()) return loadTxMode();
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return null;
+  const { createInterface } = await import('node:readline/promises');
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    const answer = await rl.question(
+      'Enable auto mode? Transactions broadcast immediately without a dry-run preview. [y/N] '
+    );
+    const mode: TxMode = /^y(es)?$/i.test(answer.trim()) ? 'auto' : 'dry-run';
+    saveTxMode(mode);
+    return mode;
+  } finally {
+    rl.close();
+  }
 }
 
 // --- Subcommand: wallet login (Google OIDC browser flow — the only login) ---
@@ -107,12 +133,15 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
     // re-running `wallet login` without forcing a fresh browser auth.
     if (!argv.force && oms.wallet.walletAddress) {
       const builderProvisioned = await provisionBuilder(oms.wallet.walletAddress);
+      const txMode = await maybeAskTxMode();
       jsonOut({
         ok: true,
         walletName: argv.name,
         walletAddress: oms.wallet.walletAddress,
         alreadyLoggedIn: true,
-        builderProvisioned
+        builderProvisioned,
+        txMode: txMode ?? loadTxMode(),
+        ...(txMode === null ? { modePrompt: MODE_PROMPT } : {})
       });
       return;
     }
@@ -184,7 +213,16 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
 
     const builderProvisioned = await provisionBuilder(walletAddress);
 
-    jsonOut({ ok: true, walletName: argv.name, walletAddress, loginMethod, builderProvisioned });
+    const txMode = await maybeAskTxMode();
+    jsonOut({
+      ok: true,
+      walletName: argv.name,
+      walletAddress,
+      loginMethod,
+      builderProvisioned,
+      txMode: txMode ?? loadTxMode(),
+      ...(txMode === null ? { modePrompt: MODE_PROMPT } : {})
+    });
 
     // Funding: the login page's success screen already directs the user onward,
     // so the browser flow only prints the panel; --local keeps opening the page.
