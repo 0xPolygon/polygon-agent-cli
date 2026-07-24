@@ -7,6 +7,7 @@ import type { ContractTokenBalance } from '@polygonlabs/oms-wallet';
 import { findNetworkById } from '@polygonlabs/oms-wallet';
 
 import { isWalletFunded } from '../lib/indexer.ts';
+import { resolveBroadcast, withWriteFlags } from '../lib/mode.ts';
 import { getOmsClient, loginUiBaseUrl } from '../lib/oms-client.ts';
 import { loadOmsWalletPointer, loadBuilderConfig } from '../lib/storage.ts';
 import { resolveErc20BySymbol } from '../lib/token-directory.ts';
@@ -34,14 +35,6 @@ function withWalletAndChain<T>(yargs: Argv<T>) {
       type: 'string' as const,
       describe: 'Chain name or ID'
     });
-}
-
-function withBroadcast<T>(yargs: Argv<T>) {
-  return yargs.option('broadcast', {
-    type: 'boolean' as const,
-    default: false,
-    describe: 'Execute transaction (dry-run by default)'
-  });
 }
 
 // Get per-chain indexer URL
@@ -427,7 +420,7 @@ export const sendCommand: CommandModule = {
   command: 'send',
   describe: 'Send native token (auto-detect with --symbol for ERC20)',
   builder: (yargs) =>
-    withBroadcast(
+    withWriteFlags(
       withWalletAndChain(yargs)
         .option('to', {
           type: 'string',
@@ -473,7 +466,7 @@ export const sendNativeCommand: CommandModule = {
   command: 'send-native',
   describe: 'Send native token (explicit)',
   builder: (yargs) =>
-    withBroadcast(
+    withWriteFlags(
       withWalletAndChain(yargs)
         .option('to', {
           type: 'string',
@@ -508,7 +501,7 @@ async function handleSendNative(argv: {
   const walletName = (argv.wallet as string) || 'main';
   const to = argv.to as string;
   const amount = argv.amount as string;
-  const broadcast = (argv.broadcast as boolean) || false;
+  const broadcast = resolveBroadcast(argv);
 
   // Build transaction and execute
   async function exec(): Promise<{
@@ -645,7 +638,7 @@ export const sendTokenCommand: CommandModule = {
   command: 'send-token',
   describe: 'Send ERC20 by symbol',
   builder: (yargs) =>
-    withBroadcast(
+    withWriteFlags(
       withWalletAndChain(yargs)
         .option('symbol', {
           type: 'string',
@@ -694,7 +687,7 @@ async function handleSendToken(argv: {
   const decimalsArg = argv.decimals as number | undefined;
   const to = argv.to as string;
   const amount = argv.amount as string;
-  const broadcast = (argv.broadcast as boolean) || false;
+  const broadcast = resolveBroadcast(argv);
 
   // Resolve token info
   async function resolveToken(): Promise<{
@@ -840,7 +833,7 @@ async function handleCall(argv: {
   'prefer-native-fee'?: boolean;
 }): Promise<void> {
   const walletName = argv.wallet || 'main';
-  const broadcast = argv.broadcast || false;
+  const broadcast = resolveBroadcast(argv);
   const preferNativeFee = argv['prefer-native-fee'] || false;
 
   if (!/^0x[0-9a-fA-F]{40}$/.test(argv.to)) {
@@ -889,7 +882,7 @@ export const callCommand: CommandModule = {
   command: 'call',
   describe: 'Submit a raw contract call (pre-encoded calldata) via the active wallet session',
   builder: (yargs) =>
-    withBroadcast(
+    withWriteFlags(
       withWalletAndChain(yargs)
         .option('to', {
           type: 'string',
@@ -924,7 +917,7 @@ export const swapCommand: CommandModule = {
   command: 'swap',
   describe: 'DEX swap via Trails API',
   builder: (yargs) =>
-    withBroadcast(
+    withWriteFlags(
       withWalletAndChain(yargs)
         .option('from', {
           type: 'string',
@@ -960,7 +953,7 @@ export const swapCommand: CommandModule = {
     const amount = argv.amount as string;
     const slippageArg = argv.slippage as number | undefined;
     const toChainArg = argv['to-chain'] as string | undefined;
-    const broadcast = argv.broadcast as boolean;
+    const broadcast = resolveBroadcast(argv as { broadcast?: boolean; dryRun?: boolean });
 
     try {
       const session = await loadOmsWalletPointer(walletName);
@@ -1165,7 +1158,7 @@ export const depositCommand: CommandModule = {
   command: 'deposit',
   describe: 'Deposit ERC20 to earn yield (Trails earn pools)',
   builder: (yargs) =>
-    withBroadcast(
+    withWriteFlags(
       withWalletAndChain(yargs)
         .option('asset', {
           type: 'string',
@@ -1188,7 +1181,7 @@ export const depositCommand: CommandModule = {
     const assetSymbol = ((argv.asset as string) || 'USDC').toUpperCase();
     let amountArg = argv.amount as string;
     const protocolFilter = argv.protocol as string | undefined;
-    const broadcast = argv.broadcast as boolean;
+    const broadcast = resolveBroadcast(argv as { broadcast?: boolean; dryRun?: boolean });
 
     try {
       const session = await loadOmsWalletPointer(walletName);
@@ -1589,7 +1582,7 @@ export const withdrawCommand: CommandModule = {
   command: 'withdraw',
   describe: 'Withdraw from an Aave v3 aToken position or ERC-4626 vault (dry-run by default)',
   builder: (yargs) =>
-    withBroadcast(
+    withWriteFlags(
       withWalletAndChain(yargs)
         .option('position', {
           type: 'string',
@@ -1620,7 +1613,7 @@ export const withdrawCommand: CommandModule = {
     const amountArg = String(argv.amount || '')
       .trim()
       .toLowerCase();
-    const broadcast = argv.broadcast as boolean;
+    const broadcast = resolveBroadcast(argv as { broadcast?: boolean; dryRun?: boolean });
     const protocolFilter = (argv.protocol as string)?.toLowerCase();
     const assetSymbol = (argv.asset as string)?.toUpperCase();
 

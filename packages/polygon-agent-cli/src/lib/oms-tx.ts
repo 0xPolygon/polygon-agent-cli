@@ -79,7 +79,14 @@ export async function runOmsTx(params: OmsTxParams): Promise<OmsTxResult> {
     const bigintReplacer = (_k: string, v: unknown) => (typeof v === 'bigint' ? v.toString() : v);
     console.log(
       JSON.stringify(
-        { ok: true, dryRun: true, walletName, walletAddress, transactions },
+        {
+          ok: true,
+          dryRun: true,
+          walletName,
+          walletAddress,
+          transactions,
+          hint: 'Dry run only, nothing was sent. Re-run with --broadcast to execute, or enable always-broadcast with: agent mode auto'
+        },
         bigintReplacer,
         2
       )
