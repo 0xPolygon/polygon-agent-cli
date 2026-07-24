@@ -7,7 +7,13 @@ import { fileURLToPath } from 'node:url';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 
-import { agentCommand } from './commands/agent.ts';
+import {
+  feedbackCommand,
+  identityCommand,
+  registerCommand,
+  reputationCommand,
+  reviewsCommand
+} from './commands/agent.ts';
 import { modeCommand } from './commands/mode.ts';
 import {
   balancesCommand,
@@ -32,58 +38,6 @@ const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'package.js
 // Auto-load OMS V3 credentials from builder.json if not already in env
 bootstrapOmsConfig();
 
-// Legacy aliases — hidden commands that map to the new structure
-const legacyAliases = [
-  {
-    command: 'register',
-    describe: false as const,
-    handler: async () => {
-      const { registerAgent } = await import('./commands/agent-legacy.ts');
-      await registerAgent();
-    }
-  },
-  {
-    command: 'agent-wallet',
-    describe: false as const,
-    handler: async () => {
-      const { getAgentWallet } = await import('./commands/agent-legacy.ts');
-      await getAgentWallet();
-    }
-  },
-  {
-    command: 'agent-metadata',
-    describe: false as const,
-    handler: async () => {
-      const { getMetadata } = await import('./commands/agent-legacy.ts');
-      await getMetadata();
-    }
-  },
-  {
-    command: 'reputation',
-    describe: false as const,
-    handler: async () => {
-      const { getReputation } = await import('./commands/agent-legacy.ts');
-      await getReputation();
-    }
-  },
-  {
-    command: 'give-feedback',
-    describe: false as const,
-    handler: async () => {
-      const { giveFeedback } = await import('./commands/agent-legacy.ts');
-      await giveFeedback();
-    }
-  },
-  {
-    command: 'read-feedback',
-    describe: false as const,
-    handler: async () => {
-      const { readAllFeedback } = await import('./commands/agent-legacy.ts');
-      await readAllFeedback();
-    }
-  }
-];
-
 // The CLI ships two bin names ("agent" is the primary, "polygon-agent" the
 // long-form alias); help and usage text follow whichever one was invoked.
 const invokedAs = path.basename(process.argv[1] ?? '');
@@ -104,13 +58,12 @@ const parser = yargs(hideBin(process.argv))
   .command(depositCommand)
   .command(withdrawCommand)
   .command(x402PayCommand)
-  .command(agentCommand)
+  .command(registerCommand)
+  .command(identityCommand)
+  .command(reputationCommand)
+  .command(reviewsCommand)
+  .command(feedbackCommand)
   .command(polymarketCommand);
-
-// Register legacy aliases
-for (const alias of legacyAliases) {
-  parser.command(alias);
-}
 
 parser
   .demandCommand(1, '')
