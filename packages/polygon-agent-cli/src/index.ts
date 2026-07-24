@@ -8,6 +8,7 @@ import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 
 import { agentCommand } from './commands/agent.ts';
+import { modeCommand } from './commands/mode.ts';
 import {
   balancesCommand,
   callCommand,
@@ -91,6 +92,7 @@ const parser = yargs(hideBin(process.argv))
   .scriptName(invokedAs === 'agent' ? 'agent' : 'polygon-agent')
   .version(pkg.version)
   .command(setupCommand)
+  .command(modeCommand)
   .command(walletCommand)
   .command(balancesCommand)
   .command(fundCommand)
