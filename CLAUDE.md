@@ -16,8 +16,9 @@ Wallets use the OMS (Open Money Stack) V3 embedded-wallet model (`@polygonlabs/o
 `OMSWallet`): the CLI authenticates via browser login with Google or email (`wallet login`) and
 holds the credential on disk.
 
-Static assets (ABI JSON in `contracts/`, Claude skills in `skills/`) are
-published with the CLI package but are not source code.
+Static assets: ABI JSON in `contracts/` is published with the CLI package (it is in
+`package.json` `files`); Claude skills live in the root `skills/` tree (one directory per
+skill) and are distributed via `npx skills add` and agentconnect, not via npm.
 
 ## Development
 
