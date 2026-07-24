@@ -1,7 +1,7 @@
 {
   "name": "@polygonlabs/agentconnect-ui",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.0.1",
   "type": "module",
   "description": "Wallet funding + dashboard UI for Polygon Agent CLI (login happens in the CLI)",
   "repository": {
