@@ -3,7 +3,6 @@ import './App.css';
 import type { ElementType } from 'react';
 
 import {
-  AlertCircle,
   ArrowLeftRight,
   Copy,
   Cpu,
@@ -453,20 +452,61 @@ function Dashboard({
   );
 }
 
-// ── Centered notice shown when opened without a wallet param ──
-function MissingWalletNotice() {
+// One copyable command/prompt row, styled like the dashboard's terminal chips.
+function CopyRow({ label, command }: { label: string; command: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div>
+      <div className="text-xs font-bold text-[#141635] mb-1.5">{label}</div>
+      <button
+        type="button"
+        onClick={() => {
+          void navigator.clipboard.writeText(command).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          });
+        }}
+        className="w-full flex items-center gap-2 bg-[#f5f6fb] hover:bg-[#eef0f8] border border-[#c8cfe1] hover:border-[#929eba] rounded-xl px-3 py-2.5 transition-all cursor-pointer text-left group"
+      >
+        <code className="flex-1 font-mono text-xs text-[#141635] break-all">{command}</code>
+        <span className="flex items-center gap-1 text-xs font-bold text-[#64708f] group-hover:text-[#141635] flex-shrink-0">
+          <Copy className="w-3.5 h-3.5" />
+          {copied ? 'Copied' : 'Copy'}
+        </span>
+      </button>
+    </div>
+  );
+}
+
+// ── Get-started screen shown when opened without a wallet param ──
+// (i.e. someone browsed to the dashboard directly instead of deep-linking
+// from the CLI). Points them at installing the skill and prompting their agent.
+function GetStartedNotice() {
   return (
     <div className="min-h-screen bg-[#f5f6fb] flex flex-col items-center justify-center px-4">
       <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[99999]">
         <LogoBadge />
       </div>
       <div
-        className="w-full max-w-sm bg-white rounded-3xl border border-[#c8cfe1] px-8 py-8 flex flex-col items-center gap-3 text-center"
+        className="w-full max-w-md bg-white rounded-3xl border border-[#c8cfe1] px-8 py-8 flex flex-col gap-5"
         style={{ boxShadow: '0 2px 8px rgba(20,22,53,0.06), 0 16px 48px rgba(20,22,53,0.08)' }}
       >
-        <AlertCircle className="w-6 h-6 text-[#7c3aed]" />
-        <p className="text-sm text-[#64708f] leading-relaxed font-medium">
-          Open this page from the polygon-agent CLI.
+        <div className="flex flex-col items-center gap-2 text-center">
+          <div className="w-10 h-10 rounded-xl bg-[#141635] flex items-center justify-center">
+            <Sparkles className="w-5 h-5 text-white" />
+          </div>
+          <h1 className="text-lg font-bold text-[#141635]">Set up a Polygon Agent</h1>
+          <p className="text-sm text-[#64708f] leading-relaxed font-medium">
+            Give your AI agent its own wallet, tokens, swaps, and on-chain identity. Two steps:
+          </p>
+        </div>
+        <CopyRow
+          label="1. Install the skill"
+          command="npx skills add https://github.com/0xPolygon/polygon-agent-cli"
+        />
+        <CopyRow label="2. Prompt your agent" command="set up a Polygon Agent for me" />
+        <p className="text-xs text-[#929eba] leading-relaxed font-medium text-center">
+          Works with Claude Code, Codex, Openclaw, and any skills-compatible agent.
         </p>
       </div>
     </div>
@@ -484,7 +524,7 @@ function App() {
   }
 
   if (!walletAddress) {
-    return <MissingWalletNotice />;
+    return <GetStartedNotice />;
   }
 
   // `?view=fund` (the CLI's `fund` deep link) opens the dashboard with the
