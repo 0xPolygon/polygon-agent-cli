@@ -6,6 +6,7 @@
 
 import type { CommandModule } from 'yargs';
 
+import { resolveBroadcast, withWriteFlags } from '../lib/mode.ts';
 import {
   getMarkets,
   getMarket,
@@ -121,9 +122,13 @@ async function handleProxyWallet(): Promise<void> {
   }
 }
 
-async function handleApprove(argv: { negRisk?: boolean; broadcast?: boolean }): Promise<void> {
+async function handleApprove(argv: {
+  negRisk?: boolean;
+  broadcast?: boolean;
+  dryRun?: boolean;
+}): Promise<void> {
   const negRisk = argv.negRisk ?? false;
-  const broadcast = argv.broadcast ?? false;
+  const broadcast = resolveBroadcast(argv);
 
   try {
     const privateKey = await loadPolymarketKey();
@@ -254,6 +259,7 @@ async function handleClobBuy(argv: {
   fak?: boolean;
   skipFund?: boolean;
   broadcast?: boolean;
+  dryRun?: boolean;
 }): Promise<void> {
   const conditionId = argv.conditionId;
   const outcomeArg = argv.outcome.toUpperCase();
@@ -262,7 +268,7 @@ async function handleClobBuy(argv: {
   const priceArg = argv.price;
   const useFak = argv.fak ?? false;
   const skipFund = argv.skipFund ?? false;
-  const broadcast = argv.broadcast ?? false;
+  const broadcast = resolveBroadcast(argv);
 
   if (!['YES', 'NO'].includes(outcomeArg)) {
     console.error(JSON.stringify({ ok: false, error: 'Outcome must be YES or NO' }));
@@ -452,13 +458,14 @@ async function handleSell(argv: {
   price?: number;
   fak?: boolean;
   broadcast?: boolean;
+  dryRun?: boolean;
 }): Promise<void> {
   const conditionId = argv.conditionId;
   const outcomeArg = argv.outcome.toUpperCase();
   const shares = argv.shares;
   const priceArg = argv.price;
   const useFak = argv.fak ?? false;
-  const broadcast = argv.broadcast ?? false;
+  const broadcast = resolveBroadcast(argv);
 
   if (!['YES', 'NO'].includes(outcomeArg)) {
     console.error(JSON.stringify({ ok: false, error: 'Outcome must be YES or NO' }));
@@ -682,17 +689,13 @@ export const polymarketCommand: CommandModule = {
         command: 'approve',
         describe: 'Set proxy wallet approvals (run once before clob-buy)',
         builder: (y) =>
-          y
-            .option('neg-risk', {
+          withWriteFlags(
+            y.option('neg-risk', {
               type: 'boolean',
               default: false,
               describe: 'Set neg-risk approvals'
             })
-            .option('broadcast', {
-              type: 'boolean',
-              default: false,
-              describe: 'Execute (dry-run without)'
-            }),
+          ),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         handler: (argv) => handleApprove(argv as any)
       })
@@ -700,30 +703,35 @@ export const polymarketCommand: CommandModule = {
         command: 'clob-buy <conditionId> <outcome> <amount>',
         describe: 'Buy YES/NO tokens via CLOB (funds proxy wallet first)',
         builder: (y) =>
-          y
-            .positional('conditionId', { type: 'string', demandOption: true })
-            .positional('outcome', { type: 'string', demandOption: true, describe: 'YES or NO' })
-            .positional('amount', { type: 'number', demandOption: true, describe: 'USDC to spend' })
-            .option('wallet', {
-              type: 'string',
-              default: 'main',
-              describe: 'Smart wallet to fund from'
-            })
-            .option('price', {
-              type: 'number',
-              describe: 'Limit price 0-1 (GTC); omit for market order'
-            })
-            .option('fak', { type: 'boolean', default: false, describe: 'Use FAK instead of FOK' })
-            .option('skip-fund', {
-              type: 'boolean',
-              default: false,
-              describe: 'Skip wallet→proxy funding'
-            })
-            .option('broadcast', {
-              type: 'boolean',
-              default: false,
-              describe: 'Execute (dry-run without)'
-            }),
+          withWriteFlags(
+            y
+              .positional('conditionId', { type: 'string', demandOption: true })
+              .positional('outcome', { type: 'string', demandOption: true, describe: 'YES or NO' })
+              .positional('amount', {
+                type: 'number',
+                demandOption: true,
+                describe: 'USDC to spend'
+              })
+              .option('wallet', {
+                type: 'string',
+                default: 'main',
+                describe: 'Smart wallet to fund from'
+              })
+              .option('price', {
+                type: 'number',
+                describe: 'Limit price 0-1 (GTC); omit for market order'
+              })
+              .option('fak', {
+                type: 'boolean',
+                default: false,
+                describe: 'Use FAK instead of FOK'
+              })
+              .option('skip-fund', {
+                type: 'boolean',
+                default: false,
+                describe: 'Skip wallet→proxy funding'
+              })
+          ),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         handler: (argv) => handleClobBuy(argv as any)
       })
@@ -731,24 +739,25 @@ export const polymarketCommand: CommandModule = {
         command: 'sell <conditionId> <outcome> <shares>',
         describe: 'Sell YES/NO tokens via CLOB',
         builder: (y) =>
-          y
-            .positional('conditionId', { type: 'string', demandOption: true })
-            .positional('outcome', { type: 'string', demandOption: true, describe: 'YES or NO' })
-            .positional('shares', {
-              type: 'number',
-              demandOption: true,
-              describe: 'Number of tokens to sell'
-            })
-            .option('price', {
-              type: 'number',
-              describe: 'Limit price 0-1 (GTC); omit for market order'
-            })
-            .option('fak', { type: 'boolean', default: false, describe: 'Use FAK instead of FOK' })
-            .option('broadcast', {
-              type: 'boolean',
-              default: false,
-              describe: 'Execute (dry-run without)'
-            }),
+          withWriteFlags(
+            y
+              .positional('conditionId', { type: 'string', demandOption: true })
+              .positional('outcome', { type: 'string', demandOption: true, describe: 'YES or NO' })
+              .positional('shares', {
+                type: 'number',
+                demandOption: true,
+                describe: 'Number of tokens to sell'
+              })
+              .option('price', {
+                type: 'number',
+                describe: 'Limit price 0-1 (GTC); omit for market order'
+              })
+              .option('fak', {
+                type: 'boolean',
+                default: false,
+                describe: 'Use FAK instead of FOK'
+              })
+          ),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         handler: (argv) => handleSell(argv as any)
       })
