@@ -17,7 +17,7 @@
 - [Quickstart](#quickstart)
 - [Core Components](#core-components)
   - [OMS: Wallet Infrastructure](#oms-wallet-infrastructure)
-  - [Trails: Swapping, Bridging, and onchain actions](#trails-swapping-bridging-and-defi-actions)
+  - [Swap, Bridge & Deposit](#swap-bridge--deposit)
   - [Onchain Identity](#onchain-agentic-identity)
 - [Plugins & Skills](#plugins--skills)
 - [CLI Reference](#cli-reference)
@@ -95,10 +95,10 @@ agent send --to 0x... --amount 1.0
 agent swap --from USDC --to USDT --amount 5
 
 # 4. Register your agent on-chain
-agent agent register --name "MyAgent"
+agent register --name "MyAgent" --broadcast
 ```
 
-> Omit `--broadcast` on any command to preview without sending. See [`SKILL.md`](skills/SKILL.md) for the full agent-consumable reference.
+> Write commands preview by default — omit `--broadcast` to dry-run, or run `agent mode auto` once to always broadcast (`--dry-run` still previews any single command). See [`SKILL.md`](https://github.com/0xPolygon/polygon-agent-cli/blob/main/skills/polygon-agent-cli/SKILL.md) for the full agent-consumable reference.
 
 ---
 
@@ -118,7 +118,7 @@ The CLI is built on three pillars to enable end to end onchain payments with you
 
 Wallets are created and unlocked via browser login (Google or email). The embedded wallet can call any contract and spend any amount it holds; there is no contract whitelist or per-token spend limit. The wallet address is the same across every supported chain, and sessions last about a week before you re-run `wallet login`.
 
-### Trails: Swapping, Bridging, and DeFi Actions
+### Swap, Bridge & Deposit
 
 [Trails](https://sequence.xyz/trails) handles swapping, bridging, and onchain interactions enabling you to call any smart contract function and pay with any token. Trails handles it under the hood in a single transaction for your agent.
 
@@ -155,7 +155,7 @@ The CLI ships with agent-friendly documentation designed to be consumed directly
 
 Once installed, the agent receives the full skill context — including wallet setup, token operations, and ERC-8004 registration, and can execute autonomously.
 
-See [`SKILL.md`](skills/SKILL.md) for the full agent-consumable reference.
+See [`SKILL.md`](https://github.com/0xPolygon/polygon-agent-cli/blob/main/skills/polygon-agent-cli/SKILL.md) for the full agent-consumable reference.
 
 ---
 
@@ -171,6 +171,7 @@ agent wallet list                          # Show all wallets
 agent wallet address [--name <n>]          # Show wallet address (same on every chain)
 agent wallet remove [--name <n>]           # Remove a stored wallet
 agent fund                                 # Open funding widget
+agent mode [auto|dry-run]                  # Show or set the persisted transaction mode
 ```
 
 ### Token Operations
@@ -196,10 +197,11 @@ The embedded wallet can call any contract on any chain, so no pre-authorization 
 ### Agent Registry (ERC-8004)
 
 ```bash
-agent agent register --name "MyAgent" --broadcast
-agent agent reputation --agent-id <id>
-agent agent feedback --agent-id <id> --value 4.5 --broadcast
-agent agent reviews --agent-id <id>
+agent register --name "MyAgent" --broadcast
+agent identity --agent-id <id>                       # payment wallet (+ --key for metadata)
+agent reputation --agent-id <id>
+agent feedback --agent-id <id> --value 4.5 --broadcast
+agent reviews --agent-id <id> [--include-revoked]
 ```
 
 ### Smart Defaults
@@ -209,7 +211,7 @@ agent agent reviews --agent-id <id>
 | Wallet name   | `main`                 | `--name <name>`      |
 | Chain         | `polygon`              | `--chain <name\|id>` |
 | Multi-chain balances | —                 | `--chains <csv>` (comma-separated, max 20; overrides `--chain`) |
-| Broadcast     | Dry-run (preview)      | `--broadcast`        |
+| Tx mode       | `dry-run` (preview)    | `--broadcast`, `--dry-run`, or persist with `agent mode auto` |
 
 ---
 
@@ -265,11 +267,11 @@ polygon-agent-cli/
 │   └── polygon-agent-cli/  # CLI package (@polygonlabs/agent-cli)
 │       ├── src/            # TypeScript source
 │       │   ├── index.ts    # yargs entry point
-│       │   ├── commands/   # Command modules (setup, wallet, operations, agent)
-│       │   ├── lib/        # Shared utils (storage, ethauth, tokens)
+│       │   ├── commands/   # Command modules (setup, mode, wallet, operations, agent)
+│       │   ├── lib/        # Shared utils (storage, mode, ethauth, tokens)
 │       │   └── types.d.ts  # Ambient declarations for untyped deps
-│       ├── contracts/      # ERC-8004 ABIs
-│       └── skills/         # Agent-friendly docs (SKILL.md)
+│       └── contracts/      # ERC-8004 ABIs
+├── skills/                 # Agent skills (SKILL.md per skill; served via agentconnect)
 ├── pnpm-workspace.yaml
 └── package.json
 ```

@@ -76,6 +76,13 @@ agent wallet login
 #   login auto-provisions a Builder project + access key to
 #   ~/.polygon-agent/builder.json
 
+# Step 1b: Choose transaction mode (asked once)
+# → if the login output includes a `modePrompt` field, ask the user whether to
+#   enable auto mode (writes broadcast immediately, no preview), then run:
+agent mode auto      # or: agent mode dry-run
+# → dry-run (default) previews every write; auto broadcasts immediately.
+#   Never enable auto mode without the user's explicit answer.
+
 # Step 2: Fund wallet
 agent fund
 # → reads walletAddress from session, builds Trails widget URL with toAddress=<walletAddress>
@@ -86,7 +93,7 @@ agent fund
 agent balances
 
 # Step 4: Register agent on-chain (ERC-8004, Polygon mainnet only)
-agent agent register --name "MyAgent" --broadcast
+agent register --name "MyAgent" --broadcast
 # → mints ERC-721 NFT, emits Registered event containing agentId
 # → retrieve agentId: open the tx on https://polygonscan.com, go to Logs tab,
 #   find the Registered event — agentId is the first indexed parameter
@@ -100,7 +107,7 @@ For specific workflows, fetch and load the relevant sub-skill **before attemptin
 | Use Case | Skill URL |
 |----------|-----------|
 | Polymarket prediction market trading | https://agentconnect.polygon.technology/polygon-polymarket/SKILL.md |
-| DeFi — swap, deposit, withdraw, yield | https://agentconnect.polygon.technology/polygon-defi/SKILL.md |
+| Swap, bridge & deposit (also yield withdraw) | https://agentconnect.polygon.technology/polygon-defi/SKILL.md |
 | x402 discovery & pay-per-call APIs | https://agentconnect.polygon.technology/polygon-discovery/SKILL.md |
 
 > **IMPORTANT — x402 calls:** If the user asks to use x402 to fetch data or call a service (web search, scraping, news, LLM inference, email, on-chain wallet analytics, multi-chain RPC, etc.), follow these steps in order before making any request:
@@ -119,6 +126,7 @@ For specific workflows, fetch and load the relevant sub-skill **before attemptin
 ```bash
 agent setup [--name <name>] [--force]
   [--oms-publishable-key <key>] [--oms-project-id <proj_...>]  # save OMS credentials (project id optional/legacy)
+agent mode [auto|dry-run]   # show or set the persisted transaction mode
 ```
 
 ### Wallet
@@ -143,18 +151,19 @@ agent send-token --symbol <SYM> --to <addr> --amount <num> [--token <addr>] [--d
 agent swap --from <SYM> --to <SYM> --amount <num> [--to-chain <chain>] [--slippage <num>] [--broadcast]
 agent deposit --asset <SYM> --amount <num> [--protocol aave|morpho] [--broadcast]
 agent withdraw --position <addr> --amount <num|max> [--chain <chain>] [--broadcast]
-agent fund [--wallet <n>] [--token <addr>]
-agent x402-pay --url <url> --wallet <n> [--method GET] [--body <str>] [--header Key:Value]
+agent fund [--wallet <n>]
+agent x402-pay --url <url> --wallet <n> [--chain <chain>] [--method GET] [--body <str>] [--header Key:Value]
 ```
 
-### Agent (ERC-8004)
+Every write command accepts `--broadcast` (execute) and `--dry-run` (force preview); with neither, the persisted `agent mode` decides.
+
+### Agent identity & reputation (ERC-8004)
 ```bash
-agent agent register --name <n> [--agent-uri <uri>] [--metadata <k=v,k=v>] [--broadcast]
-agent agent wallet --agent-id <id>
-agent agent metadata --agent-id <id> --key <key>
-agent agent reputation --agent-id <id> [--tag1 <tag>] [--tag2 <tag>]
-agent agent reviews --agent-id <id> [--tag1 <t>] [--tag2 <t>] [--revoked]
-agent agent feedback --agent-id <id> --value <score> [--tag1 <t>] [--tag2 <t>] [--endpoint <e>] [--feedback-uri <uri>] [--broadcast]
+agent register --name <n> [--agent-uri <uri>] [--metadata <k=v,k=v>] [--broadcast|--dry-run]
+agent identity --agent-id <id> [--key <metadata-key>]   # agent payment wallet + optional metadata
+agent reputation --agent-id <id> [--tag1 <tag>] [--tag2 <tag>]
+agent reviews --agent-id <id> [--tag1 <t>] [--tag2 <t>] [--include-revoked]
+agent feedback --agent-id <id> --value <score> [--tag1 <t>] [--tag2 <t>] [--endpoint <e>] [--feedback-uri <uri>] [--broadcast|--dry-run]
 ```
 
 **ERC-8004 contracts (Polygon mainnet):**
@@ -163,7 +172,7 @@ agent agent feedback --agent-id <id> --value <score> [--tag1 <t>] [--tag2 <t>] [
 
 ## Key Behaviors
 
-- **Dry-run by default** — all write commands require `--broadcast` to execute
+- **Transaction mode** — in the default `dry-run` mode, write commands preview and require `--broadcast` to execute. `agent mode auto` persists always-broadcast; `--dry-run` on any command forces a preview regardless of mode. After the first `wallet login`, if the login JSON contains a `modePrompt` field, relay that question to the user and run `agent mode auto` or `agent mode dry-run` per their answer before continuing. Never enable auto mode without the user's explicit answer.
 - **Smart defaults** — `--wallet main`, `--chain polygon`
 - **`balances --chains`** — comma-separated chains (max 20); two or more return JSON with `multiChain: true` and a `chains` array (same wallet address on each)
 - **Fee preference** — auto-selects USDC over native POL when both available; the relayer pays gas in whichever fee token the wallet can afford
@@ -171,7 +180,8 @@ agent agent feedback --agent-id <id> --value <score> [--tag1 <t>] [--tag2 <t>] [
 - **`deposit`** — picks highest-TVL pool via Trails `getEarnPools` and deposits directly. Full deposit reference: https://agentconnect.polygon.technology/polygon-defi/SKILL.md
 - **Gas reserve** — when using `deposit` or any command that spends tokens, always reserve at least 0.1 USDC or 0.1 POL in the wallet for gas. Never attempt to spend the full balance. The `deposit` command enforces a 0.1 reserve automatically, but the agent must apply the same rule when constructing amounts for `send`, `swap`, or direct contract calls.
 - **`withdraw`** — `--position` = aToken or ERC-4626 vault; `--amount` = `max` or underlying units (Aave / vault). Dry-run JSON includes `poolAddress` / `vault`.
-- **`x402-pay`** — probes endpoint for 402, smart wallet funds builder EOA with exact token amount, EOA signs EIP-3009 payment. Chain auto-detected from 402 response
+- **`x402-pay`** — probes endpoint for 402, the wallet funds a builder EOA with the exact token amount, the EOA signs the EIP-3009 payment. Chain auto-detected from the 402 response
+- **`call`** — submit arbitrary pre-encoded calldata: `agent call --to <addr> --data 0x... [--value <amt>] [--prefer-native-fee] [--broadcast]`. The wallet can call any contract (no permission scoping in the V3 model)
 - **`send-native --direct`** — bypasses ValueForwarder contract for direct EOA transfer
 - **No permission scoping** — the V3 embedded wallet can call any contract and spend any amount it holds; there are no per-contract whitelists or spend limits. Guard spending in agent logic, not at the wallet layer.
 - **Session expiry** — ~1 week from login; on expiry, re-run `wallet login`
@@ -189,10 +199,9 @@ CLI commands output JSON (non-TTY). After running a command, always render the r
 | `withdraw` | Summary: `kind` (aave / erc4626), position, amount, pool or vault. If broadcast, show tx hash + explorer link. |
 | `fund` | Show the `fundingUrl` as a clickable link with a brief instruction to open it. |
 | `wallet login` / `wallet list` | Wallet name, truncated address, chain in a small table or bullet list. |
-| `agent register` | Show agent name and tx hash as a code span with Polygonscan link. Remind user to retrieve `agentId` from the Registered event on the Logs tab. |
-| `agent wallet` | Show `agentId`, wallet address, and whether a wallet is set. |
-| `agent metadata` | Show `agentId`, key, and decoded value. |
-| `agent reputation` | Format score and tag breakdown as a small table. |
+| `register` | Show agent name and tx hash as a code span with Polygonscan link. Remind user to retrieve `agentId` from the Registered event on the Logs tab. |
+| `identity` | Show `agentId`, wallet address, whether a wallet is set, and the decoded metadata value when `--key` was passed. |
+| `reputation` | Format score and tag breakdown as a small table. |
 
 **Dry-run results** — always make it visually clear this was a simulation. Prefix with `⚡ Dry run` and show what *would* happen. Remind the user to re-run with `--broadcast` to execute.
 
@@ -216,7 +225,8 @@ CLI commands output JSON (non-TTY). After running a command, always render the r
 ```
 ~/.polygon-agent/
 ├── .encryption-key       # AES-256-GCM key (auto-generated, 0600)
-├── builder.json          # publishableKey, omsProjectId (encrypted)
+├── config.json           # transaction mode (auto | dry-run)
+├── builder.json          # publishableKey, omsProjectId, polymarket/EOA keys (encrypted)
 ├── wallets/<name>.json   # OMS wallet pointer: walletAddress, loginMethod
 └── oms/<name>/           # OMS SDK session storage + encrypted credential key
 ```

@@ -1,9 +1,9 @@
 ---
 name: polygon-defi
-description: DeFi operations on Polygon using the Polygon Agent CLI. Covers same-chain token swaps, cross-chain bridging, and yield deposits into Aave v3 and Morpho vaults via Trails earn pool discovery. All commands dry-run by default — add --broadcast to execute.
+description: Swap, bridge, and deposit on Polygon using the Polygon Agent CLI. Covers same-chain token swaps, cross-chain bridging, yield deposits into Aave v3 and Morpho vaults, and withdrawals from those positions. Write commands preview by default; add --broadcast (or enable `agent mode auto`) to execute.
 ---
 
-# Polygon DeFi Skill
+# Swap, Bridge & Deposit
 
 ## Session Prerequisites
 
