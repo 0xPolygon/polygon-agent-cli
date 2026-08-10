@@ -100,8 +100,7 @@ const PUBLIC_RPC_BY_CHAIN_ID: Record<number, string> = {
 
 /**
  * Read-only RPC URL. Prefers the OMS nodes endpoint when a project access
- * key is configured; otherwise falls back to a public RPC for the chain. Safe
- * for both the legacy (dapp-client) and OMS (typescript-sdk) paths.
+ * key is configured; otherwise falls back to a public RPC for the chain.
  */
 export function getReadRpcUrl(network: NetworkMetadata): string {
   const accessKey = process.env.SEQUENCE_PROJECT_ACCESS_KEY;
