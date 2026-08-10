@@ -1,5 +1,11 @@
 # @polygonlabs/agentconnect-ui
 
+## 0.0.2
+
+### Patch Changes
+
+- 64f4c91: Point the agent discovery service (x402 services catalog) at its new domain, `agent-discovery.polygon.org`, replacing the retired `agentic-services.polygon.technology`.
+
 ## 0.0.1
 
 ### Patch Changes
