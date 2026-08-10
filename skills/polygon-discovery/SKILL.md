@@ -10,9 +10,9 @@ protocol on Polygon mainnet. No API keys or subscriptions — each call costs a 
 USDC amount drawn from your wallet. The CLI (`x402-pay`) detects the `402` response,
 signs the exact payment, and retries automatically.
 
-- **Base URL:** `https://agentic-services.polygon.technology`
-- **Live catalog (source of truth):** `GET https://agentic-services.polygon.technology/api/discover/routes`
-- **Full provider docs:** `https://agentic-services.polygon.technology/SKILL.md`
+- **Base URL:** `https://agent-discovery.polygon.org`
+- **Live catalog (source of truth):** `GET https://agent-discovery.polygon.org/api/discover/routes`
+- **Full provider docs:** `https://agent-discovery.polygon.org/SKILL.md`
 
 > **Always read the live catalog first.** It returns every active route with its exact
 > proxy path, method, price, and `payTo` address (CORS enabled, no payment required to
@@ -49,23 +49,23 @@ upstream provider's own API.
 ```bash
 # POST with a JSON body (e.g. Exa web search)
 agent x402-pay \
-  --url "https://agentic-services.polygon.technology/api/proxy/exa/search" \
+  --url "https://agent-discovery.polygon.org/api/proxy/exa/search" \
   --wallet main --method POST \
   --body '{"query": "polygon agentic payments", "numResults": 5}'
 
 # GET with query params (e.g. SearchApi Google search)
 agent x402-pay \
-  --url "https://agentic-services.polygon.technology/api/proxy/searchapi/google?q=<query>" \
+  --url "https://agent-discovery.polygon.org/api/proxy/searchapi/google?q=<query>" \
   --wallet main --method GET
 
 # Scrape a page to clean markdown (Firecrawl)
 agent x402-pay \
-  --url "https://agentic-services.polygon.technology/api/proxy/firecrawl/scrape" \
+  --url "https://agent-discovery.polygon.org/api/proxy/firecrawl/scrape" \
   --wallet main --method POST --body '{"url": "https://example.com"}'
 
 # LLM inference (Llama 3.3 70B, OpenAI-compatible chat body)
 agent x402-pay \
-  --url "https://agentic-services.polygon.technology/api/proxy/nim/llama-3.3-70b/chat" \
+  --url "https://agent-discovery.polygon.org/api/proxy/nim/llama-3.3-70b/chat" \
   --wallet main --method POST \
   --body '{"messages": [{"role": "user", "content": "Summarize Polygon in one line."}]}'
 ```
@@ -77,7 +77,7 @@ Chain and token are auto-detected from the `402` response — no manual config.
 ## Catalog
 
 Prices are per call, in USDC, settling on Polygon (chain 137). All routes below are
-relative to the base URL `https://agentic-services.polygon.technology`.
+relative to the base URL `https://agent-discovery.polygon.org`.
 
 ### Search, scraping & news (proxied)
 

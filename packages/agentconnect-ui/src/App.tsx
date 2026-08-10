@@ -28,7 +28,7 @@ import { LoginPage } from './login/LoginPage.js';
 const SKILL_URL = 'https://agentconnect.polygon.technology/polygon-agent-cli/SKILL.md';
 // x402 services catalog skill: Services/Search prompts point the agent here so it
 // knows which service routes to call (not the agentconnect/CLI skill).
-const AGENTIC_SERVICES_SKILL_URL = 'https://agentic-services.polygon.technology/SKILL.md';
+const AGENTIC_SERVICES_SKILL_URL = 'https://agent-discovery.polygon.org/SKILL.md';
 
 const AGENTS: {
   id: string;
@@ -395,7 +395,7 @@ function Dashboard({
             {
               title: 'Add your Service for Agents',
               desc: 'List your API as an x402 service that agents can discover and pay for per call.',
-              href: 'https://agentic-services.polygon.technology/discover'
+              href: 'https://agent-discovery.polygon.org/discover'
             }
           ].map((card) => (
             <a
