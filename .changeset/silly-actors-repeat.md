@@ -1,5 +1,5 @@
 ---
-"@polygonlabs/agent-cli": patch
+"@polygonlabs/agent-cli": minor
 "@polygonlabs/agentconnect-ui": patch
 ---
 
