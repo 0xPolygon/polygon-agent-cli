@@ -9,6 +9,7 @@ import { getAddress, isAddress } from 'viem';
 import type { OwnerAction } from '../lib/owner/pending.ts';
 import type { Plan, PlanToken } from '../lib/session/plan.ts';
 
+import { ensureBuilderAccessKey, makeDefaultProvisionDeps } from '../lib/builder-provision.ts';
 import { CliError, errorJson, httpStatus, jsonFail, jsonOut } from '../lib/errors.ts';
 import { runOwnerAction } from '../lib/owner/actions.ts';
 import { deletePending, loadPending } from '../lib/owner/pending.ts';
@@ -294,6 +295,19 @@ export const confirmCommandModule: CommandModule<object, ConfirmArgs> = {
     }
     const failedOutright =
       result.connected === false || result.renewed === false || result.updated === false;
+    // A newly connected install gets its own Builder access key (Trails quotes)
+    // and x402 signer, like a browser login. Best effort: trades and payments
+    // set it up on first use if this fails.
+    if (result.connected === true && typeof result.walletAddress === 'string') {
+      const provision = await ensureBuilderAccessKey(
+        result.walletAddress,
+        makeDefaultProvisionDeps()
+      ).catch((error: unknown) => ({ provisioned: false, reason: String(error) }));
+      result = {
+        ...result,
+        builderAccess: provision.provisioned || provision.reason === 'existing'
+      };
+    }
     jsonOut({ ok: !failedOutright, walletName: wallet, ...result });
     if (failedOutright) process.exit(1);
   }

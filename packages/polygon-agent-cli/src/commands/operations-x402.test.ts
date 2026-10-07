@@ -12,6 +12,11 @@ vi.mock('../lib/storage.ts', () => ({
   loadBuilderConfig: mocks.loadBuilderConfig
 }));
 
+// The signer's Builder setup is provisioned on first use; nothing to do here.
+vi.mock('../lib/builder-provision.ts', () => ({
+  ensureBuilderAccess: async () => {}
+}));
+
 vi.mock('../lib/tx-dispatch.ts', () => ({
   runTx: mocks.runTx
 }));
@@ -38,7 +43,8 @@ vi.mock('@x402/fetch', () => {
         accepts: [
           {
             amount: '1000',
-            asset: '0x2222222222222222222222222222222222222222',
+            // USDC on Polygon: the CLI only pays in stablecoins it can value.
+            asset: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359',
             network: 'eip155:137',
             extra: {}
           }
@@ -132,7 +138,7 @@ describe('x402-pay transaction mode', () => {
           amount_usdc: 0.001,
           supported_chains: [{ chain: 'polygon', chainId: 137 }],
           usdc_contracts: {
-            polygon: '0x5555555555555555555555555555555555555555'
+            polygon: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359'
           }
         }),
         {

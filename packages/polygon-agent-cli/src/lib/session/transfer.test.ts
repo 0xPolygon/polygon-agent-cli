@@ -333,6 +333,56 @@ describe('reconciling earlier transfers', () => {
     });
   });
 
+  it('a 404 after execute was called is not proof nothing ran: it stays open', async () => {
+    const fake = setup();
+    writeRecord(fake, { id: 'odd', credentialId: 'cred-1', executeAttempted: true });
+    fake.client.getTransactionStatus = async () => {
+      throw httpError(404, 'TransactionNotFound');
+    };
+    await expect(send(fake, 1n)).rejects.toMatchObject({ code: 'upstream_unavailable' });
+    expect(listTransfers(fake.wallet).find((r) => r.id === 'odd')).toMatchObject({
+      state: 'uncertain'
+    });
+    expect(fake.calls.prepare).toBe(0);
+  });
+
+  it('marks a 404 before any execute as certainly never sent', async () => {
+    const fake = setup();
+    writeRecord(fake, { id: 'gone2', credentialId: 'cred-1', state: 'prepared' });
+    const status = fake.client.getTransactionStatus;
+    let first = true;
+    fake.client.getTransactionStatus = async (params) => {
+      if (first) {
+        first = false;
+        throw httpError(404, 'TransactionNotFound');
+      }
+      return status(params);
+    };
+    await send(fake, 1n);
+    expect(listTransfers(fake.wallet).find((r) => r.id === 'gone2')).toMatchObject({
+      state: 'failed',
+      neverSent: true
+    });
+  });
+
+  it('does not send past notAfter (e.g. a quote that expired while waiting)', async () => {
+    const fake = setup();
+    await expect(
+      sessionTransfer({
+        wallet: fake.wallet,
+        walletAddress: WALLET_ADDRESS,
+        chainId: 137,
+        token: USDC,
+        to: TO,
+        amount: 1n,
+        purpose: 'trade',
+        notAfter: START.getTime() - 1,
+        deps: fake.deps
+      })
+    ).rejects.toMatchObject({ code: 'quote_expired' });
+    expect(fake.calls.prepare).toBe(0);
+  });
+
   it('keeps an uncertain transfer whose quote is still live, and closes it once expired', async () => {
     const fake = setup({ statuses: [{ status: 'quoted' }] });
     writeRecord(fake, {
@@ -344,8 +394,8 @@ describe('reconciling earlier transfers', () => {
     await expect(send(fake, 1n)).rejects.toMatchObject({ code: 'upstream_unavailable' });
     expect(fake.calls.prepare).toBe(0);
 
-    // Ten minutes on, the quote has expired: it was never executed.
-    await fake.deps.sleep(10 * 60_000);
+    // Past the quote's expiry plus the 2-minute clock margin: never executed.
+    await fake.deps.sleep(12 * 60_000);
     fake.state.statuses = [{ status: 'quoted' }, { status: 'executed', txnHash: '0xnew' }];
     await send(fake, 1n);
     expect(listTransfers(fake.wallet).find((r) => r.id === 'live')).toMatchObject({

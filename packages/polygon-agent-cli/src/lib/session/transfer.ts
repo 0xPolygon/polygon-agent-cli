@@ -52,6 +52,8 @@ const POLL_MS = 2_000;
 const POLL_TIMEOUT_MS = 60_000;
 // Without a recorded quote expiry, assume a prepared transaction is dead after this.
 const FALLBACK_QUOTE_LIFETIME_MS = 10 * 60 * 1000;
+// Slack for the local clock when judging another clock's expiry.
+const CLOCK_MARGIN_MS = 2 * 60 * 1000;
 
 const TransferRecordSchema = z.object({
   id: z.string(),
@@ -75,6 +77,12 @@ const TransferRecordSchema = z.object({
   quoteExpiresAt: z.string().optional(),
   txHash: z.string().optional(),
   error: z.string().optional(),
+  // Set only when it's certain no tokens moved (never prepared or executed,
+  // OMS has no record of it, it reverted, or its quote expired unexecuted). A
+  // failure without it may still have gone through.
+  neverSent: z.boolean().optional(),
+  // Set just before executeTransaction is called.
+  executeAttempted: z.boolean().optional(),
   ledgered: z.boolean().default(false),
   createdAt: z.string(),
   updatedAt: z.string()
@@ -187,7 +195,15 @@ async function settle(params: {
       if (httpStatus(error) === 404) {
         return update({
           ...params,
-          patch: { state: 'failed', error: 'OMS has no record of this transaction; it never ran' }
+          // Proof nothing ran only if it was never executed; after an execute
+          // a 404 is an anomaly, so it stays open.
+          patch: record.executeAttempted
+            ? { state: 'uncertain' }
+            : {
+                state: 'failed',
+                neverSent: true,
+                error: 'OMS has no record of this transaction; it never ran'
+              }
         });
       }
     }
@@ -207,7 +223,7 @@ async function settle(params: {
     if (status?.status === 'failed') {
       return update({
         ...params,
-        patch: { state: 'failed', error: 'OMS reported the transaction failed' }
+        patch: { state: 'failed', neverSent: true, error: 'OMS reported the transaction failed' }
       });
     }
     // Still only quoted: it was never executed, but an execute already sent
@@ -215,10 +231,14 @@ async function settle(params: {
     const quoteExpiry = record.quoteExpiresAt
       ? Date.parse(record.quoteExpiresAt)
       : Date.parse(record.createdAt) + FALLBACK_QUOTE_LIFETIME_MS;
-    if (status?.status === 'quoted' && deps.now().getTime() > quoteExpiry) {
+    if (status?.status === 'quoted' && deps.now().getTime() > quoteExpiry + CLOCK_MARGIN_MS) {
       return update({
         ...params,
-        patch: { state: 'failed', error: 'prepared but never executed (quote expired)' }
+        patch: {
+          state: 'failed',
+          neverSent: true,
+          error: 'prepared but never executed (quote expired)'
+        }
       });
     }
     if (deps.now().getTime() >= deadline) {
@@ -268,7 +288,7 @@ export async function reconcileTransfers(params: {
       update({
         ...params,
         record,
-        patch: { state: 'failed', error: 'interrupted before preparing' }
+        patch: { state: 'failed', neverSent: true, error: 'interrupted before preparing' }
       });
       continue;
     }
@@ -329,6 +349,9 @@ export async function sessionTransfer(params: {
   amount: bigint;
   purpose: SpendPurpose;
   ref?: string;
+  // Don't send after this time (ms), e.g. a trade quote's expiry; checked once
+  // the lock is held and earlier transfers are settled.
+  notAfter?: number;
   deps: TransferDeps;
 }): Promise<SessionTransferResult> {
   const { wallet, deps } = params;
@@ -346,6 +369,13 @@ export async function sessionTransfer(params: {
   await reconcileTransfers({ wallet, deps });
 
   const check = await checkTransfer(params);
+  if (params.notAfter !== undefined && deps.now().getTime() > params.notAfter) {
+    throw new CliError({
+      code: 'quote_expired',
+      message: 'The quote expired while waiting to send; nothing was sent.',
+      hint: 'Quote again.'
+    });
+  }
 
   const now = deps.now().toISOString();
   let record: TransferRecord = {
@@ -382,11 +412,21 @@ export async function sessionTransfer(params: {
       })
     });
   } catch (error) {
-    update({ wallet, record, deps, patch: { state: 'failed', error: String(error) } });
+    update({
+      wallet,
+      record,
+      deps,
+      patch: { state: 'failed', neverSent: true, error: String(error) }
+    });
     throw mapPrepareOrExecuteError(error) ?? mapRacError({ error, wallet });
   }
   if (!prepared.sponsored) {
-    update({ wallet, record, deps, patch: { state: 'failed', error: 'not sponsored' } });
+    update({
+      wallet,
+      record,
+      deps,
+      patch: { state: 'failed', neverSent: true, error: 'not sponsored' }
+    });
     throw new CliError({
       code: 'not_sponsored',
       message: `OMS won't sponsor gas for session transfers on ${chainLabel(params.chainId)}, and sessions can't pay their own gas.`
@@ -405,6 +445,7 @@ export async function sessionTransfer(params: {
   });
 
   try {
+    record = update({ wallet, record, deps, patch: { executeAttempted: true } });
     await deps.client.executeTransaction({ txnId: prepared.txnId });
   } catch (error) {
     const status = httpStatus(error);
