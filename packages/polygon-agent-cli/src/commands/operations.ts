@@ -1,17 +1,27 @@
+import type { SelectPaymentRequirements } from '@x402/core/client';
 import type { CommandModule, Argv } from 'yargs';
 
 import React from 'react';
+import { encodeFunctionData, erc20Abi, getAddress, isAddress } from 'viem';
 
 import type { ContractTokenBalance } from '@polygonlabs/oms-wallet';
 
 import { findNetworkById } from '@polygonlabs/oms-wallet';
 
-import { bigintReplacer, failureJson } from '../lib/errors.ts';
+import type { TradeRecord } from '../lib/trade/state.ts';
+
+import { ensureBuilderAccess } from '../lib/builder-provision.ts';
+import { bigintReplacer, CliError, failureJson } from '../lib/errors.ts';
 import { isWalletFunded } from '../lib/indexer.ts';
 import { resolveBroadcast, withWriteFlags } from '../lib/mode.ts';
 import { getOmsClient, loginUiBaseUrl } from '../lib/oms-client.ts';
+import { checkSessionSpend } from '../lib/session/run-tx.ts';
 import { loadOmsWalletPointer, loadBuilderConfig } from '../lib/storage.ts';
 import { resolveErc20BySymbol } from '../lib/token-directory.ts';
+import { getTokenConfig } from '../lib/tokens.ts';
+import { DEFAULT_TRADE_TIMEOUT_MS, executeSwap } from '../lib/trade/execute.ts';
+import { describeTrade, quoteSwap } from '../lib/trade/quote.ts';
+import { loadTrade } from '../lib/trade/state.ts';
 import { runTx as runDappClientTx } from '../lib/tx-dispatch.ts';
 import {
   resolveNetwork,
@@ -21,6 +31,13 @@ import {
   getReadRpcUrl,
   fileCoerce
 } from '../lib/utils.ts';
+import {
+  isBazaarBody,
+  parseBazaarPayment,
+  payWithinLimits,
+  x402PriceUsd,
+  x402UsdText
+} from '../lib/x402-guard.ts';
 import { isTTY, inkRender } from '../ui/render.js';
 import { BalancesUI, FundUI, SendUI } from './operations-ui.js';
 
@@ -36,62 +53,6 @@ function withWalletAndChain<T>(yargs: Argv<T>) {
       type: 'string' as const,
       describe: 'Chain name or ID'
     });
-}
-
-// Get per-chain indexer URL
-// Load optional token map override from env
-function loadTokenMap(): Record<string, Record<string, { address: string; decimals: number }>> {
-  const raw = process.env.TRAILS_TOKEN_MAP_JSON || '';
-  if (!raw) return {};
-  try {
-    return JSON.parse(raw);
-  } catch {
-    throw new Error('Invalid TRAILS_TOKEN_MAP_JSON (must be valid JSON)');
-  }
-}
-
-// Helper: Get token configuration (native or ERC20)
-async function getTokenConfig({
-  chainId,
-  symbol,
-  nativeSymbol
-}: {
-  chainId: number;
-  symbol: string;
-  nativeSymbol: string;
-}): Promise<{ symbol: string; address: string; decimals: number }> {
-  const sym = String(symbol || '')
-    .toUpperCase()
-    .trim();
-
-  if (sym === 'NATIVE' || sym === nativeSymbol.toUpperCase() || sym === 'POL' || sym === 'MATIC') {
-    return {
-      symbol: nativeSymbol.toUpperCase(),
-      address: '0x0000000000000000000000000000000000000000',
-      decimals: 18
-    };
-  }
-
-  const tokenMap = loadTokenMap();
-  const entry = tokenMap?.[String(chainId)]?.[sym];
-  if (entry?.address && entry.decimals != null) {
-    return {
-      symbol: sym,
-      address: entry.address,
-      decimals: Number(entry.decimals)
-    };
-  }
-
-  const token = await resolveErc20BySymbol({ chainId, symbol: sym });
-  if (!token?.address || token.decimals == null) {
-    throw new Error(`Unknown token ${sym} on chainId=${chainId}`);
-  }
-
-  return {
-    symbol: sym,
-    address: token.address,
-    decimals: Number(token.decimals)
-  };
 }
 
 const BALANCES_MAX_CHAINS = 20;
@@ -862,156 +823,199 @@ export const callCommand: CommandModule = {
 };
 
 // --- swap ---
-export const swapCommand: CommandModule = {
-  command: 'swap',
-  describe: 'DEX swap via Trails API',
+interface SwapArgs {
+  action?: string;
+  wallet?: string;
+  chain?: string;
+  from?: string;
+  to?: string;
+  amount?: string;
+  'amount-usd'?: number;
+  slippage?: number;
+  'to-chain'?: string;
+  intent?: string;
+  timeout?: number;
+  broadcast?: boolean;
+  dryRun?: boolean;
+}
+
+function requireTrade(intentId: string | undefined): TradeRecord {
+  if (!intentId) {
+    throw new CliError({ code: 'invalid_input', message: 'Give the trade with --intent <id>.' });
+  }
+  const trade = loadTrade(intentId);
+  if (!trade) {
+    throw new CliError({
+      code: 'invalid_input',
+      message: `No saved trade ${intentId} on this install.`
+    });
+  }
+  return trade;
+}
+
+// Prints where the trade ended up; refunded and failed trades exit 1.
+function reportTrade(trade: TradeRecord): void {
+  const network = resolveNetwork(trade.origin.chainId);
+  const result = {
+    ...describeTrade(trade),
+    ...(trade.depositTxHash
+      ? { depositExplorerUrl: getExplorerUrl(network, trade.depositTxHash) }
+      : {})
+  };
+  if (trade.state === 'refunded' || trade.state === 'failed') {
+    console.error(
+      JSON.stringify(
+        {
+          ok: false,
+          code: 'trade_failed',
+          error:
+            trade.state === 'refunded'
+              ? 'The trade failed and Trails refunded the deposit to the wallet.'
+              : `The trade failed: ${trade.error ?? 'Trails reported a failure'}.`,
+          ...result
+        },
+        bigintReplacer,
+        2
+      )
+    );
+    process.exit(1);
+  }
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        walletName: trade.walletName,
+        walletAddress: trade.walletAddress,
+        ...result,
+        ...(trade.state === 'executing'
+          ? {
+              hint: 'Trails is still working on it.',
+              command: `polygon-agent swap status --intent ${trade.intentId}`
+            }
+          : {})
+      },
+      bigintReplacer,
+      2
+    )
+  );
+}
+
+export const swapCommand: CommandModule<object, SwapArgs> = {
+  command: 'swap [action]',
+  describe: 'Swap or bridge tokens via Trails (swap status --intent <id> to follow one)',
   builder: (yargs) =>
     withWriteFlags(
       withWalletAndChain(yargs)
+        .positional('action', {
+          type: 'string',
+          choices: ['status'],
+          describe: 'status: resume or report a trade (--intent)'
+        })
         .option('from', {
           type: 'string',
-          demandOption: true,
-          describe: 'Source token symbol',
+          describe: 'Token to sell (default: a covered stablecoin with enough balance)',
           coerce: fileCoerce
         })
-        .option('to', {
-          type: 'string',
-          demandOption: true,
-          describe: 'Destination token symbol',
-          coerce: fileCoerce
-        })
+        .option('to', { type: 'string', describe: 'Token to buy', coerce: fileCoerce })
         .option('amount', {
           type: 'string',
-          demandOption: true,
-          describe: 'Amount to swap',
+          describe: 'Amount to sell: a number, <n>%, or all',
           coerce: fileCoerce
         })
-        .option('slippage', {
-          type: 'number',
-          describe: 'Slippage tolerance (0-0.5)'
-        })
-        .option('to-chain', {
+        .option('amount-usd', { type: 'number', describe: 'Amount to sell, in USD' })
+        .option('slippage', { type: 'number', describe: 'Slippage tolerance (default 0.005)' })
+        .option('to-chain', { type: 'string', describe: 'Destination chain (bridges)' })
+        .option('intent', {
           type: 'string',
-          describe: 'Destination chain (for cross-chain swaps)'
+          describe: 'A quoted trade to execute (with --broadcast), or to follow (status)'
+        })
+        .option('timeout', {
+          type: 'number',
+          default: DEFAULT_TRADE_TIMEOUT_MS / 1000,
+          describe: 'Seconds to wait for completion'
         })
     ),
   handler: async (argv) => {
-    const walletName = (argv.wallet as string) || 'main';
-    const fromSymbol = argv.from as string;
-    const toSymbol = argv.to as string;
-    const amount = argv.amount as string;
-    const slippageArg = argv.slippage as number | undefined;
-    const toChainArg = argv['to-chain'] as string | undefined;
-    const broadcast = resolveBroadcast(argv as { broadcast?: boolean; dryRun?: boolean });
-
     try {
-      const session = await loadOmsWalletPointer(walletName);
-      if (!session) {
-        throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login`);
+      const timeoutSeconds = argv.timeout ?? DEFAULT_TRADE_TIMEOUT_MS / 1000;
+      if (!Number.isFinite(timeoutSeconds) || timeoutSeconds < 0) {
+        throw new CliError({
+          code: 'invalid_input',
+          message: '--timeout must be seconds (0 or more).'
+        });
+      }
+      const timeoutMs = timeoutSeconds * 1000;
+      if (argv.action === 'status') {
+        // An unfinished trade picks up where it stopped; a quote is never sent.
+        reportTrade(
+          await executeSwap({ trade: requireTrade(argv.intent), timeoutMs, send: false })
+        );
+        return;
       }
 
-      const originNetwork = resolveNetwork((argv.chain as string) || 'polygon');
-      const originChainId = originNetwork.chainId;
-      const originNativeSymbol = originNetwork.nativeToken?.symbol || 'NATIVE';
-
-      const destNetwork = toChainArg ? resolveNetwork(toChainArg) : originNetwork;
-      const destChainId = destNetwork.chainId;
-      const destNativeSymbol = destNetwork.nativeToken?.symbol || 'NATIVE';
-      const isCrossChain = destChainId !== originChainId;
-
-      const slippage = slippageArg ?? 0.005;
-      if (!Number.isFinite(slippage) || slippage <= 0 || slippage >= 0.5) {
-        throw new Error('Invalid --slippage (must be between 0 and 0.5)');
-      }
-
-      const fromToken = await getTokenConfig({
-        chainId: originChainId,
-        symbol: fromSymbol,
-        nativeSymbol: originNativeSymbol
-      });
-      const toToken = await getTokenConfig({
-        chainId: destChainId,
-        symbol: toSymbol,
-        nativeSymbol: destNativeSymbol
-      });
-
-      if (!isCrossChain && fromToken.address.toLowerCase() === toToken.address.toLowerCase()) {
-        throw new Error('from and to token must be different');
-      }
-
-      const { TrailsApi, TradeType, UnavailableError } = await import('@0xtrails/api');
-      const trailsApiKey =
-        process.env.TRAILS_API_KEY ||
-        process.env.SEQUENCE_PROJECT_ACCESS_KEY ||
-        (await loadBuilderConfig())?.accessKey ||
-        '';
-      const trails = new TrailsApi(trailsApiKey, {
-        hostname: process.env.TRAILS_API_HOSTNAME
-      });
-
-      const walletAddress = session.walletAddress;
-
-      const { parseUnits: viemParseUnits } = await import('viem');
-      const originTokenAmount = viemParseUnits(amount, fromToken.decimals);
-
-      const quoteReq = {
-        ownerAddress: walletAddress,
-        originChainId,
-        originTokenAddress: fromToken.address,
-        originTokenAmount,
-        destinationChainId: destChainId,
-        destinationTokenAddress: toToken.address,
-        destinationTokenAmount: 0n,
-        tradeType: TradeType.EXACT_INPUT,
-        options: {
-          slippageTolerance: slippage
+      const broadcast = resolveBroadcast(argv);
+      let trade: TradeRecord;
+      let warnings: string[] = [];
+      if (argv.intent) {
+        trade = requireTrade(argv.intent);
+      } else {
+        // A sell without --to goes to USDC on the same chain.
+        const to = argv.to ?? (argv.from ? 'USDC' : undefined);
+        if (!to) {
+          throw new CliError({
+            code: 'invalid_input',
+            message: 'Give the token to buy with --to.'
+          });
         }
-      };
-
-      const quoteRes = await trails.quoteIntent(quoteReq);
-      if (!quoteRes?.intent) {
-        throw new Error('No intent returned from quoteIntent');
+        ({ trade, warnings } = await quoteSwap({
+          walletName: argv.wallet || 'main',
+          from: argv.from,
+          to,
+          amount: argv.amount,
+          amountUsd: argv['amount-usd'],
+          chain: argv.chain,
+          toChain: argv['to-chain'],
+          slippage: argv.slippage,
+          now: new Date()
+        }));
       }
-
-      const intent = quoteRes.intent;
-
-      // Trails 0.18: executeIntent follows quoteIntent directly (commitIntent is
-      // deprecated), so the quote's intent id is the one to execute.
-      const intentId = intent.intentId;
-      if (!intentId) {
-        throw new Error('No intentId from quoteIntent');
-      }
-
-      const depositTx = intent.depositTransaction;
-      if (!depositTx?.to) {
-        throw new Error('Intent missing depositTransaction');
-      }
-
-      const transactions = [
-        {
-          to: depositTx.to,
-          data: depositTx.data || '0x',
-          value: depositTx.value ? BigInt(depositTx.value) : 0n
-        }
-      ];
 
       if (!broadcast) {
+        // In session mode, the deposit is checked against the allowance now.
+        const allowance =
+          trade.mode === 'session'
+            ? await checkSessionSpend({
+                walletName: trade.walletName,
+                walletAddress: trade.walletAddress,
+                chainId: trade.origin.chainId,
+                token: getAddress(trade.origin.token),
+                amount: BigInt(trade.origin.amount)
+              })
+            : undefined;
         console.log(
           JSON.stringify(
             {
               ok: true,
               dryRun: true,
-              walletName,
-              walletAddress,
-              intentId,
-              fromToken: fromToken.symbol,
-              fromChain: originNetwork.name,
-              toToken: toToken.symbol,
-              toChain: destNetwork.name,
-              crossChain: isCrossChain,
-              amount,
-              depositTransaction: depositTx,
-              note: 'Re-run with --broadcast to submit the deposit transaction and execute the intent.'
+              walletName: trade.walletName,
+              walletAddress: trade.walletAddress,
+              ...describeTrade(trade),
+              ...(allowance
+                ? {
+                    allowance: {
+                      usd: allowance.usd,
+                      spentUsd: allowance.spentUsd,
+                      allowanceUsd: allowance.allowanceUsd,
+                      remainingOnChain:
+                        allowance.remaining === null
+                          ? null
+                          : formatUnits(allowance.remaining, allowance.decimals)
+                    }
+                  }
+                : {}),
+              ...(warnings.length ? { warnings } : {}),
+              hint: 'Nothing was sent. Show the user the quote; to execute it before it expires:',
+              command: `polygon-agent swap --intent ${trade.intentId} --broadcast`
             },
             bigintReplacer,
             2
@@ -1020,128 +1024,7 @@ export const swapCommand: CommandModule = {
         return;
       }
 
-      const { createPublicClient, http } = await import('viem');
-      const chains = await import('viem/chains');
-      const originChain = Object.values(chains).find((chain) => chain.id === originChainId);
-      if (!originChain) throw new Error(`No RPC configuration for chain ${originChainId}`);
-      const publicClient = createPublicClient({
-        chain: originChain,
-        transport: http(
-          process.env.SEQUENCE_PROJECT_ACCESS_KEY
-            ? getReadRpcUrl(originNetwork)
-            : originChain.rpcUrls.default.http[0]
-        )
-      });
-
-      const result = await runDappClientTx({
-        walletName,
-        chainId: originChainId,
-        transactions,
-        broadcast: true,
-        preferNativeFee: false,
-        purpose: 'trade',
-        ref: intentId
-      });
-      const txHash = result.txHash;
-      if (!txHash) {
-        throw new Error(
-          `Deposit for intent ${intentId} returned no transaction hash; not executing the intent`
-        );
-      }
-
-      // OMS can return a hash before mining. Trails rejects a client-supplied
-      // hash without a receipt, so confirm the deposit before executing.
-      try {
-        const depositReceipt = await publicClient.waitForTransactionReceipt({
-          hash: txHash as `0x${string}`,
-          timeout: 60_000
-        });
-        if (depositReceipt.status !== 'success') throw new Error('Deposit transaction reverted');
-        if (depositReceipt.transactionHash.toLowerCase() !== txHash.toLowerCase()) {
-          throw new Error(`Deposit transaction was replaced by ${depositReceipt.transactionHash}`);
-        }
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        throw new Error(
-          `Deposit confirmation failed for intent ${intentId}, transaction ${txHash}: ${reason}; not executing the intent`,
-          { cause: error }
-        );
-      }
-
-      // Retry transient Trails RPC failures after the deposit is confirmed.
-      // Failures include the intent and deposit identifiers for recovery.
-      const EXECUTE_RETRY_MS = 3000;
-      const EXECUTE_TIMEOUT_MS = 120000;
-      const executeStart = Date.now();
-      let execRes;
-      while (true) {
-        try {
-          execRes = await trails.executeIntent({ intentId, depositTransactionHash: txHash });
-          break;
-        } catch (e) {
-          if (!(e instanceof UnavailableError) || Date.now() - executeStart >= EXECUTE_TIMEOUT_MS) {
-            const reason = e instanceof Error ? e.message : String(e);
-            throw new Error(
-              `executeIntent failed for intent ${intentId} after deposit ${txHash}: ${reason}`,
-              { cause: e }
-            );
-          }
-          await new Promise((r) => setTimeout(r, EXECUTE_RETRY_MS));
-        }
-      }
-
-      // Poll for receipt until done or timeout (120s)
-      const POLL_INTERVAL_MS = 3000;
-      const POLL_TIMEOUT_MS = 120000;
-      const pollStart = Date.now();
-      let receipt;
-      while (true) {
-        receipt = await trails.waitIntentReceipt({ intentId });
-        if (receipt?.done) break;
-        if (Date.now() - pollStart >= POLL_TIMEOUT_MS) {
-          console.error(
-            JSON.stringify(
-              {
-                ok: false,
-                error: 'Swap intent timed out waiting for completion',
-                intentId,
-                intentStatus: receipt?.intentReceipt?.status ?? null,
-                hint: `Check status manually with intentId: ${intentId}`
-              },
-              null,
-              2
-            )
-          );
-          process.exit(1);
-        }
-        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-      }
-
-      const explorerUrl = getExplorerUrl(originNetwork, txHash);
-      console.log(
-        JSON.stringify(
-          {
-            ok: true,
-            walletName,
-            walletAddress,
-            fromToken: fromToken.symbol,
-            fromChain: originNetwork.name,
-            fromChainId: originChainId,
-            toToken: toToken.symbol,
-            toChain: destNetwork.name,
-            toChainId: destChainId,
-            crossChain: isCrossChain,
-            amount,
-            intentId,
-            depositTxHash: txHash,
-            depositExplorerUrl: explorerUrl,
-            executeStatus: execRes?.intentStatus,
-            receipt
-          },
-          bigintReplacer,
-          2
-        )
-      );
+      reportTrade(await executeSwap({ trade, timeoutMs }));
     } catch (error) {
       console.error(JSON.stringify(failureJson(error), bigintReplacer, 2));
       process.exit(1);
@@ -1943,20 +1826,41 @@ export const x402PayCommand: CommandModule = {
         type: 'string',
         array: true,
         describe: 'Additional header (Key:Value), repeatable'
+      })
+      .option('max-usd', {
+        type: 'number',
+        describe: 'Refuse to pay more than this (USD)'
+      })
+      .option('yes', {
+        type: 'boolean',
+        default: false,
+        describe: 'Pay a price over x402_max_per_call (after the user agreed)'
       }),
   handler: async (argv) => {
     const walletName = (argv.wallet as string) || 'main';
     const url = argv.url as string;
+    const maxUsd = argv['max-usd'] as number | undefined;
+    const yes = argv.yes === true;
+    if (maxUsd !== undefined && (!Number.isFinite(maxUsd) || maxUsd < 0)) {
+      console.error(
+        JSON.stringify({
+          ok: false,
+          code: 'invalid_input',
+          error: '--max-usd must be a USD amount (0 or more).'
+        })
+      );
+      process.exit(1);
+    }
     const method = ((argv.method as string) || 'GET').toUpperCase();
     const body = argv.body as string | undefined;
     const headerArgs = (argv.header as string[]) || [];
 
     try {
-      const [session, builderConfig] = await Promise.all([
-        loadOmsWalletPointer(walletName),
-        loadBuilderConfig()
-      ]);
+      const session = await loadOmsWalletPointer(walletName);
       if (!session) throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login`);
+      // The x402 signer EOA comes with this install's Builder setup.
+      await ensureBuilderAccess(session.walletAddress);
+      const builderConfig = await loadBuilderConfig();
       if (!builderConfig?.privateKey) throw new Error('Builder EOA not found. Run: agent setup');
 
       const { privateKeyToAccount } = await import('viem/accounts');
@@ -2006,73 +1910,37 @@ export const x402PayCommand: CommandModule = {
       // x402 Bazaar payment format — specific to x402-api.onrender.com.
       // Not a general x402 standard; do not apply to other endpoints.
       const isX402Bazaar = new URL(url).hostname === 'x402-api.onrender.com';
-      if (isX402Bazaar && (probeBody?.payment_address || probeBody?.payment_details)) {
-        const pad = (hex: string, n = 64) => String(hex).replace(/^0x/, '').padStart(n, '0');
-        let payChain: string;
-        let payChainId: number;
-        let payRecipient: string;
-        let amountUsdc: number;
-        let usdcContract: string;
-
-        if (probeBody.payment_address) {
-          // Current x402 Bazaar format
-          const supportedChains: { chain: string; chainId: number }[] = Array.isArray(
-            probeBody.supported_chains
-          )
-            ? probeBody.supported_chains
-            : [];
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const usdcContracts: Record<string, string> = (probeBody.usdc_contracts as any) || {};
-          const polygonEntry = supportedChains.find(
-            (c) => c.chain === 'polygon' || c.chainId === 137
-          );
-          if (polygonEntry) {
-            payChain = 'polygon';
-            payChainId = 137;
-            usdcContract = usdcContracts['polygon'] || '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359';
-          } else if (supportedChains.length > 0) {
-            const first = supportedChains[0];
-            payChain = first.chain;
-            payChainId = first.chainId;
-            usdcContract = usdcContracts[first.chain] || '';
-            if (!usdcContract) throw new Error(`No USDC contract known for chain ${payChain}`);
-          } else {
-            throw new Error('No supported chains in 402 response');
-          }
-          payRecipient = probeBody.payment_address as string;
-          amountUsdc = probeBody.amount_usdc as number;
-        } else {
-          // Legacy payment_details format
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const details = probeBody.payment_details as any;
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const networks: any[] = Array.isArray(details.networks) ? details.networks : [];
-
-          const polygonNet = networks.find(
-            (n: any) => n.network === 'polygon' || n.chainId === 137
-          );
-          if (!polygonNet) throw new Error('No Polygon payment option in 402 response');
-          payChain = 'polygon';
-          payChainId = 137;
-          payRecipient = (polygonNet.recipient || details.recipient) as string;
-          amountUsdc = details.amount as number;
-          usdcContract = polygonNet.usdc_contract || '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359';
-        }
-
-        const amountUnits = BigInt(Math.round(amountUsdc * 1_000_000));
-        const transferData =
-          '0xa9059cbb' + pad(payRecipient) + pad('0x' + amountUnits.toString(16));
-
-        process.stderr.write(`Sending ${amountUsdc} USDC to ${payRecipient} on ${payChain}...\n`);
-        const fundResult = await runDappClientTx({
+      if (isX402Bazaar && isBazaarBody(probeBody)) {
+        const payment = parseBazaarPayment(probeBody);
+        const payChain = payment.chain;
+        const payChainId = payment.chainId;
+        const payRecipient = payment.recipient;
+        const usdcContract = payment.asset;
+        const amountUsdc = payment.usd;
+        const priceUsd = payment.usd;
+        const transferData = payment.data;
+        const fundResult = await payWithinLimits({
           walletName,
-          chainId: payChainId,
-          transactions: [{ to: usdcContract, value: 0n, data: transferData }],
-          broadcast: true,
-          purpose: 'x402',
-          ref: url
+          url,
+          usd: priceUsd,
+          maxUsd,
+          yes,
+          pay: () => {
+            process.stderr.write(
+              `Sending ${amountUsdc} USDC to ${payRecipient} on ${payChain}...\n`
+            );
+            return runDappClientTx({
+              walletName,
+              chainId: payChainId,
+              transactions: [{ to: usdcContract, value: 0n, data: transferData }],
+              broadcast: true,
+              purpose: 'x402',
+              ref: url
+            });
+          }
         });
-        const payTxHash = fundResult.txHash!;
+        const payTxHash = fundResult.txHash;
+        if (!payTxHash) throw new Error('The payment returned no transaction hash');
         process.stderr.write(`Paid via tx: ${payTxHash}\n`);
 
         // Wait for the transaction to be confirmed before presenting to the server
@@ -2127,6 +1995,12 @@ export const x402PayCommand: CommandModule = {
               ok: response.ok,
               status: response.status,
               walletAddress: session.walletAddress,
+              paidUsd: priceUsd,
+              ...(response.ok
+                ? {}
+                : {
+                    error: `Paid ${x402UsdText(priceUsd)}, but the service returned ${response.status}. x402 has no refunds.`
+                  }),
               funded: { amount: amountUsdc, asset: usdcContract, txHash: payTxHash },
               data
             },
@@ -2191,29 +2065,88 @@ export const x402PayCommand: CommandModule = {
 
       const { amount, asset, network: paymentNetwork } = req;
 
-      const chainFromPayment = paymentNetwork?.startsWith('eip155:')
-        ? paymentNetwork.split(':')[1]
-        : null;
-      const resolvedNetwork = resolveNetwork(chainArg || chainFromPayment || 'polygon');
-      const pad = (hex: string, n = 64) => String(hex).replace(/^0x/, '').padStart(n, '0');
-      const transferData =
-        '0xa9059cbb' + pad(eoaAccount.address) + pad('0x' + BigInt(amount).toString(16));
-
-      process.stderr.write(
-        `Funding EOA ${eoaAccount.address} with ${amount} units of ${asset}...\n`
-      );
-      const fundResult = await runDappClientTx({
-        walletName,
+      // Pay on the chain the selected requirement names; a different --chain
+      // only steers the choice, it never redirects the payment.
+      const chainFromPayment =
+        typeof paymentNetwork === 'string' && paymentNetwork.startsWith('eip155:')
+          ? Number(paymentNetwork.split(':')[1])
+          : NaN;
+      if (!Number.isInteger(chainFromPayment)) {
+        throw new CliError({
+          code: 'invalid_input',
+          message: `The service asks for payment on ${String(paymentNetwork)}, which isn't an EVM chain the CLI pays on.`
+        });
+      }
+      const resolvedNetwork = resolveNetwork(chainFromPayment);
+      if (chainArg && resolveNetwork(chainArg).chainId !== resolvedNetwork.chainId) {
+        throw new CliError({
+          code: 'invalid_input',
+          message: `The service doesn't take payment on ${chainArg}; its cheapest option is on ${resolvedNetwork.name}.`,
+          hint: 'Drop --chain, or pick a chain the service supports.'
+        });
+      }
+      if (!isAddress(asset)) {
+        throw new CliError({
+          code: 'invalid_input',
+          message: `Not a token address: ${String(asset)}`
+        });
+      }
+      const fundAmount = BigInt(amount);
+      const priceUsd = x402PriceUsd({
         chainId: resolvedNetwork.chainId,
-        transactions: [{ to: asset, value: 0n, data: transferData }],
-        broadcast: true,
-        preferNativeFee: true,
-        purpose: 'x402',
-        ref: url
+        asset,
+        amount: fundAmount
+      });
+      const transferData = encodeFunctionData({
+        abi: erc20Abi,
+        functionName: 'transfer',
+        args: [eoaAccount.address, fundAmount]
+      });
+
+      const fundResult = await payWithinLimits({
+        walletName,
+        url,
+        usd: priceUsd,
+        maxUsd,
+        yes,
+        pay: () => {
+          process.stderr.write(
+            `Funding EOA ${eoaAccount.address} with ${amount} units of ${asset}...\n`
+          );
+          return runDappClientTx({
+            walletName,
+            chainId: resolvedNetwork.chainId,
+            transactions: [{ to: asset, value: 0n, data: transferData }],
+            broadcast: true,
+            preferNativeFee: true,
+            purpose: 'x402',
+            ref: url
+          });
+        }
       });
       process.stderr.write(`Funded via tx: ${fundResult.txHash}\n`);
 
-      const client = new x402Client(selectAccept);
+      // On the paid request, sign only the requirement that was valued and
+      // funded: same network, asset and scheme, for no more than that amount.
+      const selectValued: SelectPaymentRequirements = (_version, accepts) => {
+        const match = accepts.find(
+          (r) =>
+            r.network === req.network &&
+            r.scheme === req.scheme &&
+            r.asset.toLowerCase() === String(req.asset).toLowerCase() &&
+            BigInt(r.amount || 0) <= fundAmount
+        );
+        if (!match) {
+          throw new Error(
+            'The service changed its payment terms after they were checked; it was not paid more.'
+          );
+        }
+        return match;
+      };
+
+      // The library's own caps ($1, its token list) are off: the CLI has valued
+      // and limited this payment already, and selectValued holds it to that.
+      const client = new x402Client(selectValued).setSpendControls(false);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       client.register('eip155:*', new ExactEvmScheme(eoaAccount as any));
       const fetchWithPayment = wrapFetchWithPayment(fetch, client);
@@ -2226,11 +2159,31 @@ export const x402PayCommand: CommandModule = {
         retryHeaders['Content-Type'] = 'application/json';
       }
 
-      const response = await fetchWithPayment(url, {
-        method,
-        headers: Object.keys(retryHeaders).length ? retryHeaders : undefined,
-        body: body || undefined
-      });
+      let response: Response;
+      try {
+        response = await fetchWithPayment(url, {
+          method,
+          headers: Object.keys(retryHeaders).length ? retryHeaders : undefined,
+          body: body || undefined
+        });
+      } catch (error) {
+        console.error(
+          JSON.stringify(
+            {
+              ok: false,
+              code: 'upstream_error',
+              error: `The paid request failed (${error instanceof Error ? error.message : String(error)}), so the service wasn't paid. The ${x402UsdText(priceUsd)} stays in the signer ${eoaAccount.address} and pays for a later call.`,
+              walletAddress: session.walletAddress,
+              signerAddress: eoaAccount.address,
+              paidUsd: 0,
+              funded: { amount, asset, txHash: fundResult.txHash }
+            },
+            bigintReplacer,
+            2
+          )
+        );
+        process.exit(1);
+      }
 
       const paymentResponseHeader =
         response.headers.get('PAYMENT-RESPONSE') || response.headers.get('X-PAYMENT-RESPONSE');
@@ -2255,6 +2208,16 @@ export const x402PayCommand: CommandModule = {
             status: response.status,
             walletAddress: session.walletAddress,
             signerAddress: eoaAccount.address,
+            paidUsd: response.ok || payment ? priceUsd : 0,
+            ...(response.ok
+              ? {}
+              : payment
+                ? {
+                    error: `Paid ${x402UsdText(priceUsd)}, but the service returned ${response.status}. x402 has no refunds.`
+                  }
+                : {
+                    error: `The service returned ${response.status} and didn't take the payment. The ${x402UsdText(priceUsd)} stays in the signer ${eoaAccount.address} and pays for a later call.`
+                  }),
             funded: {
               amount,
               asset,

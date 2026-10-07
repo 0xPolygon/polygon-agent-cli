@@ -5,7 +5,7 @@ import { decodeFunctionData, erc20Abi, getAddress, isAddress, isHex } from 'viem
 
 import type { OmsTxParams, OmsTxResult } from '../oms-tx.ts';
 import type { SpendPurpose } from './ledger.ts';
-import type { TransferDeps } from './transfer.ts';
+import type { TransferDeps, TransferCheck } from './transfer.ts';
 
 import { CliError, bigintReplacer } from '../errors.ts';
 import { formatUnits } from '../utils.ts';
@@ -18,6 +18,7 @@ export interface SessionTxParams extends OmsTxParams {
   walletAddress: string;
   purpose?: SpendPurpose;
   ref?: string;
+  notAfter?: number;
 }
 
 function ownerRequired(what: string): CliError {
@@ -55,6 +56,29 @@ export function decodeSessionTransfer(params: OmsTxParams): {
   if (decoded.functionName !== 'transfer') throw ownerRequired(`A token ${decoded.functionName}`);
   const [to, amount] = decoded.args;
   return { token: getAddress(tx.to), to: getAddress(to), amount };
+}
+
+// The checks a session transfer would run, without sending anything (dry runs
+// of trades and payments).
+export async function checkSessionSpend(params: {
+  walletName: string;
+  walletAddress: string;
+  chainId: number;
+  token: `0x${string}`;
+  amount: bigint;
+}): Promise<TransferCheck> {
+  return withWalletKeys({
+    wallet: params.walletName,
+    fn: () =>
+      checkTransfer({
+        wallet: params.walletName,
+        walletAddress: params.walletAddress,
+        chainId: params.chainId,
+        token: params.token,
+        amount: params.amount,
+        deps: liveTransferDeps(params.walletName)
+      })
+  });
 }
 
 export async function runSessionTx(
@@ -113,6 +137,7 @@ export async function runSessionTx(
         ...transfer,
         purpose: params.purpose ?? 'send',
         ref: params.ref,
+        notAfter: params.notAfter,
         deps
       });
       return { walletAddress, txHash: result.txHash };

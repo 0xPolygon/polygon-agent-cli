@@ -22,9 +22,32 @@ export type CliErrorCode =
   | 'chain_required'
   | 'invalid_input'
   | 'wallet_busy'
+  | 'quote_expired'
+  | 'upstream_invalid_quote'
+  | 'trade_failed'
+  | 'confirmation_required'
+  | 'x402_price_exceeds_max'
+  | 'daily_limit_exceeded'
   | 'rate_limited'
   | 'upstream_unavailable'
   | 'upstream_error';
+
+// Refusals raised before anything is sent: a spend that failed with one of
+// these certainly moved nothing.
+export const NOTHING_SENT_CODES: ReadonlySet<CliErrorCode> = new Set<CliErrorCode>([
+  'not_connected',
+  'session_expired',
+  'session_revoked',
+  'not_covered',
+  'allowance_exhausted',
+  'insufficient_balance',
+  'native_not_supported',
+  'owner_required',
+  'not_sponsored',
+  'invalid_input',
+  'wallet_busy',
+  'quote_expired'
+]);
 
 export class CliError extends Error {
   code: CliErrorCode;

@@ -12,27 +12,42 @@ const mocks = vi.hoisted(() => ({
   quoteIntent: vi.fn(),
   executeIntent: vi.fn(),
   waitIntentReceipt: vi.fn(),
+  getIntentReceipt: vi.fn(),
   runTx: vi.fn(),
   waitForTransactionReceipt: vi.fn(),
   createPublicClient: vi.fn()
 }));
 
+vi.mock('../lib/builder-provision.ts', () => ({
+  ensureBuilderAccess: async () => undefined,
+  ensureBuilderAccessKey: async () => ({ provisioned: false, reason: 'existing' }),
+  makeDefaultProvisionDeps: () => ({})
+}));
 vi.mock('@0xtrails/api', async (importOriginal) => ({
   ...(await importOriginal<typeof Trails>()),
   TrailsApi: class {
     quoteIntent = mocks.quoteIntent;
     executeIntent = mocks.executeIntent;
     waitIntentReceipt = mocks.waitIntentReceipt;
+    getIntentReceipt = mocks.getIntentReceipt;
   }
 }));
 vi.mock('viem', async (importOriginal) => ({
   ...(await importOriginal<typeof Viem>()),
   createPublicClient: mocks.createPublicClient
 }));
-vi.mock('../lib/storage.ts', () => ({
-  loadOmsWalletPointer: vi.fn(async () => ({ walletAddress: '0x1234' })),
-  loadBuilderConfig: vi.fn(async () => ({ accessKey: 'test' }))
-}));
+vi.mock('../lib/storage.ts', async (importOriginal) => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  return {
+    ...(await importOriginal<object>()),
+    // Saved trades go to a temp state folder.
+    STORAGE_ROOT: fs.mkdtempSync(path.join(os.tmpdir(), 'pa-swap-')),
+    loadOmsWalletPointer: vi.fn(async () => ({ walletAddress: '0x1234' })),
+    loadBuilderConfig: vi.fn(async () => ({ accessKey: 'test' }))
+  };
+});
 vi.mock('../lib/oms-client.ts', () => ({ getOmsClient: vi.fn() }));
 vi.mock('../lib/mode.ts', () => ({
   resolveBroadcast: (argv: { broadcast?: boolean }) => argv.broadcast === true,
@@ -48,6 +63,28 @@ vi.mock('./operations-ui.js', () => ({ BalancesUI: vi.fn(), FundUI: vi.fn(), Sen
 const txHash = `0x${'ab'.repeat(32)}`;
 const intentId = 'test-intent';
 const successReceipt = { status: 'success', transactionHash: txHash };
+const depositAddress = '0x00000000000000000000000000000000000000d0';
+const ONE = 10n ** 18n;
+
+// A quote for 1 POL on Polygon → USDC on Base that passes deposit validation.
+const quotedIntent = () => ({
+  intentId,
+  ownerAddress: '0x1234',
+  originChainId: 137,
+  destinationChainId: 8453,
+  originTokenAddress: '0x0000000000000000000000000000000000000000',
+  destinationTokenAddress: '0x5678',
+  originIntentAddress: depositAddress,
+  quoteRequest: {
+    destinationToAddress: '0x1234',
+    originTokenAmount: ONE,
+    tradeType: 'EXACT_INPUT'
+  },
+  depositTransaction: { chainId: 137, to: depositAddress, value: ONE, data: '0x' },
+  quote: { fromAmountUsd: 0.1, toAmount: 99_000n, toAmountMin: 98_600n, toAmountUsd: 0.099 },
+  fees: { totalFeeUsd: 0.001 },
+  expiresAt: new Date(Date.now() + 10 * 60_000).toISOString()
+});
 
 async function swap(overrides: Record<string, unknown> = {}) {
   if (typeof swapCommand.handler !== 'function') throw new Error('Missing swap handler');
@@ -76,13 +113,15 @@ beforeEach(() => {
   mocks.createPublicClient.mockReturnValue({
     waitForTransactionReceipt: mocks.waitForTransactionReceipt
   });
-  mocks.quoteIntent.mockResolvedValue({
-    intent: { intentId, depositTransaction: { to: '0x1234' } }
-  });
+  mocks.quoteIntent.mockResolvedValue({ intent: quotedIntent() });
+  mocks.getIntentReceipt.mockRejectedValue(new Error('not found'));
   mocks.runTx.mockResolvedValue({ txHash });
   mocks.waitForTransactionReceipt.mockResolvedValue(successReceipt);
   mocks.executeIntent.mockResolvedValue({ intentStatus: 'EXECUTING' });
-  mocks.waitIntentReceipt.mockResolvedValue({ done: true });
+  mocks.waitIntentReceipt.mockResolvedValue({
+    done: true,
+    intentReceipt: { status: 'SUCCEEDED', summary: {} }
+  });
 });
 
 afterEach(() => {
@@ -150,6 +189,39 @@ describe('swap deposit confirmation', () => {
     expect(mocks.executeIntent).toHaveBeenCalledTimes(2);
     expect(mocks.waitForTransactionReceipt).toHaveBeenCalledTimes(1);
     expect(mocks.runTx).toHaveBeenCalledTimes(1);
+  });
+
+  it('a dry run saves the quote, and --intent executes exactly it without quoting again', async () => {
+    await swap({ broadcast: false });
+    const dryRun = JSON.parse(vi.mocked(console.log).mock.calls.at(-1)?.[0] as string);
+    expect(dryRun).toMatchObject({
+      dryRun: true,
+      intentId,
+      command: `polygon-agent swap --intent ${intentId} --broadcast`
+    });
+    await swap({ intent: intentId, from: undefined, to: undefined, amount: undefined });
+    expect(mocks.quoteIntent).toHaveBeenCalledTimes(1);
+    expect(mocks.runTx).toHaveBeenCalledTimes(1);
+    const done = JSON.parse(vi.mocked(console.log).mock.calls.at(-1)?.[0] as string);
+    expect(done).toMatchObject({ ok: true, intentId, state: 'completed', depositTxHash: txHash });
+  });
+
+  it('swap status resumes a trade still executing, without sending anything', async () => {
+    mocks.waitIntentReceipt.mockResolvedValueOnce({
+      done: false,
+      intentReceipt: { status: 'EXECUTING' }
+    });
+    await swap({ timeout: 0 });
+    expect(JSON.parse(vi.mocked(console.log).mock.calls.at(-1)?.[0] as string)).toMatchObject({
+      state: 'executing',
+      command: `polygon-agent swap status --intent ${intentId}`
+    });
+    await swap({ action: 'status', intent: intentId });
+    expect(JSON.parse(vi.mocked(console.log).mock.calls.at(-1)?.[0] as string)).toMatchObject({
+      state: 'completed'
+    });
+    expect(mocks.runTx).toHaveBeenCalledTimes(1);
+    expect(mocks.executeIntent).toHaveBeenCalledTimes(1);
   });
 
   it('only quotes on a dry run', async () => {

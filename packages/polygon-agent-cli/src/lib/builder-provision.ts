@@ -7,6 +7,7 @@
 import { ethers } from 'ethers';
 
 import { getAuthToken, createProject, getDefaultAccessKey } from './builder-api.ts';
+import { CliError } from './errors.ts';
 import { generateEthAuthProof } from './ethauth.ts';
 import { loadBuilderConfigRaw, saveBuilderConfig } from './storage.ts';
 
@@ -96,5 +97,19 @@ export async function ensureBuilderAccessKey(
     return { provisioned: true };
   } catch (error) {
     return { provisioned: false, reason: `access-key: ${msg(error)}` };
+  }
+}
+
+// This install's Builder access key (Trails quotes, indexer quota) and signer
+// EOA (x402), set up on first use if missing: session-mode installs connect by
+// email code and never ran the browser login that provisions them.
+export async function ensureBuilderAccess(walletAddress: string): Promise<void> {
+  if (loadBuilderConfigRaw()?.accessKey) return;
+  const result = await ensureBuilderAccessKey(walletAddress, makeDefaultProvisionDeps());
+  if (!result.provisioned && result.reason !== 'existing') {
+    throw new CliError({
+      code: 'upstream_unavailable',
+      message: `Couldn't set up this install's Trails access (${result.reason ?? 'unknown'}). Try again shortly.`
+    });
   }
 }

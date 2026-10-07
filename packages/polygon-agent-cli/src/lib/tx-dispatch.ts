@@ -16,12 +16,23 @@ export interface RunTxParams extends OmsTxParams {
   ref?: string;
   // Refuse in session mode even if the transaction would be a plain transfer.
   ownerOnly?: boolean;
+  // Don't send after this time (ms since epoch), e.g. a trade quote's expiry.
+  notAfter?: number;
 }
 export type RunTxResult = OmsTxResult;
 
 export async function runTx(params: RunTxParams): Promise<RunTxResult> {
   const pointer = await loadOmsWalletPointer(params.walletName);
-  if (pointer?.access !== 'session') return runOmsTx(params);
+  if (pointer?.access !== 'session') {
+    if (params.notAfter !== undefined && Date.now() > params.notAfter) {
+      throw new CliError({
+        code: 'quote_expired',
+        message: 'The quote expired before sending; nothing was sent.',
+        hint: 'Quote again.'
+      });
+    }
+    return runOmsTx(params);
+  }
   if (params.ownerOnly) {
     throw new CliError({
       code: 'owner_required',

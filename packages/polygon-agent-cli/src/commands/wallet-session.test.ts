@@ -59,6 +59,11 @@ const httpError = (status: number, name?: string) =>
     upstreamError: { service: 'waas', status, ...(name ? { name } : {}) }
   });
 
+vi.mock('../lib/builder-provision.ts', () => ({
+  ensureBuilderAccess: async () => undefined,
+  ensureBuilderAccessKey: async () => ({ provisioned: false, reason: 'existing' }),
+  makeDefaultProvisionDeps: () => ({})
+}));
 vi.mock('@polygonlabs/oms-wallet', async (importOriginal) => {
   const real = await importOriginal<typeof OmsWallet>();
 
