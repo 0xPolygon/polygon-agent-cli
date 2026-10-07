@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import { z } from 'zod';
 
+import { withLock } from '../lib/lock.ts';
 import { STORAGE_ROOT } from '../lib/storage.ts';
 import { cliVersion, getLatestVersion, isNewerVersion, PACKAGE_NAME } from '../lib/version.ts';
 import {
@@ -17,6 +18,7 @@ import {
   readInstallRecord,
   readSkill,
   renderSkill,
+  stateDir,
   wrapperPath,
   writeInstallRecord
 } from '../lib/workspace.ts';
@@ -200,6 +202,60 @@ function runInit(root: string): z.infer<typeof InitOutput> | null {
   return parsed.success ? parsed.data : null;
 }
 
+// Installs beside the current CLI and swaps folders only once it's complete,
+// so a failed or partial install never breaks the wrapper. Run under the
+// workspace's update lock.
+function installLatest(params: { root: string; current: string }): Record<string, unknown> {
+  const { root, current } = params;
+  const cliDir = path.join(root, 'cli');
+  const nextDir = `${cliDir}.next`;
+  const prevDir = `${cliDir}.prev`;
+  fs.rmSync(nextDir, { recursive: true, force: true });
+  const npm = npmCommand(root);
+  // stdout stays reserved for this command's JSON.
+  const install = spawnSync(
+    npm.file,
+    [...npm.args, 'install', '--prefix', nextDir, `${PACKAGE_NAME}@latest`],
+    { stdio: ['ignore', 2, 2], env: npmEnv() }
+  );
+  if (install.error) throw install.error;
+  if (install.status !== 0) throw new Error(`npm install exited with ${install.status}`);
+  if (!fs.existsSync(path.join(nextDir, 'node_modules', PACKAGE_NAME, 'dist', 'index.js'))) {
+    throw new Error(`npm install finished without ${PACKAGE_NAME} in ${nextDir}`);
+  }
+
+  fs.rmSync(prevDir, { recursive: true, force: true });
+  fs.renameSync(cliDir, prevDir);
+  fs.renameSync(nextDir, cliDir);
+
+  // The new CLI re-runs init: a fresh wrapper, install.json and skill. If
+  // that fails, put the previous CLI back and restore its workspace files.
+  const refreshed = runInit(root);
+  if (!refreshed) {
+    // Never remove the installed CLI without the previous one to put back.
+    if (!fs.existsSync(prevDir)) {
+      throw new Error(
+        `The latest CLI installed, but its workspace init failed and ${prevDir} is missing, ` +
+          `so it was left in place. Run: ${wrapperPath(root)} workspace init --root ${root}`
+      );
+    }
+    fs.rmSync(cliDir, { recursive: true, force: true });
+    fs.renameSync(prevDir, cliDir);
+    initWorkspace({ root, version: current });
+    throw new Error(
+      `The latest CLI installed, but its workspace init failed, so the update was rolled ` +
+        `back to ${current}.`
+    );
+  }
+  fs.rmSync(prevDir, { recursive: true, force: true });
+  return {
+    updated: refreshed.version !== current,
+    from: current,
+    to: refreshed.version,
+    skill: refreshed.skill
+  };
+}
+
 export const updateCommand: CommandModule = {
   command: 'update',
   describe: 'Update a workspace install to the latest CLI and refresh its skill',
@@ -225,50 +281,12 @@ export const updateCommand: CommandModule = {
         return;
       }
 
-      // Install beside the current CLI and swap folders only once it's complete,
-      // so a failed or partial install never breaks the wrapper.
-      const cliDir = path.join(root, 'cli');
-      const nextDir = `${cliDir}.next`;
-      const prevDir = `${cliDir}.prev`;
-      fs.rmSync(nextDir, { recursive: true, force: true });
-      const npm = npmCommand(root);
-      // stdout stays reserved for this command's JSON.
-      const install = spawnSync(
-        npm.file,
-        [...npm.args, 'install', '--prefix', nextDir, `${PACKAGE_NAME}@latest`],
-        { stdio: ['ignore', 2, 2], env: npmEnv() }
-      );
-      if (install.error) throw install.error;
-      if (install.status !== 0) throw new Error(`npm install exited with ${install.status}`);
-      if (!fs.existsSync(path.join(nextDir, 'node_modules', PACKAGE_NAME, 'dist', 'index.js'))) {
-        throw new Error(`npm install finished without ${PACKAGE_NAME} in ${nextDir}`);
-      }
-
-      fs.rmSync(prevDir, { recursive: true, force: true });
-      fs.renameSync(cliDir, prevDir);
-      fs.renameSync(nextDir, cliDir);
-
-      // The new CLI re-runs init: a fresh wrapper, install.json and skill. If
-      // that fails, put the previous CLI back and restore its workspace files.
-      const refreshed = runInit(root);
-      if (!refreshed) {
-        fs.rmSync(cliDir, { recursive: true, force: true });
-        fs.renameSync(prevDir, cliDir);
-        initWorkspace({ root, version: current });
-        throw new Error(
-          `The latest CLI installed, but its workspace init failed, so the update was rolled ` +
-            `back to ${current}.`
-        );
-      }
-      fs.rmSync(prevDir, { recursive: true, force: true });
-
-      jsonOut({
-        ok: true,
-        updated: refreshed.version !== current,
-        from: current,
-        to: refreshed.version,
-        skill: refreshed.skill
+      // One update per workspace at a time: they share cli.next and cli.prev.
+      const result = await withLock({
+        file: path.join(stateDir(root), 'update.lock'),
+        fn: () => installLatest({ root, current })
       });
+      jsonOut({ ok: true, ...result });
     } catch (error) {
       fail(error);
     }
