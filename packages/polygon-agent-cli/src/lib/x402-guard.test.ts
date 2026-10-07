@@ -153,6 +153,23 @@ describe('payWithinLimits', () => {
     expect(spent()).toBe(0.5);
   });
 
+  it('logs only what left the wallet when the signer already held part of it', async () => {
+    await payWithinLimits({
+      walletName: 'main',
+      url,
+      usd: 0.5,
+      pay: async () => ({ txHash: undefined, fundedUsd: 0 })
+    });
+    expect(spent()).toBe(0);
+    await payWithinLimits({
+      walletName: 'main',
+      url,
+      usd: 0.5,
+      pay: async () => ({ txHash: '0xpart', fundedUsd: 0.2 })
+    });
+    expect(spent()).toBe(0.2);
+  });
+
   it('checks the limits before paying', async () => {
     const pay = async () => ({ txHash: '0x' });
     await expect(payWithinLimits({ walletName: 'main', url, usd: 2, pay })).rejects.toMatchObject({

@@ -35,6 +35,8 @@ import {
   isBazaarBody,
   parseBazaarPayment,
   payWithinLimits,
+  readTokenBalance,
+  waitForSignerFunds,
   x402PriceUsd,
   x402UsdText
 } from '../lib/x402-guard.ts';
@@ -2147,13 +2149,9 @@ export const x402PayCommand: CommandModule = {
         asset,
         amount: fundAmount
       });
-      const transferData = encodeFunctionData({
-        abi: erc20Abi,
-        functionName: 'transfer',
-        args: [eoaAccount.address, fundAmount]
-      });
-
       if (!broadcast) {
+        // The full price as the funding transfer: funds the signer already
+        // holds are counted only when paying.
         printX402Preview({
           walletName,
           walletAddress: session.walletAddress,
@@ -2168,33 +2166,75 @@ export const x402PayCommand: CommandModule = {
             network: paymentNetwork,
             chainId: resolvedNetwork.chainId
           },
-          transactions: [{ to: asset, value: 0n, data: transferData }]
+          transactions: [
+            {
+              to: asset,
+              value: 0n,
+              data: encodeFunctionData({
+                abi: erc20Abi,
+                functionName: 'transfer',
+                args: [eoaAccount.address, fundAmount]
+              })
+            }
+          ]
         });
         return;
       }
 
+      const signerBalance = await readTokenBalance({
+        chainId: resolvedNetwork.chainId,
+        token: asset,
+        owner: eoaAccount.address
+      });
+
+      // Funds left in the signer by an earlier call that wasn't settled pay
+      // first; the wallet funds only the shortfall.
       const fundResult = await payWithinLimits({
         walletName,
         url,
         usd: priceUsd,
         maxUsd,
         yes,
-        pay: () => {
+        pay: async () => {
+          const shortfall = fundAmount > signerBalance ? fundAmount - signerBalance : 0n;
+          if (shortfall === 0n) return { txHash: undefined, fundedUsd: 0 };
           process.stderr.write(
-            `Funding EOA ${eoaAccount.address} with ${amount} units of ${asset}...\n`
+            `Funding EOA ${eoaAccount.address} with ${shortfall} units of ${asset}...\n`
           );
-          return runDappClientTx({
+          const result = await runDappClientTx({
             walletName,
             chainId: resolvedNetwork.chainId,
-            transactions: [{ to: asset, value: 0n, data: transferData }],
+            transactions: [
+              {
+                to: asset,
+                value: 0n,
+                data: encodeFunctionData({
+                  abi: erc20Abi,
+                  functionName: 'transfer',
+                  args: [eoaAccount.address, shortfall]
+                })
+              }
+            ],
             broadcast: true,
             preferNativeFee: true,
             purpose: 'x402',
             ref: url
           });
+          return {
+            txHash: result.txHash,
+            fundedUsd: x402PriceUsd({ chainId: resolvedNetwork.chainId, asset, amount: shortfall })
+          };
         }
       });
-      process.stderr.write(`Funded via tx: ${fundResult.txHash}\n`);
+      if (fundResult.txHash) {
+        process.stderr.write(`Funded via tx: ${fundResult.txHash}\n`);
+        await waitForSignerFunds({
+          chainId: resolvedNetwork.chainId,
+          token: asset,
+          owner: eoaAccount.address,
+          atLeast: fundAmount
+        });
+      }
 
       // On the paid request, sign only the requirement that was valued and
       // funded: same network, asset and scheme, for no more than that amount.
@@ -2203,6 +2243,7 @@ export const x402PayCommand: CommandModule = {
           (r) =>
             r.network === req.network &&
             r.scheme === req.scheme &&
+            r.payTo.toLowerCase() === String(req.payTo).toLowerCase() &&
             r.asset.toLowerCase() === String(req.asset).toLowerCase() &&
             BigInt(r.amount || 0) <= fundAmount
         );
@@ -2278,10 +2319,10 @@ export const x402PayCommand: CommandModule = {
             status: response.status,
             walletAddress: session.walletAddress,
             signerAddress: eoaAccount.address,
-            paidUsd: response.ok || payment ? priceUsd : 0,
+            paidUsd: response.ok || payment?.success === true ? priceUsd : 0,
             ...(response.ok
               ? {}
-              : payment
+              : payment?.success === true
                 ? {
                     error: `Paid ${x402UsdText(priceUsd)}, but the service returned ${response.status}. x402 has no refunds.`
                   }
@@ -2291,9 +2332,16 @@ export const x402PayCommand: CommandModule = {
             funded: {
               amount,
               asset,
-              txHash: fundResult.txHash
+              txHash: fundResult.txHash ?? null,
+              fromSignerBalance: signerBalance > 0n
             },
-            payment: payment ? { settled: true, transaction: payment.transaction } : null,
+            payment: payment
+              ? {
+                  settled: payment.success === true,
+                  transaction: payment.transaction,
+                  ...(payment.errorReason ? { errorReason: payment.errorReason } : {})
+                }
+              : null,
             data
           },
           null,
