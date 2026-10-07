@@ -283,7 +283,7 @@ export const updateCommand: CommandModule = {
 
       // One update per workspace at a time: they share cli.next and cli.prev.
       const result = await withLock({
-        file: path.join(stateDir(root), 'update.lock'),
+        dir: path.join(stateDir(root), 'update.lock'),
         fn: () => installLatest({ root, current })
       });
       jsonOut({ ok: true, ...result });

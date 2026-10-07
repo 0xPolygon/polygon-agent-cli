@@ -1,33 +1,62 @@
-// Exclusive file locks between CLI processes (e.g. two `update` runs on one
-// workspace). A lock is a file created with O_EXCL that names its holder; a lock
-// left by a process that died on this host is taken over.
+// Exclusive locks between CLI processes (e.g. two `update` runs on one
+// workspace), safe when holders crash.
+//
+// A lock is a directory of numbered generation files, each naming its holder.
+// The highest generation is the lock's current state:
+//   - Acquire: if the highest generation's holder is gone (a dead process on
+//     this host, or an unreadable file left long enough), create the next
+//     generation with O_EXCL. Only one process can create a given generation,
+//     so two processes that both found the same holder dead can't both get in.
+//     The winner then checks that no higher generation exists (else it backs
+//     off) and removes the older ones, which can only be dead or released.
+//   - Release: delete only your own generation file.
+// Nothing ever deletes or replaces another live holder's file, so a takeover
+// can't evict a live holder and a release can't free someone else's lock.
 
 import fs from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 
 import { z } from 'zod';
 
 const LockHolder = z.object({ pid: z.number(), host: z.string(), startedAt: z.string() });
 type LockHolder = z.infer<typeof LockHolder>;
 
-// An unreadable lock (its writer died mid-write) counts as stale after this.
+// An unreadable generation (its writer died mid-write) counts as gone after this.
 const UNREADABLE_STALE_MS = 10 * 60 * 1000;
+// Rounds of losing a race to a dead holder's successor before giving up.
+const MAX_ATTEMPTS = 5;
+
+const GENERATION = /^(\d{12})\.json$/;
 
 export class LockHeldError extends Error {
-  file: string;
+  dir: string;
   holder: LockHolder | null;
 
-  constructor(params: { file: string; holder: LockHolder | null }) {
-    const { file, holder } = params;
+  constructor(params: { dir: string; holder: LockHolder | null }) {
+    const { dir, holder } = params;
     super(
       holder
-        ? `Another process (pid ${holder.pid} on ${holder.host}, since ${holder.startedAt}) holds ${file}`
-        : `Another process holds ${file}`
+        ? `Another process (pid ${holder.pid} on ${holder.host}, since ${holder.startedAt}) holds ${dir}`
+        : `Another process holds ${dir}`
     );
     this.name = 'LockHeldError';
-    this.file = file;
+    this.dir = dir;
     this.holder = holder;
   }
+}
+
+function generationPath(params: { dir: string; generation: number }): string {
+  return path.join(params.dir, `${String(params.generation).padStart(12, '0')}.json`);
+}
+
+function generations(dir: string): number[] {
+  return fs
+    .readdirSync(dir)
+    .map((name) => GENERATION.exec(name))
+    .filter((match) => match !== null)
+    .map((match) => Number(match[1]))
+    .sort((a, b) => a - b);
 }
 
 function readHolder(file: string): LockHolder | null {
@@ -49,9 +78,9 @@ function isAlive(pid: number): boolean {
   }
 }
 
-// Stale only when provably gone: a holder on this host whose process isn't
-// running, or a lock nobody could read for a while.
-function isStale(file: string): boolean {
+// Gone only when provably so: released (file removed), a holder on this host
+// whose process isn't running, or a file nobody could read for a while.
+function isGone(file: string): boolean {
   const holder = readHolder(file);
   if (holder) return holder.host === os.hostname() && !isAlive(holder.pid);
   try {
@@ -76,20 +105,44 @@ function tryCreate(file: string): boolean {
   }
 }
 
-// Runs fn while holding the lock; throws LockHeldError if a live process has it.
-export async function withLock<T>(params: { file: string; fn: () => Promise<T> | T }): Promise<T> {
-  if (!tryCreate(params.file)) {
-    if (!isStale(params.file)) {
-      throw new LockHeldError({ file: params.file, holder: readHolder(params.file) });
+function held(params: { dir: string; generation: number }): LockHeldError {
+  return new LockHeldError({ dir: params.dir, holder: readHolder(generationPath(params)) });
+}
+
+// Returns the generation this process now holds, or throws LockHeldError.
+function acquire(dir: string): number {
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const top = generations(dir).at(-1) ?? 0;
+    if (top > 0 && !isGone(generationPath({ dir, generation: top }))) {
+      throw held({ dir, generation: top });
     }
-    fs.rmSync(params.file, { force: true });
-    if (!tryCreate(params.file)) {
-      throw new LockHeldError({ file: params.file, holder: readHolder(params.file) });
+    const mine = top + 1;
+    // Lost the race for this generation: look again.
+    if (!tryCreate(generationPath({ dir, generation: mine }))) continue;
+
+    const after = generations(dir);
+    const higher = after.find((generation) => generation > mine);
+    if (higher !== undefined) {
+      fs.rmSync(generationPath({ dir, generation: mine }), { force: true });
+      continue;
     }
+    for (const generation of after) {
+      if (generation < mine) fs.rmSync(generationPath({ dir, generation }), { force: true });
+    }
+    return mine;
   }
+  const top = generations(dir).at(-1) ?? 0;
+  throw held({ dir, generation: top });
+}
+
+// Runs fn while holding the lock directory `dir`; throws LockHeldError if a
+// live process holds it.
+export async function withLock<T>(params: { dir: string; fn: () => Promise<T> | T }): Promise<T> {
+  fs.mkdirSync(params.dir, { recursive: true, mode: 0o700 });
+  const mine = acquire(params.dir);
   try {
     return await params.fn();
   } finally {
-    fs.rmSync(params.file, { force: true });
+    fs.rmSync(generationPath({ dir: params.dir, generation: mine }), { force: true });
   }
 }
