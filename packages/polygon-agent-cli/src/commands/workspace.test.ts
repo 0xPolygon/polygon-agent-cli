@@ -203,6 +203,43 @@ describe('update', () => {
   });
 });
 
+describe('update concurrency', () => {
+  it('refuses while another live process is updating, leaving the CLI untouched', async () => {
+    fs.writeFileSync(
+      path.join(root, 'state', 'update.lock'),
+      JSON.stringify({ pid: process.pid, host: os.hostname(), startedAt: 'now' })
+    );
+    await expect(update()).rejects.toThrow('CLI exited');
+    expect(errorOutput()).toMatch(/holds .*update\.lock/);
+    expect(mocks.spawnSync).not.toHaveBeenCalled();
+    expect(cliMarker()).toBe('old');
+  });
+
+  it('two overlapping updates leave exactly one working CLI', async () => {
+    const skill = { name: 'polygon-oms-wallet', installed: false };
+    let second: Promise<unknown> | undefined;
+    mocks.spawnSync.mockImplementation((file: string, args: string[]) => {
+      if (args.includes('install')) {
+        // A second update starts while the first is mid-install.
+        second ??= updateCommand.handler?.({ _: [], $0: 'polygon-agent' }) ?? undefined;
+        return npmInstalls('new')(file, args);
+      }
+      return initPrints({ version: '0.15.0', skill })();
+    });
+
+    const first = updateCommand.handler?.({ _: [], $0: 'polygon-agent' });
+    const results = await Promise.allSettled([first, second]);
+    // second is set once the first update reaches npm.
+    const settled = await Promise.allSettled([second]);
+
+    expect([...results, ...settled].filter((r) => r.status === 'rejected')).toHaveLength(1);
+    expect(errorOutput()).toMatch(/holds .*update\.lock/);
+    expect(cliMarker()).toBe('new');
+    expect(fs.readdirSync(root).sort()).toEqual(['.gitignore', 'bin', 'cli', 'state']);
+    expect(fs.existsSync(path.join(root, 'state', 'update.lock'))).toBe(false);
+  });
+});
+
 describe('skills install', () => {
   async function install(args: { name: string; dir: string }): Promise<void> {
     const yargs = (await import('yargs')).default;

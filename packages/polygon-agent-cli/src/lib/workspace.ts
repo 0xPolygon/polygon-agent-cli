@@ -144,14 +144,20 @@ export function readSkill(params: { sourceDir: string | null; name: string }): s
 // of its own also gets that line set to the wrapper's absolute path.
 const POLYGON_AGENT_LINE = /^POLYGON_AGENT=.*$/m;
 
+// POSIX single quotes: nothing inside is expanded. A quote becomes '\''.
+export function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 export function renderSkill(params: { markdown: string; wrapper: string }): string {
   const note =
     `> **This install's CLI:** \`${params.wrapper}\`. Run it wherever this skill says ` +
     '`polygon-agent` or `agent`. If that file is missing, the workspace was reset: ' +
     'set it up again with https://agents.polygon.technology/setup.md.\n\n';
+  // A callback, so `$&` and the like in the path aren't replacement patterns.
   const markdown = params.markdown.replace(
     POLYGON_AGENT_LINE,
-    `POLYGON_AGENT=${JSON.stringify(params.wrapper)}`
+    () => `POLYGON_AGENT=${shellQuote(params.wrapper)}`
   );
   const match = /^---\r?\n[\s\S]*?\r?\n---\r?\n/.exec(markdown);
   if (!match) return note + markdown;

@@ -12,6 +12,7 @@ import {
   readInstallRecord,
   readSkill,
   renderSkill,
+  shellQuote,
   WRAPPER_SCRIPT
 } from './workspace.ts';
 
@@ -230,9 +231,36 @@ describe('skills', () => {
       '---\nname: x\n---\n\n```sh\nPOLYGON_AGENT=<workspace>/.polygon-agent/bin/polygon-agent\n' +
       '"$POLYGON_AGENT" wallet status\n```\n';
     const rendered = renderSkill({ markdown, wrapper: '/my ws/.polygon-agent/bin/polygon-agent' });
-    expect(rendered).toContain('POLYGON_AGENT="/my ws/.polygon-agent/bin/polygon-agent"\n');
+    expect(rendered).toContain("POLYGON_AGENT='/my ws/.polygon-agent/bin/polygon-agent'\n");
     expect(rendered).toContain('"$POLYGON_AGENT" wallet status');
     expect(rendered).not.toContain('<workspace>');
+  });
+
+  // Paths an install could plausibly (or hostilely) live under.
+  it.each([
+    '/ws/project-$budget/.polygon-agent/bin/polygon-agent',
+    '/ws/$(touch PWNED)/.polygon-agent/bin/polygon-agent',
+    '/ws/`touch PWNED`/.polygon-agent/bin/polygon-agent',
+    "/ws/it's/.polygon-agent/bin/polygon-agent",
+    '/ws/a$&b$1\\n "q"/.polygon-agent/bin/polygon-agent'
+  ])('the rendered POLYGON_AGENT line evaluates in sh to the exact path (case %#)', (wrapper) => {
+    const markdown = '---\nname: x\n---\n\nPOLYGON_AGENT=<placeholder>\n';
+    const line = renderSkill({ markdown, wrapper })
+      .split('\n')
+      .find((l) => l.startsWith('POLYGON_AGENT='));
+    const cwd = tmpDir('pa-quote-');
+    const value = execFileSync('sh', ['-c', `${line}\nprintf %s "$POLYGON_AGENT"`], {
+      cwd,
+      encoding: 'utf8',
+      env: { ...process.env, budget: 'expanded' }
+    });
+    expect(value).toBe(wrapper);
+    expect(fs.readdirSync(cwd)).toEqual([]);
+  });
+
+  it('quotes with POSIX single quotes', () => {
+    expect(shellQuote('/a b')).toBe("'/a b'");
+    expect(shellQuote("it's")).toBe("'it'\\''s'");
   });
 
   it('renders a skill without frontmatter by prepending the note', () => {

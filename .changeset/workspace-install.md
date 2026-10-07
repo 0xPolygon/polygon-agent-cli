@@ -10,5 +10,5 @@ Workspace installs: run the CLI from inside an assistant's workspace folder, wit
   - a `.gitignore` containing `*`
   - `state/install.json`
   - the `polygon-oms-wallet` assistant skill, once a release bundles it
-- `skills show <name>` and `skills install [name] --dir <dir>` print or write the skills now bundled in `dist/skills/`. When run through the wrapper, they render the wrapper's path into the skill.
-- `update` installs the latest CLI beside the current one, swaps it in, and re-runs `workspace init` from the new version. A failed install leaves the current CLI in place; a failed refresh rolls back. Outside a workspace install, it prints the global npm command.
+- `skills show <name>` and `skills install [name] --dir <dir>` print or write the skills now bundled in `dist/skills/`. When run through the wrapper, they render the wrapper's path into the skill. A `POLYGON_AGENT=` line is set to the single-quoted path, so nothing in it is expanded by the shell.
+- `update` installs the latest CLI beside the current one, swaps it in, and re-runs `workspace init` from the new version. A failed install leaves the current CLI in place; a failed refresh rolls back. Concurrent updates of one workspace are serialized by a lock (`state/update.lock`). Outside a workspace install, it prints the global npm command.
