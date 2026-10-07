@@ -594,6 +594,20 @@ describe('watch create, what the trade can actually do', () => {
     });
     expect(String(out.note)).toMatch(/still settling/);
   });
+
+  it('cancelling the last watch keeps the check while it owes an alert', async () => {
+    await run(['watch', 'create', '--token', 'ETH', '--mode', 'alert', '--buy-below', '2000']);
+    const [w] = loadWatches();
+    const owed = { key: 'k1', kind: 'watch_triggered', message: 'ETH crossed' };
+    saveWatches([{ ...w, outbox: [owed] }]);
+    const out = await run(['watch', 'cancel', w.id]);
+    expect(out).toMatchObject({
+      ok: true,
+      schedule: { command: 'polygon-agent watch check', undeliveredAlerts: 1 }
+    });
+    expect(out.hint).toBeUndefined();
+    expect(String(out.note)).toMatch(/still has to deliver/);
+  });
 });
 
 describe('wallet status without a connection', () => {
