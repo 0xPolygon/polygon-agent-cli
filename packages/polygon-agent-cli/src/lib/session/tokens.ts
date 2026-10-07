@@ -61,8 +61,9 @@ export const SUPPORTED: Readonly<Record<number, readonly SupportedToken[]>> = {
     t('USDT0', 'usd', '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9', 6),
     t('WETH', 'eth', '0x82af49447d8a07e3bd95bd0d56f35241523fbab1', 18),
     t('WBTC', 'btc', '0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f', 8),
-    t('cbBTC', 'btc', '0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf', 8),
-    t('POL', 'pol', '0x044d8e7f3a17751d521efea8ccf9282268fe08cc', 18)
+    t('cbBTC', 'btc', '0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf', 8)
+    // No POL: Trails has no price for bridged POL here, so it could be
+    // neither limited nor spent.
   ],
   // Optimism
   10: [

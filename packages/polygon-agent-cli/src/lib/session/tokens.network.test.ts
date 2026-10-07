@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { trailsClient } from '../prices.ts';
+import { getUsdPrices, priceKey, trailsClient } from '../prices.ts';
 import { SUPPORTED, chainLabel } from './tokens.ts';
 
 const run = process.env.RUN_NETWORK_TESTS === '1';
@@ -39,4 +39,19 @@ describe.skipIf(!run)('supported table vs Trails (network)', () => {
     }
     expect(missing).toEqual([]);
   }, 120_000);
+
+  // Limits and spends are valued at the current price; a token without one
+  // would block connecting on its chain.
+  it('every non-stablecoin has a Trails USD price', async () => {
+    const tokens = Object.entries(SUPPORTED).flatMap(([chainId, list]) =>
+      list.filter((t) => t.kind !== 'usd').map((t) => ({ chainId: Number(chainId), ...t }))
+    );
+    const prices = await getUsdPrices(
+      tokens.map((t) => ({ chainId: t.chainId, address: t.address }))
+    );
+    const unpriced = tokens
+      .filter((t) => prices.get(priceKey({ chainId: t.chainId, address: t.address })) === undefined)
+      .map((t) => `${t.symbol} on ${chainLabel(t.chainId)}`);
+    expect(unpriced).toEqual([]);
+  }, 60_000);
 });
