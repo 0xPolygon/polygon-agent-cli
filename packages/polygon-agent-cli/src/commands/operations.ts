@@ -16,6 +16,7 @@ import { isWalletFunded } from '../lib/indexer.ts';
 import { resolveBroadcast, withWriteFlags } from '../lib/mode.ts';
 import { getOmsClient, loginUiBaseUrl } from '../lib/oms-client.ts';
 import { checkSessionSpend } from '../lib/session/run-tx.ts';
+import { findSupportedToken } from '../lib/session/tokens.ts';
 import { listTransfers } from '../lib/session/transfer.ts';
 import { loadOmsWalletPointer, loadBuilderConfig } from '../lib/storage.ts';
 import { resolveErc20BySymbol } from '../lib/token-directory.ts';
@@ -35,9 +36,12 @@ import {
 import {
   isBazaarBody,
   parseBazaarPayment,
+  markAuthorizationPending,
+  pendingAuthorizations,
   readTokenBalance,
   releaseX402Reservation,
   reserveX402Payment,
+  withX402Lock,
   waitForSignerFunds,
   x402PriceUsd,
   x402UsdText
@@ -1835,6 +1839,9 @@ function printX402Preview(params: {
 // --- x402-pay ---
 // A response body: parsed JSON when it parses, else the text. A malformed body
 // must not hide what was paid.
+// A paid request holds the x402 lock, so it must not hang forever.
+const PAID_REQUEST_TIMEOUT_MS = 120_000;
+
 async function readBody(response: Response): Promise<unknown> {
   const text = await response.text().catch(() => '');
   try {
@@ -1986,102 +1993,129 @@ export const x402PayCommand: CommandModule = {
         }
         // The transfer is the payment itself: a refusal raised after a session
         // transfer was recorded (e.g. while polling it) may still have paid.
-        const recordedBefore = new Set(
-          session.access === 'session' ? listTransfers(walletName).map((r) => r.id) : []
-        );
-        const { funded: fundResult } = await reserveX402Payment({
-          walletName,
-          url,
-          usd: priceUsd,
-          maxUsd,
-          yes,
-          sentAnything: () =>
-            session.access === 'session' &&
-            listTransfers(walletName).some(
-              (r) => !recordedBefore.has(r.id) && !(r.state === 'failed' && r.neverSent === true)
-            ),
-          fund: () => {
-            process.stderr.write(
-              `Sending ${amountUsdc} USDC to ${payRecipient} on ${payChain}...\n`
+        await withX402Lock({
+          fn: async () => {
+            const recordedBefore = new Set(
+              session.access === 'session' ? listTransfers(walletName).map((r) => r.id) : []
             );
-            return runDappClientTx({
+            const { funded: fundResult } = await reserveX402Payment({
               walletName,
-              chainId: payChainId,
-              transactions: [{ to: usdcContract, value: 0n, data: transferData }],
-              broadcast: true,
-              purpose: 'x402',
-              ref: url
+              url,
+              usd: priceUsd,
+              maxUsd,
+              yes,
+              sentAnything: () =>
+                session.access === 'session' &&
+                listTransfers(walletName).some(
+                  (r) =>
+                    !recordedBefore.has(r.id) && !(r.state === 'failed' && r.neverSent === true)
+                ),
+              fund: () => {
+                process.stderr.write(
+                  `Sending ${amountUsdc} USDC to ${payRecipient} on ${payChain}...\n`
+                );
+                return runDappClientTx({
+                  walletName,
+                  chainId: payChainId,
+                  transactions: [{ to: usdcContract, value: 0n, data: transferData }],
+                  broadcast: true,
+                  purpose: 'x402',
+                  ref: url
+                });
+              }
             });
-          }
-        });
-        const payTxHash = fundResult.txHash;
-        if (!payTxHash) throw new Error('The payment returned no transaction hash');
-        process.stderr.write(`Paid via tx: ${payTxHash}\n`);
+            const payTxHash = fundResult.txHash;
+            if (!payTxHash) throw new Error('The payment returned no transaction hash');
+            process.stderr.write(`Paid via tx: ${payTxHash}\n`);
 
-        // Wait for the transaction to be confirmed before presenting to the server
-        process.stderr.write('Waiting for confirmation...\n');
-        const rpcUrl =
-          process.env.SEQUENCE_NODES_URL?.replace('{network}', payChain) ||
-          getReadRpcUrl(resolveNetwork(String(payChainId)));
-        for (let attempt = 0; attempt < 30; attempt++) {
-          await new Promise((r) => setTimeout(r, 3000));
-          try {
-            const rpcRes = await fetch(rpcUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                jsonrpc: '2.0',
-                id: 1,
-                method: 'eth_getTransactionReceipt',
-                params: [payTxHash]
-              })
-            });
-            const rpcData = (await rpcRes.json()) as { result?: { status?: string } | null };
-            if (rpcData.result?.status === '0x1') {
-              process.stderr.write('Transaction confirmed.\n');
-              break;
+            // Wait for the transaction to be confirmed before presenting to the server
+            process.stderr.write('Waiting for confirmation...\n');
+            const rpcUrl =
+              process.env.SEQUENCE_NODES_URL?.replace('{network}', payChain) ||
+              getReadRpcUrl(resolveNetwork(String(payChainId)));
+            for (let attempt = 0; attempt < 30; attempt++) {
+              await new Promise((r) => setTimeout(r, 3000));
+              try {
+                const rpcRes = await fetch(rpcUrl, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    jsonrpc: '2.0',
+                    id: 1,
+                    method: 'eth_getTransactionReceipt',
+                    params: [payTxHash]
+                  })
+                });
+                const rpcData = (await rpcRes.json()) as { result?: { status?: string } | null };
+                if (rpcData.result?.status === '0x1') {
+                  process.stderr.write('Transaction confirmed.\n');
+                  break;
+                }
+              } catch {
+                // ignore RPC errors, keep polling
+              }
             }
-          } catch {
-            // ignore RPC errors, keep polling
+
+            const retryHeaders: Record<string, string> = {
+              ...headers,
+              'X-Payment-TxHash': payTxHash,
+              'X-Payment-Chain': payChain
+            };
+            if (body) retryHeaders['Content-Type'] = 'application/json';
+
+            let response: Response;
+            try {
+              response = await fetch(url, {
+                method,
+                headers: retryHeaders,
+                body: body || undefined,
+                signal: AbortSignal.timeout(PAID_REQUEST_TIMEOUT_MS)
+              });
+            } catch (error) {
+              // Paid already: keep that in the output, so nobody pays again.
+              console.error(
+                JSON.stringify(
+                  {
+                    ok: false,
+                    code: 'upstream_error',
+                    error: `Paid ${x402UsdText(priceUsd)} (tx ${payTxHash}), but the service didn't answer (${error instanceof Error ? error.message : String(error)}). Don't pay again: retry the request with the payment headers below.`,
+                    walletAddress: session.walletAddress,
+                    paidUsd: priceUsd,
+                    funded: { amount: amountUsdc, asset: usdcContract, txHash: payTxHash },
+                    retryHeaders: { 'X-Payment-TxHash': payTxHash, 'X-Payment-Chain': payChain }
+                  },
+                  null,
+                  2
+                )
+              );
+              process.exit(1);
+            }
+
+            const data = await readBody(response);
+
+            console.log(
+              JSON.stringify(
+                {
+                  ok: response.ok,
+                  status: response.status,
+                  walletAddress: session.walletAddress,
+                  paidUsd: priceUsd,
+                  ...(response.ok
+                    ? {}
+                    : {
+                        error: `Paid ${x402UsdText(priceUsd)}, but the service returned ${response.status}. x402 has no refunds.`
+                      }),
+                  funded: { amount: amountUsdc, asset: usdcContract, txHash: payTxHash },
+                  data
+                },
+                null,
+                2
+              )
+            );
+
+            if (!response.ok) process.exit(1);
           }
-        }
-
-        const retryHeaders: Record<string, string> = {
-          ...headers,
-          'X-Payment-TxHash': payTxHash,
-          'X-Payment-Chain': payChain
-        };
-        if (body) retryHeaders['Content-Type'] = 'application/json';
-
-        const response = await fetch(url, {
-          method,
-          headers: retryHeaders,
-          body: body || undefined
         });
-
-        const data = await readBody(response);
-
-        console.log(
-          JSON.stringify(
-            {
-              ok: response.ok,
-              status: response.status,
-              walletAddress: session.walletAddress,
-              paidUsd: priceUsd,
-              ...(response.ok
-                ? {}
-                : {
-                    error: `Paid ${x402UsdText(priceUsd)}, but the service returned ${response.status}. x402 has no refunds.`
-                  }),
-              funded: { amount: amountUsdc, asset: usdcContract, txHash: payTxHash },
-              data
-            },
-            null,
-            2
-          )
-        );
-
-        if (!response.ok) process.exit(1);
         return;
       }
 
@@ -2115,8 +2149,17 @@ export const x402PayCommand: CommandModule = {
         return !name.includes('gateway') && !name.includes('batched');
       };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const cheapest = (list: any[]): any =>
-        [...list].sort((a, b) => (BigInt(a.amount) < BigInt(b.amount) ? -1 : 1))[0];
+      const cheapest = (list: any[]): any => {
+        // By USD value: raw amounts aren't comparable across decimals (BNB USDC has 18).
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const usd = (r: any) =>
+          x402PriceUsd({
+            chainId: Number(String(r.network).split(':')[1]),
+            asset: String(r.asset),
+            amount: BigInt(r.amount)
+          });
+        return [...list].sort((a, b) => usd(a) - usd(b))[0];
+      };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const selectAccept = (_version: number, accepts: any[]): any => {
         // Only what this client can sign: the plain EVM "exact" scheme.
@@ -2127,6 +2170,11 @@ export const x402PayCommand: CommandModule = {
             r.network.startsWith('eip155:') &&
             r.scheme === 'exact' &&
             isPlainTransfer(r) &&
+            // A stablecoin the CLI can value on that chain (else it can't pay).
+            findSupportedToken({
+              chainId: Number(r.network.split(':')[1]),
+              address: String(r.asset)
+            })?.kind === 'usd' &&
             // An EIP-3009 authorization; Permit2 needs an allowance the signer lacks.
             (r.extra?.assetTransferMethod === undefined ||
               r.extra?.assetTransferMethod === 'eip3009')
@@ -2212,213 +2260,235 @@ export const x402PayCommand: CommandModule = {
         return;
       }
 
-      const signerFunds = () =>
-        readTokenBalance({
-          chainId: resolvedNetwork.chainId,
-          token: asset,
-          owner: eoaAccount.address
-        });
-      // Read under the x402 lock (inside fund), so two calls can't both count
-      // on the same leftover.
-      let signerBalance = 0n;
+      await withX402Lock({
+        fn: async () => {
+          const signerFunds = () =>
+            readTokenBalance({
+              chainId: resolvedNetwork.chainId,
+              token: asset,
+              owner: eoaAccount.address
+            });
+          // Read under the x402 lock (inside fund), so two calls can't both count
+          // on the same leftover.
+          let signerBalance = 0n;
 
-      // Funds left in the signer by an earlier call that wasn't settled pay
-      // first; the wallet funds only the shortfall.
-      const { reservationId, funded: fundResult } = await reserveX402Payment({
-        walletName,
-        url,
-        usd: priceUsd,
-        maxUsd,
-        yes,
-        fund: async (): Promise<{ txHash?: string }> => {
-          signerBalance = await signerFunds();
-          const shortfall = fundAmount > signerBalance ? fundAmount - signerBalance : 0n;
-          if (shortfall === 0n) return { txHash: undefined };
-          process.stderr.write(
-            `Funding EOA ${eoaAccount.address} with ${shortfall} units of ${asset}...\n`
-          );
-          const result = await runDappClientTx({
+          // Funds left in the signer by an earlier call that wasn't settled pay
+          // first; the wallet funds only the shortfall.
+          const { reservationId, funded: fundResult } = await reserveX402Payment({
             walletName,
-            chainId: resolvedNetwork.chainId,
-            transactions: [
-              {
-                to: asset,
-                value: 0n,
-                data: encodeFunctionData({
-                  abi: erc20Abi,
-                  functionName: 'transfer',
-                  args: [eoaAccount.address, shortfall]
-                })
-              }
-            ],
-            broadcast: true,
-            preferNativeFee: true,
-            purpose: 'x402',
-            ref: url
+            url,
+            usd: priceUsd,
+            maxUsd,
+            yes,
+            fund: async (): Promise<{ txHash?: string }> => {
+              signerBalance = await signerFunds();
+              // Funds an earlier, unconfirmed authorization may still claim aren't free.
+              const promised = pendingAuthorizations({
+                chainId: resolvedNetwork.chainId,
+                asset,
+                now: new Date()
+              });
+              const free = signerBalance > promised ? signerBalance - promised : 0n;
+              const shortfall = fundAmount > free ? fundAmount - free : 0n;
+              if (shortfall === 0n) return { txHash: undefined };
+              process.stderr.write(
+                `Funding EOA ${eoaAccount.address} with ${shortfall} units of ${asset}...\n`
+              );
+              const result = await runDappClientTx({
+                walletName,
+                chainId: resolvedNetwork.chainId,
+                transactions: [
+                  {
+                    to: asset,
+                    value: 0n,
+                    data: encodeFunctionData({
+                      abi: erc20Abi,
+                      functionName: 'transfer',
+                      args: [eoaAccount.address, shortfall]
+                    })
+                  }
+                ],
+                broadcast: true,
+                preferNativeFee: true,
+                purpose: 'x402',
+                ref: url
+              });
+              return { txHash: result.txHash };
+            }
           });
-          return { txHash: result.txHash };
+          if (fundResult.txHash) {
+            process.stderr.write(`Funded via tx: ${fundResult.txHash}\n`);
+            try {
+              await waitForSignerFunds({
+                chainId: resolvedNetwork.chainId,
+                token: asset,
+                owner: eoaAccount.address,
+                atLeast: fundAmount
+              });
+            } catch (error) {
+              // Nothing was signed, so the service can't have been paid.
+              releaseX402Reservation(reservationId);
+              throw error;
+            }
+          }
+
+          // On the paid request, sign only the requirement that was valued and
+          // funded: same network, asset and scheme, for no more than that amount.
+          // A signed authorization the service didn't confirm can settle until
+          // it expires (the offer's timeout); its funds aren't free till then.
+          const markPending = () =>
+            markAuthorizationPending({
+              id: reservationId,
+              chainId: resolvedNetwork.chainId,
+              asset,
+              amount: fundAmount,
+              until: new Date(Date.now() + ((Number(req.maxTimeoutSeconds) || 600) + 60) * 1000)
+            });
+          let signed = false;
+          const selectValued: SelectPaymentRequirements = (_version, accepts) => {
+            const match = accepts.find(
+              (r) =>
+                r.network === req.network &&
+                r.scheme === req.scheme &&
+                r.payTo.toLowerCase() === String(req.payTo).toLowerCase() &&
+                r.asset.toLowerCase() === String(req.asset).toLowerCase() &&
+                BigInt(r.amount || 0) <= fundAmount
+            );
+            if (!match) {
+              throw new Error(
+                'The service changed its payment terms after they were checked; it was not paid more.'
+              );
+            }
+            signed = true;
+            return match;
+          };
+
+          // The library's own caps ($1, its token list) are off: the CLI has valued
+          // and limited this payment already, and selectValued holds it to that.
+          const client = new x402Client(selectValued).setSpendControls(false);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          client.register('eip155:*', new ExactEvmScheme(eoaAccount as any));
+          const fetchWithPayment = wrapFetchWithPayment(fetch, client);
+
+          // Ensure a JSON body is parseable upstream: set Content-Type when a body is
+          // present and the caller didn't specify one (mirrors the bazaar path).
+          // Without this, proxied POST services reject the body ("expected object").
+          const retryHeaders: Record<string, string> = { ...headers };
+          if (body && !Object.keys(retryHeaders).some((h) => h.toLowerCase() === 'content-type')) {
+            retryHeaders['Content-Type'] = 'application/json';
+          }
+
+          let response: Response;
+          try {
+            response = await fetchWithPayment(url, {
+              signal: AbortSignal.timeout(PAID_REQUEST_TIMEOUT_MS),
+              method,
+              headers: Object.keys(retryHeaders).length ? retryHeaders : undefined,
+              body: body || undefined
+            });
+          } catch (error) {
+            const reason = error instanceof Error ? error.message : String(error);
+            // Nothing signed yet (or refused before signing): certainly unpaid.
+            // After signing, the payment may have reached the service, so it
+            // stays counted.
+            const unsent = !signed;
+            if (unsent) releaseX402Reservation(reservationId);
+            else markPending();
+            console.error(
+              JSON.stringify(
+                {
+                  ok: false,
+                  code: 'upstream_error',
+                  error: unsent
+                    ? `The paid request failed before paying (${reason}). The ${x402UsdText(priceUsd)} stays in the signer ${eoaAccount.address} and pays for a later call.`
+                    : `The paid request failed (${reason}). The payment may or may not have reached the service: the ${x402UsdText(priceUsd)} is either with the service or still in the signer ${eoaAccount.address}.`,
+                  walletAddress: session.walletAddress,
+                  signerAddress: eoaAccount.address,
+                  paidUsd: unsent ? 0 : null,
+                  ...(unsent ? {} : { paymentUncertain: true }),
+                  funded: { amount, asset, txHash: fundResult.txHash }
+                },
+                bigintReplacer,
+                2
+              )
+            );
+            process.exit(1);
+          }
+
+          const paymentResponseHeader =
+            response.headers.get('PAYMENT-RESPONSE') || response.headers.get('X-PAYMENT-RESPONSE');
+          let payment = null;
+          if (paymentResponseHeader) {
+            try {
+              payment = decodePaymentResponseHeader(paymentResponseHeader);
+            } catch {
+              // ignore
+            }
+          }
+
+          const data = await readBody(response);
+
+          // Paid: a settlement that says so, or a success after signing. Unpaid:
+          // nothing was signed. A signed authorization the service says it didn't
+          // settle can still settle until it expires, so it stays counted against
+          // the daily limit and is reported as uncertain.
+          const paid = signed && (payment?.success === true || (response.ok && !payment));
+          const unpaid = !signed;
+          if (unpaid) releaseX402Reservation(reservationId);
+          const uncertain = !paid && !unpaid;
+          if (uncertain) markPending();
+          const reportedUnsettled =
+            uncertain && (payment ? payment.success !== true : response.status === 402);
+
+          console.log(
+            JSON.stringify(
+              {
+                ok: response.ok,
+                status: response.status,
+                walletAddress: session.walletAddress,
+                signerAddress: eoaAccount.address,
+                paidUsd: paid ? priceUsd : uncertain ? null : 0,
+                ...(uncertain ? { paymentUncertain: true } : {}),
+                ...(response.ok
+                  ? {}
+                  : paid
+                    ? {
+                        error: `Paid ${x402UsdText(priceUsd)}, but the service returned ${response.status}. x402 has no refunds.`
+                      }
+                    : unpaid
+                      ? {
+                          error: `The service returned ${response.status} before anything was signed. The ${x402UsdText(priceUsd)} stays in the signer ${eoaAccount.address} and pays for a later call.`
+                        }
+                      : reportedUnsettled
+                        ? {
+                            error: `The service returned ${response.status} and says it didn't settle the payment. The signed authorization can still be settled until it expires, so the ${x402UsdText(priceUsd)} stays counted against the daily limit; if it isn't, the funds stay in the signer ${eoaAccount.address} for a later call.`
+                          }
+                        : {
+                            error: `The service returned ${response.status} without saying whether it took the payment. The ${x402UsdText(priceUsd)} is either with the service or still in the signer ${eoaAccount.address}.`
+                          }),
+                funded: {
+                  amount,
+                  asset,
+                  txHash: fundResult.txHash ?? null,
+                  fromSignerBalance: signerBalance > 0n
+                },
+                payment: payment
+                  ? {
+                      settled: payment.success === true,
+                      transaction: payment.transaction,
+                      ...(payment.errorReason ? { errorReason: payment.errorReason } : {})
+                    }
+                  : null,
+                data
+              },
+              null,
+              2
+            )
+          );
+
+          if (!response.ok) process.exit(1);
         }
       });
-      if (fundResult.txHash) {
-        process.stderr.write(`Funded via tx: ${fundResult.txHash}\n`);
-        try {
-          await waitForSignerFunds({
-            chainId: resolvedNetwork.chainId,
-            token: asset,
-            owner: eoaAccount.address,
-            atLeast: fundAmount
-          });
-        } catch (error) {
-          // Nothing was signed, so the service can't have been paid.
-          releaseX402Reservation(reservationId);
-          throw error;
-        }
-      }
-
-      // On the paid request, sign only the requirement that was valued and
-      // funded: same network, asset and scheme, for no more than that amount.
-      let refusedTerms = false;
-      let signed = false;
-      const selectValued: SelectPaymentRequirements = (_version, accepts) => {
-        const match = accepts.find(
-          (r) =>
-            r.network === req.network &&
-            r.scheme === req.scheme &&
-            r.payTo.toLowerCase() === String(req.payTo).toLowerCase() &&
-            r.asset.toLowerCase() === String(req.asset).toLowerCase() &&
-            BigInt(r.amount || 0) <= fundAmount
-        );
-        if (!match) {
-          refusedTerms = true;
-          throw new Error(
-            'The service changed its payment terms after they were checked; it was not paid more.'
-          );
-        }
-        signed = true;
-        return match;
-      };
-
-      // The library's own caps ($1, its token list) are off: the CLI has valued
-      // and limited this payment already, and selectValued holds it to that.
-      const client = new x402Client(selectValued).setSpendControls(false);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      client.register('eip155:*', new ExactEvmScheme(eoaAccount as any));
-      const fetchWithPayment = wrapFetchWithPayment(fetch, client);
-
-      // Ensure a JSON body is parseable upstream: set Content-Type when a body is
-      // present and the caller didn't specify one (mirrors the bazaar path).
-      // Without this, proxied POST services reject the body ("expected object").
-      const retryHeaders: Record<string, string> = { ...headers };
-      if (body && !Object.keys(retryHeaders).some((h) => h.toLowerCase() === 'content-type')) {
-        retryHeaders['Content-Type'] = 'application/json';
-      }
-
-      let response: Response;
-      try {
-        response = await fetchWithPayment(url, {
-          method,
-          headers: Object.keys(retryHeaders).length ? retryHeaders : undefined,
-          body: body || undefined
-        });
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        // Refused before signing: certainly unpaid. Otherwise the signed
-        // payment may have reached the service, so it stays counted.
-        // Nothing signed yet (or refused): certainly unpaid. After signing, the
-        // payment may have reached the service, so it stays counted.
-        const unsent = refusedTerms || !signed;
-        if (unsent) releaseX402Reservation(reservationId);
-        console.error(
-          JSON.stringify(
-            {
-              ok: false,
-              code: 'upstream_error',
-              error: unsent
-                ? `The paid request failed before paying (${reason}). The ${x402UsdText(priceUsd)} stays in the signer ${eoaAccount.address} and pays for a later call.`
-                : `The paid request failed (${reason}). The payment may or may not have reached the service: the ${x402UsdText(priceUsd)} is either with the service or still in the signer ${eoaAccount.address}.`,
-              walletAddress: session.walletAddress,
-              signerAddress: eoaAccount.address,
-              paidUsd: unsent ? 0 : null,
-              ...(unsent ? {} : { paymentUncertain: true }),
-              funded: { amount, asset, txHash: fundResult.txHash }
-            },
-            bigintReplacer,
-            2
-          )
-        );
-        process.exit(1);
-      }
-
-      const paymentResponseHeader =
-        response.headers.get('PAYMENT-RESPONSE') || response.headers.get('X-PAYMENT-RESPONSE');
-      let payment = null;
-      if (paymentResponseHeader) {
-        try {
-          payment = decodePaymentResponseHeader(paymentResponseHeader);
-        } catch {
-          // ignore
-        }
-      }
-
-      const data = await readBody(response);
-
-      // Paid: a settlement that says so, or a success after signing. Unpaid:
-      // nothing was signed, or the service says it didn't settle (a failed
-      // settlement or a fresh 402) and the signer still holds the funds, since
-      // a facilitator can settle and still report failure. Anything else is
-      // unclear and stays counted against the daily limit.
-      const paid = signed && (payment?.success === true || (response.ok && !payment));
-      let unpaid = !signed;
-      if (signed && !paid && (payment ? payment.success !== true : response.status === 402)) {
-        const after = await signerFunds().catch(() => undefined);
-        unpaid = after !== undefined && after >= fundAmount;
-      }
-      if (unpaid) releaseX402Reservation(reservationId);
-      const uncertain = !paid && !unpaid;
-
-      console.log(
-        JSON.stringify(
-          {
-            ok: response.ok,
-            status: response.status,
-            walletAddress: session.walletAddress,
-            signerAddress: eoaAccount.address,
-            paidUsd: paid ? priceUsd : uncertain ? null : 0,
-            ...(uncertain ? { paymentUncertain: true } : {}),
-            ...(response.ok
-              ? {}
-              : paid
-                ? {
-                    error: `Paid ${x402UsdText(priceUsd)}, but the service returned ${response.status}. x402 has no refunds.`
-                  }
-                : unpaid
-                  ? {
-                      error: `The service returned ${response.status} and didn't take the payment. The ${x402UsdText(priceUsd)} stays in the signer ${eoaAccount.address} and pays for a later call.`
-                    }
-                  : {
-                      error: `The service returned ${response.status} without saying whether it took the payment. The ${x402UsdText(priceUsd)} is either with the service or still in the signer ${eoaAccount.address}.`
-                    }),
-            funded: {
-              amount,
-              asset,
-              txHash: fundResult.txHash ?? null,
-              fromSignerBalance: signerBalance > 0n
-            },
-            payment: payment
-              ? {
-                  settled: payment.success === true,
-                  transaction: payment.transaction,
-                  ...(payment.errorReason ? { errorReason: payment.errorReason } : {})
-                }
-              : null,
-            data
-          },
-          null,
-          2
-        )
-      );
-
-      if (!response.ok) process.exit(1);
     } catch (error) {
       console.error(JSON.stringify(failureJson(error), bigintReplacer, 2));
       process.exit(1);

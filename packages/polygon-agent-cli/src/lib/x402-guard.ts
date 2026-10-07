@@ -6,7 +6,8 @@
 //   - x402_daily_max over a rolling 24 hours (daily_limit_exceeded).
 // Every payment is reserved in x402-payments.jsonl at its price *before*
 // anything is sent (so a crash can't lose it), and released only when it's
-// certain the service wasn't paid. The daily limit counts reservations: what
+// certain the service can't be paid: nothing was sent and nothing signed. A
+// signed authorization stays counted, since it can settle later. The daily limit counts reservations: what
 // services are paid, whether the signer was topped up or already held funds.
 
 import { randomBytes } from 'node:crypto';
@@ -37,6 +38,18 @@ const ReservationSchema = z.object({
   txHash: z.string().optional()
 });
 const ReleaseSchema = z.object({ ts: z.string(), id: z.string(), release: z.literal(true) });
+// A signed authorization the service didn't confirm: until it expires it may
+// still settle, so the signer funds it covers aren't free for another call.
+const PendingSchema = z.object({
+  ts: z.string(),
+  id: z.string(),
+  pending: z.object({
+    chainId: z.number(),
+    asset: z.string(),
+    amount: z.string(),
+    until: z.string()
+  })
+});
 
 function paymentsFile(): string {
   return path.join(STORAGE_ROOT, 'x402-payments.jsonl');
@@ -176,6 +189,63 @@ export function recordX402Payment(params: {
   return id;
 }
 
+export function markAuthorizationPending(params: {
+  id: string;
+  chainId: number;
+  asset: string;
+  amount: bigint;
+  until: Date;
+}): void {
+  try {
+    appendEntry({
+      ts: new Date().toISOString(),
+      id: params.id,
+      pending: {
+        chainId: params.chainId,
+        asset: params.asset.toLowerCase(),
+        amount: params.amount.toString(),
+        until: params.until.toISOString()
+      }
+    });
+  } catch {
+    // only means a later call may count on these funds and fail to settle
+  }
+}
+
+// Signer funds still promised to unexpired, unconfirmed authorizations.
+export function pendingAuthorizations(params: {
+  chainId: number;
+  asset: string;
+  now: Date;
+}): bigint {
+  let text: string;
+  try {
+    text = fs.readFileSync(paymentsFile(), 'utf8');
+  } catch {
+    return 0n;
+  }
+  let total = 0n;
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const entry = PendingSchema.safeParse(value);
+    if (
+      entry.success &&
+      entry.data.pending.chainId === params.chainId &&
+      entry.data.pending.asset === params.asset.toLowerCase() &&
+      Date.parse(entry.data.pending.until) > params.now.getTime()
+    ) {
+      total += BigInt(entry.data.pending.amount);
+    }
+  }
+  return total;
+}
+
 // The service certainly wasn't paid: the reservation no longer counts. Never
 // throws (a failed release only over-counts), so it can't mask another error.
 export function releaseX402Reservation(id: string): void {
@@ -188,14 +258,39 @@ export function releaseX402Reservation(id: string): void {
 
 export { usdText as x402UsdText };
 
-// Checks the price against the limits, reserves it, then funds the payment,
-// one payment at a time per install so concurrent calls can't both pass the
-// daily limit. The reservation is written before anything is sent and is
-// released here only if funding certainly sent nothing; the caller releases it
-// once it knows the service wasn't paid. Where the funding transfer pays the
-// service directly (the bazaar path), a refusal raised after a transfer was
-// recorded (e.g. session_revoked while polling) may still have paid:
-// `sentAnything` says whether one was, and then the reservation stays.
+// One x402 payment at a time per install, from the price check to the
+// service's answer: concurrent calls can't both pass the daily limit, nor both
+// count on the same funds left in the signer.
+// A payment can take a few minutes (funding, confirmation, the service), so
+// a second call waits up to 5 minutes before giving up.
+export async function withX402Lock<T>(params: { fn: () => Promise<T> }): Promise<T> {
+  ensureStorageDir();
+  try {
+    return await withLock({
+      dir: path.join(STORAGE_ROOT, 'locks', 'x402.lock'),
+      waitMs: 300_000,
+      fn: params.fn
+    });
+  } catch (error) {
+    if (error instanceof LockHeldError) {
+      throw new CliError({
+        code: 'wallet_busy',
+        message:
+          'Another x402 payment is still running on this install (a payment can take a few minutes). Try again when it finishes.',
+        cause: error
+      });
+    }
+    throw error;
+  }
+}
+
+// Call under withX402Lock. Checks the price against the limits, reserves it,
+// then funds the payment. The reservation is written before anything is sent
+// and is released here only if funding certainly sent nothing; the caller
+// releases it only if nothing was signed either. Where the funding transfer
+// pays the service directly (the bazaar path), a refusal raised after a
+// transfer was recorded (e.g. session_revoked while polling) may still have
+// paid: `sentAnything` says whether one was, and then the reservation stays.
 export async function reserveX402Payment<T>(params: {
   walletName: string;
   url: string;
@@ -205,35 +300,17 @@ export async function reserveX402Payment<T>(params: {
   fund: () => Promise<T>;
   sentAnything?: () => boolean;
 }): Promise<{ reservationId: string; funded: T }> {
+  checkX402Price({ ...params, now: new Date() });
+  const reservationId = recordX402Payment({ ...params, now: new Date() });
   try {
-    return await withLock({
-      dir: path.join(STORAGE_ROOT, 'locks', 'x402.lock'),
-      waitMs: 120_000,
-      fn: async () => {
-        checkX402Price({ ...params, now: new Date() });
-        const reservationId = recordX402Payment({ ...params, now: new Date() });
-        try {
-          return { reservationId, funded: await params.fund() };
-        } catch (error) {
-          if (
-            error instanceof CliError &&
-            NOTHING_SENT_CODES.has(error.code) &&
-            !(params.sentAnything?.() ?? false)
-          ) {
-            releaseX402Reservation(reservationId);
-          }
-          throw error;
-        }
-      }
-    });
+    return { reservationId, funded: await params.fund() };
   } catch (error) {
-    if (error instanceof LockHeldError) {
-      throw new CliError({
-        code: 'wallet_busy',
-        message:
-          'Another x402 payment is still running on this install. Try again when it finishes.',
-        cause: error
-      });
+    if (
+      error instanceof CliError &&
+      NOTHING_SENT_CODES.has(error.code) &&
+      !(params.sentAnything?.() ?? false)
+    ) {
+      releaseX402Reservation(reservationId);
     }
     throw error;
   }

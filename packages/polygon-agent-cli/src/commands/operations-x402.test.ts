@@ -176,9 +176,8 @@ describe('x402-pay standard path', () => {
     expect(spent()).toBe(0.001);
   });
 
-  it('a settlement that failed is unpaid: the reservation is released', async () => {
+  it('a signed payment the service says it did not settle stays counted (it can settle later)', async () => {
     serviceAsks([exact('1000')]);
-    // The signer still holds the funds: the payment never left it.
     fake.signerBalance = 1000n;
     fake.paidFetch.mockResolvedValue(
       new Response('{}', {
@@ -189,9 +188,9 @@ describe('x402-pay standard path', () => {
       })
     );
     const out = await pay();
-    expect(out).toMatchObject({ ok: false, paidUsd: 0 });
-    expect(String(out.error)).toMatch(/didn't take the payment/);
-    expect(spent()).toBe(0);
+    expect(out).toMatchObject({ ok: false, paidUsd: null, paymentUncertain: true });
+    expect(String(out.error)).toMatch(/can still be settled until it expires/);
+    expect(spent()).toBe(0.001);
   });
 
   it('a paid request that fails in flight is reported as uncertain and stays counted', async () => {
@@ -212,19 +211,80 @@ describe('x402-pay standard path', () => {
     expect(spent()).toBe(0);
   });
 
-  it('a 402 with no settlement response is unpaid only if the signer still holds the funds', async () => {
+  it('a fresh 402 after signing stays counted, whatever the signer still holds', async () => {
     serviceAsks([exact('1000')]);
     fake.paidFetch.mockResolvedValue(new Response('{}', { status: 402 }));
+    // 12 left in the signer after a 6-unit settlement would look "unpaid" by balance.
+    fake.signerBalance = 12_000n;
+    expect(await pay()).toMatchObject({ paidUsd: null, paymentUncertain: true });
+    expect(spent()).toBe(0.001);
+  });
+
+  it('skips an offer in a token it cannot value, even if cheaper, and pays the USDC one', async () => {
+    serviceAsks([
+      { ...exact('1'), asset: '0x0000000000000000000000000000000000000bad' },
+      exact('1000')
+    ]);
+    fake.paidFetch.mockResolvedValue(
+      new Response('{}', {
+        status: 200,
+        headers: {
+          'PAYMENT-RESPONSE': b64({ success: true, transaction: '0xpaid', network: 'eip155:137' })
+        }
+      })
+    );
+    expect(await pay()).toMatchObject({ ok: true, paidUsd: 0.001 });
+  });
+
+  it('holds the x402 lock through the paid request, so concurrent calls cannot share leftovers', async () => {
+    const fs = await import('node:fs');
+    const lockDir = `${fake.home}/locks/x402.lock`;
+    let heldDuringPayment = false;
+    serviceAsks([exact('1000')]);
+    fake.paidFetch.mockImplementation(async () => {
+      heldDuringPayment = fs
+        .readdirSync(lockDir)
+        .some((name) => !JSON.parse(fs.readFileSync(`${lockDir}/${name}`, 'utf8')).released);
+      return new Response('{}', {
+        status: 200,
+        headers: {
+          'PAYMENT-RESPONSE': b64({ success: true, transaction: '0xpaid', network: 'eip155:137' })
+        }
+      });
+    });
+    await pay();
+    expect(heldDuringPayment).toBe(true);
+  });
+
+  it('does not count on signer funds an unconfirmed authorization may still claim', async () => {
+    serviceAsks([exact('1000')]);
     fake.signerBalance = 1000n;
-    expect(await pay()).toMatchObject({ paidUsd: 0 });
-    expect(spent()).toBe(0);
-    // The funds left the signer: the service settled despite saying otherwise.
-    fake.signerBalance = 0n;
+    fake.paidFetch.mockResolvedValue(new Response('{}', { status: 402 }));
+    await pay(); // signs against the leftover; the service doesn't confirm
+    expect(fake.runTx).not.toHaveBeenCalled();
     vi.mocked(console.log).mockClear();
     vi.mocked(console.error).mockClear();
-    const second = await pay();
-    expect(second).toMatchObject({ paidUsd: null, paymentUncertain: true });
-    expect(spent()).toBe(0.001);
+    await pay(); // the leftover is promised to that authorization: fund afresh
+    expect(fake.runTx).toHaveBeenCalledTimes(1);
+  });
+
+  it('ranks offers by USD value across tokens with different decimals', async () => {
+    const BNB_USDC = '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d';
+    const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+    serviceAsks([
+      { ...exact('5000'), network: 'eip155:8453', asset: BASE_USDC }, // $0.005
+      { ...exact('1000000000000000'), network: 'eip155:56', asset: BNB_USDC } // $0.001
+    ]);
+    fake.paidFetch.mockResolvedValue(
+      new Response('{}', {
+        status: 200,
+        headers: {
+          'PAYMENT-RESPONSE': b64({ success: true, transaction: '0x', network: 'eip155:56' })
+        }
+      })
+    );
+    expect(await pay()).toMatchObject({ ok: true, paidUsd: 0.001 });
+    expect(fake.runTx).toHaveBeenCalledWith(expect.objectContaining({ chainId: 56 }));
   });
 
   it('a malformed body after a settled payment still reports the payment', async () => {
@@ -311,6 +371,56 @@ describe('x402-pay bazaar path', () => {
     });
     expect(await bazaar()).toMatchObject({ code: 'session_revoked' });
     expect(spent()).toBe(0.02);
+  });
+
+  it('a lost answer after paying keeps the payment details, so nobody pays again', async () => {
+    fake.runTx.mockResolvedValue({ txHash: '0xpaidtx' });
+    let call = 0;
+    const out = await (async () => {
+      if (typeof x402PayCommand.handler !== 'function') throw new Error('no handler');
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: unknown) => {
+          call += 1;
+          if (call === 1) {
+            return new Response(
+              JSON.stringify({
+                payment_address: '0x1D17C0F90A0b3dFb5124C2FF56B33a0D2E202e1d',
+                amount_usdc: 0.02,
+                supported_chains: [{ chain: 'polygon', chainId: 137 }]
+              }),
+              { status: 402 }
+            );
+          }
+          // RPC receipt polling succeeds; the paid request itself is reset.
+          if (String(input).includes('x402-api')) throw new Error('ECONNRESET');
+          return new Response(JSON.stringify({ result: { status: '0x1' } }));
+        })
+      );
+      vi.useFakeTimers({ shouldAdvanceTime: true, advanceTimeDelta: 1000 });
+      await Promise.resolve(
+        x402PayCommand.handler({
+          _: [],
+          $0: 'polygon-agent',
+          url: 'https://x402-api.onrender.com/api/x',
+          method: 'GET',
+          broadcast: true
+        })
+      ).catch(() => undefined);
+      vi.useRealTimers();
+      const line = vi
+        .mocked(console.error)
+        .mock.calls.map((c) => String(c[0]))
+        .find((l) => l.startsWith('{'));
+      return JSON.parse(line ?? '{}');
+    })();
+    expect(out).toMatchObject({
+      ok: false,
+      paidUsd: 0.02,
+      funded: { txHash: '0xpaidtx' },
+      retryHeaders: { 'X-Payment-TxHash': '0xpaidtx' }
+    });
+    expect(String(out.error)).toMatch(/Don't pay again/);
   });
 
   it('releases the reservation when a check refused it before any transfer', async () => {

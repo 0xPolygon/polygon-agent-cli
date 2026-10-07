@@ -9,8 +9,11 @@ process.env.POLYGON_AGENT_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-x402-
 const {
   checkX402Price,
   parseBazaarPayment,
+  markAuthorizationPending,
+  pendingAuthorizations,
   releaseX402Reservation,
   reserveX402Payment,
+  withX402Lock,
   recordX402Payment,
   x402PriceUsd,
   x402SpentLastDay
@@ -210,7 +213,8 @@ describe('reserveX402Payment', () => {
 
   it('runs one payment at a time, so two cannot both pass the daily limit', async () => {
     updateConfig({ x402_daily_max: 1 });
-    const slow = () => reserve(0.6, () => new Promise((r) => setTimeout(r, 50)));
+    const slow = () =>
+      withX402Lock({ fn: () => reserve(0.6, () => new Promise((r) => setTimeout(r, 50))) });
     const results = await Promise.allSettled([slow(), slow()]);
     expect(results.map((r) => r.status).sort()).toEqual(['fulfilled', 'rejected']);
     expect(spent()).toBe(0.6);
@@ -236,5 +240,41 @@ describe('parseBazaarPayment with --chain', () => {
     expect(() => parseBazaarPayment({ body, chainId: 42161 })).toThrow(
       expect.objectContaining({ code: 'invalid_input' })
     );
+  });
+});
+
+describe('pending authorizations', () => {
+  it('sums unexpired ones for the same chain and asset', () => {
+    const now = new Date();
+    const later = new Date(now.getTime() + 60_000);
+    markAuthorizationPending({
+      id: 'a',
+      chainId: 137,
+      asset: USDC_POLYGON,
+      amount: 400n,
+      until: later
+    });
+    markAuthorizationPending({
+      id: 'b',
+      chainId: 137,
+      asset: USDC_POLYGON,
+      amount: 100n,
+      until: later
+    });
+    markAuthorizationPending({
+      id: 'c',
+      chainId: 8453,
+      asset: USDC_POLYGON,
+      amount: 999n,
+      until: later
+    });
+    markAuthorizationPending({
+      id: 'd',
+      chainId: 137,
+      asset: USDC_POLYGON,
+      amount: 999n,
+      until: new Date(now.getTime() - 1)
+    });
+    expect(pendingAuthorizations({ chainId: 137, asset: USDC_POLYGON, now })).toBe(500n);
   });
 });
