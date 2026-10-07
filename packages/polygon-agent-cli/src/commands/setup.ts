@@ -6,6 +6,7 @@ import { ethers } from 'ethers';
 import React from 'react';
 
 import { getAuthToken, createProject, getDefaultAccessKey } from '../lib/builder-api.ts';
+import { bigintReplacer, failureJson } from '../lib/errors.ts';
 import { generateEthAuthProof } from '../lib/ethauth.ts';
 import {
   saveBuilderConfig,
@@ -126,17 +127,7 @@ export const setupCommand: CommandModule<object, SetupArgs> = {
           )
         );
       } catch (error) {
-        console.error(
-          JSON.stringify(
-            {
-              ok: false,
-              error: (error as Error).message,
-              stack: (error as Error).stack
-            },
-            null,
-            2
-          )
-        );
+        console.error(JSON.stringify(failureJson(error), bigintReplacer, 2));
         process.exit(1);
       }
     } else {

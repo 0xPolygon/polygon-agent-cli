@@ -66,6 +66,12 @@ export function errorJson(error: unknown): Record<string, unknown> {
   return { ok: false, error: error instanceof Error ? error.message : String(error) };
 }
 
+// errorJson, plus the stack for an unexpected (non-CLI) error.
+export function failureJson(error: unknown): Record<string, unknown> {
+  if (error instanceof CliError || !(error instanceof Error)) return errorJson(error);
+  return { ...errorJson(error), stack: error.stack };
+}
+
 // Prints the failure as JSON on stderr and exits 1.
 export function jsonFail(error: unknown): never {
   console.error(JSON.stringify(errorJson(error), bigintReplacer));

@@ -33,6 +33,17 @@ function writeHolder(params: { dir: string; generation: number; pid: number; hos
   );
 }
 
+// Each generation file in the lock directory and whether it is released.
+function generationsState(dir: string): string[] {
+  return fs
+    .readdirSync(dir)
+    .sort()
+    .map((name) => {
+      const holder = JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8'));
+      return `${name}:${holder.released ? 'released' : 'held'}`;
+    });
+}
+
 // The pid of a process that has already exited.
 function deadPid(): number {
   return Number(
@@ -44,7 +55,16 @@ describe('withLock', () => {
   it('runs fn, returns its result and releases the lock', async () => {
     const dir = lockDir();
     expect(await withLock({ dir, fn: () => 42 })).toBe(42);
-    expect(fs.readdirSync(dir)).toEqual([]);
+    expect(generationsState(dir)).toEqual(['000000000001.json:released']);
+  });
+
+  it('never reuses a generation number: the next holder continues from a release', async () => {
+    const dir = lockDir();
+    await withLock({ dir, fn: () => undefined });
+    let during: string[] = [];
+    await withLock({ dir, fn: () => (during = generationsState(dir)) });
+    expect(during).toEqual(['000000000002.json:held']);
+    expect(generationsState(dir)).toEqual(['000000000002.json:released']);
   });
 
   it('releases the lock when fn throws', async () => {
@@ -57,7 +77,7 @@ describe('withLock', () => {
         }
       })
     ).rejects.toThrow('boom');
-    expect(fs.readdirSync(dir)).toEqual([]);
+    expect(generationsState(dir)).toEqual(['000000000001.json:released']);
   });
 
   it('refuses while another holder is running, without running fn', async () => {
@@ -93,7 +113,7 @@ describe('withLock', () => {
       })
     ).toBe('ok');
     expect(during).toEqual(['000000000002.json']);
-    expect(fs.readdirSync(dir)).toEqual([]);
+    expect(generationsState(dir)).toEqual(['000000000002.json:released']);
   });
 
   it('does not take over a lock held by a live process', async () => {
@@ -128,7 +148,7 @@ describe('withLock', () => {
       // Someone else's generation appears while this one is held.
       fn: () => writeHolder({ dir, generation: 2, pid: process.pid })
     });
-    expect(fs.readdirSync(dir)).toEqual(['000000000002.json']);
+    expect(generationsState(dir)).toEqual(['000000000001.json:released', '000000000002.json:held']);
   });
 });
 
@@ -269,7 +289,34 @@ describe('withLock across processes', () => {
     fs.writeFileSync(path.join(base, 'C.finish'), '');
     expect(await launch({ role: 'C', base })).toBe('ran');
     expectNoOverlap(fs.readFileSync(path.join(base, 'log'), 'utf8'));
-    expect(fs.readdirSync(path.join(base, 'update.lock'))).toEqual([]);
+    expect(
+      generationsState(path.join(base, 'update.lock')).every((g) => g.endsWith(':released'))
+    ).toBe(true);
+  });
+
+  // A judges the dead holder's lock free and pauses. Meanwhile B takes over,
+  // finishes and releases, and C takes the lock again. A resumes: it must not
+  // evict C, even though the generation it was about to create is free again.
+  it('a stale recoverer resuming after a release and re-acquire never gets in', async () => {
+    const base = tmpDir();
+    writeHolder({ dir: path.join(base, 'update.lock'), generation: 1, pid: deadPid() });
+
+    const a = launch({ role: 'A', base, pause: true });
+    await waitFor(path.join(base, 'A.ready'));
+    expect(await launch({ role: 'B', base, holdMs: 1 })).toBe('ran');
+    const c = launch({ role: 'C', base });
+    await waitFor(path.join(base, 'C.in'));
+
+    fs.writeFileSync(path.join(base, 'A.go'), '');
+    const aOutcome = await Promise.race([
+      a,
+      waitFor(path.join(base, 'A.in')).then(() => 'A got in while C held the lock')
+    ]);
+    expect(aOutcome).toBe('LockHeldError');
+
+    fs.writeFileSync(path.join(base, 'C.finish'), '');
+    expect(await c).toBe('ran');
+    expectNoOverlap(fs.readFileSync(path.join(base, 'log'), 'utf8'));
   });
 
   it('many processes racing to recover a stale lock never overlap', async () => {
@@ -281,6 +328,8 @@ describe('withLock across processes', () => {
     expect(results.filter((r) => r === 'ran').length).toBeGreaterThanOrEqual(1);
     expect(results.every((r) => r === 'ran' || r === 'LockHeldError')).toBe(true);
     expectNoOverlap(fs.readFileSync(path.join(base, 'log'), 'utf8'));
-    expect(fs.readdirSync(path.join(base, 'update.lock'))).toEqual([]);
+    expect(
+      generationsState(path.join(base, 'update.lock')).every((g) => g.endsWith(':released'))
+    ).toBe(true);
   });
 });

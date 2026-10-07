@@ -22,7 +22,14 @@ import {
   planSummary,
   validateAllowance
 } from '../lib/session/plan.ts';
-import { clearRacSlot, racClient, readRacRecord, registerRac } from '../lib/session/rac.ts';
+import {
+  parkedRacSlots,
+  racClient,
+  readRacRecord,
+  registerRac,
+  retireParkedRacs,
+  retireRac
+} from '../lib/session/rac.ts';
 import {
   parseTokenAtChain,
   requireSupportedChain,
@@ -172,11 +179,13 @@ export async function handleEmailLogin(argv: {
         wallet,
         fn: () => getSessions({ wallet, client: racClient({ wallet, slot: 'rac' }), fresh: true })
       }).catch((error: unknown) => {
-        // Only a dead key means "reconnect". Anything else (an OMS outage) must
-        // not lead to revoking a working key below.
+        // Only a dead or missing key means "reconnect". Anything else (an OMS
+        // outage) must not lead to revoking a working key below.
         if (
           error instanceof CliError &&
-          (error.code === 'session_revoked' || error.code === 'session_expired')
+          (error.code === 'session_revoked' ||
+            error.code === 'session_expired' ||
+            error.code === 'not_connected')
         ) {
           return [];
         }
@@ -228,13 +237,7 @@ export async function handleEmailLogin(argv: {
     await withWalletLock({
       wallet,
       fn: async () => {
-        const old = readRacRecord({ wallet, slot: 'rac' });
-        if (old) {
-          await racClient({ wallet, slot: 'rac' })
-            .revokeCredential({ credentialId: old.credentialId })
-            .catch(() => undefined);
-          clearRacSlot({ wallet, slot: 'rac' });
-        }
+        await retireRac({ wallet, slot: 'rac' });
         await registerRac({
           wallet,
           slot: 'rac',
@@ -331,10 +334,18 @@ async function sessionReport(params: {
   const approved = readApprovedPlan(wallet);
   let sessions: Awaited<ReturnType<typeof getSessions>> = [];
   let accessError: Record<string, unknown> | undefined;
+  let keysPendingRevocation: string[] = [];
   try {
     sessions = await withWalletLock({
       wallet,
-      fn: () => getSessions({ wallet, client: racClient({ wallet, slot: 'rac' }) })
+      fn: async () => {
+        keysPendingRevocation = await retireParkedRacs({ wallet }).catch(() =>
+          parkedRacSlots(wallet).map(
+            (slot) => readRacRecord({ wallet, slot })?.credentialId ?? slot
+          )
+        );
+        return getSessions({ wallet, client: racClient({ wallet, slot: 'rac' }) });
+      }
     });
   } catch (error) {
     if (
@@ -364,6 +375,13 @@ async function sessionReport(params: {
   const alerts = accessError
     ? []
     : sessionAlerts({ sessions, approved, spent, holdings, now: new Date() });
+  if (keysPendingRevocation.length > 0) {
+    alerts.push({
+      type: 'old_key_live',
+      message: `A replaced session key of this install isn't revoked on OMS yet (${keysPendingRevocation.join(', ')}), so its sessions may still be live. It's retried automatically.`,
+      command: `polygon-agent wallet access --revoke ${keysPendingRevocation[0]}${nameFlag(wallet)}`
+    });
+  }
 
   const pending = loadPending(wallet);
   const pendingInfo =
@@ -556,7 +574,7 @@ const allowanceRenewCommand: CommandModule<object, RenewArgs> = {
       await withWalletLock({
         wallet,
         fn: async () => {
-          clearRacSlot({ wallet, slot: 'rac-next' });
+          await retireRac({ wallet, slot: 'rac-next' });
           await registerRac({
             wallet,
             slot: 'rac-next',
@@ -720,9 +738,14 @@ export async function logoutSessionWallet(wallet: string): Promise<Record<string
   await withWalletLock({
     wallet,
     fn: async () => {
-      for (const slot of ['rac', 'rac-next'] as const) {
+      for (const slot of ['rac', 'rac-next', ...parkedRacSlots(wallet)] as const) {
         const record = readRacRecord({ wallet, slot });
         if (!record) continue;
+        // Past its lifetime, a key has no access left.
+        if (Date.parse(record.expiresAt) <= Date.now()) {
+          revoked.push(record.credentialId);
+          continue;
+        }
         try {
           await racClient({ wallet, slot }).revokeCredential({ credentialId: record.credentialId });
           revoked.push(record.credentialId);
@@ -749,7 +772,7 @@ export async function logoutSessionWallet(wallet: string): Promise<Record<string
     });
   }
   removeSessionState(wallet);
-  deletePending(wallet);
+  await deletePending({ wallet });
   await deleteOmsWallet(wallet);
   return { accessRevoked: true, revokedCredentials: revoked };
 }

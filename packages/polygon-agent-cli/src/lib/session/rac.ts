@@ -1,6 +1,8 @@
 // The install's session key: a remote access credential (RAC) the owner
 // authorizes smart sessions for. 'rac' is the live key; 'rac-next' exists only
-// while a renewal is pending (a key's lifetime can't be extended).
+// while a renewal is pending (a key's lifetime can't be extended). A replaced
+// key is parked as 'retiring-<credentialId>' until OMS confirms it is revoked,
+// so a failed revoke is retried instead of leaving access nobody tracks.
 
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
@@ -8,13 +10,18 @@ import path from 'node:path';
 
 import { z } from 'zod';
 
+import type { OMSWallet } from '@polygonlabs/oms-wallet';
+
 import { RemoteAccessClient } from '@polygonlabs/oms-wallet';
 
+import { CliError, httpStatus } from '../errors.ts';
 import { decrypt, encrypt, loadOmsConfig } from '../storage.ts';
 import { PersistentNonceSigner } from './rac-signer.ts';
 import { readJsonFile, sessionDir, writeJsonFile } from './state.ts';
 
-export type RacSlot = 'rac' | 'rac-next';
+export type RacSlot = 'rac' | 'rac-next' | `retiring-${string}`;
+
+const PARKED = /^(retiring-[\w-]+)\.json$/;
 
 const APP_URL = 'https://agents.polygon.technology';
 // Served by agentconnect-ui (public/polygon-logo.png).
@@ -56,6 +63,22 @@ export function loadOrCreateRacKey(params: { wallet: string; slot: RacSlot }): U
   }
 }
 
+// The slot's existing key. Never creates one: a missing key (e.g. a move cut
+// short by a crash) must not be replaced by a new key that OMS would answer
+// with 401, which would read as "already revoked".
+function loadRacKey(params: { wallet: string; slot: RacSlot }): Uint8Array {
+  const cipher = CipherSchema.safeParse(readJsonFile(slotFile({ ...params, suffix: 'key.enc' })));
+  if (!cipher.success) {
+    throw new CliError({
+      code: 'not_connected',
+      message: `This install's session key (${params.slot}) is missing.`,
+      hint: 'Connect again with a new email code.',
+      command: 'polygon-agent wallet login --email <email>'
+    });
+  }
+  return Buffer.from(decrypt(cipher.data), 'hex');
+}
+
 export function readRacRecord(params: { wallet: string; slot: RacSlot }): RacRecord | null {
   const parsed = RacRecordSchema.safeParse(readJsonFile(slotFile({ ...params, suffix: 'json' })));
   return parsed.success ? parsed.data : null;
@@ -65,7 +88,7 @@ export function racClient(params: { wallet: string; slot: RacSlot }): RemoteAcce
   return new RemoteAccessClient({
     publishableKey: loadOmsConfig().publishableKey,
     credentialSigner: new PersistentNonceSigner({
-      privateKey: loadOrCreateRacKey(params),
+      privateKey: loadRacKey(params),
       nonceFile: slotFile({ ...params, suffix: 'nonce.json' })
     })
   });
@@ -84,15 +107,11 @@ export async function registerRac(params: {
   const existing = readRacRecord(params);
   const neededUntil = params.now.getTime() + params.days * 86_400_000;
   if (existing && Date.parse(existing.expiresAt) > neededUntil) return existing;
-  if (existing) {
-    // Too short-lived to reuse: retire it on OMS too, not just locally.
-    await racClient(params)
-      .revokeCredential({ credentialId: existing.credentialId })
-      .catch(() => undefined);
-    clearRacSlot(params);
-  }
+  // Too short-lived to reuse: retire it on OMS too, not just locally.
+  if (existing) await retireRac(params);
 
   const lifetimeSeconds = params.days * 86_400 + LIFETIME_MARGIN_SECONDS;
+  loadOrCreateRacKey(params);
   const { credentialId } = await racClient(params).registerCredential({
     lifetimeSeconds,
     metadata: {
@@ -118,11 +137,98 @@ export function clearRacSlot(params: { wallet: string; slot: RacSlot }): void {
   }
 }
 
-// After a renewal: the new key becomes the live one.
-export function promoteNextRac(wallet: string): void {
-  clearRacSlot({ wallet, slot: 'rac' });
+// Moves a slot's files. Resumable after a crash part-way (files already moved
+// are skipped), and never overwrites: a file already at the destination is a
+// different key's, or this one's moved earlier.
+function moveSlot(params: { wallet: string; from: RacSlot; to: RacSlot }): void {
   for (const suffix of ['key.enc', 'json', 'nonce.json']) {
-    const from = slotFile({ wallet, slot: 'rac-next', suffix });
-    if (fs.existsSync(from)) fs.renameSync(from, slotFile({ wallet, slot: 'rac', suffix }));
+    const from = slotFile({ wallet: params.wallet, slot: params.from, suffix });
+    const to = slotFile({ wallet: params.wallet, slot: params.to, suffix });
+    if (!fs.existsSync(from)) continue;
+    if (fs.existsSync(to)) {
+      throw new Error(`Can't move session key file ${from}: ${to} already exists`);
+    }
+    fs.renameSync(from, to);
   }
+}
+
+// After a renewal (the old key already retired or parked): the new key
+// becomes the live one.
+export function promoteNextRac(wallet: string): void {
+  if (readRacRecord({ wallet, slot: 'rac' })) {
+    throw new Error('The live session key must be retired before promoting the new one');
+  }
+  clearRacSlot({ wallet, slot: 'rac' });
+  moveSlot({ wallet, from: 'rac-next', to: 'rac' });
+}
+
+type OwnerRevoker = Pick<OMSWallet['wallet'], 'revokeAccess'>;
+
+// Revokes a parked key: through the key itself, else as the owner (when signed
+// in). A key past its lifetime, or one OMS no longer accepts (401), has no
+// access left. Forgets the key only once it has none.
+async function revokeParked(params: {
+  wallet: string;
+  slot: RacSlot;
+  record: RacRecord;
+  owner?: OwnerRevoker;
+}): Promise<boolean> {
+  const { record } = params;
+  let gone = Date.parse(record.expiresAt) <= Date.now();
+  if (!gone) {
+    try {
+      await racClient(params).revokeCredential({ credentialId: record.credentialId });
+      gone = true;
+    } catch (error) {
+      gone = httpStatus(error) === 401;
+    }
+  }
+  if (!gone && params.owner) {
+    gone = await params.owner
+      .revokeAccess({ credentialId: record.credentialId })
+      .then(() => true)
+      .catch(() => false);
+  }
+  if (gone) clearRacSlot(params);
+  return gone;
+}
+
+// Retires the key in `slot`: parks it, then revokes it. Returns its credential
+// id if OMS hasn't confirmed the revoke (it stays parked and is retried by
+// retireParkedRacs), else null.
+export async function retireRac(params: {
+  wallet: string;
+  slot: RacSlot;
+  owner?: OwnerRevoker;
+}): Promise<string | null> {
+  const record = readRacRecord(params);
+  if (!record) {
+    clearRacSlot(params);
+    return null;
+  }
+  const parked: RacSlot = `retiring-${record.credentialId.replace(/[^\w-]/g, '_')}`;
+  if (params.slot !== parked) moveSlot({ wallet: params.wallet, from: params.slot, to: parked });
+  const gone = await revokeParked({ ...params, slot: parked, record });
+  return gone ? null : record.credentialId;
+}
+
+export function parkedRacSlots(wallet: string): RacSlot[] {
+  return fs
+    .readdirSync(sessionDir(wallet))
+    .map((name) => PARKED.exec(name))
+    .filter((match) => match !== null)
+    .map((match): RacSlot => `retiring-${match[1].slice('retiring-'.length)}`);
+}
+
+// Retries every parked key; returns the credential ids still not revoked.
+export async function retireParkedRacs(params: {
+  wallet: string;
+  owner?: OwnerRevoker;
+}): Promise<string[]> {
+  const pending: string[] = [];
+  for (const slot of parkedRacSlots(params.wallet)) {
+    const credentialId = await retireRac({ ...params, slot });
+    if (credentialId) pending.push(credentialId);
+  }
+  return pending;
 }

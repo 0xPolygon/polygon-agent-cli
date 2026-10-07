@@ -354,6 +354,59 @@ describe('reconciling earlier transfers', () => {
   });
 });
 
+describe('USD accounting survives a failed ledger write', () => {
+  const failAppends = (times: number) => {
+    const original = fs.appendFileSync;
+    let left = times;
+    return vi.spyOn(fs, 'appendFileSync').mockImplementation((...args) => {
+      if (left-- > 0) throw new Error('ENOSPC: no space left on device');
+      return original(...args);
+    });
+  };
+
+  it('a transfer whose ledger write failed still counts, and is written once later', async () => {
+    const fake = setup();
+    failAppends(1);
+    expect(await send(fake, 60_000_000n)).toMatchObject({ usd: 60 });
+    expect(readLedger(fake.wallet)).toEqual([]);
+    expect(listTransfers(fake.wallet).at(-1)).toMatchObject({
+      state: 'executed',
+      ledgered: false
+    });
+
+    // $60 of WETH would take the total to $120 of the $100 allowance.
+    await expect(send(fake, 24n * 10n ** 15n, WETH)).rejects.toMatchObject({
+      code: 'allowance_exhausted'
+    });
+    expect(fake.calls.prepare).toBe(1);
+    expect(readLedger(fake.wallet)).toEqual([
+      expect.objectContaining({ usd: 60, transferId: listTransfers(fake.wallet)[0].id })
+    ]);
+    expect(listTransfers(fake.wallet)[0].ledgered).toBe(true);
+  });
+
+  it('while the ledger stays unwritable, no new transfer starts', async () => {
+    const fake = setup();
+    failAppends(Infinity);
+    await send(fake, 60_000_000n);
+    await expect(send(fake, 1_000_000n)).rejects.toThrow(/ENOSPC/);
+    expect(fake.calls.prepare).toBe(1);
+  });
+
+  it('a crash between the ledger write and the record update is not counted twice', async () => {
+    const fake = setup();
+    await send(fake, 60_000_000n);
+    const [record] = listTransfers(fake.wallet);
+    // As if the process died right after appending.
+    fs.writeFileSync(
+      path.join(sessionDir(fake.wallet), 'transfers', `${record.id}.json`),
+      JSON.stringify({ ...record, ledgered: false })
+    );
+    expect(await send(fake, 30_000_000n)).toMatchObject({ usd: 30 });
+    expect(readLedger(fake.wallet).map((entry) => entry.usd)).toEqual([60, 30]);
+  });
+});
+
 describe('checks before a transfer (nothing is prepared)', () => {
   it('not_covered for a token without a grant', async () => {
     const fake = setup();
@@ -398,6 +451,17 @@ describe('checks before a transfer (nothing is prepared)', () => {
     fs.rmSync(path.join(sessionDir(fake.wallet), 'plan.json'));
     await expect(send(fake, 1n)).rejects.toMatchObject({ code: 'not_connected' });
     expect(fake.calls.prepare).toBe(0);
+  });
+
+  it('upstream_unavailable without a current price (never the price at approval)', async () => {
+    const fake = setup();
+    fake.deps.usdPrice = async () => undefined;
+    await expect(send(fake, 10n ** 15n, WETH)).rejects.toMatchObject({
+      code: 'upstream_unavailable'
+    });
+    expect(fake.calls.prepare).toBe(0);
+    // Stablecoins are valued at $1 and don't need a price.
+    expect(await send(fake, 1_000_000n)).toMatchObject({ usd: 1 });
   });
 
   it('counts dust against the allowance (rounds up to the cent)', async () => {

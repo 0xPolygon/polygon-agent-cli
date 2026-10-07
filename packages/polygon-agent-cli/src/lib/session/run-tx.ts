@@ -10,6 +10,7 @@ import type { TransferDeps } from './transfer.ts';
 import { CliError, bigintReplacer } from '../errors.ts';
 import { formatUnits } from '../utils.ts';
 import { liveTransferDeps } from './live.ts';
+import { retireParkedRacs } from './rac.ts';
 import { withWalletLock } from './state.ts';
 import { checkTransfer, sessionTransfer } from './transfer.ts';
 
@@ -58,14 +59,17 @@ export function decodeSessionTransfer(params: OmsTxParams): {
 
 export async function runSessionTx(
   params: SessionTxParams,
-  deps: TransferDeps = liveTransferDeps(params.walletName)
+  injected?: TransferDeps
 ): Promise<OmsTxResult> {
   const { walletName: wallet, walletAddress } = params;
+  // What the transaction is decides first: a refusal doesn't depend on the key.
   const transfer = decodeSessionTransfer(params);
 
   return withWalletLock({
     wallet,
     fn: async () => {
+      // Built under the lock, so a renewal that just finished is seen.
+      const deps = injected ?? liveTransferDeps(wallet);
       if (!params.broadcast) {
         const check = await checkTransfer({
           wallet,
@@ -100,6 +104,8 @@ export async function runSessionTx(
         );
         return { walletAddress, dryRun: true };
       }
+      // Retry revoking any replaced key OMS hasn't confirmed revoked; best effort.
+      await retireParkedRacs({ wallet }).catch(() => undefined);
       const result = await sessionTransfer({
         wallet,
         walletAddress,
