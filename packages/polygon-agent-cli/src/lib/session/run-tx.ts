@@ -11,7 +11,7 @@ import { CliError, bigintReplacer } from '../errors.ts';
 import { formatUnits } from '../utils.ts';
 import { liveTransferDeps } from './live.ts';
 import { retireParkedRacs } from './rac.ts';
-import { withWalletLock } from './state.ts';
+import { withWalletKeys } from './renewal.ts';
 import { checkTransfer, sessionTransfer } from './transfer.ts';
 
 export interface SessionTxParams extends OmsTxParams {
@@ -65,7 +65,7 @@ export async function runSessionTx(
   // What the transaction is decides first: a refusal doesn't depend on the key.
   const transfer = decodeSessionTransfer(params);
 
-  return withWalletLock({
+  return withWalletKeys({
     wallet,
     fn: async () => {
       // Built under the lock, so a renewal that just finished is seen.

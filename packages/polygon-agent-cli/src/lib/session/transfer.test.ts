@@ -393,6 +393,47 @@ describe('USD accounting survives a failed ledger write', () => {
     expect(fake.calls.prepare).toBe(1);
   });
 
+  it('an append that wrote part of a line still counts, and the next entry is not lost', async () => {
+    const fake = setup();
+    const original = fs.appendFileSync;
+    let failed = false;
+    vi.spyOn(fs, 'appendFileSync').mockImplementation((file, data, options) => {
+      if (!failed && String(data).length > 2) {
+        failed = true;
+        original(file, String(data).slice(0, 25), options);
+        throw new Error('ENOSPC: no space left on device');
+      }
+      return original(file, data, options);
+    });
+    await send(fake, 60_000_000n);
+    // $60 of WETH would pass the $100 allowance.
+    await expect(send(fake, 24n * 10n ** 15n, WETH)).rejects.toMatchObject({
+      code: 'allowance_exhausted'
+    });
+    expect(readLedger(fake.wallet)).toEqual([expect.objectContaining({ usd: 60 })]);
+    const text = fs.readFileSync(path.join(sessionDir(fake.wallet), 'ledger.jsonl'), 'utf8');
+    expect(text.trim().split('\n')).toHaveLength(1);
+  });
+
+  it('a complete entry missing only its newline is kept, not cut off', async () => {
+    const fake = setup();
+    await send(fake, 60_000_000n);
+    const file = path.join(sessionDir(fake.wallet), 'ledger.jsonl');
+    fs.writeFileSync(file, fs.readFileSync(file, 'utf8').trimEnd());
+    await send(fake, 10_000_000n);
+    expect(readLedger(fake.wallet).map((entry) => entry.usd)).toEqual([60, 10]);
+  });
+
+  it('a transfer marked ledgered whose entry is missing still counts', async () => {
+    const fake = setup();
+    await send(fake, 60_000_000n);
+    expect(listTransfers(fake.wallet)[0].ledgered).toBe(true);
+    fs.writeFileSync(path.join(sessionDir(fake.wallet), 'ledger.jsonl'), '');
+    await expect(send(fake, 24n * 10n ** 15n, WETH)).rejects.toMatchObject({
+      code: 'allowance_exhausted'
+    });
+  });
+
   it('a crash between the ledger write and the record update is not counted twice', async () => {
     const fake = setup();
     await send(fake, 60_000_000n);

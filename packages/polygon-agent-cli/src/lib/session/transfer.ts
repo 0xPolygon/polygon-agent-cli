@@ -122,14 +122,16 @@ function executedAt(record: TransferRecord): string {
 
 // Writes an executed transfer's ledger entry, once: if a crash came between
 // the append and marking the record, the entry is found and not added again.
+// The record is marked only once the entry reads back.
 function recordLedger(params: {
   wallet: string;
   record: TransferRecord;
   deps: TransferDeps;
 }): TransferRecord {
   const { wallet, record } = params;
-  if (record.ledgered) return record;
-  if (!readLedger(wallet).some((entry) => entry.transferId === record.id)) {
+  const inLedger = () => readLedger(wallet).some((entry) => entry.transferId === record.id);
+  if (record.ledgered && inLedger()) return record;
+  if (!inLedger()) {
     appendLedger({
       wallet,
       entry: {
@@ -145,11 +147,14 @@ function recordLedger(params: {
       }
     });
   }
+  if (!inLedger()) {
+    throw new Error(`The spend ledger entry for transfer ${record.id} didn't read back`);
+  }
   return update({ ...params, patch: { ledgered: true } });
 }
 
-// USD spent since `since`: the ledger, plus executed transfers whose ledger
-// entry hasn't been written (yet).
+// USD spent since `since`: the ledger, plus every executed transfer without a
+// readable ledger entry (whatever its `ledgered` flag says).
 export function spentUsdSince(params: { wallet: string; since: string }): number {
   const inLedger = new Set(readLedger(params.wallet).map((entry) => entry.transferId));
   const since = Date.parse(params.since);
@@ -157,7 +162,6 @@ export function spentUsdSince(params: { wallet: string; since: string }): number
     .filter(
       (record) =>
         record.state === 'executed' &&
-        !record.ledgered &&
         !inLedger.has(record.id) &&
         Date.parse(executedAt(record)) >= since
     )
@@ -231,9 +235,19 @@ export async function reconcileTransfers(params: {
   wallet: string;
   deps: TransferDeps;
 }): Promise<void> {
+  // Entries are written only for this allowance period: earlier ones were
+  // reset on purpose when the allowance changed.
+  const approvedAt = readApprovedPlan(params.wallet)?.approvedAt;
+  const inLedger = new Set(readLedger(params.wallet).map((entry) => entry.transferId));
   for (const record of listTransfers(params.wallet)) {
-    if (record.state === 'executed' && !record.ledgered) {
-      recordLedger({ ...params, record });
+    if (record.state === 'executed') {
+      if (
+        approvedAt !== undefined &&
+        !inLedger.has(record.id) &&
+        Date.parse(executedAt(record)) >= Date.parse(approvedAt)
+      ) {
+        recordLedger({ ...params, record });
+      }
       continue;
     }
     const open =
