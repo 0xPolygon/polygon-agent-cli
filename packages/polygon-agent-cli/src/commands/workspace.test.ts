@@ -205,8 +205,10 @@ describe('update', () => {
 
 describe('update concurrency', () => {
   it('refuses while another live process is updating, leaving the CLI untouched', async () => {
+    const lockDir = path.join(root, 'state', 'update.lock');
+    fs.mkdirSync(lockDir);
     fs.writeFileSync(
-      path.join(root, 'state', 'update.lock'),
+      path.join(lockDir, '000000000001.json'),
       JSON.stringify({ pid: process.pid, host: os.hostname(), startedAt: 'now' })
     );
     await expect(update()).rejects.toThrow('CLI exited');
@@ -236,7 +238,8 @@ describe('update concurrency', () => {
     expect(errorOutput()).toMatch(/holds .*update\.lock/);
     expect(cliMarker()).toBe('new');
     expect(fs.readdirSync(root).sort()).toEqual(['.gitignore', 'bin', 'cli', 'state']);
-    expect(fs.existsSync(path.join(root, 'state', 'update.lock'))).toBe(false);
+    // Released: the lock directory holds no generation.
+    expect(fs.readdirSync(path.join(root, 'state', 'update.lock'))).toEqual([]);
   });
 });
 
