@@ -2,9 +2,6 @@
 // funds, what it reports as paid, and what stays counted against the daily
 // limit.
 
-import type { SelectPaymentRequirements } from '@x402/core/client';
-import type * as X402Fetch from '@x402/fetch';
-
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type * as Storage from '../lib/storage.ts';
@@ -13,10 +10,13 @@ import type * as Guard from '../lib/x402-guard.ts';
 const fake = vi.hoisted(() => ({
   runTx: vi.fn(),
   paidFetch: vi.fn(),
-  // The payment selector the command hands the x402 client, and the offers.
-  selector: undefined as undefined | SelectPaymentRequirements,
+  waitForSignerFunds: vi.fn(),
+  // The service's offers.
   accepts: [] as unknown[],
+  // What the service offers on the paid request, if not the same.
+  paidAccepts: undefined as undefined | unknown[],
   signerBalance: 0n,
+  pendingWriteFails: false,
   home: ''
 }));
 
@@ -42,36 +42,23 @@ vi.mock('../lib/storage.ts', async (importOriginal) => {
 });
 vi.mock('../lib/builder-provision.ts', () => ({ ensureBuilderAccess: async () => undefined }));
 vi.mock('../lib/tx-dispatch.ts', () => ({ runTx: fake.runTx }));
-vi.mock('../lib/x402-guard.ts', async (importOriginal) => ({
-  ...(await importOriginal<typeof Guard>()),
-  readTokenBalance: async () => fake.signerBalance,
-  waitForSignerFunds: async () => undefined
-}));
-vi.mock('@x402/fetch', async (importOriginal) => {
-  const real = await importOriginal<typeof X402Fetch>();
-  class CapturingClient extends real.x402Client {
-    constructor(...args: ConstructorParameters<typeof real.x402Client>) {
-      super(...args);
-      if (typeof args[0] === 'function') fake.selector = args[0];
-    }
-  }
+vi.mock('../lib/x402-guard.ts', async (importOriginal) => {
+  const real = await importOriginal<typeof Guard>();
   return {
     ...real,
-    x402Client: CapturingClient,
-    // As the library does: choose (and sign) an offer, then send.
-    wrapFetchWithPayment:
-      () =>
-      async (...args: unknown[]) => {
-        // Test offers are plain objects shaped like the library's requirements.
-        fake.selector?.(2, fake.accepts as Parameters<SelectPaymentRequirements>[1]);
-        return fake.paidFetch(...args);
-      }
+    readTokenBalance: async () => fake.signerBalance,
+    waitForSignerFunds: fake.waitForSignerFunds,
+    markAuthorizationPending: (params: Parameters<typeof real.markAuthorizationPending>[0]) => {
+      if (fake.pendingWriteFails) throw new Error('ENOSPC');
+      real.markAuthorizationPending(params);
+    }
   };
 });
 vi.mock('../ui/render.js', () => ({ isTTY: () => false, inkRender: vi.fn() }));
 
 const { x402PayCommand } = await import('./operations.ts');
-const { x402SpentLastDay } = await import('../lib/x402-guard.ts');
+const { markAuthorizationPending, pendingAuthorizations, x402SpentLastDay } =
+  await import('../lib/x402-guard.ts');
 
 const USDC = '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359';
 const PAY_TO = '0xfd13b3f3f876e100898b72f06a500b5a9e9d1f9c';
@@ -90,23 +77,29 @@ const exact = (
   extra
 });
 
+// The service, behind the real payment wrapper: a request without a payment
+// gets a 402 (the command's probe, then the wrapper's), one with a payment
+// goes to paidFetch.
 function serviceAsks(accepts: unknown[]) {
   fake.accepts = accepts;
+  let probes = 0;
   vi.stubGlobal(
     'fetch',
-    vi.fn(
-      async () =>
-        new Response('{}', {
-          status: 402,
-          headers: {
-            'PAYMENT-REQUIRED': b64({
-              x402Version: 2,
-              accepts,
-              resource: { url: 'https://svc', description: '', mimeType: 'application/json' }
-            })
-          }
-        })
-    )
+    vi.fn(async (input: Request | string | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      if (request.headers.has('PAYMENT-SIGNATURE')) return fake.paidFetch(request);
+      probes += 1;
+      return new Response('{}', {
+        status: 402,
+        headers: {
+          'PAYMENT-REQUIRED': b64({
+            x402Version: 2,
+            accepts: probes > 1 ? (fake.paidAccepts ?? accepts) : accepts,
+            resource: { url: 'https://svc', description: '', mimeType: 'application/json' }
+          })
+        }
+      });
+    })
   );
 }
 
@@ -139,6 +132,9 @@ beforeEach(async () => {
   fake.runTx.mockReset().mockResolvedValue({ txHash: '0xfund' });
   fake.paidFetch.mockReset();
   fake.signerBalance = 0n;
+  fake.paidAccepts = undefined;
+  fake.pendingWriteFails = false;
+  fake.waitForSignerFunds.mockReset().mockResolvedValue(undefined);
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
   vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
@@ -205,7 +201,7 @@ describe('x402-pay standard path', () => {
     serviceAsks([exact('1000')]);
     fake.paidFetch.mockImplementation(async () => new Response('{}', { status: 200 }));
     // The service now asks more than was valued: nothing is signed.
-    fake.accepts = [exact('5000')];
+    fake.paidAccepts = [exact('5000')];
     const out = await pay();
     expect(String(out.error)).toMatch(/failed before paying/);
     expect(spent()).toBe(0);
@@ -266,6 +262,98 @@ describe('x402-pay standard path', () => {
     vi.mocked(console.error).mockClear();
     await pay(); // the leftover is promised to that authorization: fund afresh
     expect(fake.runTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("records the signed authorization before sending it, with the signed offer's expiry", async () => {
+    serviceAsks([exact('1000')]);
+    // The paid request's offer allows an hour, not the first offer's minute.
+    fake.paidAccepts = [{ ...exact('800'), maxTimeoutSeconds: 3600 }];
+    const in30Minutes = () => new Date(Date.now() + 30 * 60_000);
+    let promisedInFlight = -1n;
+    fake.paidFetch.mockImplementation(async () => {
+      // As if the process died here: the record must already be on disk.
+      promisedInFlight = pendingAuthorizations({ chainId: 137, asset: USDC, now: in30Minutes() });
+      throw new Error('socket hang up');
+    });
+    await pay();
+    expect(promisedInFlight).toBe(800n);
+  });
+
+  it('frees the set-aside funds once the service confirms settlement', async () => {
+    serviceAsks([exact('1000')]);
+    fake.signerBalance = 1000n;
+    fake.paidFetch.mockResolvedValue(
+      new Response('{}', {
+        status: 200,
+        headers: {
+          'PAYMENT-RESPONSE': b64({ success: true, transaction: '0xpaid', network: 'eip155:137' })
+        }
+      })
+    );
+    expect(await pay()).toMatchObject({ ok: true, paidUsd: 0.001 });
+    expect(pendingAuthorizations({ chainId: 137, asset: USDC, now: new Date() })).toBe(0n);
+  });
+
+  it('waits for the top-up on top of funds promised to earlier authorizations', async () => {
+    markAuthorizationPending({
+      id: 'earlier',
+      chainId: 137,
+      asset: USDC,
+      amount: 20_000n,
+      until: new Date(Date.now() + 600_000)
+    });
+    // The signer still holds the promised $0.02; this $0.02 needs a top-up.
+    fake.signerBalance = 20_000n;
+    serviceAsks([exact('20000')]);
+    fake.paidFetch.mockResolvedValue(
+      new Response('{}', {
+        status: 200,
+        headers: {
+          'PAYMENT-RESPONSE': b64({ success: true, transaction: '0xpaid', network: 'eip155:137' })
+        }
+      })
+    );
+    await pay();
+    expect(fake.runTx).toHaveBeenCalledTimes(1);
+    expect(fake.waitForSignerFunds).toHaveBeenCalledWith(
+      expect.objectContaining({ atLeast: 40_000n })
+    );
+  });
+
+  it('waits only for what the top-up adds when the promised funds already left', async () => {
+    // The earlier authorization settled unconfirmed: the signer is empty, but
+    // its funds are still set aside. The top-up covers this payment in full.
+    markAuthorizationPending({
+      id: 'earlier',
+      chainId: 137,
+      asset: USDC,
+      amount: 20_000n,
+      until: new Date(Date.now() + 600_000)
+    });
+    fake.signerBalance = 0n;
+    serviceAsks([exact('20000')]);
+    fake.paidFetch.mockResolvedValue(
+      new Response('{}', {
+        status: 200,
+        headers: {
+          'PAYMENT-RESPONSE': b64({ success: true, transaction: '0xpaid', network: 'eip155:137' })
+        }
+      })
+    );
+    await pay();
+    expect(fake.waitForSignerFunds).toHaveBeenCalledWith(
+      expect.objectContaining({ atLeast: 20_000n })
+    );
+  });
+
+  it('sends nothing if the signed authorization cannot be recorded', async () => {
+    serviceAsks([exact('1000')]);
+    fake.pendingWriteFails = true;
+    const out = await pay();
+    expect(fake.paidFetch).not.toHaveBeenCalled();
+    expect(out).toMatchObject({ paidUsd: 0 });
+    expect(String(out.error)).toMatch(/failed before paying/);
+    expect(spent()).toBe(0);
   });
 
   it('ranks offers by USD value across tokens with different decimals', async () => {
