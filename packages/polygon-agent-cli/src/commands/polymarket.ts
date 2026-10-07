@@ -356,7 +356,9 @@ async function handleClobBuy(argv: {
         chainId: 137,
         transactions: [{ to: USDC_E, value: 0n, data: transferData }],
         broadcast: true,
-        preferNativeFee: false
+        preferNativeFee: false,
+        // Polymarket runs on the builder EOA; session mode doesn't fund it.
+        ownerOnly: true
       });
       fundTxHash = fundResult.txHash ?? null;
       process.stderr.write(`[polymarket] Funded: ${fundTxHash}\n`);

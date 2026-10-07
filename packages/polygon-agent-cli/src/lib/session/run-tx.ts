@@ -1,0 +1,115 @@
+// runTx for session-mode wallets. A session can only make ERC-20 transfers of
+// covered tokens, one per call; everything else needs the owner.
+
+import { decodeFunctionData, erc20Abi, getAddress, isAddress, isHex } from 'viem';
+
+import type { OmsTxParams, OmsTxResult } from '../oms-tx.ts';
+import type { SpendPurpose } from './ledger.ts';
+import type { TransferDeps } from './transfer.ts';
+
+import { CliError, bigintReplacer } from '../errors.ts';
+import { formatUnits } from '../utils.ts';
+import { liveTransferDeps } from './live.ts';
+import { withWalletLock } from './state.ts';
+import { checkTransfer, sessionTransfer } from './transfer.ts';
+
+export interface SessionTxParams extends OmsTxParams {
+  walletAddress: string;
+  purpose?: SpendPurpose;
+  ref?: string;
+}
+
+function ownerRequired(what: string): CliError {
+  return new CliError({
+    code: 'owner_required',
+    message: `${what} needs the wallet owner; this install's allowance only covers token transfers.`
+  });
+}
+
+// The single ERC-20 transfer a session can make, or a clear refusal.
+export function decodeSessionTransfer(params: OmsTxParams): {
+  token: `0x${string}`;
+  to: `0x${string}`;
+  amount: bigint;
+} {
+  if (params.transactions.length !== 1) {
+    throw ownerRequired('A multi-step transaction');
+  }
+  const [tx] = params.transactions;
+  if (tx.value !== undefined && BigInt(tx.value) > 0n) {
+    throw new CliError({
+      code: 'native_not_supported',
+      message:
+        "Native coins (ETH, POL, BNB, AVAX) can't be spent with this install's allowance. " +
+        'Swap from a covered token instead, or ask the owner.'
+    });
+  }
+  if (!isAddress(tx.to) || !isHex(tx.data)) throw ownerRequired('This transaction');
+  let decoded: ReturnType<typeof decodeFunctionData<typeof erc20Abi>>;
+  try {
+    decoded = decodeFunctionData({ abi: erc20Abi, data: tx.data });
+  } catch {
+    throw ownerRequired('This contract call');
+  }
+  if (decoded.functionName !== 'transfer') throw ownerRequired(`A token ${decoded.functionName}`);
+  const [to, amount] = decoded.args;
+  return { token: getAddress(tx.to), to: getAddress(to), amount };
+}
+
+export async function runSessionTx(
+  params: SessionTxParams,
+  deps: TransferDeps = liveTransferDeps(params.walletName)
+): Promise<OmsTxResult> {
+  const { walletName: wallet, walletAddress } = params;
+  const transfer = decodeSessionTransfer(params);
+
+  return withWalletLock({
+    wallet,
+    fn: async () => {
+      if (!params.broadcast) {
+        const check = await checkTransfer({
+          wallet,
+          walletAddress,
+          chainId: params.chainId,
+          ...transfer,
+          deps
+        });
+        console.log(
+          JSON.stringify(
+            {
+              ok: true,
+              dryRun: true,
+              mode: 'session',
+              walletName: wallet,
+              walletAddress,
+              transactions: params.transactions,
+              allowance: {
+                token: check.symbol,
+                amount: formatUnits(transfer.amount, check.decimals),
+                usd: check.usd,
+                remainingOnChain:
+                  check.remaining === null ? null : formatUnits(check.remaining, check.decimals),
+                allowanceUsd: check.allowanceUsd,
+                spentUsd: check.spentUsd
+              },
+              hint: 'Dry run only, nothing was sent. Re-run with --broadcast to execute.'
+            },
+            bigintReplacer,
+            2
+          )
+        );
+        return { walletAddress, dryRun: true };
+      }
+      const result = await sessionTransfer({
+        wallet,
+        walletAddress,
+        chainId: params.chainId,
+        ...transfer,
+        purpose: params.purpose ?? 'send',
+        ref: params.ref,
+        deps
+      });
+      return { walletAddress, txHash: result.txHash };
+    }
+  });
+}
