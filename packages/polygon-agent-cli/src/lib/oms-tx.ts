@@ -5,7 +5,7 @@
 // existing command call sites need only swap which implementation they call (via
 // the runTx dispatch). Internally maps onto oms.wallet.sendTransaction.
 
-import type { FeeOptionWithBalance } from '@polygonlabs/oms-wallet';
+import type { FeeOptionSelection, FeeOptionWithBalance } from '@polygonlabs/oms-wallet';
 
 import { findNetworkById, isOMSWalletError, TransactionMode } from '@polygonlabs/oms-wallet';
 
@@ -36,8 +36,11 @@ const USDC_POLYGON = '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359';
 
 // Build a selectFeeOption callback mirroring the legacy fee logic:
 // prefer native gas if requested, else prefer USDC, always gated on affordability.
-function makeFeeSelector(preferNativeFee: boolean) {
-  return (opts: FeeOptionWithBalance[]) => {
+// Sponsored transactions call it with an empty list (oms-wallet >= 0.3); returning
+// undefined lets them proceed with no fee.
+export function makeFeeSelector(preferNativeFee: boolean) {
+  return (opts: FeeOptionWithBalance[]): FeeOptionSelection | undefined => {
+    if (opts.length === 0) return undefined;
     const usable = opts.filter(
       (o) => o.availableRaw != null && BigInt(o.availableRaw) >= BigInt(o.feeOption.value)
     );
@@ -61,7 +64,9 @@ function makeFeeSelector(preferNativeFee: boolean) {
           'Fund with POL (agent fund), or hold USDC for fees.'
       );
     }
-    return { token: pick.feeOption.token.symbol };
+    // The SDK's selection carries the option's index, so two options with the
+    // same symbol can't be confused.
+    return pick.selection;
   };
 }
 

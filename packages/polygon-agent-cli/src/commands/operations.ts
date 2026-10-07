@@ -990,7 +990,7 @@ export const swapCommand: CommandModule = {
         throw new Error('from and to token must be different');
       }
 
-      const { TrailsApi, TradeType } = await import('@0xtrails/api');
+      const { TrailsApi, TradeType, UnavailableError } = await import('@0xtrails/api');
       const trailsApiKey =
         process.env.TRAILS_API_KEY ||
         process.env.SEQUENCE_PROJECT_ACCESS_KEY ||
@@ -1026,10 +1026,11 @@ export const swapCommand: CommandModule = {
 
       const intent = quoteRes.intent;
 
-      const commitRes = await trails.commitIntent({ intent });
-      const intentId = commitRes?.intentId || intent.intentId;
+      // Trails 0.18: executeIntent follows quoteIntent directly (commitIntent is
+      // deprecated), so the quote's intent id is the one to execute.
+      const intentId = intent.intentId;
       if (!intentId) {
-        throw new Error('No intentId from commitIntent');
+        throw new Error('No intentId from quoteIntent');
       }
 
       const depositTx = intent.depositTransaction;
@@ -1070,6 +1071,19 @@ export const swapCommand: CommandModule = {
         return;
       }
 
+      const { createPublicClient, http } = await import('viem');
+      const chains = await import('viem/chains');
+      const originChain = Object.values(chains).find((chain) => chain.id === originChainId);
+      if (!originChain) throw new Error(`No RPC configuration for chain ${originChainId}`);
+      const publicClient = createPublicClient({
+        chain: originChain,
+        transport: http(
+          process.env.SEQUENCE_PROJECT_ACCESS_KEY
+            ? getReadRpcUrl(originNetwork)
+            : originChain.rpcUrls.default.http[0]
+        )
+      });
+
       const result = await runDappClientTx({
         walletName,
         chainId: originChainId,
@@ -1077,12 +1091,53 @@ export const swapCommand: CommandModule = {
         broadcast: true,
         preferNativeFee: false
       });
-      const txHash = result.txHash ?? '';
+      const txHash = result.txHash;
+      if (!txHash) {
+        throw new Error(
+          `Deposit for intent ${intentId} returned no transaction hash; not executing the intent`
+        );
+      }
 
-      const execRes = await trails.executeIntent({
-        intentId,
-        depositTransactionHash: txHash
-      });
+      // OMS can return a hash before mining. Trails rejects a client-supplied
+      // hash without a receipt, so confirm the deposit before executing.
+      try {
+        const depositReceipt = await publicClient.waitForTransactionReceipt({
+          hash: txHash as `0x${string}`,
+          timeout: 60_000
+        });
+        if (depositReceipt.status !== 'success') throw new Error('Deposit transaction reverted');
+        if (depositReceipt.transactionHash.toLowerCase() !== txHash.toLowerCase()) {
+          throw new Error(`Deposit transaction was replaced by ${depositReceipt.transactionHash}`);
+        }
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `Deposit confirmation failed for intent ${intentId}, transaction ${txHash}: ${reason}; not executing the intent`,
+          { cause: error }
+        );
+      }
+
+      // Retry transient Trails RPC failures after the deposit is confirmed.
+      // Failures include the intent and deposit identifiers for recovery.
+      const EXECUTE_RETRY_MS = 3000;
+      const EXECUTE_TIMEOUT_MS = 120000;
+      const executeStart = Date.now();
+      let execRes;
+      while (true) {
+        try {
+          execRes = await trails.executeIntent({ intentId, depositTransactionHash: txHash });
+          break;
+        } catch (e) {
+          if (!(e instanceof UnavailableError) || Date.now() - executeStart >= EXECUTE_TIMEOUT_MS) {
+            const reason = e instanceof Error ? e.message : String(e);
+            throw new Error(
+              `executeIntent failed for intent ${intentId} after deposit ${txHash}: ${reason}`,
+              { cause: e }
+            );
+          }
+          await new Promise((r) => setTimeout(r, EXECUTE_RETRY_MS));
+        }
+      }
 
       // Poll for receipt until done or timeout (120s)
       const POLL_INTERVAL_MS = 3000;

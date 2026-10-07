@@ -89,7 +89,7 @@ export function FundingScreen({ walletAddress, chainId, onSkip }: FundingScreenP
             customCss={trailsTheme}
             to={{
               recipient: walletAddress,
-              currency: USDC_POLYGON,
+              token: USDC_POLYGON,
               chain: chainId
             }}
             buttonText="Add Funds to Agent"
