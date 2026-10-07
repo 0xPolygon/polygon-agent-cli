@@ -41,6 +41,8 @@ import {
   readTokenBalance,
   releaseX402Reservation,
   reserveX402Payment,
+  settleAuthorizationPending,
+  signedAuthorization,
   withX402Lock,
   waitForSignerFunds,
   x402PriceUsd,
@@ -2189,6 +2191,8 @@ export const x402PayCommand: CommandModule = {
           // Read under the x402 lock (inside fund), so two calls can't both count
           // on the same leftover.
           let signerBalance = 0n;
+          // What the wallet tops the signer up by.
+          let shortfall = 0n;
 
           // Funds left in the signer by an earlier call that wasn't settled pay
           // first; the wallet funds only the shortfall.
@@ -2207,7 +2211,7 @@ export const x402PayCommand: CommandModule = {
                 now: new Date()
               });
               const free = signerBalance > promised ? signerBalance - promised : 0n;
-              const shortfall = fundAmount > free ? fundAmount - free : 0n;
+              shortfall = fundAmount > free ? fundAmount - free : 0n;
               if (shortfall === 0n) return { txHash: undefined };
               process.stderr.write(
                 `Funding EOA ${eoaAccount.address} with ${shortfall} units of ${asset}...\n`
@@ -2241,7 +2245,9 @@ export const x402PayCommand: CommandModule = {
                 chainId: resolvedNetwork.chainId,
                 token: asset,
                 owner: eoaAccount.address,
-                atLeast: fundAmount
+                // The balance the top-up produces, not just enough for this
+                // payment: funds promised to earlier authorizations don't count.
+                atLeast: signerBalance + shortfall
               });
             } catch (error) {
               // Nothing was signed, so the service can't have been paid.
@@ -2252,17 +2258,6 @@ export const x402PayCommand: CommandModule = {
 
           // On the paid request, sign only the requirement that was valued and
           // funded: same network, asset and scheme, for no more than that amount.
-          // A signed authorization the service didn't confirm can settle until
-          // it expires (the offer's timeout); its funds aren't free till then.
-          const markPending = () =>
-            markAuthorizationPending({
-              id: reservationId,
-              chainId: resolvedNetwork.chainId,
-              asset,
-              amount: fundAmount,
-              until: new Date(Date.now() + ((Number(req.maxTimeoutSeconds) || 600) + 60) * 1000)
-            });
-          let signed = false;
           const selectValued: SelectPaymentRequirements = (_version, accepts) => {
             const match = accepts.find(
               (r) =>
@@ -2277,7 +2272,6 @@ export const x402PayCommand: CommandModule = {
                 'The service changed its payment terms after they were checked; it was not paid more.'
               );
             }
-            signed = true;
             return match;
           };
 
@@ -2286,6 +2280,27 @@ export const x402PayCommand: CommandModule = {
           const client = new x402Client(selectValued).setSpendControls(false);
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           client.register('eip155:*', new ExactEvmScheme(eoaAccount as any));
+          // A signed authorization can settle until it expires, whatever the
+          // service answers; until then the signer funds it covers aren't free.
+          // Recorded from what was actually signed, before it's sent (if it
+          // can't be recorded, the hook throws and nothing is sent). `sent`
+          // means signed and recorded, so possibly sent: from then on the
+          // payment counts as made unless the service confirms otherwise.
+          let sent = false;
+          client.onAfterPaymentCreation(async ({ paymentPayload }) => {
+            const signedAuth = signedAuthorization(paymentPayload);
+            if (signedAuth.amount > fundAmount) {
+              throw new Error('The signed amount is more than was valued; it was not sent.');
+            }
+            markAuthorizationPending({
+              id: reservationId,
+              chainId: resolvedNetwork.chainId,
+              asset,
+              amount: signedAuth.amount,
+              until: new Date(signedAuth.validBefore.getTime() + 60_000)
+            });
+            sent = true;
+          });
           const fetchWithPayment = wrapFetchWithPayment(fetch, client);
 
           // Ensure a JSON body is parseable upstream: set Content-Type when a body is
@@ -2306,12 +2321,11 @@ export const x402PayCommand: CommandModule = {
             });
           } catch (error) {
             const reason = error instanceof Error ? error.message : String(error);
-            // Nothing signed yet (or refused before signing): certainly unpaid.
-            // After signing, the payment may have reached the service, so it
-            // stays counted.
-            const unsent = !signed;
+            // Nothing signed and sent yet (or refused before that): certainly
+            // unpaid. After that, the payment may have reached the service, so
+            // it stays counted.
+            const unsent = !sent;
             if (unsent) releaseX402Reservation(reservationId);
-            else markPending();
             console.error(
               JSON.stringify(
                 {
@@ -2346,15 +2360,17 @@ export const x402PayCommand: CommandModule = {
 
           const data = await readBody(response);
 
-          // Paid: a settlement that says so, or a success after signing. Unpaid:
-          // nothing was signed. A signed authorization the service says it didn't
-          // settle can still settle until it expires, so it stays counted against
-          // the daily limit and is reported as uncertain.
-          const paid = signed && (payment?.success === true || (response.ok && !payment));
-          const unpaid = !signed;
+          // Paid: a settlement that says so, or a success after sending. Unpaid:
+          // nothing was signed and sent. A sent authorization the service says it
+          // didn't settle can still settle until it expires, so it stays counted
+          // against the daily limit, its funds stay set aside, and it's reported
+          // as uncertain.
+          const paid = sent && (payment?.success === true || (response.ok && !payment));
+          const unpaid = !sent;
           if (unpaid) releaseX402Reservation(reservationId);
+          // Only a confirmed settlement frees the set-aside funds.
+          if (paid && payment?.success === true) settleAuthorizationPending(reservationId);
           const uncertain = !paid && !unpaid;
-          if (uncertain) markPending();
           const reportedUnsettled =
             uncertain && (payment ? payment.success !== true : response.status === 402);
 

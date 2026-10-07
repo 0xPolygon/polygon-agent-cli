@@ -6,9 +6,11 @@
 //   - x402_daily_max over a rolling 24 hours (daily_limit_exceeded).
 // Every payment is reserved in x402-payments.jsonl at its price *before*
 // anything is sent (so a crash can't lose it), and released only when it's
-// certain the service can't be paid: nothing was sent and nothing signed. A
-// signed authorization stays counted, since it can settle later. The daily limit counts reservations: what
-// services are paid, whether the signer was topped up or already held funds.
+// certain the service can't be paid: no authorization left the process (none
+// was signed, or recording it failed so it wasn't sent). A sent authorization
+// stays counted, since it can settle later. The daily limit counts
+// reservations: what services are paid, whether the signer was topped up or
+// already held funds.
 
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
@@ -38,8 +40,9 @@ const ReservationSchema = z.object({
   txHash: z.string().optional()
 });
 const ReleaseSchema = z.object({ ts: z.string(), id: z.string(), release: z.literal(true) });
-// A signed authorization the service didn't confirm: until it expires it may
-// still settle, so the signer funds it covers aren't free for another call.
+// A signed authorization: until it expires it may still settle, so the signer
+// funds it covers aren't free for another call, unless a settled entry for the
+// same id follows.
 const PendingSchema = z.object({
   ts: z.string(),
   id: z.string(),
@@ -50,6 +53,8 @@ const PendingSchema = z.object({
     until: z.string()
   })
 });
+// The service confirmed it: the funds have left the signer.
+const SettledSchema = z.object({ ts: z.string(), id: z.string(), settled: z.literal(true) });
 
 function paymentsFile(): string {
   return path.join(STORAGE_ROOT, 'x402-payments.jsonl');
@@ -189,6 +194,8 @@ export function recordX402Payment(params: {
   return id;
 }
 
+// Recorded as the authorization is signed, before it's sent, so a crash can't
+// lose it. Throws if it can't be written: the caller must then not send.
 export function markAuthorizationPending(params: {
   id: string;
   chainId: number;
@@ -196,19 +203,50 @@ export function markAuthorizationPending(params: {
   amount: bigint;
   until: Date;
 }): void {
-  try {
-    appendEntry({
-      ts: new Date().toISOString(),
-      id: params.id,
-      pending: {
-        chainId: params.chainId,
-        asset: params.asset.toLowerCase(),
-        amount: params.amount.toString(),
-        until: params.until.toISOString()
-      }
+  appendEntry({
+    ts: new Date().toISOString(),
+    id: params.id,
+    pending: {
+      chainId: params.chainId,
+      asset: params.asset.toLowerCase(),
+      amount: params.amount.toString(),
+      until: params.until.toISOString()
+    }
+  });
+}
+
+// The amount and expiry of an EIP-3009 authorization as signed.
+const SignedPayloadSchema = z.object({
+  payload: z.object({
+    authorization: z.object({
+      value: z.string().regex(/^\d+$/),
+      validBefore: z.string().regex(/^\d+$/)
+    })
+  })
+});
+
+export function signedAuthorization(paymentPayload: unknown): {
+  amount: bigint;
+  validBefore: Date;
+} {
+  const parsed = SignedPayloadSchema.safeParse(paymentPayload);
+  if (!parsed.success) {
+    throw new CliError({
+      code: 'invalid_input',
+      message: 'The signed payment is not an EIP-3009 authorization; it was not sent.'
     });
+  }
+  const { value, validBefore } = parsed.data.payload.authorization;
+  return { amount: BigInt(value), validBefore: new Date(Number(validBefore) * 1000) };
+}
+
+// The service confirmed the payment, so its funds are no longer in the signer.
+// Never throws: a missed clear only keeps the funds set aside until expiry.
+export function settleAuthorizationPending(id: string): void {
+  try {
+    appendEntry({ ts: new Date().toISOString(), id, settled: true });
   } catch {
-    // only means a later call may count on these funds and fail to settle
+    // over-counting is the safe side
   }
 }
 
@@ -224,13 +262,19 @@ export function pendingAuthorizations(params: {
   } catch {
     return 0n;
   }
-  let total = 0n;
+  const pending = new Map<string, bigint>();
+  const settled = new Set<string>();
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
     let value: unknown;
     try {
       value = JSON.parse(line);
     } catch {
+      continue;
+    }
+    const done = SettledSchema.safeParse(value);
+    if (done.success) {
+      settled.add(done.data.id);
       continue;
     }
     const entry = PendingSchema.safeParse(value);
@@ -240,9 +284,15 @@ export function pendingAuthorizations(params: {
       entry.data.pending.asset === params.asset.toLowerCase() &&
       Date.parse(entry.data.pending.until) > params.now.getTime()
     ) {
-      total += BigInt(entry.data.pending.amount);
+      // Summed per id: should one payment ever be signed twice, both could settle.
+      pending.set(
+        entry.data.id,
+        (pending.get(entry.data.id) ?? 0n) + BigInt(entry.data.pending.amount)
+      );
     }
   }
+  let total = 0n;
+  for (const [id, amount] of pending) if (!settled.has(id)) total += amount;
   return total;
 }
 

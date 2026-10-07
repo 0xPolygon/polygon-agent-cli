@@ -13,6 +13,8 @@ const {
   pendingAuthorizations,
   releaseX402Reservation,
   reserveX402Payment,
+  settleAuthorizationPending,
+  signedAuthorization,
   withX402Lock,
   recordX402Payment,
   x402PriceUsd,
@@ -276,5 +278,34 @@ describe('pending authorizations', () => {
       until: new Date(now.getTime() - 1)
     });
     expect(pendingAuthorizations({ chainId: 137, asset: USDC_POLYGON, now })).toBe(500n);
+  });
+
+  it('stops counting one the service confirmed', () => {
+    const now = new Date();
+    markAuthorizationPending({
+      id: 'e',
+      chainId: 137,
+      asset: USDC_POLYGON,
+      amount: 400n,
+      until: new Date(now.getTime() + 60_000)
+    });
+    settleAuthorizationPending('e');
+    expect(pendingAuthorizations({ chainId: 137, asset: USDC_POLYGON, now })).toBe(0n);
+  });
+});
+
+describe('signedAuthorization', () => {
+  it('reads the signed amount and expiry', () => {
+    expect(
+      signedAuthorization({
+        payload: { authorization: { value: '800', validBefore: '1800000000' }, signature: '0x' }
+      })
+    ).toEqual({ amount: 800n, validBefore: new Date(1_800_000_000_000) });
+  });
+
+  it('refuses anything else', () => {
+    expect(() => signedAuthorization({ payload: { permit2Authorization: {} } })).toThrow(
+      expect.objectContaining({ code: 'invalid_input' })
+    );
   });
 });
