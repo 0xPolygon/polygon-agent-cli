@@ -16,7 +16,7 @@ import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { encodeFunctionData, erc20Abi, getAddress, isAddress } from 'viem';
+import { encodeFunctionData, erc20Abi, getAddress, isAddress, isHex, parseEventLogs } from 'viem';
 import { z } from 'zod';
 
 import { readConfig } from './config.ts';
@@ -367,23 +367,27 @@ export async function reserveX402Payment<T>(params: {
 }
 
 // An ERC-20 balance read from the chain (not the indexer, which lags).
+async function publicClient(chainId: number) {
+  const { createPublicClient, http } = await import('viem');
+  const chains = await import('viem/chains');
+  const chain = Object.values(chains).find((c) => c.id === chainId);
+  if (!chain) throw new Error(`No RPC configuration for chain ${chainId}`);
+  return createPublicClient({
+    chain,
+    transport: http(
+      process.env.SEQUENCE_PROJECT_ACCESS_KEY
+        ? getReadRpcUrl(resolveNetwork(chainId))
+        : chain.rpcUrls.default.http[0]
+    )
+  });
+}
+
 export async function readTokenBalance(params: {
   chainId: number;
   token: `0x${string}`;
   owner: `0x${string}`;
 }): Promise<bigint> {
-  const { createPublicClient, http } = await import('viem');
-  const chains = await import('viem/chains');
-  const chain = Object.values(chains).find((c) => c.id === params.chainId);
-  if (!chain) throw new Error(`No RPC configuration for chain ${params.chainId}`);
-  const client = createPublicClient({
-    chain,
-    transport: http(
-      process.env.SEQUENCE_PROJECT_ACCESS_KEY
-        ? getReadRpcUrl(resolveNetwork(params.chainId))
-        : chain.rpcUrls.default.http[0]
-    )
-  });
+  const client = await publicClient(params.chainId);
   return client.readContract({
     address: params.token,
     abi: erc20Abi,
@@ -392,20 +396,67 @@ export async function readTokenBalance(params: {
   });
 }
 
-// After funding the signer: wait until the balance is visible on chain, then a
+// Whether a mined transaction moved at least `amount` of `token` to `to`
+// (false while unknown). The token's own Transfer event is the proof: a
+// relayed wallet transaction can succeed while its inner call didn't.
+export async function transferLanded(params: {
+  chainId: number;
+  txHash: string;
+  token: `0x${string}`;
+  to: `0x${string}`;
+  amount: bigint;
+}): Promise<boolean> {
+  if (!isHex(params.txHash)) return false;
+  const client = await publicClient(params.chainId);
+  const receipt = await client
+    .getTransactionReceipt({ hash: params.txHash })
+    .catch(() => undefined);
+  if (receipt?.status !== 'success') return false;
+  const transfers = parseEventLogs({
+    abi: erc20Abi,
+    eventName: 'Transfer',
+    logs: receipt.logs.filter((log) => log.address.toLowerCase() === params.token.toLowerCase())
+  });
+  const received = transfers
+    .filter((log) => log.args.to.toLowerCase() === params.to.toLowerCase())
+    .reduce((sum, log) => sum + log.args.value, 0n);
+  return received >= params.amount;
+}
+
+// After funding the signer: wait until the funds are visible on chain, then a
 // little longer, since the service's facilitator may read from a node a block
 // or two behind and would reject the payment as unfunded.
+//
+// Visible means the balance reached what the top-up produces (`atLeast`), or,
+// once the top-up's transfer to the signer is mined, at least `enough` (this
+// payment's price). The second covers an earlier authorization settling meanwhile, which
+// lowers the balance and what's promised alike: funds leave the signer only
+// that way, so the free funds are still at least the free funds before plus
+// the top-up, which covers this payment.
 export async function waitForSignerFunds(params: {
   chainId: number;
   token: `0x${string}`;
   owner: `0x${string}`;
   atLeast: bigint;
+  // The top-up's transaction and amount, and this payment's price.
+  funding?: { txHash: string; amount: bigint; enough: bigint };
   timeoutMs?: number;
 }): Promise<void> {
   const deadline = Date.now() + (params.timeoutMs ?? 60_000);
+  let mined = false;
   for (;;) {
     const balance = await readTokenBalance(params).catch(() => -1n);
     if (balance >= params.atLeast) break;
+    if (params.funding && !mined) {
+      mined = await transferLanded({
+        chainId: params.chainId,
+        txHash: params.funding.txHash,
+        token: params.token,
+        to: params.owner,
+        amount: params.funding.amount
+      }).catch(() => false);
+    }
+    if (params.funding && mined && balance >= params.funding.enough) break;
     if (Date.now() >= deadline) {
       throw new CliError({
         code: 'upstream_unavailable',

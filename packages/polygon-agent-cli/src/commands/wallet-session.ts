@@ -338,6 +338,8 @@ export async function sessionReport(params: {
       walletName: wallet,
       connected: false,
       next: `polygon-agent wallet login --email <email>${nameFlag(wallet)}`,
+      // Alert watches work without a connection.
+      watches: watchStatus(new Date()),
       ...version
     };
   }

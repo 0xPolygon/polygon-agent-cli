@@ -8,6 +8,7 @@ import type { CommandModule, Argv } from 'yargs';
 
 import { randomBytes } from 'node:crypto';
 
+import { isAddress } from 'viem';
 import { z } from 'zod';
 
 import type { QuotedSwap } from '../lib/trade/quote.ts';
@@ -18,10 +19,10 @@ import type { Watch } from '../lib/watch/store.ts';
 import { CliError, errorJson, jsonFail, jsonOut } from '../lib/errors.ts';
 import { chainIdFor, resolvePriceTarget } from '../lib/price-target.ts';
 import { getPriceReadings, priceKey } from '../lib/prices.ts';
-import { chainLabel, resolveSupportedSymbol } from '../lib/session/tokens.ts';
+import { chainLabel, findSupportedToken, resolveSupportedSymbol } from '../lib/session/tokens.ts';
 import { loadOmsWalletPointer } from '../lib/storage.ts';
 import { executeSwap } from '../lib/trade/execute.ts';
-import { assertTradeCovered, quoteSwap } from '../lib/trade/quote.ts';
+import { assertTradeCovered, isNativeSymbol, quoteSwap } from '../lib/trade/quote.ts';
 import { loadTrade } from '../lib/trade/state.ts';
 import {
   acknowledgeAlerts,
@@ -140,7 +141,8 @@ export function liveDeps(walletName: string): CheckDeps {
     now: () => new Date(),
     prices: (tokens) => getPriceReadings({ tokens, now: new Date() }),
     quote: ({ watch, side }) => quoteWatchTrade({ watch, side, now: new Date() }),
-    execute: (trade) => executeSwap({ trade, timeoutMs: AUTO_TRADE_TIMEOUT_MS }),
+    execute: ({ trade, notAfter }) =>
+      executeSwap({ trade, timeoutMs: AUTO_TRADE_TIMEOUT_MS, notAfter }),
     resumeTrade: async (intentId) => {
       const trade = loadTrade(intentId);
       return trade ? executeSwap({ trade, timeoutMs: RESUME_TIMEOUT_MS, send: false }) : null;
@@ -282,20 +284,29 @@ const createCommand: CommandModule<object, CreateArgs> = {
         }
       }
       const everyMs = parseDuration({ value: argv.every ?? '15m', flag: '--every' });
-      if (everyMs < MIN_INTERVAL_MS || everyMs > MAX_INTERVAL_MS) {
+      // Whole minutes, so the advised schedule is exactly the interval.
+      if (everyMs < MIN_INTERVAL_MS || everyMs > MAX_INTERVAL_MS || everyMs % 60_000 !== 0) {
         throw new CliError({
           code: 'invalid_input',
           message:
-            '--every must be between 5m and 24h (shorter checks would hammer prices and wake the assistant too often).'
+            '--every must be whole minutes between 5m and 24h (shorter checks would hammer prices and wake the assistant too often).'
         });
       }
       const expiresMs = parseDuration({ value: argv.expires ?? '30d', flag: '--expires' });
       if (expiresMs <= 0 || expiresMs > MAX_EXPIRY_MS) {
         throw new CliError({ code: 'invalid_input', message: '--expires must be at most 90d.' });
       }
-      const token = argv.token ?? '';
+      const named = argv.token ?? '';
       const chainId = argv.chain !== undefined ? chainIdFor(argv.chain) : undefined;
-      const target = await resolvePriceTarget({ token, chain: argv.chain });
+      const target = await resolvePriceTarget({ token: named, chain: argv.chain });
+      // Trades name tokens by symbol: a reviewed token given by its address
+      // trades as its symbol.
+      const token =
+        isAddress(named) &&
+        chainId !== undefined &&
+        findSupportedToken({ chainId, address: named }) !== undefined
+          ? target.symbol
+          : named;
 
       // An auto watch must be able to trade: the wallet is connected and, in
       // session mode, the token is covered. An alert watch on an uncovered
@@ -310,6 +321,20 @@ const createCommand: CommandModule<object, CreateArgs> = {
       }
       // Raised once the watch is saved.
       const notices: NewAlert[] = [];
+      // The native coin can only be sold by amount (owner mode; a session
+      // can't sell it at all).
+      if (
+        mode === 'auto' &&
+        pointer?.access !== 'session' &&
+        sellAmount !== undefined &&
+        /%$|^all$/i.test(sellAmount) &&
+        isNativeSymbol({ chainId: chainId ?? 137, symbol: token })
+      ) {
+        throw new CliError({
+          code: 'invalid_input',
+          message: `${token.toUpperCase()} is the native coin there, which sells by amount only: give --sell-amount as a number, not a share.`
+        });
+      }
       // In session mode a sell trades the covered token of the asset (ETH →
       // WETH): native coins can't be spent by the session.
       const sellToken =
@@ -330,14 +355,20 @@ const createCommand: CommandModule<object, CreateArgs> = {
               chainId
             });
           } catch (error) {
-            if (mode === 'auto' || !(error instanceof CliError) || error.code !== 'not_covered') {
+            // An alert watch spends nothing: what the session can't trade
+            // only limits what it suggests.
+            if (
+              mode === 'auto' ||
+              !(error instanceof CliError) ||
+              (error.code !== 'not_covered' && error.code !== 'native_not_supported')
+            ) {
               throw error;
             }
             notices.push({
-              kind: 'not_covered',
-              message: `${error.message} The watch only alerts; to trade it, cover it first.`,
+              kind: error.code,
+              message: `${error.message} The watch only alerts; ${error.code === 'native_not_supported' ? "this install can't make that trade" : 'to trade it, cover it first'}.`,
               ...(error.command ? { command: error.command } : {}),
-              key: `not_covered:${argv.wallet}:${token.toUpperCase()}@${chainId ?? 'any'}:${side}`
+              key: `${error.code}:${argv.wallet}:${token.toUpperCase()}@${chainId ?? 'any'}:${side}`
             });
           }
         }
@@ -476,6 +507,11 @@ const cancelCommand: CommandModule<object, { id?: string }> = {
       jsonOut({
         ok: true,
         watch: describeWatch(cancelled.watch),
+        ...(cancelled.watch.pendingTrade
+          ? {
+              note: `Its auto ${cancelled.watch.pendingTrade.side} (intent ${cancelled.watch.pendingTrade.intentId}) is still settling; keep the recurring check until it reports.`
+            }
+          : {}),
         ...(scheduleAdvice(cancelled.remaining)
           ? { schedule: scheduleAdvice(cancelled.remaining) }
           : { hint: 'No active watches left; the recurring watch check can be removed.' })

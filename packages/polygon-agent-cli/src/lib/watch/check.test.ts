@@ -461,4 +461,121 @@ describe('watch check', () => {
     expect(loadWatches()[0]).toMatchObject({ buyArmed: true });
     expect(loadWatches()[0].pendingTrade).toBeUndefined();
   });
+
+  it('re-reads a price that aged while earlier watches traded, before acting on it', async () => {
+    saveWatches([
+      watch({ id: 'w_1', mode: 'auto', buyAmountUsd: 1 }),
+      watch({ id: 'w_2', mode: 'auto', buyAmountUsd: 1 })
+    ]);
+    const d = deps({
+      // Each trade takes 6 minutes.
+      execute: vi.fn(async () => {
+        clock = new Date(clock.getTime() + 6 * 60_000);
+        return trade('completed');
+      })
+    });
+    await runCheck(d);
+    // The batch, then a fresh read for w_2 once its reading was 6 minutes old.
+    expect(d.prices).toHaveBeenCalledTimes(2);
+    expect(d.quote).toHaveBeenCalledTimes(2);
+  });
+
+  it("doesn't act on an aged price it can't re-read, and keeps the level armed", async () => {
+    saveWatches([
+      watch({ id: 'w_1', mode: 'auto', buyAmountUsd: 1 }),
+      watch({ id: 'w_2', mode: 'auto', buyAmountUsd: 1 })
+    ]);
+    let calls = 0;
+    const d = deps({
+      prices: vi.fn(async () => {
+        if (++calls > 1) throw new Error('Trails down');
+        return new Map([
+          [priceKey(ETH), { usd: 1900, updatedAt: clock.toISOString(), stale: false }]
+        ]);
+      }),
+      execute: vi.fn(async () => {
+        clock = new Date(clock.getTime() + 6 * 60_000);
+        return trade('completed');
+      })
+    });
+    await runCheck(d);
+    expect(d.quote).toHaveBeenCalledTimes(1);
+    expect(loadWatches().find((w) => w.id === 'w_2')?.buyArmed).toBe(true);
+  });
+
+  it('a watch that expires while an earlier one trades is expired, not traded', async () => {
+    saveWatches([
+      watch({ id: 'w_1', mode: 'auto', buyAmountUsd: 1 }),
+      watch({
+        id: 'w_2',
+        mode: 'auto',
+        buyAmountUsd: 1,
+        expiresAt: new Date(T0.getTime() + 30_000).toISOString()
+      })
+    ]);
+    const d = deps({
+      execute: vi.fn(async () => {
+        clock = new Date(clock.getTime() + 60_000);
+        return trade('completed');
+      })
+    });
+    const result = await runCheck(d);
+    expect(d.quote).toHaveBeenCalledTimes(1);
+    expect(loadWatches().find((w) => w.id === 'w_2')?.status).toBe('expired');
+    expect(result.alerts.map((a) => a.kind)).toContain('watch_expired');
+  });
+
+  it('no deposit after the watch expires or its price goes stale, whichever is first', async () => {
+    const expiresAt = new Date(T0.getTime() + 60_000);
+    saveWatches([watch({ mode: 'auto', buyAmountUsd: 1, expiresAt: expiresAt.toISOString() })]);
+    const d = deps();
+    await runCheck(d);
+    expect(d.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ notAfter: expiresAt.getTime() })
+    );
+
+    fs.rmSync(path.join(HOME, 'watches.json'), { force: true });
+    saveWatches([watch({ mode: 'auto', buyAmountUsd: 1 })]);
+    const d2 = deps();
+    await runCheck(d2);
+    expect(d2.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ notAfter: T0.getTime() + 5 * 60_000 })
+    );
+  });
+
+  it('a deadline passing before the deposit keeps the level armed: nothing was sent', async () => {
+    saveWatches([watch({ mode: 'auto', buyAmountUsd: 1 })]);
+    saved = trade('quoted');
+    const d = deps({
+      execute: vi.fn(async () => {
+        throw new CliError({
+          code: 'quote_expired',
+          message: 'The deadline passed; nothing was sent.'
+        });
+      })
+    });
+    const result = await runCheck(d);
+    expect(result.alerts).toEqual([]);
+    expect(loadWatches()[0]).toMatchObject({ buyArmed: true });
+  });
+
+  it("an alert that can't be written isn't lost: the next check delivers it", async () => {
+    saveWatches([watch()]);
+    const append = vi.spyOn(fs, 'appendFileSync').mockImplementationOnce(() => {
+      throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' });
+    });
+    await expect(runCheck(deps())).rejects.toThrow('ENOSPC');
+    append.mockRestore();
+    // The crossing is consumed, but its alert is owed.
+    expect(loadWatches()[0]).toMatchObject({ buyArmed: false });
+    expect(loadWatches()[0].outbox).toHaveLength(1);
+
+    clock = new Date(T0.getTime() + 60_000);
+    const result = await runCheck(deps());
+    expect(result.alerts.map((a) => a.kind)).toEqual(['watch_triggered']);
+    expect(loadWatches()[0].outbox).toBeUndefined();
+    // Delivered once, however often it's retried.
+    await runCheck(deps());
+    expect(kinds()).toEqual(['watch_triggered']);
+  });
 });

@@ -56,7 +56,7 @@ vi.mock('../lib/prices.ts', async (importOriginal) => {
 });
 
 const { watchCommand, alertsCommand, quoteWatchTrade } = await import('./watch.ts');
-const { loadWatches } = await import('../lib/watch/store.ts');
+const { loadWatches, saveWatches } = await import('../lib/watch/store.ts');
 const { raiseAlert, readAlerts } = await import('../lib/watch/alerts.ts');
 const { CliError } = await import('../lib/errors.ts');
 const { writeApprovedPlan } = await import('../lib/session/state.ts');
@@ -438,5 +438,180 @@ describe('quoteWatchTrade', () => {
     expect(calls[0]).toMatchObject({ chain: '8453', toChain: '8453' });
     expect(calls[1]).toMatchObject({ toChain: '8453' });
     expect(calls[1]).not.toHaveProperty('chain');
+  });
+});
+
+describe('watch create, what the trade can actually do', () => {
+  it('an auto sell needs USDC covered on its chain too', async () => {
+    writeApprovedPlan({
+      wallet: 'main',
+      approved: {
+        approvedAt: '2026-10-07T00:00:00Z',
+        plan: {
+          allowanceUsd: 20,
+          days: 365,
+          expiresAt: '2027-10-07T00:00:00Z',
+          chains: [
+            {
+              chainId: 1,
+              grants: [
+                {
+                  symbol: 'WETH',
+                  token: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+                  decimals: 18,
+                  kind: 'eth',
+                  limit: 10n ** 16n,
+                  priceUsd: 2500
+                }
+              ]
+            }
+          ]
+        }
+      }
+    });
+    const out = await run([
+      'watch',
+      'create',
+      '--token',
+      'ETH',
+      '--chain',
+      'ethereum',
+      '--mode',
+      'auto',
+      '--sell-above',
+      '3000',
+      '--sell-amount',
+      '0.001'
+    ]);
+    expect(out).toMatchObject({ ok: false, code: 'not_covered' });
+    expect(String(out.error)).toMatch(/USDC/);
+  });
+
+  it('an alert watch on a native coin the session cannot sell is still created', async () => {
+    const out = await run([
+      'watch',
+      'create',
+      '--token',
+      'AVAX',
+      '--chain',
+      'avalanche',
+      '--mode',
+      'alert',
+      '--sell-above',
+      '3000'
+    ]);
+    expect(out).toMatchObject({
+      ok: true,
+      alerts: [expect.objectContaining({ kind: 'native_not_supported' })]
+    });
+  });
+
+  it('a covered token given by its address trades as its symbol', async () => {
+    const out = await run([
+      'watch',
+      'create',
+      '--token',
+      '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619',
+      '--chain',
+      'polygon',
+      '--mode',
+      'auto',
+      '--buy-below',
+      '2000',
+      '--buy-amount',
+      '5'
+    ]);
+    expect(out).toMatchObject({ ok: true });
+    expect(loadWatches()[0]).toMatchObject({ token: 'WETH' });
+  });
+
+  it('owner mode: the native coin sells by amount, not by share', async () => {
+    fake.pointer = {
+      walletAddress: '0xd384ea24ca0B3a5e4BB35935C611E3dCB68Fd08e',
+      loginMethod: 'email',
+      createdAt: 'x',
+      access: 'owner'
+    };
+    for (const amount of ['all', '50%']) {
+      const out = await run([
+        'watch',
+        'create',
+        '--token',
+        'ETH',
+        '--chain',
+        'ethereum',
+        '--mode',
+        'auto',
+        '--sell-above',
+        '3000',
+        '--sell-amount',
+        amount
+      ]);
+      expect(out).toMatchObject({ ok: false, code: 'invalid_input' });
+    }
+    expect(
+      await run([
+        'watch',
+        'create',
+        '--token',
+        'ETH',
+        '--chain',
+        'ethereum',
+        '--mode',
+        'auto',
+        '--sell-above',
+        '3000',
+        '--sell-amount',
+        '0.01'
+      ])
+    ).toMatchObject({ ok: true });
+  });
+
+  it('intervals are whole minutes, so the advised schedule is exact', async () => {
+    const out = await run([
+      'watch',
+      'create',
+      '--token',
+      'ETH',
+      '--mode',
+      'alert',
+      '--buy-below',
+      '2000',
+      '--every',
+      '5.4m'
+    ]);
+    expect(out).toMatchObject({ ok: false, code: 'invalid_input' });
+  });
+
+  it('cancelling the last watch keeps the check while its trade is settling', async () => {
+    await run(['watch', 'create', '--token', 'ETH', '--mode', 'alert', '--buy-below', '2000']);
+    const [w] = loadWatches();
+    saveWatches([{ ...w, pendingTrade: { intentId: 'intent-1', side: 'buy' } }]);
+    const out = await run(['watch', 'cancel', w.id]);
+    expect(out).toMatchObject({
+      ok: true,
+      schedule: { command: 'polygon-agent watch check', pendingTrades: 1 }
+    });
+    expect(String(out.note)).toMatch(/still settling/);
+  });
+});
+
+describe('wallet status without a connection', () => {
+  it('still reports the watches, their alerts and missed checks', async () => {
+    await run(['watch', 'create', '--token', 'ETH', '--mode', 'alert', '--buy-below', '2000']);
+    const [w] = loadWatches();
+    saveWatches([{ ...w, createdAt: new Date(Date.now() - 86_400_000).toISOString() }]);
+    raiseAlert({ alert: { kind: 'watch_triggered', message: 'ETH crossed' }, now: new Date() });
+    fake.pointer = null;
+    const { sessionReport } = await import('./wallet-session.ts');
+    const report = await sessionReport({ wallet: 'main', withVersion: false });
+    expect(report).toMatchObject({
+      connected: false,
+      watches: {
+        active: 1,
+        unacknowledgedCount: 1,
+        warning: expect.stringMatching(/haven't been checked/)
+      }
+    });
   });
 });

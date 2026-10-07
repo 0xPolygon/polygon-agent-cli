@@ -14,12 +14,18 @@ export function formatDuration(ms: number): string {
 }
 
 // The recurring task the assistant should keep: `watch check` at the shortest
-// active interval.
+// active interval, for as long as any watch is active or still has an auto
+// trade to follow up (a cancelled or expired one included).
 export function scheduleAdvice(watches: Watch[]): Record<string, unknown> | undefined {
-  const active = watches.filter((watch) => watch.status === 'active');
-  if (active.length === 0) return undefined;
-  const every = Math.max(MIN_INTERVAL_MS, Math.min(...active.map((watch) => watch.everyMs)));
-  return { command: 'polygon-agent watch check', every: formatDuration(every) };
+  const needed = watches.filter((watch) => watch.status === 'active' || watch.pendingTrade);
+  if (needed.length === 0) return undefined;
+  const pending = needed.filter((watch) => watch.pendingTrade).length;
+  const every = Math.max(MIN_INTERVAL_MS, Math.min(...needed.map((watch) => watch.everyMs)));
+  return {
+    command: 'polygon-agent watch check',
+    every: formatDuration(every),
+    ...(pending ? { pendingTrades: pending } : {})
+  };
 }
 
 // For `wallet status`: the watch alerts not yet acknowledged, and whether
@@ -50,13 +56,15 @@ export function watchStatus(now: Date): Record<string, unknown> {
         }
       : {})
   };
-  if (active.length > 0) {
-    const limit = 3 * Math.min(...active.map((watch) => watch.everyMs));
-    // Measured from the later of the last check and the oldest active watch
+  // Active watches, and ended ones with a trade still to follow up.
+  const needed = watches.filter((watch) => watch.status === 'active' || watch.pendingTrade);
+  if (needed.length > 0) {
+    const limit = 3 * Math.min(...needed.map((watch) => watch.everyMs));
+    // Measured from the later of the last check and the oldest such watch
     // (a check long before any of these existed says nothing about them).
     const since = Math.max(
       lastCheckAt ? Date.parse(lastCheckAt) : 0,
-      Math.min(...active.map((watch) => Date.parse(watch.createdAt)))
+      Math.min(...needed.map((watch) => Date.parse(watch.createdAt)))
     );
     if (now.getTime() - since > limit) {
       result.warning = lastCheckAt
