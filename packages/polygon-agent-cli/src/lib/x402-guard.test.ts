@@ -9,7 +9,8 @@ process.env.POLYGON_AGENT_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-x402-
 const {
   checkX402Price,
   parseBazaarPayment,
-  payWithinLimits,
+  releaseX402Reservation,
+  reserveX402Payment,
   recordX402Payment,
   x402PriceUsd,
   x402SpentLastDay
@@ -90,9 +91,11 @@ describe('parseBazaarPayment', () => {
 
   it('encodes exactly transfer(recipient, amount) and values that amount', () => {
     const payment = parseBazaarPayment({
-      payment_address: recipient,
-      amount_usdc: 0.02,
-      supported_chains: [{ chain: 'polygon', chainId: 137 }]
+      body: {
+        payment_address: recipient,
+        amount_usdc: 0.02,
+        supported_chains: [{ chain: 'polygon', chainId: 137 }]
+      }
     });
     expect(payment).toMatchObject({
       chainId: 137,
@@ -111,9 +114,11 @@ describe('parseBazaarPayment', () => {
     const crafted = `0x${'0'.repeat(24)}${'ab'.repeat(20)}${'ff'.repeat(32)}`;
     expect(() =>
       parseBazaarPayment({
-        payment_address: crafted,
-        amount_usdc: 0.01,
-        supported_chains: [{ chain: 'polygon', chainId: 137 }]
+        body: {
+          payment_address: crafted,
+          amount_usdc: 0.01,
+          supported_chains: [{ chain: 'polygon', chainId: 137 }]
+        }
       })
     ).toThrow(expect.objectContaining({ code: 'invalid_input' }));
   });
@@ -121,9 +126,11 @@ describe('parseBazaarPayment', () => {
   it.each([-1, 0, Number.NaN])('refuses an amount of %s', (amount) => {
     expect(() =>
       parseBazaarPayment({
-        payment_address: recipient,
-        amount_usdc: amount,
-        supported_chains: [{ chain: 'polygon', chainId: 137 }]
+        body: {
+          payment_address: recipient,
+          amount_usdc: amount,
+          supported_chains: [{ chain: 'polygon', chainId: 137 }]
+        }
       })
     ).toThrow(expect.objectContaining({ code: 'invalid_input' }));
   });
@@ -131,89 +138,103 @@ describe('parseBazaarPayment', () => {
   it('refuses a payment token it cannot value', () => {
     expect(() =>
       parseBazaarPayment({
-        payment_address: recipient,
-        amount_usdc: 0.01,
-        supported_chains: [{ chain: 'polygon', chainId: 137 }],
-        usdc_contracts: { polygon: '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619' }
+        body: {
+          payment_address: recipient,
+          amount_usdc: 0.01,
+          supported_chains: [{ chain: 'polygon', chainId: 137 }],
+          usdc_contracts: { polygon: '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619' }
+        }
       })
     ).toThrow(expect.objectContaining({ code: 'invalid_input' }));
   });
 });
 
-describe('payWithinLimits', () => {
+describe('reserveX402Payment', () => {
   const spent = () => x402SpentLastDay(new Date());
+  const reserve = (usd: number, fund: () => Promise<unknown> = async () => ({})) =>
+    reserveX402Payment({ walletName: 'main', url, usd, yes: true, fund });
 
-  it('logs a payment once the wallet paid', async () => {
-    await payWithinLimits({
-      walletName: 'main',
-      url,
-      usd: 0.5,
-      pay: async () => ({ txHash: '0xpaid' })
-    });
-    expect(spent()).toBe(0.5);
+  it('counts every payment at its price, even when the signer already held the funds', async () => {
+    // Two $6 payments paid from signer leftovers (no top-up): the second must not pass $10.
+    await reserve(6);
+    await expect(reserve(6)).rejects.toMatchObject({ code: 'daily_limit_exceeded' });
+    expect(spent()).toBe(6);
   });
 
-  it('logs only what left the wallet when the signer already held part of it', async () => {
-    await payWithinLimits({
-      walletName: 'main',
-      url,
-      usd: 0.5,
-      pay: async () => ({ txHash: undefined, fundedUsd: 0 })
+  it('writes the reservation before anything is sent, so a crash cannot lose it', async () => {
+    let seenDuringFunding = -1;
+    await reserve(0.5, async () => {
+      seenDuringFunding = spent();
+      return {};
     });
-    expect(spent()).toBe(0);
-    await payWithinLimits({
-      walletName: 'main',
-      url,
-      usd: 0.5,
-      pay: async () => ({ txHash: '0xpart', fundedUsd: 0.2 })
-    });
-    expect(spent()).toBe(0.2);
+    expect(seenDuringFunding).toBe(0.5);
   });
 
-  it('checks the limits before paying', async () => {
-    const pay = async () => ({ txHash: '0x' });
-    await expect(payWithinLimits({ walletName: 'main', url, usd: 2, pay })).rejects.toMatchObject({
-      code: 'confirmation_required'
-    });
-    expect(spent()).toBe(0);
-  });
-
-  it('does not log a refusal that sent nothing, but logs a failure that may have paid', async () => {
+  it('releases a refusal that certainly sent nothing, keeps a failure that may have', async () => {
     await expect(
-      payWithinLimits({
-        walletName: 'main',
-        url,
-        usd: 0.3,
-        pay: async () => {
-          throw new CliError({ code: 'insufficient_balance', message: 'no' });
-        }
+      reserve(0.3, async () => {
+        throw new CliError({ code: 'insufficient_balance', message: 'no' });
       })
     ).rejects.toThrow('no');
     expect(spent()).toBe(0);
     await expect(
-      payWithinLimits({
-        walletName: 'main',
-        url,
-        usd: 0.3,
-        pay: async () => {
-          throw new Error('timeout');
-        }
+      reserve(0.3, async () => {
+        throw new Error('timeout');
       })
     ).rejects.toThrow('timeout');
     expect(spent()).toBe(0.3);
   });
 
-  it('runs one payment at a time, so two cannot both pass the daily limit', async () => {
-    updateConfig({ x402_daily_max: 1 });
-    const slow = () =>
-      payWithinLimits({
+  it('the caller releases a reservation once the service certainly was not paid', async () => {
+    const { reservationId } = await reserve(0.4);
+    expect(spent()).toBe(0.4);
+    releaseX402Reservation(reservationId);
+    expect(spent()).toBe(0);
+  });
+
+  it('checks the limits before reserving or sending', async () => {
+    let funded = false;
+    await expect(
+      reserveX402Payment({
         walletName: 'main',
         url,
-        usd: 0.6,
-        pay: () => new Promise<{ txHash: string }>((r) => setTimeout(() => r({ txHash: '0x' }), 50))
-      });
+        usd: 2,
+        fund: async () => {
+          funded = true;
+        }
+      })
+    ).rejects.toMatchObject({ code: 'confirmation_required' });
+    expect(funded).toBe(false);
+    expect(spent()).toBe(0);
+  });
+
+  it('runs one payment at a time, so two cannot both pass the daily limit', async () => {
+    updateConfig({ x402_daily_max: 1 });
+    const slow = () => reserve(0.6, () => new Promise((r) => setTimeout(r, 50)));
     const results = await Promise.allSettled([slow(), slow()]);
     expect(results.map((r) => r.status).sort()).toEqual(['fulfilled', 'rejected']);
     expect(spent()).toBe(0.6);
+  });
+});
+
+describe('parseBazaarPayment with --chain', () => {
+  const body = {
+    payment_address: '0x1D17C0F90A0b3dFb5124C2FF56B33a0D2E202e1d',
+    amount_usdc: 0.01,
+    supported_chains: [
+      { chain: 'polygon', chainId: 137 },
+      { chain: 'base', chainId: 8453 }
+    ],
+    usdc_contracts: { base: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' }
+  };
+
+  it('pays on the chain asked for', () => {
+    expect(parseBazaarPayment({ body, chainId: 8453 })).toMatchObject({ chainId: 8453 });
+  });
+
+  it('refuses a chain the service does not take', () => {
+    expect(() => parseBazaarPayment({ body, chainId: 42161 })).toThrow(
+      expect.objectContaining({ code: 'invalid_input' })
+    );
   });
 });

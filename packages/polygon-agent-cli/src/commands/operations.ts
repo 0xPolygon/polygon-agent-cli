@@ -16,6 +16,7 @@ import { isWalletFunded } from '../lib/indexer.ts';
 import { resolveBroadcast, withWriteFlags } from '../lib/mode.ts';
 import { getOmsClient, loginUiBaseUrl } from '../lib/oms-client.ts';
 import { checkSessionSpend } from '../lib/session/run-tx.ts';
+import { listTransfers } from '../lib/session/transfer.ts';
 import { loadOmsWalletPointer, loadBuilderConfig } from '../lib/storage.ts';
 import { resolveErc20BySymbol } from '../lib/token-directory.ts';
 import { getTokenConfig } from '../lib/tokens.ts';
@@ -34,8 +35,9 @@ import {
 import {
   isBazaarBody,
   parseBazaarPayment,
-  payWithinLimits,
   readTokenBalance,
+  releaseX402Reservation,
+  reserveX402Payment,
   waitForSignerFunds,
   x402PriceUsd,
   x402UsdText
@@ -1831,6 +1833,17 @@ function printX402Preview(params: {
 }
 
 // --- x402-pay ---
+// A response body: parsed JSON when it parses, else the text. A malformed body
+// must not hide what was paid.
+async function readBody(response: Response): Promise<unknown> {
+  const text = await response.text().catch(() => '');
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
 export const x402PayCommand: CommandModule = {
   command: 'x402-pay',
   describe: 'Call x402-protected resource (preview by default)',
@@ -1916,10 +1929,7 @@ export const x402PayCommand: CommandModule = {
         })()
       });
       if (probe.status !== 402) {
-        const contentType = probe.headers.get('content-type') || '';
-        const data = contentType.includes('application/json')
-          ? await probe.json()
-          : await probe.text();
+        const data = await readBody(probe);
         console.log(JSON.stringify({ ok: probe.ok, status: probe.status, data }));
         return;
       }
@@ -1944,7 +1954,10 @@ export const x402PayCommand: CommandModule = {
       // Not a general x402 standard; do not apply to other endpoints.
       const isX402Bazaar = new URL(url).hostname === 'x402-api.onrender.com';
       if (isX402Bazaar && isBazaarBody(probeBody)) {
-        const payment = parseBazaarPayment(probeBody);
+        const payment = parseBazaarPayment({
+          body: probeBody,
+          chainId: argv.chain ? resolveNetwork(String(argv.chain)).chainId : undefined
+        });
         const payChain = payment.chain;
         const payChainId = payment.chainId;
         const payRecipient = payment.recipient;
@@ -1971,13 +1984,23 @@ export const x402PayCommand: CommandModule = {
           });
           return;
         }
-        const fundResult = await payWithinLimits({
+        // The transfer is the payment itself: a refusal raised after a session
+        // transfer was recorded (e.g. while polling it) may still have paid.
+        const recordedBefore = new Set(
+          session.access === 'session' ? listTransfers(walletName).map((r) => r.id) : []
+        );
+        const { funded: fundResult } = await reserveX402Payment({
           walletName,
           url,
           usd: priceUsd,
           maxUsd,
           yes,
-          pay: () => {
+          sentAnything: () =>
+            session.access === 'session' &&
+            listTransfers(walletName).some(
+              (r) => !recordedBefore.has(r.id) && !(r.state === 'failed' && r.neverSent === true)
+            ),
+          fund: () => {
             process.stderr.write(
               `Sending ${amountUsdc} USDC to ${payRecipient} on ${payChain}...\n`
             );
@@ -2036,10 +2059,7 @@ export const x402PayCommand: CommandModule = {
           body: body || undefined
         });
 
-        const contentType = response.headers.get('content-type') || '';
-        const data = contentType.includes('application/json')
-          ? await response.json()
-          : await response.text();
+        const data = await readBody(response);
 
         console.log(
           JSON.stringify(
@@ -2099,21 +2119,32 @@ export const x402PayCommand: CommandModule = {
         [...list].sort((a, b) => (BigInt(a.amount) < BigInt(b.amount) ? -1 : 1))[0];
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const selectAccept = (_version: number, accepts: any[]): any => {
-        const evm = (accepts || []).filter(
+        // Only what this client can sign: the plain EVM "exact" scheme.
+        const signable = (accepts || []).filter(
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (r: any) => typeof r?.network === 'string' && r.network.startsWith('eip155:')
+          (r: any) =>
+            typeof r?.network === 'string' &&
+            r.network.startsWith('eip155:') &&
+            r.scheme === 'exact' &&
+            isPlainTransfer(r) &&
+            // An EIP-3009 authorization; Permit2 needs an allowance the signer lacks.
+            (r.extra?.assetTransferMethod === undefined ||
+              r.extra?.assetTransferMethod === 'eip3009')
         );
-        const preferred = evm.filter((r) => r.network === `eip155:${preferredChainId}`);
-        const preferredPlain = preferred.filter(isPlainTransfer);
-        const evmPlain = evm.filter(isPlainTransfer);
-        if (preferredPlain.length) return cheapest(preferredPlain);
+        const preferred = signable.filter((r) => r.network === `eip155:${preferredChainId}`);
         if (preferred.length) return cheapest(preferred);
-        if (evmPlain.length) return cheapest(evmPlain);
-        return accepts?.[0];
+        if (signable.length) return cheapest(signable);
+        return undefined;
       };
 
       const req = selectAccept(paymentRequired.x402Version ?? 2, paymentRequired.accepts);
-      if (!req) throw new Error('No payment requirements in 402 response');
+      if (!req) {
+        throw new CliError({
+          code: 'invalid_input',
+          message:
+            "The service offers no payment option the CLI can sign (a plain 'exact' transfer on an EVM chain); nothing was paid."
+        });
+      }
 
       const { amount, asset, network: paymentNetwork } = req;
 
@@ -2181,23 +2212,28 @@ export const x402PayCommand: CommandModule = {
         return;
       }
 
-      const signerBalance = await readTokenBalance({
-        chainId: resolvedNetwork.chainId,
-        token: asset,
-        owner: eoaAccount.address
-      });
+      const signerFunds = () =>
+        readTokenBalance({
+          chainId: resolvedNetwork.chainId,
+          token: asset,
+          owner: eoaAccount.address
+        });
+      // Read under the x402 lock (inside fund), so two calls can't both count
+      // on the same leftover.
+      let signerBalance = 0n;
 
       // Funds left in the signer by an earlier call that wasn't settled pay
       // first; the wallet funds only the shortfall.
-      const fundResult = await payWithinLimits({
+      const { reservationId, funded: fundResult } = await reserveX402Payment({
         walletName,
         url,
         usd: priceUsd,
         maxUsd,
         yes,
-        pay: async () => {
+        fund: async (): Promise<{ txHash?: string }> => {
+          signerBalance = await signerFunds();
           const shortfall = fundAmount > signerBalance ? fundAmount - signerBalance : 0n;
-          if (shortfall === 0n) return { txHash: undefined, fundedUsd: 0 };
+          if (shortfall === 0n) return { txHash: undefined };
           process.stderr.write(
             `Funding EOA ${eoaAccount.address} with ${shortfall} units of ${asset}...\n`
           );
@@ -2220,24 +2256,29 @@ export const x402PayCommand: CommandModule = {
             purpose: 'x402',
             ref: url
           });
-          return {
-            txHash: result.txHash,
-            fundedUsd: x402PriceUsd({ chainId: resolvedNetwork.chainId, asset, amount: shortfall })
-          };
+          return { txHash: result.txHash };
         }
       });
       if (fundResult.txHash) {
         process.stderr.write(`Funded via tx: ${fundResult.txHash}\n`);
-        await waitForSignerFunds({
-          chainId: resolvedNetwork.chainId,
-          token: asset,
-          owner: eoaAccount.address,
-          atLeast: fundAmount
-        });
+        try {
+          await waitForSignerFunds({
+            chainId: resolvedNetwork.chainId,
+            token: asset,
+            owner: eoaAccount.address,
+            atLeast: fundAmount
+          });
+        } catch (error) {
+          // Nothing was signed, so the service can't have been paid.
+          releaseX402Reservation(reservationId);
+          throw error;
+        }
       }
 
       // On the paid request, sign only the requirement that was valued and
       // funded: same network, asset and scheme, for no more than that amount.
+      let refusedTerms = false;
+      let signed = false;
       const selectValued: SelectPaymentRequirements = (_version, accepts) => {
         const match = accepts.find(
           (r) =>
@@ -2248,10 +2289,12 @@ export const x402PayCommand: CommandModule = {
             BigInt(r.amount || 0) <= fundAmount
         );
         if (!match) {
+          refusedTerms = true;
           throw new Error(
             'The service changed its payment terms after they were checked; it was not paid more.'
           );
         }
+        signed = true;
         return match;
       };
 
@@ -2278,15 +2321,25 @@ export const x402PayCommand: CommandModule = {
           body: body || undefined
         });
       } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        // Refused before signing: certainly unpaid. Otherwise the signed
+        // payment may have reached the service, so it stays counted.
+        // Nothing signed yet (or refused): certainly unpaid. After signing, the
+        // payment may have reached the service, so it stays counted.
+        const unsent = refusedTerms || !signed;
+        if (unsent) releaseX402Reservation(reservationId);
         console.error(
           JSON.stringify(
             {
               ok: false,
               code: 'upstream_error',
-              error: `The paid request failed (${error instanceof Error ? error.message : String(error)}), so the service wasn't paid. The ${x402UsdText(priceUsd)} stays in the signer ${eoaAccount.address} and pays for a later call.`,
+              error: unsent
+                ? `The paid request failed before paying (${reason}). The ${x402UsdText(priceUsd)} stays in the signer ${eoaAccount.address} and pays for a later call.`
+                : `The paid request failed (${reason}). The payment may or may not have reached the service: the ${x402UsdText(priceUsd)} is either with the service or still in the signer ${eoaAccount.address}.`,
               walletAddress: session.walletAddress,
               signerAddress: eoaAccount.address,
-              paidUsd: 0,
+              paidUsd: unsent ? 0 : null,
+              ...(unsent ? {} : { paymentUncertain: true }),
               funded: { amount, asset, txHash: fundResult.txHash }
             },
             bigintReplacer,
@@ -2307,10 +2360,21 @@ export const x402PayCommand: CommandModule = {
         }
       }
 
-      const contentType = response.headers.get('content-type') || '';
-      const data = contentType.includes('application/json')
-        ? await response.json()
-        : await response.text();
+      const data = await readBody(response);
+
+      // Paid: a settlement that says so, or a success after signing. Unpaid:
+      // nothing was signed, or the service says it didn't settle (a failed
+      // settlement or a fresh 402) and the signer still holds the funds, since
+      // a facilitator can settle and still report failure. Anything else is
+      // unclear and stays counted against the daily limit.
+      const paid = signed && (payment?.success === true || (response.ok && !payment));
+      let unpaid = !signed;
+      if (signed && !paid && (payment ? payment.success !== true : response.status === 402)) {
+        const after = await signerFunds().catch(() => undefined);
+        unpaid = after !== undefined && after >= fundAmount;
+      }
+      if (unpaid) releaseX402Reservation(reservationId);
+      const uncertain = !paid && !unpaid;
 
       console.log(
         JSON.stringify(
@@ -2319,16 +2383,21 @@ export const x402PayCommand: CommandModule = {
             status: response.status,
             walletAddress: session.walletAddress,
             signerAddress: eoaAccount.address,
-            paidUsd: response.ok || payment?.success === true ? priceUsd : 0,
+            paidUsd: paid ? priceUsd : uncertain ? null : 0,
+            ...(uncertain ? { paymentUncertain: true } : {}),
             ...(response.ok
               ? {}
-              : payment?.success === true
+              : paid
                 ? {
                     error: `Paid ${x402UsdText(priceUsd)}, but the service returned ${response.status}. x402 has no refunds.`
                   }
-                : {
-                    error: `The service returned ${response.status} and didn't take the payment. The ${x402UsdText(priceUsd)} stays in the signer ${eoaAccount.address} and pays for a later call.`
-                  }),
+                : unpaid
+                  ? {
+                      error: `The service returned ${response.status} and didn't take the payment. The ${x402UsdText(priceUsd)} stays in the signer ${eoaAccount.address} and pays for a later call.`
+                    }
+                  : {
+                      error: `The service returned ${response.status} without saying whether it took the payment. The ${x402UsdText(priceUsd)} is either with the service or still in the signer ${eoaAccount.address}.`
+                    }),
             funded: {
               amount,
               asset,

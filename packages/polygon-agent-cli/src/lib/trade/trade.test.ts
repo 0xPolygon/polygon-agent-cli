@@ -32,7 +32,8 @@ const fake = vi.hoisted(() => ({
 vi.mock('../builder-provision.ts', () => ({
   ensureBuilderAccess: async () => undefined,
   ensureBuilderAccessKey: async () => ({ provisioned: false, reason: 'existing' }),
-  makeDefaultProvisionDeps: () => ({})
+  makeDefaultProvisionDeps: () => ({}),
+  provisionBuilderOnce: async () => ({ provisioned: false, reason: 'existing' })
 }));
 vi.mock('../storage.ts', async (importOriginal) => {
   const fs = await import('node:fs');
@@ -278,6 +279,16 @@ describe('quoteSwap in session mode', () => {
     expect(trade.origin.symbol).toBe('USDT');
   });
 
+  it('skips a stablecoin whose session is gone, even though it is in the plan', async () => {
+    balances([
+      { chainId: 137, token: USDC, balance: 50_000_000n },
+      { chainId: 137, token: USDT, balance: 50_000_000n }
+    ]);
+    sessionWith({ [USDT]: 100_000_000n });
+    const { trade } = await quote();
+    expect(trade.origin.symbol).toBe('USDT');
+  });
+
   it('insufficient_balance when no covered stablecoin can pay', async () => {
     balances([{ chainId: 137, token: USDC, balance: 100n }]);
     await expect(quote()).rejects.toMatchObject({ code: 'insufficient_balance' });
@@ -448,6 +459,20 @@ describe('executeSwap', () => {
       throw new Error('execute failed');
     });
     await expect(executeSwap({ trade })).rejects.toThrow('execute failed');
+    expect(loadTrade(trade.intentId)?.state).toBe('depositing');
+    await expect(executeSwap({ trade })).rejects.toMatchObject({ code: 'upstream_unavailable' });
+    expect(fake.runTx).toHaveBeenCalledTimes(1);
+  });
+
+  it('session_revoked after the transfer was recorded is not proof nothing was sent', async () => {
+    const { trade } = await quote();
+    const { CliError } = await import('../errors.ts');
+    fake.runTx.mockImplementationOnce(async () => {
+      // Executed, then polling the status hit a revoked key.
+      transferRecord({ id: 't5', ref: trade.intentId, patch: { state: 'uncertain' } });
+      throw new CliError({ code: 'session_revoked', message: 'revoked' });
+    });
+    await expect(executeSwap({ trade })).rejects.toThrow('revoked');
     expect(loadTrade(trade.intentId)?.state).toBe('depositing');
     await expect(executeSwap({ trade })).rejects.toMatchObject({ code: 'upstream_unavailable' });
     expect(fake.runTx).toHaveBeenCalledTimes(1);

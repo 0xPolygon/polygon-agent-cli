@@ -62,7 +62,8 @@ const httpError = (status: number, name?: string) =>
 vi.mock('../lib/builder-provision.ts', () => ({
   ensureBuilderAccess: async () => undefined,
   ensureBuilderAccessKey: async () => ({ provisioned: false, reason: 'existing' }),
-  makeDefaultProvisionDeps: () => ({})
+  makeDefaultProvisionDeps: () => ({}),
+  provisionBuilderOnce: async () => ({ provisioned: false, reason: 'existing' })
 }));
 vi.mock('@polygonlabs/oms-wallet', async (importOriginal) => {
   const real = await importOriginal<typeof OmsWallet>();
@@ -787,7 +788,39 @@ describe('replaced session keys', () => {
     expect(readRacRecord({ wallet, slot: 'rac-next' })).toBeNull();
     expect(readApprovedPlan(wallet)?.plan.days).toBe(14);
     expect(world.revoked.has(oldKey)).toBe(true);
-    expect(shown).toMatchObject({ connected: true });
+    // The very first report after recovery already shows the renewed plan.
+    expect(shown).toMatchObject({
+      connected: true,
+      allowance: { expiresAt: readApprovedPlan(wallet)?.plan.expiresAt }
+    });
+  });
+
+  it('reconnecting after an interrupted renewal keeps the recovered key', async () => {
+    await confirm(await connectStep1({ chains: 'polygon' }));
+    const yargs = (await import('yargs')).default;
+    vi.mocked(console.log).mockClear();
+    await yargs()
+      .command(allowanceCommandModule)
+      .parseAsync(['allowance', 'renew', '--days', '14', '--name', wallet]);
+    const request = String(lastJson('log').request);
+    const newKey = String(readRacRecord({ wallet, slot: 'rac-next' })?.credentialId);
+    const keysDir = path.join(stateDir(), 'keys');
+    const rename = fs.renameSync;
+    vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      if (String(from) === path.join(keysDir, 'rac-next')) throw new Error('killed');
+      return rename(from, to);
+    });
+    await confirm(request);
+    vi.mocked(fs.renameSync).mockRestore();
+
+    // The live key is parked mid-renewal; reconnecting must not replace the
+    // renewed one that recovery restores.
+    await expect(
+      handleEmailLogin({ name: wallet, email: 'owner@example.com', chains: 'polygon' })
+    ).rejects.toThrow('CLI exited');
+    expect(lastJson('error')).toMatchObject({ code: 'already_connected' });
+    expect(readRacRecord({ wallet, slot: 'rac' })?.credentialId).toBe(newKey);
+    expect(world.revoked.has(newKey)).toBe(false);
   });
 
   it('logout finishes when only the owner can revoke a key whose file is gone, and says so', async () => {

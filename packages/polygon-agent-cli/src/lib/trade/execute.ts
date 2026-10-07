@@ -117,11 +117,18 @@ async function sendDeposit(trade: TradeRecord): Promise<TradeRecord> {
       now: new Date()
     });
   } catch (error) {
-    // A refusal raised before sending: nothing went out (either mode).
-    const outcome: DepositOutcome =
-      error instanceof CliError && NOTHING_SENT_CODES.has(error.code)
-        ? { sent: false }
-        : await depositOutcome(current);
+    // A refusal raised before any transfer for this trade was recorded (a
+    // check, a busy lock): nothing went out. Once a record exists, the same
+    // codes can come from polling after execute (e.g. session_revoked), so
+    // only the reconciled records decide.
+    const refusedBeforeSending =
+      error instanceof CliError &&
+      NOTHING_SENT_CODES.has(error.code) &&
+      (current.mode !== 'session' ||
+        !listTransfers(current.walletName).some((r) => r.ref === current.intentId));
+    const outcome: DepositOutcome = refusedBeforeSending
+      ? { sent: false }
+      : await depositOutcome(current);
     if (outcome.sent === true) {
       return updateTrade({
         record: current,

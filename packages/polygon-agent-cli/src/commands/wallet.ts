@@ -12,7 +12,7 @@ import type { TxMode } from '../lib/mode.ts';
 import type { OmsLoginMethod } from '../lib/storage.ts';
 
 import { runBrowserLogin } from '../lib/browser-login.ts';
-import { ensureBuilderAccessKey, makeDefaultProvisionDeps } from '../lib/builder-provision.ts';
+import { provisionBuilderOnce } from '../lib/builder-provision.ts';
 import { CliError, jsonFail } from '../lib/errors.ts';
 import { makeLoginRelay } from '../lib/login-relay-client.ts';
 import { isTxModeSet, loadTxMode, saveTxMode } from '../lib/mode.ts';
@@ -132,7 +132,10 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
     // key (indexer and Trails quota). Best-effort: a failure never fails the
     // login; re-running `wallet login` retries it, no fresh browser auth needed.
     async function provisionBuilder(walletAddress: string): Promise<boolean> {
-      const provision = await ensureBuilderAccessKey(walletAddress, makeDefaultProvisionDeps());
+      const provision = await provisionBuilderOnce({ walletAddress }).catch((error: unknown) => ({
+        provisioned: false,
+        reason: String(error)
+      }));
       const ok = provision.provisioned || provision.reason === 'existing';
       if (!ok) {
         process.stderr.write(

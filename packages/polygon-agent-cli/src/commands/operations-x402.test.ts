@@ -1,177 +1,322 @@
+// x402-pay's standard path end to end, against a fake service: what it
+// funds, what it reports as paid, and what stays counted against the daily
+// limit.
+
+import type { SelectPaymentRequirements } from '@x402/core/client';
+import type * as X402Fetch from '@x402/fetch';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({
+import type * as Storage from '../lib/storage.ts';
+import type * as Guard from '../lib/x402-guard.ts';
+
+const fake = vi.hoisted(() => ({
   runTx: vi.fn(),
-  loadOmsWalletPointer: vi.fn(),
-  loadBuilderConfig: vi.fn(),
-  wrapFetchWithPayment: vi.fn()
+  paidFetch: vi.fn(),
+  // The payment selector the command hands the x402 client, and the offers.
+  selector: undefined as undefined | SelectPaymentRequirements,
+  accepts: [] as unknown[],
+  signerBalance: 0n,
+  home: ''
 }));
 
-vi.mock('../lib/storage.ts', () => ({
-  loadOmsWalletPointer: mocks.loadOmsWalletPointer,
-  loadBuilderConfig: mocks.loadBuilderConfig
-}));
-
-// The signer's Builder setup is provisioned on first use; nothing to do here.
-vi.mock('../lib/builder-provision.ts', () => ({
-  ensureBuilderAccess: async () => {}
-}));
-
-vi.mock('../lib/tx-dispatch.ts', () => ({
-  runTx: mocks.runTx
-}));
-
-vi.mock('viem/accounts', () => ({
-  privateKeyToAccount: () => ({
-    address: '0x1111111111111111111111111111111111111111'
-  })
-}));
-
-vi.mock('@x402/evm', () => ({
-  ExactEvmScheme: class {}
-}));
-
-vi.mock('@x402/fetch', () => {
-  class MockX402Client {
-    register() {}
-  }
-
-  class MockX402HTTPClient {
-    getPaymentRequiredResponse() {
-      return {
-        x402Version: 2,
-        accepts: [
-          {
-            amount: '1000',
-            // USDC on Polygon: the CLI only pays in stablecoins it can value.
-            asset: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359',
-            network: 'eip155:137',
-            extra: {}
-          }
-        ]
-      };
-    }
-  }
-
+vi.mock('../lib/storage.ts', async (importOriginal) => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  fake.home = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-x402-cmd-'));
   return {
-    x402Client: MockX402Client,
-    x402HTTPClient: MockX402HTTPClient,
-    wrapFetchWithPayment: mocks.wrapFetchWithPayment,
-    decodePaymentResponseHeader: vi.fn()
+    ...(await importOriginal<typeof Storage>()),
+    STORAGE_ROOT: fake.home,
+    loadOmsWalletPointer: vi.fn(async () => ({
+      walletAddress: '0xd384ea24ca0B3a5e4BB35935C611E3dCB68Fd08e',
+      loginMethod: 'email',
+      createdAt: 'x',
+      access: 'session'
+    })),
+    loadBuilderConfig: vi.fn(async () => ({
+      privateKey: `0x${'11'.repeat(32)}`,
+      accessKey: 'k'
+    }))
   };
 });
-
-import { x402PayCommand } from './operations.ts';
-
-describe('x402-pay transaction mode', () => {
-  beforeEach(() => {
-    mocks.runTx.mockReset();
-    mocks.wrapFetchWithPayment.mockReset();
-    mocks.loadOmsWalletPointer.mockResolvedValue({
-      walletAddress: '0x3333333333333333333333333333333333333333'
-    });
-    mocks.loadBuilderConfig.mockResolvedValue({
-      privateKey: '0x' + '11'.repeat(32)
-    });
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.unstubAllGlobals();
-  });
-
-  it('exposes the shared broadcast and dry-run flags', () => {
-    const options: string[] = [];
-    const yargs = {
-      option(name: string) {
-        options.push(name);
-        return this;
+vi.mock('../lib/builder-provision.ts', () => ({ ensureBuilderAccess: async () => undefined }));
+vi.mock('../lib/tx-dispatch.ts', () => ({ runTx: fake.runTx }));
+vi.mock('../lib/x402-guard.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof Guard>()),
+  readTokenBalance: async () => fake.signerBalance,
+  waitForSignerFunds: async () => undefined
+}));
+vi.mock('@x402/fetch', async (importOriginal) => {
+  const real = await importOriginal<typeof X402Fetch>();
+  class CapturingClient extends real.x402Client {
+    constructor(...args: ConstructorParameters<typeof real.x402Client>) {
+      super(...args);
+      if (typeof args[0] === 'function') fake.selector = args[0];
+    }
+  }
+  return {
+    ...real,
+    x402Client: CapturingClient,
+    // As the library does: choose (and sign) an offer, then send.
+    wrapFetchWithPayment:
+      () =>
+      async (...args: unknown[]) => {
+        // Test offers are plain objects shaped like the library's requirements.
+        fake.selector?.(2, fake.accepts as Parameters<SelectPaymentRequirements>[1]);
+        return fake.paidFetch(...args);
       }
-    };
+  };
+});
+vi.mock('../ui/render.js', () => ({ isTTY: () => false, inkRender: vi.fn() }));
 
-    (x402PayCommand.builder as (y: unknown) => unknown)(yargs);
+const { x402PayCommand } = await import('./operations.ts');
+const { x402SpentLastDay } = await import('../lib/x402-guard.ts');
 
-    expect(options).toContain('broadcast');
-    expect(options).toContain('dry-run');
+const USDC = '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359';
+const PAY_TO = '0xfd13b3f3f876e100898b72f06a500b5a9e9d1f9c';
+const b64 = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64');
+
+const exact = (
+  amount: string,
+  extra: Record<string, unknown> = { name: 'USD Coin', version: '2' }
+) => ({
+  scheme: 'exact',
+  network: 'eip155:137',
+  amount,
+  asset: USDC,
+  payTo: PAY_TO,
+  maxTimeoutSeconds: 60,
+  extra
+});
+
+function serviceAsks(accepts: unknown[]) {
+  fake.accepts = accepts;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      async () =>
+        new Response('{}', {
+          status: 402,
+          headers: {
+            'PAYMENT-REQUIRED': b64({
+              x402Version: 2,
+              accepts,
+              resource: { url: 'https://svc', description: '', mimeType: 'application/json' }
+            })
+          }
+        })
+    )
+  );
+}
+
+async function pay(): Promise<Record<string, unknown>> {
+  if (typeof x402PayCommand.handler !== 'function') throw new Error('no handler');
+  await Promise.resolve(
+    x402PayCommand.handler({
+      _: [],
+      $0: 'polygon-agent',
+      url: 'https://svc/data',
+      method: 'GET',
+      broadcast: true
+    })
+  ).catch(() => undefined);
+  // The command's own output, in call order; a mocked process.exit then adds
+  // a second line.
+  const calls = [vi.mocked(console.log).mock, vi.mocked(console.error).mock].flatMap((mock) =>
+    mock.calls.map((call, i) => ({ line: String(call[0]), order: mock.invocationCallOrder[i] }))
+  );
+  const out = calls
+    .sort((a, b) => a.order - b.order)
+    .map((call) => call.line)
+    .filter((line) => line.startsWith('{'));
+  return JSON.parse(out[0] ?? '{}');
+}
+
+beforeEach(async () => {
+  const fs = await import('node:fs');
+  fs.rmSync(`${fake.home}/x402-payments.jsonl`, { force: true });
+  fake.runTx.mockReset().mockResolvedValue({ txHash: '0xfund' });
+  fake.paidFetch.mockReset();
+  fake.signerBalance = 0n;
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  vi.spyOn(process, 'exit').mockImplementation(() => {
+    throw new Error('CLI exited');
+  });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+const spent = () => x402SpentLastDay(new Date());
+
+describe('x402-pay standard path', () => {
+  it('funds nothing when no offer is a plain exact transfer it can sign', async () => {
+    serviceAsks([exact('100', { name: 'GatewayWalletBatched', version: '1' })]);
+    expect(await pay()).toMatchObject({ ok: false, code: 'invalid_input' });
+    expect(fake.runTx).not.toHaveBeenCalled();
+    expect(spent()).toBe(0);
   });
 
-  it('does not fund or pay a standard x402 request in dry-run mode', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response('', {
-        status: 402
+  it('a settled payment is paid and stays counted', async () => {
+    serviceAsks([exact('1000')]);
+    fake.paidFetch.mockResolvedValue(
+      new Response('{"result":1}', {
+        status: 200,
+        headers: {
+          'PAYMENT-RESPONSE': b64({ success: true, transaction: '0xpaid', network: 'eip155:137' })
+        }
       })
     );
-    vi.stubGlobal('fetch', fetchMock);
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-
-    await x402PayCommand.handler?.({
-      _: [],
-      $0: 'agent',
-      wallet: 'main',
-      url: 'https://example.com/protected',
-      method: 'GET',
-      dryRun: true
-    } as never);
-
-    expect(mocks.runTx).not.toHaveBeenCalled();
-    expect(mocks.wrapFetchWithPayment).not.toHaveBeenCalled();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-
-    const preview = JSON.parse(String(log.mock.calls.at(-1)?.[0]));
-    expect(preview).toMatchObject({
-      ok: true,
-      dryRun: true,
-      payment: {
-        format: 'x402',
-        amount: '1000',
-        network: 'eip155:137',
-        chainId: 137
-      }
-    });
+    expect(await pay()).toMatchObject({ ok: true, paidUsd: 0.001, data: { result: 1 } });
+    expect(spent()).toBe(0.001);
   });
 
-  it('does not send the Bazaar payment transaction in dry-run mode', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          payment_address: '0x4444444444444444444444444444444444444444',
-          amount_usdc: 0.001,
-          supported_chains: [{ chain: 'polygon', chainId: 137 }],
-          usdc_contracts: {
-            polygon: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359'
-          }
-        }),
-        {
-          status: 402,
-          headers: { 'content-type': 'application/json' }
+  it('a settlement that failed is unpaid: the reservation is released', async () => {
+    serviceAsks([exact('1000')]);
+    // The signer still holds the funds: the payment never left it.
+    fake.signerBalance = 1000n;
+    fake.paidFetch.mockResolvedValue(
+      new Response('{}', {
+        status: 402,
+        headers: {
+          'PAYMENT-RESPONSE': b64({ success: false, transaction: '', errorReason: 'invalid' })
         }
+      })
+    );
+    const out = await pay();
+    expect(out).toMatchObject({ ok: false, paidUsd: 0 });
+    expect(String(out.error)).toMatch(/didn't take the payment/);
+    expect(spent()).toBe(0);
+  });
+
+  it('a paid request that fails in flight is reported as uncertain and stays counted', async () => {
+    serviceAsks([exact('1000')]);
+    fake.paidFetch.mockRejectedValue(new Error('socket hang up'));
+    const out = await pay();
+    expect(String(out.error)).toMatch(/may or may not have reached the service/);
+    expect(spent()).toBe(0.001);
+  });
+
+  it('a refused offer on the paid request is certainly unpaid', async () => {
+    serviceAsks([exact('1000')]);
+    fake.paidFetch.mockImplementation(async () => new Response('{}', { status: 200 }));
+    // The service now asks more than was valued: nothing is signed.
+    fake.accepts = [exact('5000')];
+    const out = await pay();
+    expect(String(out.error)).toMatch(/failed before paying/);
+    expect(spent()).toBe(0);
+  });
+
+  it('a 402 with no settlement response is unpaid only if the signer still holds the funds', async () => {
+    serviceAsks([exact('1000')]);
+    fake.paidFetch.mockResolvedValue(new Response('{}', { status: 402 }));
+    fake.signerBalance = 1000n;
+    expect(await pay()).toMatchObject({ paidUsd: 0 });
+    expect(spent()).toBe(0);
+    // The funds left the signer: the service settled despite saying otherwise.
+    fake.signerBalance = 0n;
+    vi.mocked(console.log).mockClear();
+    vi.mocked(console.error).mockClear();
+    const second = await pay();
+    expect(second).toMatchObject({ paidUsd: null, paymentUncertain: true });
+    expect(spent()).toBe(0.001);
+  });
+
+  it('a malformed body after a settled payment still reports the payment', async () => {
+    serviceAsks([exact('1000')]);
+    fake.paidFetch.mockResolvedValue(
+      new Response('{not json', {
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+          'PAYMENT-RESPONSE': b64({ success: true, transaction: '0xpaid', network: 'eip155:137' })
+        }
+      })
+    );
+    expect(await pay()).toMatchObject({
+      ok: true,
+      paidUsd: 0.001,
+      data: '{not json',
+      payment: { settled: true, transaction: '0xpaid' }
+    });
+  });
+});
+
+describe('x402-pay bazaar path', () => {
+  async function bazaar(): Promise<Record<string, unknown>> {
+    if (typeof x402PayCommand.handler !== 'function') throw new Error('no handler');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              payment_address: '0x1D17C0F90A0b3dFb5124C2FF56B33a0D2E202e1d',
+              amount_usdc: 0.02,
+              supported_chains: [{ chain: 'polygon', chainId: 137 }]
+            }),
+            { status: 402 }
+          )
       )
     );
-    vi.stubGlobal('fetch', fetchMock);
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await Promise.resolve(
+      x402PayCommand.handler({
+        _: [],
+        $0: 'polygon-agent',
+        url: 'https://x402-api.onrender.com/api/x',
+        method: 'GET',
+        broadcast: true
+      })
+    ).catch(() => undefined);
+    const line = vi
+      .mocked(console.error)
+      .mock.calls.map((call) => String(call[0]))
+      .find((l) => l.startsWith('{'));
+    return JSON.parse(line ?? '{}');
+  }
 
-    await x402PayCommand.handler?.({
-      _: [],
-      $0: 'agent',
-      wallet: 'main',
-      url: 'https://x402-api.onrender.com/protected',
-      method: 'GET',
-      dryRun: true
-    } as never);
-
-    expect(mocks.runTx).not.toHaveBeenCalled();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-
-    const preview = JSON.parse(String(log.mock.calls.at(-1)?.[0]));
-    expect(preview).toMatchObject({
-      ok: true,
-      dryRun: true,
-      payment: {
-        format: 'bazaar',
-        chain: 'polygon',
-        chainId: 137,
-        amount: 0.001
-      }
+  it('keeps the reservation when the payment transfer was recorded before an error', async () => {
+    const { CliError } = await import('../lib/errors.ts');
+    const { sessionDir, writeJsonFile } = await import('../lib/session/state.ts');
+    const fs = await import('node:fs');
+    fake.runTx.mockImplementation(async () => {
+      // Executed, then polling it hit a revoked key.
+      const dir = `${sessionDir('main')}/transfers`;
+      fs.mkdirSync(dir, { recursive: true });
+      writeJsonFile({
+        file: `${dir}/paid.json`,
+        data: {
+          id: `paid-${Date.now()}`,
+          state: 'uncertain',
+          chainId: 137,
+          token: USDC,
+          symbol: 'USDC',
+          to: '0x1D17C0F90A0b3dFb5124C2FF56B33a0D2E202e1d',
+          amount: '20000',
+          usd: 0.02,
+          purpose: 'x402',
+          walletId: 'w',
+          sessionId: 's',
+          ledgered: false,
+          createdAt: 'x',
+          updatedAt: 'x'
+        }
+      });
+      throw new CliError({ code: 'session_revoked', message: 'revoked' });
     });
+    expect(await bazaar()).toMatchObject({ code: 'session_revoked' });
+    expect(spent()).toBe(0.02);
+  });
+
+  it('releases the reservation when a check refused it before any transfer', async () => {
+    const { CliError } = await import('../lib/errors.ts');
+    fake.runTx.mockRejectedValue(new CliError({ code: 'allowance_exhausted', message: 'limit' }));
+    expect(await bazaar()).toMatchObject({ code: 'allowance_exhausted' });
+    expect(spent()).toBe(0);
   });
 });

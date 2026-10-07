@@ -302,9 +302,10 @@ async function defaultSource(params: {
     }
     if (amount === 0n || amount > balance) continue;
     if (params.session) {
-      const remaining = sessionForToken({ sessions, chainId: token.chainId, token: token.address })
-        ?.grant.remaining;
-      if (remaining !== undefined && remaining !== null && amount > remaining) continue;
+      // Needs a live session for it (planned isn't enough), with room left.
+      const live = sessionForToken({ sessions, chainId: token.chainId, token: token.address });
+      if (!live) continue;
+      if (live.grant.remaining !== null && amount > live.grant.remaining) continue;
     }
     return { token, amount };
   }

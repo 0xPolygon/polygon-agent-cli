@@ -9,7 +9,7 @@ import { getAddress, isAddress } from 'viem';
 import type { OwnerAction } from '../lib/owner/pending.ts';
 import type { Plan, PlanToken } from '../lib/session/plan.ts';
 
-import { ensureBuilderAccessKey, makeDefaultProvisionDeps } from '../lib/builder-provision.ts';
+import { provisionBuilderOnce } from '../lib/builder-provision.ts';
 import { CliError, errorJson, httpStatus, jsonFail, jsonOut } from '../lib/errors.ts';
 import { runOwnerAction } from '../lib/owner/actions.ts';
 import { deletePending, loadPending } from '../lib/owner/pending.ts';
@@ -151,6 +151,36 @@ async function sendCode(params: {
 
 // --- wallet login --email (step 1 of connect) ---
 
+// Call under the wallet lock. Throws already_connected if this install's key
+// has live sessions. Only a dead or missing key means "reconnect"; anything
+// else (an OMS outage) must not lead to replacing a working key.
+async function refuseIfConnected(wallet: string): Promise<void> {
+  if (!readRacRecord({ wallet, slot: 'rac' })) return;
+  // Built inside the promise, so a missing key file (racClient throws) is
+  // handled below like a dead key.
+  const live = await (async () =>
+    getSessions({ wallet, client: racClient({ wallet, slot: 'rac' }), fresh: true }))().catch(
+    (error: unknown) => {
+      if (
+        error instanceof CliError &&
+        (error.code === 'session_revoked' ||
+          error.code === 'session_expired' ||
+          error.code === 'not_connected')
+      ) {
+        return [];
+      }
+      throw error;
+    }
+  );
+  if (live.some((session) => !session.expired)) {
+    throw new CliError({
+      code: 'already_connected',
+      message: 'This install is already connected.',
+      command: `polygon-agent wallet allowance set --amount <usd>${nameFlag(wallet)}`
+    });
+  }
+}
+
 export async function handleEmailLogin(argv: {
   name: string;
   email?: string;
@@ -172,31 +202,8 @@ export async function handleEmailLogin(argv: {
         message: `Wallet '${wallet}' is signed in with the browser (owner mode). Use another --name, or run: polygon-agent wallet logout${nameFlag(wallet)}`
       });
     }
-    if (pointer && readRacRecord({ wallet, slot: 'rac' })) {
-      const live = await withWalletKeys({
-        wallet,
-        fn: () => getSessions({ wallet, client: racClient({ wallet, slot: 'rac' }), fresh: true })
-      }).catch((error: unknown) => {
-        // Only a dead or missing key means "reconnect". Anything else (an OMS
-        // outage) must not lead to revoking a working key below.
-        if (
-          error instanceof CliError &&
-          (error.code === 'session_revoked' ||
-            error.code === 'session_expired' ||
-            error.code === 'not_connected')
-        ) {
-          return [];
-        }
-        throw error;
-      });
-      if (live.some((session) => !session.expired)) {
-        throw new CliError({
-          code: 'already_connected',
-          message: 'This install is already connected.',
-          command: `polygon-agent wallet allowance set --amount <usd>${nameFlag(wallet)}`
-        });
-      }
-    }
+    // Fail fast if already connected (checked again before the key is replaced).
+    if (pointer) await withWalletKeys({ wallet, fn: () => refuseIfConnected(wallet) });
 
     // Default chains: Polygon and Base, plus chains already holding covered tokens.
     let chains = parseChains(argv.chains);
@@ -235,6 +242,9 @@ export async function handleEmailLogin(argv: {
     await withWalletKeys({
       wallet,
       fn: async () => {
+        // Under the same lock that replaces the key, after any interrupted
+        // renewal was finished (withWalletKeys): never replace a live key.
+        await refuseIfConnected(wallet);
         await retireRac({ wallet, slot: 'rac' });
         await registerRac({
           wallet,
@@ -299,10 +309,9 @@ export const confirmCommandModule: CommandModule<object, ConfirmArgs> = {
     // and x402 signer, like a browser login. Best effort: trades and payments
     // set it up on first use if this fails.
     if (result.connected === true && typeof result.walletAddress === 'string') {
-      const provision = await ensureBuilderAccessKey(
-        result.walletAddress,
-        makeDefaultProvisionDeps()
-      ).catch((error: unknown) => ({ provisioned: false, reason: String(error) }));
+      const provision = await provisionBuilderOnce({ walletAddress: result.walletAddress }).catch(
+        (error: unknown) => ({ provisioned: false, reason: String(error) })
+      );
       result = {
         ...result,
         builderAccess: provision.provisioned || provision.reason === 'existing'
@@ -342,7 +351,6 @@ async function sessionReport(params: {
     };
   }
 
-  const approved = readApprovedPlan(wallet);
   let sessions: Awaited<ReturnType<typeof getSessions>> = [];
   let accessError: Record<string, unknown> | undefined;
   let keysPendingRevocation: string[] = [];
@@ -369,6 +377,8 @@ async function sessionReport(params: {
     }
   }
 
+  // Read after the wallet lock: finishing an interrupted renewal rewrites it.
+  const approved = readApprovedPlan(wallet);
   const warnings: string[] = [];
   const balances = await walletHoldings({
     wallet,

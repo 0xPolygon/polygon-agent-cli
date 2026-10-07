@@ -21,7 +21,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../lib/builder-provision.ts', () => ({
   ensureBuilderAccess: async () => undefined,
   ensureBuilderAccessKey: async () => ({ provisioned: false, reason: 'existing' }),
-  makeDefaultProvisionDeps: () => ({})
+  makeDefaultProvisionDeps: () => ({}),
+  provisionBuilderOnce: async () => ({ provisioned: false, reason: 'existing' })
 }));
 vi.mock('@0xtrails/api', async (importOriginal) => ({
   ...(await importOriginal<typeof Trails>()),
