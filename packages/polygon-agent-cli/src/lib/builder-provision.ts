@@ -4,12 +4,15 @@
 // did, but runs automatically after `wallet login`. Best-effort by contract:
 // this function never throws; a failure must never fail a completed login.
 
+import path from 'node:path';
+
 import { ethers } from 'ethers';
 
 import { getAuthToken, createProject, getDefaultAccessKey } from './builder-api.ts';
 import { CliError } from './errors.ts';
 import { generateEthAuthProof } from './ethauth.ts';
-import { loadBuilderConfigRaw, saveBuilderConfig } from './storage.ts';
+import { LockHeldError, withLock } from './lock.ts';
+import { loadBuilderConfigRaw, saveBuilderConfig, STORAGE_ROOT } from './storage.ts';
 
 /** Normalize any thrown value to a message string, even for non-Error throws. */
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -100,12 +103,39 @@ export async function ensureBuilderAccessKey(
   }
 }
 
+// Provisioning, one process at a time: two first uses could otherwise each
+// create a signer and overwrite the other's saved key, after one of them may
+// already have funded its signer. The config is re-checked under the lock.
+export async function provisionBuilderOnce(params: {
+  walletAddress: string;
+  deps?: ProvisionDeps;
+}): Promise<ProvisionResult> {
+  try {
+    return await withLock({
+      dir: path.join(STORAGE_ROOT, 'locks', 'builder.lock'),
+      waitMs: 120_000,
+      fn: () =>
+        ensureBuilderAccessKey(params.walletAddress, params.deps ?? makeDefaultProvisionDeps())
+    });
+  } catch (error) {
+    if (error instanceof LockHeldError) {
+      throw new CliError({
+        code: 'wallet_busy',
+        message:
+          "Another polygon-agent command is setting up this install's Builder access. Try again shortly.",
+        cause: error
+      });
+    }
+    throw error;
+  }
+}
+
 // This install's Builder access key (Trails quotes, indexer quota) and signer
 // EOA (x402), set up on first use if missing: session-mode installs connect by
 // email code and never ran the browser login that provisions them.
 export async function ensureBuilderAccess(walletAddress: string): Promise<void> {
   if (loadBuilderConfigRaw()?.accessKey) return;
-  const result = await ensureBuilderAccessKey(walletAddress, makeDefaultProvisionDeps());
+  const result = await provisionBuilderOnce({ walletAddress });
   if (!result.provisioned && result.reason !== 'existing') {
     throw new CliError({
       code: 'upstream_unavailable',

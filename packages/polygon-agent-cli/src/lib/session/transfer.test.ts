@@ -383,6 +383,30 @@ describe('reconciling earlier transfers', () => {
     expect(fake.calls.prepare).toBe(0);
   });
 
+  it('does not execute if notAfter passes while preparing', async () => {
+    const fake = setup();
+    const prepare = fake.client.prepareTransaction;
+    fake.client.prepareTransaction = async (params) => {
+      await fake.deps.sleep(2_000);
+      return prepare(params);
+    };
+    await expect(
+      sessionTransfer({
+        wallet: fake.wallet,
+        walletAddress: WALLET_ADDRESS,
+        chainId: 137,
+        token: USDC,
+        to: TO,
+        amount: 1n,
+        purpose: 'trade',
+        notAfter: START.getTime() + 1_000,
+        deps: fake.deps
+      })
+    ).rejects.toMatchObject({ code: 'quote_expired' });
+    expect(fake.calls.execute).toBe(0);
+    expect(listTransfers(fake.wallet).at(-1)).toMatchObject({ state: 'failed', neverSent: true });
+  });
+
   it('keeps an uncertain transfer whose quote is still live, and closes it once expired', async () => {
     const fake = setup({ statuses: [{ status: 'quoted' }] });
     writeRecord(fake, {

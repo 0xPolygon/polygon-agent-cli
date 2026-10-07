@@ -4,8 +4,12 @@
 //   - Without --max-usd, a price over x402_max_per_call needs --yes
 //     (confirmation_required), so the assistant asks the user first.
 //   - x402_daily_max over a rolling 24 hours (daily_limit_exceeded).
-// Payments are logged in x402-payments.jsonl once the wallet has paid.
+// Every payment is reserved in x402-payments.jsonl at its price *before*
+// anything is sent (so a crash can't lose it), and released only when it's
+// certain the service wasn't paid. The daily limit counts reservations: what
+// services are paid, whether the signer was topped up or already held funds.
 
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -23,13 +27,16 @@ const DEFAULT_MAX_PER_CALL_USD = 1;
 const DEFAULT_DAILY_MAX_USD = 10;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-const PaymentSchema = z.object({
+const ReservationSchema = z.object({
   ts: z.string(),
+  // Absent in entries written before reservations existed.
+  id: z.string().optional(),
   walletName: z.string(),
   url: z.string(),
   usd: z.number(),
   txHash: z.string().optional()
 });
+const ReleaseSchema = z.object({ ts: z.string(), id: z.string(), release: z.literal(true) });
 
 function paymentsFile(): string {
   return path.join(STORAGE_ROOT, 'x402-payments.jsonl');
@@ -63,16 +70,27 @@ export function x402SpentLastDay(now: Date): number {
     return 0;
   }
   const since = now.getTime() - DAY_MS;
-  let total = 0;
+  const reserved: Array<{ id?: string; usd: number }> = [];
+  const released = new Set<string>();
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
+    let value: unknown;
     try {
-      const parsed = PaymentSchema.safeParse(JSON.parse(line));
-      if (parsed.success && Date.parse(parsed.data.ts) > since) total += parsed.data.usd;
+      value = JSON.parse(line);
     } catch {
-      // skip
+      continue;
     }
+    const release = ReleaseSchema.safeParse(value);
+    if (release.success) {
+      released.add(release.data.id);
+      continue;
+    }
+    const entry = ReservationSchema.safeParse(value);
+    if (entry.success && Date.parse(entry.data.ts) > since) reserved.push(entry.data);
   }
+  const total = reserved
+    .filter((entry) => entry.id === undefined || !released.has(entry.id))
+    .reduce((sum, entry) => sum + entry.usd, 0);
   return Math.round(total * 1e6) / 1e6;
 }
 
@@ -118,29 +136,109 @@ export function checkX402Price(params: {
   }
 }
 
+function appendEntry(entry: Record<string, unknown>): void {
+  ensureStorageDir();
+  const file = paymentsFile();
+  // A torn earlier append (no final newline) must not swallow this entry.
+  let prefix = '';
+  try {
+    const size = fs.statSync(file).size;
+    if (size > 0) {
+      const fd = fs.openSync(file, 'r');
+      const last = Buffer.alloc(1);
+      fs.readSync(fd, last, 0, 1, size - 1);
+      fs.closeSync(fd);
+      if (last.toString() !== '\n') prefix = '\n';
+    }
+  } catch {
+    // no file yet
+  }
+  fs.appendFileSync(file, `${prefix}${JSON.stringify(entry)}\n`, { mode: 0o600 });
+}
+
+// Reserves a payment against the daily limit; returns its id.
 export function recordX402Payment(params: {
   walletName: string;
   url: string;
   usd: number;
   txHash?: string;
   now: Date;
-}): void {
-  ensureStorageDir();
-  const entry = {
+}): string {
+  const id = randomBytes(8).toString('hex');
+  appendEntry({
     ts: params.now.toISOString(),
+    id,
     walletName: params.walletName,
     url: params.url,
     usd: params.usd,
     ...(params.txHash ? { txHash: params.txHash } : {})
-  };
-  fs.appendFileSync(paymentsFile(), `${JSON.stringify(entry)}\n`, { mode: 0o600 });
+  });
+  return id;
+}
+
+// The service certainly wasn't paid: the reservation no longer counts. Never
+// throws (a failed release only over-counts), so it can't mask another error.
+export function releaseX402Reservation(id: string): void {
+  try {
+    appendEntry({ ts: new Date().toISOString(), id, release: true });
+  } catch {
+    // over-counting is the safe side
+  }
 }
 
 export { usdText as x402UsdText };
 
-// Checks the price against the limits, pays, and logs the payment, one payment
-// at a time per install so concurrent calls can't both pass the daily limit.
-// A payment that fails in a way that may still have gone out is logged too.
+// Checks the price against the limits, reserves it, then funds the payment,
+// one payment at a time per install so concurrent calls can't both pass the
+// daily limit. The reservation is written before anything is sent and is
+// released here only if funding certainly sent nothing; the caller releases it
+// once it knows the service wasn't paid. Where the funding transfer pays the
+// service directly (the bazaar path), a refusal raised after a transfer was
+// recorded (e.g. session_revoked while polling) may still have paid:
+// `sentAnything` says whether one was, and then the reservation stays.
+export async function reserveX402Payment<T>(params: {
+  walletName: string;
+  url: string;
+  usd: number;
+  maxUsd?: number;
+  yes?: boolean;
+  fund: () => Promise<T>;
+  sentAnything?: () => boolean;
+}): Promise<{ reservationId: string; funded: T }> {
+  try {
+    return await withLock({
+      dir: path.join(STORAGE_ROOT, 'locks', 'x402.lock'),
+      waitMs: 120_000,
+      fn: async () => {
+        checkX402Price({ ...params, now: new Date() });
+        const reservationId = recordX402Payment({ ...params, now: new Date() });
+        try {
+          return { reservationId, funded: await params.fund() };
+        } catch (error) {
+          if (
+            error instanceof CliError &&
+            NOTHING_SENT_CODES.has(error.code) &&
+            !(params.sentAnything?.() ?? false)
+          ) {
+            releaseX402Reservation(reservationId);
+          }
+          throw error;
+        }
+      }
+    });
+  } catch (error) {
+    if (error instanceof LockHeldError) {
+      throw new CliError({
+        code: 'wallet_busy',
+        message:
+          'Another x402 payment is still running on this install. Try again when it finishes.',
+        cause: error
+      });
+    }
+    throw error;
+  }
+}
+
 // An ERC-20 balance read from the chain (not the indexer, which lags).
 export async function readTokenBalance(params: {
   chainId: number;
@@ -193,59 +291,6 @@ export async function waitForSignerFunds(params: {
 }
 
 const SETTLE_SLACK_MS = 4_000;
-
-export async function payWithinLimits<T extends { txHash?: string; fundedUsd?: number }>(params: {
-  walletName: string;
-  url: string;
-  usd: number;
-  maxUsd?: number;
-  yes?: boolean;
-  pay: () => Promise<T>;
-}): Promise<T> {
-  ensureStorageDir();
-  // What left the wallet: the payment's price, or less when funds already in
-  // the signer covered part of it.
-  const log = (params2: { txHash?: string; usd: number }) => {
-    if (params2.usd <= 0) return;
-    recordX402Payment({
-      walletName: params.walletName,
-      url: params.url,
-      usd: params2.usd,
-      txHash: params2.txHash,
-      now: new Date()
-    });
-  };
-  try {
-    return await withLock({
-      dir: path.join(STORAGE_ROOT, 'locks', 'x402.lock'),
-      waitMs: 120_000,
-      fn: async () => {
-        checkX402Price({ ...params, now: new Date() });
-        let result: T;
-        try {
-          result = await params.pay();
-        } catch (error) {
-          if (!(error instanceof CliError && NOTHING_SENT_CODES.has(error.code))) {
-            log({ usd: params.usd });
-          }
-          throw error;
-        }
-        log({ txHash: result.txHash, usd: result.fundedUsd ?? params.usd });
-        return result;
-      }
-    });
-  } catch (error) {
-    if (error instanceof LockHeldError) {
-      throw new CliError({
-        code: 'wallet_busy',
-        message:
-          'Another x402 payment is still running on this install. Try again when it finishes.',
-        cause: error
-      });
-    }
-    throw error;
-  }
-}
 
 // --- the legacy "bazaar" 402 format (x402-api.onrender.com) ---------------
 // The wallet pays the recipient directly, so everything in the transfer comes
@@ -307,7 +352,9 @@ export function isBazaarBody(body: unknown): boolean {
   );
 }
 
-export function parseBazaarPayment(body: unknown): BazaarPayment {
+// chainId: pay on this chain (--chain), or fail; otherwise Polygon first.
+export function parseBazaarPayment(params: { body: unknown; chainId?: number }): BazaarPayment {
+  const { body } = params;
   let chain: string;
   let chainId: number;
   let recipient: string;
@@ -318,10 +365,19 @@ export function parseBazaarPayment(body: unknown): BazaarPayment {
   if (current.success) {
     const { data } = current;
     const polygon = data.supported_chains.find((c) => c.chain === 'polygon' || c.chainId === 137);
-    const option = polygon ?? data.supported_chains[0];
-    if (!option) throw invalidPayment('no supported chains');
-    chain = polygon ? 'polygon' : option.chain;
-    chainId = polygon ? 137 : option.chainId;
+    const option =
+      params.chainId !== undefined
+        ? data.supported_chains.find((c) => c.chainId === params.chainId)
+        : (polygon ?? data.supported_chains[0]);
+    if (!option) {
+      throw invalidPayment(
+        params.chainId !== undefined
+          ? `it doesn't take payment on chain ${params.chainId}`
+          : 'no supported chains'
+      );
+    }
+    chain = option === polygon ? 'polygon' : option.chain;
+    chainId = option === polygon ? 137 : option.chainId;
     const contract = data.usdc_contracts[chain] ?? (chainId === 137 ? POLYGON_USDC : undefined);
     if (!contract) throw invalidPayment(`no USDC contract for ${chain}`);
     asset = contract;
@@ -331,6 +387,9 @@ export function parseBazaarPayment(body: unknown): BazaarPayment {
     const legacy = LegacyFormat.safeParse(body);
     if (!legacy.success) throw invalidPayment(legacy.error.issues[0]?.message ?? 'bad format');
     const details = legacy.data.payment_details;
+    if (params.chainId !== undefined && params.chainId !== 137) {
+      throw invalidPayment(`it only takes payment on Polygon, not chain ${params.chainId}`);
+    }
     const polygon = details.networks.find((n) => n.network === 'polygon' || n.chainId === 137);
     if (!polygon) throw invalidPayment('no Polygon payment option');
     const to = polygon.recipient ?? details.recipient;

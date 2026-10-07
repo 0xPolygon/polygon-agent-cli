@@ -444,6 +444,21 @@ export async function sessionTransfer(params: {
     }
   });
 
+  // Preparing can take a while: re-check the deadline right before executing.
+  if (params.notAfter !== undefined && deps.now().getTime() > params.notAfter) {
+    update({
+      wallet,
+      record,
+      deps,
+      patch: { state: 'failed', neverSent: true, error: 'past notAfter before executing' }
+    });
+    throw new CliError({
+      code: 'quote_expired',
+      message: 'The quote expired while preparing the transfer; nothing was sent.',
+      hint: 'Quote again.'
+    });
+  }
+
   try {
     record = update({ wallet, record, deps, patch: { executeAttempted: true } });
     await deps.client.executeTransaction({ txnId: prepared.txnId });
