@@ -2329,7 +2329,10 @@ export const x402PayCommand: CommandModule = {
                 owner: eoaAccount.address,
                 // The balance the top-up produces, not just enough for this
                 // payment: funds promised to earlier authorizations don't count.
-                atLeast: signerBalance + shortfall
+                atLeast: signerBalance + shortfall,
+                // Or, once the top-up is mined, the price (an earlier
+                // authorization may have settled meanwhile).
+                funding: { txHash: fundResult.txHash, amount: shortfall, enough: fundAmount }
               });
             } catch (error) {
               // Nothing was signed, so the service can't have been paid.

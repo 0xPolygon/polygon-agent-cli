@@ -86,11 +86,20 @@ async function requireSameWallet(trade: TradeRecord): Promise<void> {
   }
 }
 
-async function sendDeposit(trade: TradeRecord): Promise<TradeRecord> {
-  if (Date.now() > Date.parse(trade.expiresAt)) {
+async function sendDeposit(params: {
+  trade: TradeRecord;
+  notAfter?: number;
+}): Promise<TradeRecord> {
+  const { trade } = params;
+  // The quote's expiry, or the caller's earlier deadline (a watch's).
+  const deadline = Math.min(Date.parse(trade.expiresAt), params.notAfter ?? Infinity);
+  if (Date.now() > deadline) {
     throw new CliError({
       code: 'quote_expired',
-      message: `The quote for intent ${trade.intentId} expired at ${trade.expiresAt}; nothing was sent.`,
+      message:
+        deadline < Date.parse(trade.expiresAt)
+          ? `The deadline for intent ${trade.intentId} passed at ${new Date(deadline).toISOString()}; nothing was sent.`
+          : `The quote for intent ${trade.intentId} expired at ${trade.expiresAt}; nothing was sent.`,
       hint: 'Quote again.'
     });
   }
@@ -108,7 +117,7 @@ async function sendDeposit(trade: TradeRecord): Promise<TradeRecord> {
       purpose: 'trade',
       ref: trade.intentId,
       // Re-checked once the wallet lock is held: never deposit after expiry.
-      notAfter: Date.parse(trade.expiresAt)
+      notAfter: deadline
     });
     if (!result.txHash) throw new Error('the deposit returned no transaction hash');
     return updateTrade({
@@ -337,6 +346,8 @@ export async function executeSwap(params: {
   timeoutMs?: number;
   // false: never send a deposit (swap status resumes, it doesn't start).
   send?: boolean;
+  // No deposit after this (ms), even if the quote is still valid.
+  notAfter?: number;
 }): Promise<TradeRecord> {
   try {
     return await withLock({
@@ -346,13 +357,13 @@ export async function executeSwap(params: {
         let trade = loadTrade(params.trade.intentId) ?? params.trade;
         if (trade.state === 'quoted') {
           if (params.send === false) return trade;
-          trade = await sendDeposit(trade);
+          trade = await sendDeposit({ trade, notAfter: params.notAfter });
         }
         if (trade.state === 'depositing') trade = await startIntent(trade);
         // An interrupted run found nothing went out: send it now (still under
         // the trade lock), unless this is only a status check.
         if (trade.state === 'quoted' && params.send !== false) {
-          trade = await sendDeposit(trade);
+          trade = await sendDeposit({ trade, notAfter: params.notAfter });
           if (trade.state === 'depositing') trade = await startIntent(trade);
         }
         if (trade.state === 'executing') {

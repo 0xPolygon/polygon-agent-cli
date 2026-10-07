@@ -90,10 +90,11 @@ function notCovered(params: { symbol: string; chainId: number }): CliError {
   });
 }
 
-function isNativeSymbol(params: { chainId: number; symbol: string }): boolean {
+export function isNativeSymbol(params: { chainId: number; symbol: string }): boolean {
   const symbol = params.symbol.toUpperCase();
   const native = resolveNetwork(params.chainId).nativeToken?.symbol?.toUpperCase();
-  return symbol === 'NATIVE' || symbol === native;
+  // MATIC is POL's old name, and only the native coin where POL is.
+  return symbol === 'NATIVE' || symbol === native || (symbol === 'MATIC' && native === 'POL');
 }
 
 // Session mode: the source must be a covered ERC-20 (no aliases: selling "ETH"
@@ -146,6 +147,46 @@ function addCommand(symbol: string): string {
   return `polygon-agent wallet allowance set --add ${symbol.toUpperCase()}@${resolveNetwork(chainId).name}`;
 }
 
+// Trails' transient failures as retryable CLI errors (a watch retries them);
+// anything else as it came.
+async function trailsError(error: unknown): Promise<unknown> {
+  const {
+    QuotaRateLimitError,
+    RateLimitedError,
+    TimeoutError,
+    UnavailableError,
+    WebrpcBadResponseError,
+    WebrpcRequestFailedError
+  } = await import('@0xtrails/api');
+  const message = error instanceof Error ? error.message : String(error);
+  // A gateway's HTML 429 or 5xx page arrives as a bad response.
+  const badResponse = error instanceof WebrpcBadResponseError ? error.status : 0;
+  if (
+    error instanceof RateLimitedError ||
+    error instanceof QuotaRateLimitError ||
+    badResponse === 429
+  ) {
+    return new CliError({
+      code: 'rate_limited',
+      message: `Trails is rate-limiting quotes: ${message}`,
+      cause: error
+    });
+  }
+  if (
+    error instanceof UnavailableError ||
+    error instanceof TimeoutError ||
+    error instanceof WebrpcRequestFailedError ||
+    badResponse >= 500
+  ) {
+    return new CliError({
+      code: 'upstream_unavailable',
+      message: `Trails couldn't quote right now: ${message}`,
+      cause: error
+    });
+  }
+  return error;
+}
+
 function destinationCovered(params: { wallet: string; chainId: number; symbol: string }): boolean {
   try {
     sessionDestination(params);
@@ -165,11 +206,10 @@ export function assertTradeCovered(params: {
   chainId?: number;
 }): void {
   if (params.side === 'sell') {
-    sessionSource({
-      wallet: params.walletName,
-      chainId: params.chainId ?? 137,
-      symbol: params.symbol
-    });
+    const chainId = params.chainId ?? 137;
+    sessionSource({ wallet: params.walletName, chainId, symbol: params.symbol });
+    // It sells for USDC on the same chain, which must be covered too.
+    sessionDestination({ wallet: params.walletName, chainId, symbol: 'USDC' });
     return;
   }
   if (params.chainId !== undefined) {
@@ -492,17 +532,21 @@ export async function quoteSwap(params: QuoteSwapParams): Promise<QuotedSwap> {
   }
   const { TradeType } = await import('@0xtrails/api');
   const trails = await trailsClient();
-  const { intent } = await trails.quoteIntent({
-    ownerAddress: walletAddress,
-    originChainId: origin.chainId,
-    originTokenAddress: origin.address,
-    originTokenAmount: amount,
-    destinationChainId: destination.chainId,
-    destinationTokenAddress: destination.address,
-    destinationToAddress: walletAddress,
-    tradeType: TradeType.EXACT_INPUT,
-    options: { slippageTolerance: slippage }
-  });
+  const { intent } = await trails
+    .quoteIntent({
+      ownerAddress: walletAddress,
+      originChainId: origin.chainId,
+      originTokenAddress: origin.address,
+      originTokenAmount: amount,
+      destinationChainId: destination.chainId,
+      destinationTokenAddress: destination.address,
+      destinationToAddress: walletAddress,
+      tradeType: TradeType.EXACT_INPUT,
+      options: { slippageTolerance: slippage }
+    })
+    .catch(async (error: unknown) => {
+      throw await trailsError(error);
+    });
   validateDeposit({
     intent,
     walletAddress,

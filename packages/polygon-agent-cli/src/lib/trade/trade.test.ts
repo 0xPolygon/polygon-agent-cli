@@ -320,6 +320,25 @@ describe('quoteSwap in session mode', () => {
     });
   });
 
+  it("maps Trails' own rate-limit and outage errors to retryable codes", async () => {
+    const { RateLimitedError, UnavailableError, QueryFailedError } = await import('@0xtrails/api');
+    fake.quoteIntent.mockRejectedValueOnce(new RateLimitedError());
+    await expect(quote()).rejects.toMatchObject({ code: 'rate_limited' });
+    fake.quoteIntent.mockRejectedValueOnce(new UnavailableError());
+    await expect(quote()).rejects.toMatchObject({ code: 'upstream_unavailable' });
+    const { TimeoutError, WebrpcBadResponseError } = await import('@0xtrails/api');
+    fake.quoteIntent.mockRejectedValueOnce(new TimeoutError());
+    await expect(quote()).rejects.toMatchObject({ code: 'upstream_unavailable' });
+    // A gateway's HTML error page.
+    fake.quoteIntent.mockRejectedValueOnce(new WebrpcBadResponseError({ status: 503 }));
+    await expect(quote()).rejects.toMatchObject({ code: 'upstream_unavailable' });
+    fake.quoteIntent.mockRejectedValueOnce(new WebrpcBadResponseError({ status: 429 }));
+    await expect(quote()).rejects.toMatchObject({ code: 'rate_limited' });
+    const other = new QueryFailedError();
+    fake.quoteIntent.mockRejectedValueOnce(other);
+    await expect(quote()).rejects.toBe(other);
+  });
+
   it('falls back to the next stablecoin when USDC lacks the balance or the allowance', async () => {
     balances([
       { chainId: 137, token: USDC, balance: 50_000_000n },

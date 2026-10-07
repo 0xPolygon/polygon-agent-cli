@@ -48,7 +48,22 @@ const WatchSchema = z.object({
   lastCheckedAt: z.string().optional(),
   staleNotified: z.boolean(),
   // An auto trade Trails was still working on at the end of a check.
-  pendingTrade: z.object({ intentId: z.string(), side: z.enum(['buy', 'sell']) }).optional()
+  pendingTrade: z.object({ intentId: z.string(), side: z.enum(['buy', 'sell']) }).optional(),
+  // Alerts owed for a change already saved (a consumed crossing, a settled
+  // trade): saved with that change and delivered after, so a failed write
+  // can't lose them. Each carries a unique key, so delivery is idempotent.
+  outbox: z
+    .array(
+      z.object({
+        kind: z.string(),
+        watchId: z.string().optional(),
+        message: z.string(),
+        command: z.string().optional(),
+        data: z.record(z.string(), z.unknown()).optional(),
+        key: z.string()
+      })
+    )
+    .optional()
 });
 export type Watch = z.infer<typeof WatchSchema>;
 
