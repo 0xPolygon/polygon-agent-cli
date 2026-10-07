@@ -29,10 +29,38 @@ function ledgerFile(wallet: string): string {
   return path.join(sessionDir(wallet), 'ledger.jsonl');
 }
 
+function parseEntry(line: string): LedgerEntry | null {
+  try {
+    const parsed = LedgerEntrySchema.safeParse(JSON.parse(line));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+// An append that failed part-way leaves a last line without its newline. A
+// complete entry just gets the newline; a fragment is cut off, so the next
+// entry starts on a line of its own instead of being glued to it (and lost).
+function repairTail(file: string): void {
+  let text: string;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch {
+    return;
+  }
+  if (text === '' || text.endsWith('\n')) return;
+  const start = text.lastIndexOf('\n') + 1;
+  if (parseEntry(text.slice(start))) {
+    fs.appendFileSync(file, '\n');
+  } else {
+    fs.truncateSync(file, Buffer.byteLength(text.slice(0, start)));
+  }
+}
+
 export function appendLedger(params: { wallet: string; entry: LedgerEntry }): void {
-  fs.appendFileSync(ledgerFile(params.wallet), `${JSON.stringify(params.entry)}\n`, {
-    mode: 0o600
-  });
+  const file = ledgerFile(params.wallet);
+  repairTail(file);
+  fs.appendFileSync(file, `${JSON.stringify(params.entry)}\n`, { mode: 0o600 });
 }
 
 // Unreadable lines are skipped rather than failing every later spend.
@@ -45,13 +73,8 @@ export function readLedger(wallet: string): LedgerEntry[] {
   }
   const entries: LedgerEntry[] = [];
   for (const line of text.split('\n')) {
-    if (!line.trim()) continue;
-    try {
-      const parsed = LedgerEntrySchema.safeParse(JSON.parse(line));
-      if (parsed.success) entries.push(parsed.data);
-    } catch {
-      // skip
-    }
+    const entry = line.trim() ? parseEntry(line) : null;
+    if (entry) entries.push(entry);
   }
   return entries;
 }

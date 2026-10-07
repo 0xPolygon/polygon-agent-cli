@@ -19,13 +19,8 @@ import { CliError, mapOmsError } from '../errors.ts';
 import { makeFeeSelector } from '../oms-tx.ts';
 import { resetLedger } from '../session/ledger.ts';
 import { planSummary, toGrants } from '../session/plan.ts';
-import {
-  promoteNextRac,
-  racClient,
-  readRacRecord,
-  retireParkedRacs,
-  retireRac
-} from '../session/rac.ts';
+import { racClient, readRacRecord, retireParkedRacs, retireRac } from '../session/rac.ts';
+import { commitRenewal } from '../session/renewal.ts';
 import { invalidateSessions } from '../session/sessions.ts';
 import { readApprovedPlan, writeApprovedPlan } from '../session/state.ts';
 import { chainLabel, findSupportedToken } from '../session/tokens.ts';
@@ -373,7 +368,6 @@ async function renew(params: { context: OwnerContext; wallet: string; plan: Plan
   const { owner, walletAddress } = params.context;
   await requireSameWallet({ wallet: params.wallet, walletAddress });
   const next = readRacRecord({ wallet: params.wallet, slot: 'rac-next' });
-  const old = readRacRecord({ wallet: params.wallet, slot: 'rac' });
   if (!next) {
     throw new CliError({
       code: 'request_expired',
@@ -413,13 +407,17 @@ async function renew(params: { context: OwnerContext; wallet: string; plan: Plan
     return { renewed: false, failed, warnings: checked.warnings };
   }
 
-  // Retire the old key: from the key itself, else as the owner. If OMS
-  // confirms neither, the old key stays parked (its sessions may still be
-  // live) and every later spend, status and owner request retries it.
+  // Switch to the new key (recorded first, so a crash part-way is finished
+  // by the next command). The old key is retired from the key itself, else as
+  // the owner; if OMS confirms neither, it stays parked (its sessions may still
+  // be live) and every later spend, status and owner request retries it.
   const warnings = [...checked.warnings];
-  const oldPending = old
-    ? await retireRac({ wallet: params.wallet, slot: 'rac', owner: owner.wallet })
-    : null;
+  const plan = approvedPlan({ plan: params.plan, approved: checked.approved });
+  const oldPending = await commitRenewal({
+    wallet: params.wallet,
+    approved: { plan, approvedAt: params.now.toISOString() },
+    owner: owner.wallet
+  });
   if (oldPending) {
     warnings.push(
       `Couldn't revoke the previous session key (${oldPending}), so its sessions may still be live. ` +
@@ -427,14 +425,6 @@ async function renew(params: { context: OwnerContext; wallet: string; plan: Plan
         oldPending
     );
   }
-  promoteNextRac(params.wallet);
-  const plan = approvedPlan({ plan: params.plan, approved: checked.approved });
-  writeApprovedPlan({
-    wallet: params.wallet,
-    approved: { plan, approvedAt: params.now.toISOString() }
-  });
-  resetLedger(params.wallet);
-  invalidateSessions(params.wallet);
   return {
     renewed: true,
     previousKeyRetired: oldPending === null,

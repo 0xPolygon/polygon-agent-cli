@@ -25,23 +25,20 @@ import {
 import {
   parkedRacSlots,
   racClient,
+  hasRacKey,
   readRacRecord,
   registerRac,
   retireParkedRacs,
   retireRac
 } from '../lib/session/rac.ts';
+import { withWalletKeys } from '../lib/session/renewal.ts';
 import {
   parseTokenAtChain,
   requireSupportedChain,
   resolvePlanToken
 } from '../lib/session/resolve.ts';
 import { getSessions } from '../lib/session/sessions.ts';
-import {
-  installName,
-  readApprovedPlan,
-  removeSessionState,
-  withWalletLock
-} from '../lib/session/state.ts';
+import { installName, readApprovedPlan, removeSessionState } from '../lib/session/state.ts';
 import {
   allowanceTotals,
   classifyHoldings,
@@ -175,7 +172,7 @@ export async function handleEmailLogin(argv: {
       });
     }
     if (pointer && readRacRecord({ wallet, slot: 'rac' })) {
-      const live = await withWalletLock({
+      const live = await withWalletKeys({
         wallet,
         fn: () => getSessions({ wallet, client: racClient({ wallet, slot: 'rac' }), fresh: true })
       }).catch((error: unknown) => {
@@ -234,7 +231,7 @@ export async function handleEmailLogin(argv: {
     });
 
     // A fresh session key for this connection; registering it needs no owner.
-    await withWalletLock({
+    await withWalletKeys({
       wallet,
       fn: async () => {
         await retireRac({ wallet, slot: 'rac' });
@@ -281,7 +278,7 @@ export const confirmCommandModule: CommandModule<object, ConfirmArgs> = {
     const now = new Date();
     let result: Awaited<ReturnType<typeof confirmOwnerRequest<Record<string, unknown>>>>;
     try {
-      result = await withWalletLock({
+      result = await withWalletKeys({
         wallet,
         fn: () =>
           confirmOwnerRequest({
@@ -336,7 +333,7 @@ async function sessionReport(params: {
   let accessError: Record<string, unknown> | undefined;
   let keysPendingRevocation: string[] = [];
   try {
-    sessions = await withWalletLock({
+    sessions = await withWalletKeys({
       wallet,
       fn: async () => {
         keysPendingRevocation = await retireParkedRacs({ wallet }).catch(() =>
@@ -571,7 +568,7 @@ const allowanceRenewCommand: CommandModule<object, RenewArgs> = {
         prices: await pricesFor(tokens),
         now: new Date()
       });
-      await withWalletLock({
+      await withWalletKeys({
         wallet,
         fn: async () => {
           await retireRac({ wallet, slot: 'rac-next' });
@@ -735,7 +732,9 @@ export const accessCommandModule: CommandModule<object, AccessArgs> = {
 export async function logoutSessionWallet(wallet: string): Promise<Record<string, unknown>> {
   const revoked: string[] = [];
   const failed: string[] = [];
-  await withWalletLock({
+  // Keys whose file is gone: nothing here can revoke them, only the owner.
+  const ownerMustRevoke: string[] = [];
+  await withWalletKeys({
     wallet,
     fn: async () => {
       for (const slot of ['rac', 'rac-next', ...parkedRacSlots(wallet)] as const) {
@@ -744,6 +743,10 @@ export async function logoutSessionWallet(wallet: string): Promise<Record<string
         // Past its lifetime, a key has no access left.
         if (Date.parse(record.expiresAt) <= Date.now()) {
           revoked.push(record.credentialId);
+          continue;
+        }
+        if (!hasRacKey({ wallet, slot })) {
+          ownerMustRevoke.push(record.credentialId);
           continue;
         }
         try {
@@ -760,19 +763,29 @@ export async function logoutSessionWallet(wallet: string): Promise<Record<string
           );
         }
       }
+      // Keep the key if OMS didn't confirm the revoke: it's what can revoke it later.
+      if (failed.length > 0) {
+        throw new CliError({
+          code: 'upstream_unavailable',
+          message:
+            "Couldn't revoke this install's access on OMS, so nothing was removed. Try again shortly.",
+          details: { revokeErrors: failed }
+        });
+      }
+      // Still under the wallet lock, so no spend or owner request interleaves.
+      removeSessionState(wallet);
+      await deletePending({ wallet });
+      await deleteOmsWallet(wallet);
     }
   });
-  // Keep the key if OMS didn't confirm the revoke: it's what can revoke it later.
-  if (failed.length > 0) {
-    throw new CliError({
-      code: 'upstream_unavailable',
-      message:
-        "Couldn't revoke this install's access on OMS, so nothing was removed. Try again shortly.",
-      details: { revokeErrors: failed }
-    });
-  }
-  removeSessionState(wallet);
-  await deletePending({ wallet });
-  await deleteOmsWallet(wallet);
-  return { accessRevoked: true, revokedCredentials: revoked };
+  if (ownerMustRevoke.length === 0) return { accessRevoked: true, revokedCredentials: revoked };
+  return {
+    accessRevoked: false,
+    revokedCredentials: revoked,
+    ownerMustRevoke,
+    hint:
+      `This install no longer has the key for ${ownerMustRevoke.join(', ')}, so only the owner can revoke it: ` +
+      'from any OMS app the owner signs into, or by connecting again and running polygon-agent wallet access --revoke <id>. ' +
+      'It expires on its own at the end of its allowance.'
+  };
 }

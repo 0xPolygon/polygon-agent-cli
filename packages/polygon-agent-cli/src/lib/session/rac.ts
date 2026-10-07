@@ -3,6 +3,11 @@
 // while a renewal is pending (a key's lifetime can't be extended). A replaced
 // key is parked as 'retiring-<credentialId>' until OMS confirms it is revoked,
 // so a failed revoke is retried instead of leaving access nobody tracks.
+//
+// Each slot is a directory (keys/<slot>/ with key.enc, record.json and
+// nonce.json), so promoting or parking a key is one atomic rename: moving a key
+// never separates it from its record. (A crash while registering can leave a
+// key without a record; it has no sessions, since those need the record.)
 
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
@@ -21,7 +26,7 @@ import { readJsonFile, sessionDir, writeJsonFile } from './state.ts';
 
 export type RacSlot = 'rac' | 'rac-next' | `retiring-${string}`;
 
-const PARKED = /^(retiring-[\w-]+)\.json$/;
+const PARKED = /^retiring-[\w-]+$/;
 
 const APP_URL = 'https://agents.polygon.technology';
 // Served by agentconnect-ui (public/polygon-logo.png).
@@ -39,14 +44,27 @@ export type RacRecord = z.infer<typeof RacRecordSchema>;
 
 const CipherSchema = z.object({ iv: z.string(), encrypted: z.string(), authTag: z.string() });
 
-function slotFile(params: { wallet: string; slot: RacSlot; suffix: string }): string {
-  return path.join(sessionDir(params.wallet), `${params.slot}.${params.suffix}`);
+function keysDir(wallet: string): string {
+  return path.join(sessionDir(wallet), 'keys');
+}
+
+function slotDir(params: { wallet: string; slot: RacSlot }): string {
+  return path.join(keysDir(params.wallet), params.slot);
+}
+
+function slotFile(params: {
+  wallet: string;
+  slot: RacSlot;
+  name: 'key.enc' | 'record.json' | 'nonce.json';
+}): string {
+  return path.join(slotDir(params), params.name);
 }
 
 // Reads the slot's key, or creates it exclusively (a concurrent creator wins
 // and we read its key).
 export function loadOrCreateRacKey(params: { wallet: string; slot: RacSlot }): Uint8Array {
-  const file = slotFile({ ...params, suffix: 'key.enc' });
+  fs.mkdirSync(slotDir(params), { recursive: true, mode: 0o700 });
+  const file = slotFile({ ...params, name: 'key.enc' });
   for (;;) {
     const cipher = CipherSchema.safeParse(readJsonFile(file));
     if (cipher.success) return Buffer.from(decrypt(cipher.data), 'hex');
@@ -67,7 +85,7 @@ export function loadOrCreateRacKey(params: { wallet: string; slot: RacSlot }): U
 // short by a crash) must not be replaced by a new key that OMS would answer
 // with 401, which would read as "already revoked".
 function loadRacKey(params: { wallet: string; slot: RacSlot }): Uint8Array {
-  const cipher = CipherSchema.safeParse(readJsonFile(slotFile({ ...params, suffix: 'key.enc' })));
+  const cipher = CipherSchema.safeParse(readJsonFile(slotFile({ ...params, name: 'key.enc' })));
   if (!cipher.success) {
     throw new CliError({
       code: 'not_connected',
@@ -79,8 +97,14 @@ function loadRacKey(params: { wallet: string; slot: RacSlot }): Uint8Array {
   return Buffer.from(decrypt(cipher.data), 'hex');
 }
 
+export function hasRacKey(params: { wallet: string; slot: RacSlot }): boolean {
+  return fs.existsSync(slotFile({ ...params, name: 'key.enc' }));
+}
+
 export function readRacRecord(params: { wallet: string; slot: RacSlot }): RacRecord | null {
-  const parsed = RacRecordSchema.safeParse(readJsonFile(slotFile({ ...params, suffix: 'json' })));
+  const parsed = RacRecordSchema.safeParse(
+    readJsonFile(slotFile({ ...params, name: 'record.json' }))
+  );
   return parsed.success ? parsed.data : null;
 }
 
@@ -89,7 +113,7 @@ export function racClient(params: { wallet: string; slot: RacSlot }): RemoteAcce
     publishableKey: loadOmsConfig().publishableKey,
     credentialSigner: new PersistentNonceSigner({
       privateKey: loadRacKey(params),
-      nonceFile: slotFile({ ...params, suffix: 'nonce.json' })
+      nonceFile: slotFile({ ...params, name: 'nonce.json' })
     })
   });
 }
@@ -127,29 +151,22 @@ export async function registerRac(params: {
     expiresAt: new Date(params.now.getTime() + lifetimeSeconds * 1000).toISOString(),
     installName: params.installName
   };
-  writeJsonFile({ file: slotFile({ ...params, suffix: 'json' }), data: record });
+  writeJsonFile({ file: slotFile({ ...params, name: 'record.json' }), data: record });
   return record;
 }
 
 export function clearRacSlot(params: { wallet: string; slot: RacSlot }): void {
-  for (const suffix of ['key.enc', 'json', 'nonce.json']) {
-    fs.rmSync(slotFile({ ...params, suffix }), { force: true });
-  }
+  fs.rmSync(slotDir(params), { recursive: true, force: true });
 }
 
-// Moves a slot's files. Resumable after a crash part-way (files already moved
-// are skipped), and never overwrites: a file already at the destination is a
-// different key's, or this one's moved earlier.
+// Moves a slot: one rename of its directory, so the key, its record and its
+// nonce always move together. Never overwrites another slot.
 function moveSlot(params: { wallet: string; from: RacSlot; to: RacSlot }): void {
-  for (const suffix of ['key.enc', 'json', 'nonce.json']) {
-    const from = slotFile({ wallet: params.wallet, slot: params.from, suffix });
-    const to = slotFile({ wallet: params.wallet, slot: params.to, suffix });
-    if (!fs.existsSync(from)) continue;
-    if (fs.existsSync(to)) {
-      throw new Error(`Can't move session key file ${from}: ${to} already exists`);
-    }
-    fs.renameSync(from, to);
-  }
+  const from = slotDir({ wallet: params.wallet, slot: params.from });
+  const to = slotDir({ wallet: params.wallet, slot: params.to });
+  if (!fs.existsSync(from)) return;
+  if (fs.existsSync(to)) throw new Error(`Can't move session key ${from}: ${to} already exists`);
+  fs.renameSync(from, to);
 }
 
 // After a renewal (the old key already retired or parked): the new key
@@ -213,11 +230,12 @@ export async function retireRac(params: {
 }
 
 export function parkedRacSlots(wallet: string): RacSlot[] {
+  const dir = keysDir(wallet);
+  if (!fs.existsSync(dir)) return [];
   return fs
-    .readdirSync(sessionDir(wallet))
-    .map((name) => PARKED.exec(name))
-    .filter((match) => match !== null)
-    .map((match): RacSlot => `retiring-${match[1].slice('retiring-'.length)}`);
+    .readdirSync(dir)
+    .filter((name) => PARKED.test(name))
+    .map((name): RacSlot => `retiring-${name.slice('retiring-'.length)}`);
 }
 
 // Retries every parked key; returns the credential ids still not revoked.

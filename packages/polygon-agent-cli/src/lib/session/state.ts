@@ -1,9 +1,10 @@
 // Per-wallet session-mode state under the state folder:
 //
+//   locks/wallets/<wallet>.lock/   serializes session-key requests and spends;
+//                                  outside session/ so logout never deletes it
 //   session/<wallet>/
-//     wallet.lock/                 serializes session-key requests and spends
-//     rac.key.enc, rac.json        session key (+ rac-next.* during renew)
-//     rac.nonce.json, rac-next.nonce.json
+//     keys/<slot>/                 session keys: rac, rac-next during renew,
+//                                  retiring-<id> until revoked (rac.ts)
 //     plan.json                    the approved plan + approvedAt
 //     ledger.jsonl                 USD spend ledger
 //     transfers/<id>.json          session transfer records
@@ -48,7 +49,9 @@ export async function withWalletLock<T>(params: {
 }): Promise<T> {
   try {
     return await withLock({
-      dir: path.join(sessionDir(params.wallet), 'wallet.lock'),
+      // Never inside session/<wallet>/: deleting a lock's directory would let
+      // its generation numbers start over (see lib/lock.ts).
+      dir: path.join(STORAGE_ROOT, 'locks', 'wallets', `${params.wallet}.lock`),
       fn: params.fn,
       waitMs: WALLET_LOCK_WAIT_MS
     });

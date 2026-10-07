@@ -702,29 +702,100 @@ describe('owner-request safety', () => {
 
 describe('replaced session keys', () => {
   const stateDir = () => path.join(String(process.env.POLYGON_AGENT_HOME), 'session', wallet);
-  const parkedName = (credentialId: string) => `retiring-${credentialId.replace(/[^\w-]/g, '_')}`;
 
-  it('a move cut short by a crash never replaces the real key, and reconnect finishes it', async () => {
+  it('keys move only as whole slot directories, so a crash never splits a key from its record', async () => {
+    await confirm(await connectStep1({ chains: 'polygon' }));
+    const yargs = (await import('yargs')).default;
+    vi.mocked(console.log).mockClear();
+    await yargs()
+      .command(allowanceCommandModule)
+      .parseAsync(['allowance', 'renew', '--days', '14', '--name', wallet]);
+    const request = String(lastJson('log').request);
+    const renames = vi.spyOn(fs, 'renameSync');
+    await confirm(request);
+    const moved = renames.mock.calls
+      .map(([from, to]) => [String(from), String(to)])
+      .filter(([from]) => from.startsWith(path.join(stateDir(), 'keys')));
+    const keysDir = path.join(stateDir(), 'keys');
+    // Only slot directories are renamed (temp files written in place aside).
+    expect(
+      moved
+        .filter(([from]) => !from.includes('.tmp'))
+        .every(([from]) => path.dirname(from) === keysDir)
+    ).toBe(true);
+    expect(moved).toContainEqual([path.join(keysDir, 'rac-next'), path.join(keysDir, 'rac')]);
+    expect(fs.readdirSync(path.join(keysDir, 'rac')).sort()).toEqual(
+      expect.arrayContaining(['key.enc', 'record.json'])
+    );
+  });
+
+  it('a missing key file is never replaced by a stand-in key; reconnect keeps its record', async () => {
     await confirm(await connectStep1({ chains: 'polygon' }));
     const oldKey = String(readRacRecord({ wallet, slot: 'rac' })?.credentialId);
-    // As if a crash came after the key file moved but before its record did.
-    fs.renameSync(
-      path.join(stateDir(), 'rac.key.enc'),
-      path.join(stateDir(), `${parkedName(oldKey)}.key.enc`)
-    );
+    const keyFile = path.join(stateDir(), 'keys', 'rac', 'key.enc');
+    fs.rmSync(keyFile);
 
-    // Using the key now fails; it doesn't create a stand-in key.
     const yargs = (await import('yargs')).default;
     await yargs()
       .command(allowanceCommandModule)
       .parseAsync(['allowance', '--name', wallet])
       .catch(() => undefined);
-    expect(fs.existsSync(path.join(stateDir(), 'rac.key.enc'))).toBe(false);
+    expect(fs.existsSync(keyFile)).toBe(false);
 
-    // Reconnecting retires the old key with the real key file.
+    // Reconnecting parks the old record (its revoke can be retried as the
+    // owner) rather than forgetting it.
     await connectStep1({ chains: 'polygon' });
+    expect(
+      parkedRacSlots(wallet).map((slot) => readRacRecord({ wallet, slot })?.credentialId)
+    ).toEqual([oldKey]);
+  });
+
+  it('a renewal cut short between retiring the old key and promoting the new one is finished by the next command', async () => {
+    await confirm(await connectStep1({ chains: 'polygon' }));
+    const oldKey = String(readRacRecord({ wallet, slot: 'rac' })?.credentialId);
+    const yargs = (await import('yargs')).default;
+    vi.mocked(console.log).mockClear();
+    await yargs()
+      .command(allowanceCommandModule)
+      .parseAsync(['allowance', 'renew', '--days', '14', '--name', wallet]);
+    const request = String(lastJson('log').request);
+    const newKey = String(readRacRecord({ wallet, slot: 'rac-next' })?.credentialId);
+
+    // The process dies as it promotes the new key.
+    const keysDir = path.join(stateDir(), 'keys');
+    const rename = fs.renameSync;
+    vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      if (String(from) === path.join(keysDir, 'rac-next')) throw new Error('killed');
+      return rename(from, to);
+    });
+    await confirm(request);
+    vi.mocked(fs.renameSync).mockRestore();
+    expect(readRacRecord({ wallet, slot: 'rac' })).toBeNull();
+
+    // The next command finishes the switch before doing anything else.
+    const shown = await (async () => {
+      vi.mocked(console.log).mockClear();
+      await yargs().command(allowanceCommandModule).parseAsync(['allowance', '--name', wallet]);
+      return lastJson('log');
+    })();
+    expect(readRacRecord({ wallet, slot: 'rac' })?.credentialId).toBe(newKey);
+    expect(readRacRecord({ wallet, slot: 'rac-next' })).toBeNull();
+    expect(readApprovedPlan(wallet)?.plan.days).toBe(14);
     expect(world.revoked.has(oldKey)).toBe(true);
-    expect(parkedRacSlots(wallet)).toEqual([]);
+    expect(shown).toMatchObject({ connected: true });
+  });
+
+  it('logout finishes when only the owner can revoke a key whose file is gone, and says so', async () => {
+    await confirm(await connectStep1({ chains: 'polygon' }));
+    const oldKey = String(readRacRecord({ wallet, slot: 'rac' })?.credentialId);
+    fs.rmSync(path.join(stateDir(), 'keys', 'rac', 'key.enc'));
+    await connectStep1({ chains: 'polygon' });
+    expect(await logoutSessionWallet(wallet)).toMatchObject({
+      accessRevoked: false,
+      ownerMustRevoke: [oldKey],
+      hint: expect.stringMatching(/only the owner can revoke/)
+    });
+    expect(await loadOmsWalletPointer(wallet)).toBeNull();
   });
 
   it('a parked key past its lifetime is forgotten without asking OMS', async () => {
@@ -742,7 +813,7 @@ describe('replaced session keys', () => {
     world.credentialRevokeError = httpError(503);
     await confirm(String(step1Out.request));
     const [slot] = parkedRacSlots(wallet);
-    const recordFile = path.join(stateDir(), `${slot}.json`);
+    const recordFile = path.join(stateDir(), 'keys', slot, 'record.json');
     const record = JSON.parse(fs.readFileSync(recordFile, 'utf8'));
     fs.writeFileSync(recordFile, JSON.stringify({ ...record, expiresAt: '2020-01-01T00:00:00Z' }));
     world.calls.length = 0;
