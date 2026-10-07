@@ -6,6 +6,7 @@ import type { ContractTokenBalance } from '@polygonlabs/oms-wallet';
 
 import { findNetworkById } from '@polygonlabs/oms-wallet';
 
+import { bigintReplacer, failureJson } from '../lib/errors.ts';
 import { isWalletFunded } from '../lib/indexer.ts';
 import { resolveBroadcast, withWriteFlags } from '../lib/mode.ts';
 import { getOmsClient, loginUiBaseUrl } from '../lib/oms-client.ts';
@@ -92,8 +93,6 @@ async function getTokenConfig({
     decimals: Number(token.decimals)
   };
 }
-
-const bigintReplacer = (_k: string, v: unknown) => (typeof v === 'bigint' ? v.toString() : v);
 
 const BALANCES_MAX_CHAINS = 20;
 
@@ -237,17 +236,7 @@ export const balancesCommand: CommandModule = {
           );
         }
       } catch (error) {
-        console.error(
-          JSON.stringify(
-            {
-              ok: false,
-              error: (error as Error).message,
-              stack: (error as Error).stack
-            },
-            null,
-            2
-          )
-        );
+        console.error(JSON.stringify(failureJson(error), bigintReplacer, 2));
         process.exit(1);
       }
       return;
@@ -279,17 +268,7 @@ export const balancesCommand: CommandModule = {
           )
         );
       } catch (error) {
-        console.error(
-          JSON.stringify(
-            {
-              ok: false,
-              error: (error as Error).message,
-              stack: (error as Error).stack
-            },
-            null,
-            2
-          )
-        );
+        console.error(JSON.stringify(failureJson(error), bigintReplacer, 2));
         process.exit(1);
       }
     } else {
@@ -399,17 +378,7 @@ export const fundCommand: CommandModule = {
 
       await showFunding(walletName, session.walletAddress, 137, { openBrowser: true });
     } catch (error) {
-      console.error(
-        JSON.stringify(
-          {
-            ok: false,
-            error: (error as Error).message,
-            stack: (error as Error).stack
-          },
-          null,
-          2
-        )
-      );
+      console.error(JSON.stringify(failureJson(error), bigintReplacer, 2));
       process.exit(1);
     }
   }
@@ -596,17 +565,7 @@ async function handleSendNative(argv: {
         )
       );
     } catch (error) {
-      console.error(
-        JSON.stringify(
-          {
-            ok: false,
-            error: (error as Error).message,
-            stack: (error as Error).stack
-          },
-          null,
-          2
-        )
-      );
+      console.error(JSON.stringify(failureJson(error), bigintReplacer, 2));
       process.exit(1);
     }
   } else {
@@ -782,17 +741,7 @@ async function handleSendToken(argv: {
         )
       );
     } catch (error) {
-      console.error(
-        JSON.stringify(
-          {
-            ok: false,
-            error: (error as Error).message,
-            stack: (error as Error).stack
-          },
-          null,
-          2
-        )
-      );
+      console.error(JSON.stringify(failureJson(error), bigintReplacer, 2));
       process.exit(1);
     }
   } else {
@@ -1194,17 +1143,7 @@ export const swapCommand: CommandModule = {
         )
       );
     } catch (error) {
-      console.error(
-        JSON.stringify(
-          {
-            ok: false,
-            error: (error as Error).message,
-            stack: (error as Error).stack
-          },
-          null,
-          2
-        )
-      );
+      console.error(JSON.stringify(failureJson(error), bigintReplacer, 2));
       process.exit(1);
     }
   }
@@ -1496,17 +1435,7 @@ export const depositCommand: CommandModule = {
         )
       );
     } catch (error) {
-      console.error(
-        JSON.stringify(
-          {
-            ok: false,
-            error: (error as Error).message,
-            stack: (error as Error).stack
-          },
-          null,
-          2
-        )
-      );
+      console.error(JSON.stringify(failureJson(error), bigintReplacer, 2));
       process.exit(1);
     }
   }
@@ -1982,17 +1911,7 @@ export const withdrawCommand: CommandModule = {
         )
       );
     } catch (error) {
-      console.error(
-        JSON.stringify(
-          {
-            ok: false,
-            error: (error as Error).message,
-            stack: (error as Error).stack
-          },
-          null,
-          2
-        )
-      );
+      console.error(JSON.stringify(failureJson(error), bigintReplacer, 2));
       process.exit(1);
     }
   }
@@ -2412,17 +2331,7 @@ export const x402PayCommand: CommandModule = {
 
       if (!response.ok) process.exit(1);
     } catch (error) {
-      console.error(
-        JSON.stringify(
-          {
-            ok: false,
-            error: (error as Error).message,
-            stack: (error as Error).stack
-          },
-          null,
-          2
-        )
-      );
+      console.error(JSON.stringify(failureJson(error), bigintReplacer, 2));
       process.exit(1);
     }
   }

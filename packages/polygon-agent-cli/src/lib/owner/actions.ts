@@ -2,7 +2,12 @@
 
 import { encodeFunctionData, erc20Abi } from 'viem';
 
-import type { AccessGrant, OMSWallet, SmartSessionGrant } from '@polygonlabs/oms-wallet';
+import type {
+  AccessGrant,
+  OMSWallet,
+  SmartSessionGrant,
+  SmartSessionGrantUsage
+} from '@polygonlabs/oms-wallet';
 
 import { findNetworkById, TransactionMode } from '@polygonlabs/oms-wallet';
 
@@ -14,10 +19,16 @@ import { CliError, mapOmsError } from '../errors.ts';
 import { makeFeeSelector } from '../oms-tx.ts';
 import { resetLedger } from '../session/ledger.ts';
 import { planSummary, toGrants } from '../session/plan.ts';
-import { clearRacSlot, promoteNextRac, racClient, readRacRecord } from '../session/rac.ts';
+import {
+  promoteNextRac,
+  racClient,
+  readRacRecord,
+  retireParkedRacs,
+  retireRac
+} from '../session/rac.ts';
 import { invalidateSessions } from '../session/sessions.ts';
 import { readApprovedPlan, writeApprovedPlan } from '../session/state.ts';
-import { chainLabel } from '../session/tokens.ts';
+import { chainLabel, findSupportedToken } from '../session/tokens.ts';
 import { probeSponsorship } from '../session/transfer.ts';
 import { loadOmsWalletPointer, saveOmsWalletPointer } from '../storage.ts';
 import { formatUnits, getExplorerUrl, resolveNetwork } from '../utils.ts';
@@ -376,10 +387,9 @@ async function renew(params: { context: OwnerContext; wallet: string; plan: Plan
     plan: params.plan,
     reuseSessions: false
   });
-  // If the new key ends up unused, retire it on OMS and locally.
+  // If the new key ends up unused, retire it (parked until OMS confirms).
   const dropNext = async () => {
-    await owner.wallet.revokeAccess({ credentialId: next.credentialId }).catch(() => undefined);
-    clearRacSlot({ wallet: params.wallet, slot: 'rac-next' });
+    await retireRac({ wallet: params.wallet, slot: 'rac-next', owner: owner.wallet });
   };
   let checked: Awaited<ReturnType<typeof verifyAndProbe>>;
   try {
@@ -403,20 +413,19 @@ async function renew(params: { context: OwnerContext; wallet: string; plan: Plan
     return { renewed: false, failed, warnings: checked.warnings };
   }
 
-  // Retire the old key: from the key itself, else as the owner.
+  // Retire the old key: from the key itself, else as the owner. If OMS
+  // confirms neither, the old key stays parked (its sessions may still be
+  // live) and every later spend, status and owner request retries it.
   const warnings = [...checked.warnings];
-  if (old) {
-    try {
-      await racClient({ wallet: params.wallet, slot: 'rac' }).revokeCredential({
-        credentialId: old.credentialId
-      });
-    } catch {
-      await owner.wallet
-        .revokeAccess({ credentialId: old.credentialId })
-        .catch((error: unknown) => {
-          warnings.push(`Could not revoke the previous session key: ${String(error)}`);
-        });
-    }
+  const oldPending = old
+    ? await retireRac({ wallet: params.wallet, slot: 'rac', owner: owner.wallet })
+    : null;
+  if (oldPending) {
+    warnings.push(
+      `Couldn't revoke the previous session key (${oldPending}), so its sessions may still be live. ` +
+        "It's kept and retried automatically; to cut it off now: polygon-agent wallet access --revoke " +
+        oldPending
+    );
   }
   promoteNextRac(params.wallet);
   const plan = approvedPlan({ plan: params.plan, approved: checked.approved });
@@ -426,7 +435,13 @@ async function renew(params: { context: OwnerContext; wallet: string; plan: Plan
   });
   resetLedger(params.wallet);
   invalidateSessions(params.wallet);
-  return { renewed: true, allowance: planSummary(plan), failed, warnings };
+  return {
+    renewed: true,
+    previousKeyRetired: oldPending === null,
+    allowance: planSummary(plan),
+    failed,
+    warnings
+  };
 }
 
 async function withdraw(params: {
@@ -469,10 +484,50 @@ async function withdraw(params: {
   };
 }
 
-function describeAccess(params: {
+function sameGrant(a: SmartSessionGrant, b: SmartSessionGrant): boolean {
+  const sameTo = (a.to ?? '').toLowerCase() === (b.to ?? '').toLowerCase();
+  if (a.kind === 'erc20Transfer' && b.kind === 'erc20Transfer') {
+    return a.token.toLowerCase() === b.token.toLowerCase() && sameTo;
+  }
+  return a.kind === 'nativeTransfer' && b.kind === 'nativeTransfer' && sameTo;
+}
+
+// One grant's limit and use, in token units when the token is a known one.
+function describeGrant(params: {
+  chainId?: number;
+  grant: SmartSessionGrant;
+  usage?: ReadonlyArray<SmartSessionGrantUsage>;
+}): Record<string, unknown> {
+  const { grant } = params;
+  const used = params.usage?.find((u) => sameGrant(u.grant, grant))?.used;
+  const known =
+    grant.kind === 'erc20Transfer' && params.chainId !== undefined
+      ? findSupportedToken({ chainId: params.chainId, address: grant.token })
+      : undefined;
+  const amount = (value: bigint) => (known ? formatUnits(value, known.decimals) : value.toString());
+  // A per-transaction limit (another app's grant) has no running total.
+  const perTransaction = grant.kind === 'erc20Transfer' && grant.cumulative === false;
+  return {
+    ...(grant.kind === 'erc20Transfer'
+      ? { token: grant.token, ...(known ? { symbol: known.symbol } : {}) }
+      : { native: true }),
+    limit: amount(grant.limit),
+    ...(perTransaction ? { perTransaction: true } : {}),
+    ...(used === undefined || perTransaction
+      ? {}
+      : { used: amount(used), remaining: amount(grant.limit > used ? grant.limit - used : 0n) }),
+    to: grant.to ?? 'any'
+  };
+}
+
+// An access grant as the owner sees it. For an install's session this reads
+// the session (chain, expiry) and its usage, so the owner can judge what is
+// still exposed; if those reads fail, the grant is still listed, marked so.
+async function describeAccess(params: {
+  owner: OMSWallet;
   grant: AccessGrant;
   installCredentialId?: string;
-}): Record<string, unknown> {
+}): Promise<Record<string, unknown>> {
   const { grant } = params;
   const common = {
     type: grant.type,
@@ -482,16 +537,38 @@ function describeAccess(params: {
     isThisInstall: grant.credentialId === params.installCredentialId
   };
   if (grant.type === 'direct') return { ...common, app: 'Owner sign-in' };
-  return {
+  const remote = {
     ...common,
     sessionId: grant.sessionId,
-    app: grant.metadata.appName || grant.metadata.appUrl || 'Unnamed app',
-    tokens: grant.grants.map((g) =>
-      g.kind === 'erc20Transfer'
-        ? { token: g.token, limit: g.limit.toString(), to: g.to ?? 'any' }
-        : { native: true, limit: g.limit.toString(), to: g.to }
-    )
+    app: grant.metadata.appName || grant.metadata.appUrl || 'Unnamed app'
   };
+  try {
+    const session = await params.owner.wallet.getRemoteAccessSession({
+      sessionId: grant.sessionId
+    });
+    const network = findNetworkById(session.chainId);
+    const usage = network
+      ? await params.owner.wallet.getRemoteAccessSessionUsage({
+          sessionId: grant.sessionId,
+          network
+        })
+      : undefined;
+    return {
+      ...remote,
+      chainId: session.chainId,
+      chain: chainLabel(session.chainId),
+      sessionExpiresAt: session.expiresAt,
+      tokens: session.grants.map((g) =>
+        describeGrant({ chainId: session.chainId, grant: g, usage })
+      )
+    };
+  } catch (error) {
+    return {
+      ...remote,
+      tokens: grant.grants.map((g) => describeGrant({ grant: g })),
+      detailsError: `Couldn't read this session's chain and usage: ${error instanceof Error ? error.message : String(error)}`
+    };
+  }
 }
 
 async function access(params: {
@@ -511,13 +588,17 @@ async function access(params: {
     };
   }
   const grants = await owner.wallet.listAccess();
+  const described: Record<string, unknown>[] = [];
+  for (const grant of grants) {
+    described.push(await describeAccess({ owner, grant, installCredentialId }));
+  }
   return {
     ...(revoked ? { revoked } : {}),
-    access: grants.map((grant) => describeAccess({ grant, installCredentialId }))
+    access: described
   };
 }
 
-export async function runOwnerAction(params: {
+async function runAction(params: {
   context: OwnerContext;
   wallet: string;
   now: Date;
@@ -535,4 +616,21 @@ export async function runOwnerAction(params: {
     case 'access':
       return { action: 'access', ...(await access({ ...params, revoke: action.revoke })) };
   }
+}
+
+export async function runOwnerAction(params: {
+  context: OwnerContext;
+  wallet: string;
+  now: Date;
+}): Promise<Record<string, unknown>> {
+  const result = await runAction(params);
+  // While the owner is signed in, retry any replaced key OMS hasn't revoked
+  // yet. Best effort: the action itself is done either way.
+  const pending = await retireParkedRacs({
+    wallet: params.wallet,
+    owner: params.context.owner.wallet
+  }).catch((error: unknown) => [
+    `retry failed: ${error instanceof Error ? error.message : String(error)}`
+  ]);
+  return pending.length > 0 ? { ...result, keysPendingRevocation: pending } : result;
 }

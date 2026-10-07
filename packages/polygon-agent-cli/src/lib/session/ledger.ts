@@ -19,7 +19,9 @@ const LedgerEntrySchema = z.object({
   amount: z.string(),
   usd: z.number(),
   purpose: z.enum(['send', 'trade', 'x402']),
-  ref: z.string().optional()
+  ref: z.string().optional(),
+  // The session transfer it records, so recording it again is a no-op.
+  transferId: z.string().optional()
 });
 export type LedgerEntry = z.infer<typeof LedgerEntrySchema>;
 

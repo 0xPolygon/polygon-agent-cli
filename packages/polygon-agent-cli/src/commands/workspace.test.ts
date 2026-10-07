@@ -238,8 +238,13 @@ describe('update concurrency', () => {
     expect(errorOutput()).toMatch(/holds .*update\.lock/);
     expect(cliMarker()).toBe('new');
     expect(fs.readdirSync(root).sort()).toEqual(['.gitignore', 'bin', 'cli', 'state']);
-    // Released: the lock directory holds no generation.
-    expect(fs.readdirSync(path.join(root, 'state', 'update.lock'))).toEqual([]);
+    // Released: every generation left in the lock directory is marked released.
+    const lockDir = path.join(root, 'state', 'update.lock');
+    for (const name of fs.readdirSync(lockDir)) {
+      expect(JSON.parse(fs.readFileSync(path.join(lockDir, name), 'utf8'))).toMatchObject({
+        released: true
+      });
+    }
   });
 });
 

@@ -39,9 +39,15 @@ const world = vi.hoisted(() => ({
   // The session key's reads fail, e.g. an outage.
   listSessionsError: undefined as unknown,
   racRevokeError: undefined as unknown,
+  // The owner's revoke of another credential fails, e.g. an outage.
+  credentialRevokeError: undefined as unknown,
+  // The owner's session reads fail.
+  sessionReadError: undefined as unknown,
   walletAddress: '0xd384ea24ca0B3a5e4BB35935C611E3dCB68Fd08e',
   isPending: (): boolean => false,
   pendingDuringRun: [] as boolean[],
+  // Runs while the code is being checked (e.g. a new step 1 in another process).
+  onSignIn: undefined as undefined | (() => Promise<void>),
   sent: [] as Array<{ to: string; data: string; network: number }>
 }));
 
@@ -77,6 +83,7 @@ vi.mock('@polygonlabs/oms-wallet', async (importOriginal) => {
     async completeEmailAuth(params: { code: string }) {
       if (this.activeEmailAuthAttempt?.verifier !== 'v-1')
         throw new Error('No pending email auth attempt');
+      await world.onSignIn?.();
       if (params.code !== world.code) throw httpError(400, 'AnswerIncorrect');
       world.ownerCredentials.add(this.credentialId);
       world.calls.push('signedIn');
@@ -118,11 +125,44 @@ vi.mock('@polygonlabs/oms-wallet', async (importOriginal) => {
       }
       if (world.ownerCredentials.has(params.credentialId) && world.failOwnerRevoke)
         throw httpError(503);
+      if (!world.ownerCredentials.has(params.credentialId) && world.credentialRevokeError)
+        throw world.credentialRevokeError;
       world.revoked.add(params.credentialId);
     }
     async listAccess() {
       world.calls.push('listAccess');
-      return [{ type: 'direct', credentialId: this.credentialId, expiresAt: '', isCaller: true }];
+      const remote = [...world.sessions.entries()]
+        .filter(([, s]) => !world.revoked.has(s.credentialId))
+        .map(([sessionId, s]) => ({
+          type: 'remote',
+          credentialId: s.credentialId,
+          expiresAt: s.expiresAt,
+          isCaller: false,
+          sessionId,
+          metadata: {
+            appName: 'Polygon OMS Agent Kit (test)',
+            appUrl: '',
+            appLogoUrl: '',
+            custom: {}
+          },
+          grants: s.grants
+        }));
+      return [
+        { type: 'direct', credentialId: this.credentialId, expiresAt: '', isCaller: true },
+        ...remote
+      ];
+    }
+    async getRemoteAccessSession(params: { sessionId: string }) {
+      if (world.sessionReadError) throw world.sessionReadError;
+      const s = world.sessions.get(params.sessionId);
+      if (!s) throw httpError(404);
+      return { sessionId: params.sessionId, walletId: 'wal-1', signerAddress: '0x0', ...s };
+    }
+    async getRemoteAccessSessionUsage(params: { sessionId: string }) {
+      return (world.sessions.get(params.sessionId)?.grants ?? []).map((grant) => ({
+        grant,
+        used: grant.kind === 'erc20Transfer' && grant.limit > 1_000_000n ? 1_000_000n : 0n
+      }));
     }
     async sendTransaction(params: { to: string; data: string; network: { id: number } }) {
       world.calls.push('sendTransaction');
@@ -210,7 +250,7 @@ const {
 } = await import('./wallet-session.ts');
 const { loadPending, savePending } = await import('../lib/owner/pending.ts');
 const { readApprovedPlan } = await import('../lib/session/state.ts');
-const { readRacRecord } = await import('../lib/session/rac.ts');
+const { parkedRacSlots, readRacRecord } = await import('../lib/session/rac.ts');
 const { loadOmsWalletPointer } = await import('../lib/storage.ts');
 
 let wallet: string;
@@ -258,10 +298,13 @@ beforeEach(() => {
   world.tamper = false;
   world.listSessionsError = undefined;
   world.racRevokeError = undefined;
+  world.credentialRevokeError = undefined;
+  world.sessionReadError = undefined;
   world.walletAddress = '0xd384ea24ca0B3a5e4BB35935C611E3dCB68Fd08e';
   world.isPending = () =>
     fs.existsSync(path.join(String(process.env.POLYGON_AGENT_HOME), 'pending', `${wallet}.json`));
   world.pendingDuringRun.length = 0;
+  world.onSignIn = undefined;
   world.sent.length = 0;
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -334,7 +377,7 @@ describe('connect', () => {
     const request = await connectStep1();
     const pending = loadPending(wallet);
     if (!pending) throw new Error('no pending request');
-    savePending({ ...pending, expiresAt: new Date(Date.now() - 1000).toISOString() });
+    await savePending({ ...pending, expiresAt: new Date(Date.now() - 1000).toISOString() });
     expect(await confirm(request)).toMatchObject({ ok: false, code: 'request_expired' });
     expect(loadPending(wallet)).toBeNull();
     expect(world.calls).not.toContain('signedIn');
@@ -424,6 +467,43 @@ describe('allowance set and renew', () => {
     expect(readRacRecord({ wallet, slot: 'rac-next' })).toBeNull();
     expect(readApprovedPlan(wallet)?.plan.days).toBe(14);
   });
+
+  it('renew keeps an old key OMS would not revoke, and retries until it is', async () => {
+    await confirm(await connectStep1({ chains: 'polygon' }));
+    const oldKey = String(readRacRecord({ wallet, slot: 'rac' })?.credentialId);
+    const step1 = await run(['renew', '--days', '14']);
+    world.racRevokeError = httpError(503);
+    world.credentialRevokeError = httpError(503);
+
+    const out = await confirm(String(step1.request));
+    expect(out).toMatchObject({
+      ok: true,
+      renewed: true,
+      previousKeyRetired: false,
+      keysPendingRevocation: [oldKey]
+    });
+    expect(String(out.warnings)).toMatch(/previous session key/);
+    expect(world.revoked.has(oldKey)).toBe(false);
+    // Parked, not deleted: the key that can still revoke itself stays.
+    const parked = parkedRacSlots(wallet);
+    expect(parked.map((slot) => readRacRecord({ wallet, slot })?.credentialId)).toEqual([oldKey]);
+    expect(readRacRecord({ wallet, slot: 'rac' })?.credentialId).not.toBe(oldKey);
+
+    // Still failing: status says so.
+    const shown = await run([]);
+    expect(shown.alerts).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'old_key_live' })])
+    );
+
+    // OMS is back: the next status retires it.
+    world.racRevokeError = undefined;
+    const after = await run([]);
+    expect(world.revoked.has(oldKey)).toBe(true);
+    expect(parkedRacSlots(wallet)).toEqual([]);
+    expect(after.alerts).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'old_key_live' })])
+    );
+  });
 });
 
 describe('logout', () => {
@@ -454,6 +534,16 @@ describe('owner-request safety', () => {
     await confirm(request);
     expect(world.pendingDuringRun.length).toBeGreaterThan(0);
     expect(world.pendingDuringRun.every((pending) => !pending)).toBe(true);
+  });
+
+  it('confirming one request never deletes a newer one saved meanwhile', async () => {
+    const request = await connectStep1({ chains: 'polygon' });
+    world.onSignIn = async () => {
+      const pending = loadPending(wallet);
+      if (pending) await savePending({ ...pending, id: 'newer-request' });
+    };
+    expect(await confirm(request)).toMatchObject({ ok: true, connected: true });
+    expect(loadPending(wallet)?.id).toBe('newer-request');
   });
 
   it('keeps the pending request encrypted and owner-only', async () => {
@@ -573,12 +663,108 @@ describe('owner-request safety', () => {
     ).toEqual([to, 1_500_000n]);
   });
 
-  it('access lists who has access, marking this sign-in', async () => {
+  it('access still lists a session whose details cannot be read, marked so', async () => {
+    await confirm(await connectStep1({ chains: 'polygon' }));
+    await yargsRun(accessCommandModule, ['access', '--name', wallet]);
+    world.sessionReadError = httpError(503);
+    const out = await confirm(String(lastJson('log').request));
+    expect(out).toMatchObject({ ok: true, action: 'access' });
+    expect(out.access).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'remote',
+          isThisInstall: true,
+          detailsError: expect.stringMatching(/chain and usage/)
+        })
+      ])
+    );
+  });
+
+  it('access lists who has access, with each session chain, limits and usage', async () => {
     await confirm(await connectStep1({ chains: 'polygon' }));
     await yargsRun(accessCommandModule, ['access', '--name', wallet]);
     const out = await confirm(String(lastJson('log').request));
     expect(out).toMatchObject({ ok: true, action: 'access' });
-    expect(out.access).toEqual([expect.objectContaining({ type: 'direct', isThisSignIn: true })]);
+    expect(out.access).toEqual([
+      expect.objectContaining({ type: 'direct', isThisSignIn: true }),
+      expect.objectContaining({
+        type: 'remote',
+        isThisInstall: true,
+        chainId: 137,
+        chain: 'Polygon',
+        tokens: expect.arrayContaining([
+          expect.objectContaining({ symbol: 'USDC', limit: '500', used: '1', remaining: '499' })
+        ])
+      })
+    ]);
+  });
+});
+
+describe('replaced session keys', () => {
+  const stateDir = () => path.join(String(process.env.POLYGON_AGENT_HOME), 'session', wallet);
+  const parkedName = (credentialId: string) => `retiring-${credentialId.replace(/[^\w-]/g, '_')}`;
+
+  it('a move cut short by a crash never replaces the real key, and reconnect finishes it', async () => {
+    await confirm(await connectStep1({ chains: 'polygon' }));
+    const oldKey = String(readRacRecord({ wallet, slot: 'rac' })?.credentialId);
+    // As if a crash came after the key file moved but before its record did.
+    fs.renameSync(
+      path.join(stateDir(), 'rac.key.enc'),
+      path.join(stateDir(), `${parkedName(oldKey)}.key.enc`)
+    );
+
+    // Using the key now fails; it doesn't create a stand-in key.
+    const yargs = (await import('yargs')).default;
+    await yargs()
+      .command(allowanceCommandModule)
+      .parseAsync(['allowance', '--name', wallet])
+      .catch(() => undefined);
+    expect(fs.existsSync(path.join(stateDir(), 'rac.key.enc'))).toBe(false);
+
+    // Reconnecting retires the old key with the real key file.
+    await connectStep1({ chains: 'polygon' });
+    expect(world.revoked.has(oldKey)).toBe(true);
+    expect(parkedRacSlots(wallet)).toEqual([]);
+  });
+
+  it('a parked key past its lifetime is forgotten without asking OMS', async () => {
+    await confirm(await connectStep1({ chains: 'polygon' }));
+    const oldKey = String(readRacRecord({ wallet, slot: 'rac' })?.credentialId);
+    const step1Out = await (async () => {
+      const yargs = (await import('yargs')).default;
+      vi.mocked(console.log).mockClear();
+      await yargs()
+        .command(allowanceCommandModule)
+        .parseAsync(['allowance', 'renew', '--days', '14', '--name', wallet]);
+      return lastJson('log');
+    })();
+    world.racRevokeError = httpError(503);
+    world.credentialRevokeError = httpError(503);
+    await confirm(String(step1Out.request));
+    const [slot] = parkedRacSlots(wallet);
+    const recordFile = path.join(stateDir(), `${slot}.json`);
+    const record = JSON.parse(fs.readFileSync(recordFile, 'utf8'));
+    fs.writeFileSync(recordFile, JSON.stringify({ ...record, expiresAt: '2020-01-01T00:00:00Z' }));
+    world.calls.length = 0;
+
+    const yargs = (await import('yargs')).default;
+    await yargs().command(allowanceCommandModule).parseAsync(['allowance', '--name', wallet]);
+    expect(parkedRacSlots(wallet)).toEqual([]);
+    expect(world.calls).not.toContain('revokeCredential');
+    expect(world.revoked.has(oldKey)).toBe(false);
+  });
+
+  it('a parked key OMS already rejects (401) is forgotten', async () => {
+    await confirm(await connectStep1({ chains: 'polygon' }));
+    // Its sessions are gone (so reconnecting is allowed), but its revoke fails.
+    world.revoked.add(String(readRacRecord({ wallet, slot: 'rac' })?.credentialId));
+    world.racRevokeError = httpError(503);
+    await connectStep1({ chains: 'polygon' });
+    expect(parkedRacSlots(wallet)).toHaveLength(1);
+    world.racRevokeError = httpError(401);
+    const yargs = (await import('yargs')).default;
+    await yargs().command(allowanceCommandModule).parseAsync(['allowance', '--name', wallet]);
+    expect(parkedRacSlots(wallet)).toEqual([]);
   });
 });
 

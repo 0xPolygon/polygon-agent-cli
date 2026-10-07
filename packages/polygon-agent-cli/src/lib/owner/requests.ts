@@ -20,7 +20,7 @@ import type { OwnerAction, PendingRequest } from './pending.ts';
 import { CliError, mapOmsError, upstreamErrorName } from '../errors.ts';
 import { loadOmsConfig } from '../storage.ts';
 import { exportEmailAttempt, restoreEmailAttempt } from './email-attempt.ts';
-import { deletePending, loadPending, savePending } from './pending.ts';
+import { deletePending, discardPendingNow, loadPending, savePending } from './pending.ts';
 
 // The owner sign-in's lifetime: as short as OMS allows, so a sign-in whose
 // revoke failed dies on its own soon after.
@@ -68,7 +68,7 @@ export async function startOwnerRequest(params: {
     createdAt: params.now.toISOString(),
     expiresAt: new Date(params.now.getTime() + REQUEST_LIFETIME_MS).toISOString()
   };
-  savePending(request);
+  await savePending(request);
   return request;
 }
 
@@ -105,7 +105,7 @@ async function signIn(params: {
     }
     const mapped = mapOmsError(error);
     if (mapped instanceof CliError && mapped.code === 'rate_limited') throw mapped;
-    deletePending(params.request.wallet);
+    await deletePending({ wallet: params.request.wallet, id: params.request.id });
     if (
       name === 'ChallengeExpired' ||
       name === 'TooManyAttempts' ||
@@ -137,14 +137,12 @@ export async function confirmOwnerRequest<T extends Record<string, unknown>>(par
     throw requestExpired(`No pending request ${params.requestId} for wallet '${params.wallet}'.`);
   }
   if (Date.parse(request.expiresAt) <= params.now.getTime()) {
-    deletePending(params.wallet);
+    await deletePending({ wallet: params.wallet, id: request.id });
     throw requestExpired('The request has expired (requests last 10 minutes).');
   }
 
   const owner = ownerWallet(Buffer.from(request.ownerKey, 'hex'));
   const auth = await signIn({ request, owner, code: params.code });
-  // Signed in: the key is now an owner credential, so it leaves the disk at once.
-  deletePending(params.wallet);
 
   const revokeSignIn = async (): Promise<string | undefined> => {
     try {
@@ -165,6 +163,12 @@ export async function confirmOwnerRequest<T extends Record<string, unknown>>(par
 
   let outcome: { ok: true; result: T } | { ok: false; error: unknown };
   try {
+    // Signed in: the key is now an owner credential, so it leaves the disk at
+    // once. A newer request saved meanwhile (a new step 1) is left alone,
+    // unless the careful delete fails; then the file goes regardless.
+    await deletePending({ wallet: params.wallet, id: request.id }).catch(() =>
+      discardPendingNow(params.wallet)
+    );
     outcome = {
       ok: true,
       result: await params.run({ owner, walletAddress: auth.walletAddress, request })

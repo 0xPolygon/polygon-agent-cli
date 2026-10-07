@@ -8,11 +8,17 @@ import type { LiveSession } from './sessions.ts';
 import type { ApprovedPlan } from './state.ts';
 
 import { formatUnits } from '../utils.ts';
-import { spentUsd } from './ledger.ts';
 import { chainLabel, findSupportedToken, supportedChainIds } from './tokens.ts';
+import { spentUsdSince } from './transfer.ts';
 
 export interface Alert {
-  type: 'expired' | 'expiring' | 'allowance_low' | 'limit_used' | 'uncovered_funds';
+  type:
+    | 'expired'
+    | 'expiring'
+    | 'allowance_low'
+    | 'limit_used'
+    | 'uncovered_funds'
+    | 'old_key_live';
   message: string;
   command?: string;
 }
@@ -169,7 +175,7 @@ export function allowanceTotals(params: {
   approved: ApprovedPlan | null;
 }): Record<string, unknown> | null {
   if (!params.approved) return null;
-  const spent = spentUsd({ wallet: params.wallet, since: params.approved.approvedAt });
+  const spent = spentUsdSince({ wallet: params.wallet, since: params.approved.approvedAt });
   const allowanceUsd = params.approved.plan.allowanceUsd;
   return {
     allowanceUsd,

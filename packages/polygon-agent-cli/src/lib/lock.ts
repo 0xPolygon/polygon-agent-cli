@@ -3,15 +3,18 @@
 //
 // A lock is a directory of numbered generation files, each naming its holder.
 // The highest generation is the lock's current state:
-//   - Acquire: if the highest generation's holder is gone (a dead process on
-//     this host, or an unreadable file left long enough), create the next
-//     generation with O_EXCL. Only one process can create a given generation,
-//     so two processes that both found the same holder dead can't both get in.
-//     The winner then checks that no higher generation exists (else it backs
-//     off) and removes the older ones, which can only be dead or released.
-//   - Release: delete only your own generation file.
-// Nothing ever deletes or replaces another live holder's file, so a takeover
-// can't evict a live holder and a release can't free someone else's lock.
+//   - Acquire: if the highest generation's holder is gone (released, a dead
+//     process on this host, or an unreadable file left long enough), create the
+//     next generation with O_EXCL. Only one process can create a given
+//     generation, so two processes that both found the same holder gone can't
+//     both get in. The winner then checks that no higher generation exists
+//     (else it backs off) and removes the older ones, which can only be gone.
+//   - Release: mark your own generation file released (an atomic replace). It
+//     stays as the highest generation until the next holder replaces it.
+// The highest generation number therefore never goes down, so a process that
+// judged the lock free and resumes late always finds a newer generation and
+// backs off. Nothing deletes or replaces another live holder's file, so a
+// takeover can't evict a live holder and a release can't free someone else's.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -19,7 +22,12 @@ import path from 'node:path';
 
 import { z } from 'zod';
 
-const LockHolder = z.object({ pid: z.number(), host: z.string(), startedAt: z.string() });
+const LockHolder = z.object({
+  pid: z.number(),
+  host: z.string(),
+  startedAt: z.string(),
+  released: z.boolean().optional()
+});
 type LockHolder = z.infer<typeof LockHolder>;
 
 // An unreadable generation (its writer died mid-write) counts as gone after this.
@@ -28,6 +36,8 @@ const UNREADABLE_STALE_MS = 10 * 60 * 1000;
 const MAX_ATTEMPTS = 5;
 
 const GENERATION = /^(\d{12})\.json$/;
+// A release's temporary file (left behind only if the releaser crashed).
+const RELEASING = /^(\d{12})\.json\..+\.tmp$/;
 
 export class LockHeldError extends Error {
   dir: string;
@@ -78,10 +88,11 @@ function isAlive(pid: number): boolean {
   }
 }
 
-// Gone only when provably so: released (file removed), a holder on this host
-// whose process isn't running, or a file nobody could read for a while.
+// Gone only when provably so: released, a holder on this host whose process
+// isn't running, or a file nobody could read for a while.
 function isGone(file: string): boolean {
   const holder = readHolder(file);
+  if (holder?.released) return true;
   if (holder) return holder.host === os.hostname() && !isAlive(holder.pid);
   try {
     return Date.now() - fs.statSync(file).mtimeMs > UNREADABLE_STALE_MS;
@@ -126,13 +137,29 @@ function acquire(dir: string): number {
       fs.rmSync(generationPath({ dir, generation: mine }), { force: true });
       continue;
     }
-    for (const generation of after) {
-      if (generation < mine) fs.rmSync(generationPath({ dir, generation }), { force: true });
+    for (const name of fs.readdirSync(dir)) {
+      const match = GENERATION.exec(name) ?? RELEASING.exec(name);
+      if (match && Number(match[1]) < mine) fs.rmSync(path.join(dir, name), { force: true });
     }
     return mine;
   }
   const top = generations(dir).at(-1) ?? 0;
   throw held({ dir, generation: top });
+}
+
+// Marks this process's generation released, atomically, so it is never seen
+// half-written. The file stays: the generation number must not be reused.
+function release(params: { dir: string; generation: number }): void {
+  const file = generationPath(params);
+  const holder: LockHolder = {
+    pid: process.pid,
+    host: os.hostname(),
+    startedAt: readHolder(file)?.startedAt ?? new Date().toISOString(),
+    released: true
+  };
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(holder), { mode: 0o600 });
+  fs.renameSync(tmp, file);
 }
 
 const WAIT_POLL_MS = 100;
@@ -162,6 +189,12 @@ export async function withLock<T>(params: {
   try {
     return await params.fn();
   } finally {
-    fs.rmSync(generationPath({ dir: params.dir, generation: mine }), { force: true });
+    // If marking the release fails (e.g. a full disk), the generation still
+    // names this process, which counts as gone once it exits.
+    try {
+      release({ dir: params.dir, generation: mine });
+    } catch {
+      // best effort
+    }
   }
 }

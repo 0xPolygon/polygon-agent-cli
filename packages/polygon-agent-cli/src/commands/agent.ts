@@ -4,6 +4,7 @@ import { Contract, Interface, JsonRpcProvider } from 'ethers';
 
 import IDENTITY_ABI from '../../contracts/IdentityRegistry.json' with { type: 'json' };
 import REPUTATION_ABI from '../../contracts/ReputationRegistry.json' with { type: 'json' };
+import { bigintReplacer, errorJson, failureJson } from '../lib/errors.ts';
 import { resolveBroadcast, withWriteFlags } from '../lib/mode.ts';
 import { runTx as runDappClientTx } from '../lib/tx-dispatch.ts';
 import {
@@ -100,17 +101,7 @@ async function handleRegister(argv: {
       )
     );
   } catch (error) {
-    console.error(
-      JSON.stringify(
-        {
-          ok: false,
-          error: (error as Error).message,
-          stack: (error as Error).stack
-        },
-        null,
-        2
-      )
-    );
+    console.error(JSON.stringify(failureJson(error), bigintReplacer, 2));
     process.exit(1);
   }
 }
@@ -141,7 +132,7 @@ async function handleIdentity(argv: { 'agent-id': string; key?: string }): Promi
 
     console.log(JSON.stringify(result, null, 2));
   } catch (error) {
-    console.error(JSON.stringify({ ok: false, error: (error as Error).message }, null, 2));
+    console.error(JSON.stringify(errorJson(error), bigintReplacer, 2));
     process.exit(1);
   }
 }
@@ -210,16 +201,7 @@ async function handleReputation(argv: {
       )
     );
   } catch (error) {
-    console.error(
-      JSON.stringify(
-        {
-          ok: false,
-          error: (error as Error).message
-        },
-        null,
-        2
-      )
-    );
+    console.error(JSON.stringify(errorJson(error), bigintReplacer, 2));
     process.exit(1);
   }
 }
@@ -294,17 +276,7 @@ async function handleFeedback(argv: {
       )
     );
   } catch (error) {
-    console.error(
-      JSON.stringify(
-        {
-          ok: false,
-          error: (error as Error).message,
-          stack: (error as Error).stack
-        },
-        null,
-        2
-      )
-    );
+    console.error(JSON.stringify(failureJson(error), bigintReplacer, 2));
     process.exit(1);
   }
 }
@@ -357,16 +329,7 @@ async function handleReviews(argv: {
       )
     );
   } catch (error) {
-    console.error(
-      JSON.stringify(
-        {
-          ok: false,
-          error: (error as Error).message
-        },
-        null,
-        2
-      )
-    );
+    console.error(JSON.stringify(errorJson(error), bigintReplacer, 2));
     process.exit(1);
   }
 }

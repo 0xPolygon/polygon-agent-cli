@@ -31,6 +31,7 @@ import { polymarketCommand } from './commands/polymarket.ts';
 import { setupCommand } from './commands/setup.ts';
 import { walletCommand } from './commands/wallet.ts';
 import { skillsCommand, updateCommand, workspaceCommand } from './commands/workspace.ts';
+import { bigintReplacer, failureJson } from './lib/errors.ts';
 import { bootstrapOmsConfig } from './lib/storage.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -76,7 +77,7 @@ parser
   .help()
   .fail((msg, err, yargs) => {
     if (err) {
-      console.error(JSON.stringify({ ok: false, error: err.message, stack: err.stack }));
+      console.error(JSON.stringify(failureJson(err), bigintReplacer, 2));
     } else {
       yargs.showHelp('error');
       if (msg) console.error(`\n${msg}`);
@@ -85,12 +86,6 @@ parser
   })
   .parseAsync()
   .catch((err: unknown) => {
-    console.error(
-      JSON.stringify(
-        { ok: false, error: (err as Error).message, stack: (err as Error).stack },
-        null,
-        2
-      )
-    );
+    console.error(JSON.stringify(failureJson(err), bigintReplacer, 2));
     process.exit(1);
   });

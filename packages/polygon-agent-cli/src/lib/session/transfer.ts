@@ -5,6 +5,8 @@
 // moving through preparing → prepared → executed | failed | uncertain. A
 // prepared or uncertain transfer is reconciled with OMS before any new one
 // starts, and is never resent: if OMS can't say what happened, spending stops.
+// An executed transfer counts against the USD allowance from the moment it is
+// recorded as executed, whether or not its ledger entry was written yet.
 
 import type { Address } from 'viem';
 
@@ -24,7 +26,7 @@ import type { RacReader } from './sessions.ts';
 
 import { CliError, httpStatus, upstreamErrorName } from '../errors.ts';
 import { formatUnits } from '../utils.ts';
-import { appendLedger, spentUsd } from './ledger.ts';
+import { appendLedger, readLedger, spentUsd } from './ledger.ts';
 import { getSessions, invalidateSessions, mapRacError, sessionForToken } from './sessions.ts';
 import { readApprovedPlan, readJsonFile, sessionDir, writeJsonFile } from './state.ts';
 import { chainLabel, findSupportedToken } from './tokens.ts';
@@ -68,6 +70,7 @@ const TransferRecordSchema = z.object({
   sessionId: z.string(),
   credentialId: z.string().optional(),
   txnId: z.string().optional(),
+  executedAt: z.string().optional(),
   // When the prepared transaction stops being executable.
   quoteExpiresAt: z.string().optional(),
   txHash: z.string().optional(),
@@ -113,26 +116,53 @@ function update(params: {
   return record;
 }
 
+function executedAt(record: TransferRecord): string {
+  return record.executedAt ?? record.updatedAt;
+}
+
+// Writes an executed transfer's ledger entry, once: if a crash came between
+// the append and marking the record, the entry is found and not added again.
 function recordLedger(params: {
   wallet: string;
   record: TransferRecord;
   deps: TransferDeps;
 }): TransferRecord {
-  if (params.record.ledgered) return params.record;
-  appendLedger({
-    wallet: params.wallet,
-    entry: {
-      ts: params.deps.now().toISOString(),
-      chainId: params.record.chainId,
-      token: params.record.token,
-      symbol: params.record.symbol,
-      amount: params.record.amount,
-      usd: params.record.usd,
-      purpose: params.record.purpose,
-      ref: params.record.txHash ?? params.record.ref
-    }
-  });
+  const { wallet, record } = params;
+  if (record.ledgered) return record;
+  if (!readLedger(wallet).some((entry) => entry.transferId === record.id)) {
+    appendLedger({
+      wallet,
+      entry: {
+        ts: executedAt(record),
+        chainId: record.chainId,
+        token: record.token,
+        symbol: record.symbol,
+        amount: record.amount,
+        usd: record.usd,
+        purpose: record.purpose,
+        ref: record.txHash ?? record.ref,
+        transferId: record.id
+      }
+    });
+  }
   return update({ ...params, patch: { ledgered: true } });
+}
+
+// USD spent since `since`: the ledger, plus executed transfers whose ledger
+// entry hasn't been written (yet).
+export function spentUsdSince(params: { wallet: string; since: string }): number {
+  const inLedger = new Set(readLedger(params.wallet).map((entry) => entry.transferId));
+  const since = Date.parse(params.since);
+  const unledgered = listTransfers(params.wallet)
+    .filter(
+      (record) =>
+        record.state === 'executed' &&
+        !record.ledgered &&
+        !inLedger.has(record.id) &&
+        Date.parse(executedAt(record)) >= since
+    )
+    .reduce((sum, record) => sum + record.usd, 0);
+  return Math.round((spentUsd(params) + unledgered) * 100) / 100;
 }
 
 // Polls OMS until the transaction is executed or failed, for up to a minute.
@@ -158,10 +188,17 @@ async function settle(params: {
       }
     }
     if (status?.status === 'executed' && status.txnHash) {
-      return recordLedger({
+      const executed = update({
         ...params,
-        record: update({ ...params, patch: { state: 'executed', txHash: status.txnHash } })
+        patch: { state: 'executed', txHash: status.txnHash, executedAt: deps.now().toISOString() }
       });
+      try {
+        return recordLedger({ ...params, record: executed });
+      } catch {
+        // The transfer went through; it still counts (spentUsdSince), and the
+        // entry is written before the next transfer starts.
+        return executed;
+      }
     }
     if (status?.status === 'failed') {
       return update({
@@ -187,13 +224,18 @@ async function settle(params: {
   }
 }
 
-// Settles any transfer left prepared or uncertain. Throws upstream_unavailable
-// if one still can't be settled: no new transfer starts until it is.
+// Settles any transfer left prepared or uncertain, and writes any missing
+// ledger entry. Throws upstream_unavailable if a transfer still can't be
+// settled: no new transfer starts until it is.
 export async function reconcileTransfers(params: {
   wallet: string;
   deps: TransferDeps;
 }): Promise<void> {
   for (const record of listTransfers(params.wallet)) {
+    if (record.state === 'executed' && !record.ledgered) {
+      recordLedger({ ...params, record });
+      continue;
+    }
     const open =
       record.state === 'preparing' || record.state === 'prepared' || record.state === 'uncertain';
     if (open && record.credentialId && record.credentialId !== params.deps.credentialId) {
@@ -456,20 +498,21 @@ export async function checkTransfer(params: {
     });
   }
 
+  // Valued at the current price only: the price at approval time could be
+  // weeks old and understate what is spent.
   const priceUsd =
     known?.kind === 'usd' || planGrant?.kind === 'usd'
       ? 1
-      : ((await deps.usdPrice({ chainId: params.chainId, token: params.token })) ??
-        planGrant?.priceUsd);
-  if (priceUsd === undefined) {
+      : await deps.usdPrice({ chainId: params.chainId, token: params.token });
+  if (priceUsd === undefined || !Number.isFinite(priceUsd) || priceUsd <= 0) {
     throw new CliError({
       code: 'upstream_unavailable',
-      message: `No USD price for ${symbol}, so the allowance total can't be checked. Try again shortly.`
+      message: `No current USD price for ${symbol}, so the allowance total can't be checked. Try again shortly.`
     });
   }
   const usd = usdFor({ amount: params.amount, decimals, priceUsd });
   const allowanceUsd = approved.plan.allowanceUsd;
-  const spent = spentUsd({ wallet, since: approved.approvedAt });
+  const spent = spentUsdSince({ wallet, since: approved.approvedAt });
   if (spent + usd > allowanceUsd) {
     throw new CliError({
       code: 'allowance_exhausted',
