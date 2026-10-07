@@ -3,7 +3,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const STORAGE_DIR = path.join(os.homedir(), '.polygon-agent');
+// A workspace install's wrapper sets POLYGON_AGENT_HOME to its own state folder;
+// a global install keeps using ~/.polygon-agent.
+const STORAGE_DIR = process.env.POLYGON_AGENT_HOME
+  ? path.resolve(process.env.POLYGON_AGENT_HOME)
+  : path.join(os.homedir(), '.polygon-agent');
 const ENCRYPTION_KEY_FILE = path.join(STORAGE_DIR, '.encryption-key');
 
 export interface CipherData {
