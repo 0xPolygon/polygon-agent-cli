@@ -539,7 +539,19 @@ const checkCommand: CommandModule<object, { wallet: string }> = {
     }),
   handler: async (argv) => {
     try {
-      jsonOut({ ...(await runCheck(liveDeps(argv.wallet))) });
+      const result = await runCheck(liveDeps(argv.wallet));
+      // The scheduled task's lifecycle: keep it while `schedule` is set; remove
+      // it once that's null (no watch active, settling a trade or owing an alert).
+      const schedule = scheduleAdvice(loadWatches()) ?? null;
+      jsonOut({
+        ...result,
+        schedule,
+        ...(schedule
+          ? {}
+          : {
+              hint: 'No watches need checking any more; the recurring watch check can be removed.'
+            })
+      });
     } catch (error) {
       jsonFail(error);
     }

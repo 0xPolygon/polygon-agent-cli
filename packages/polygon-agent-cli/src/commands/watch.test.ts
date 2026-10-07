@@ -610,6 +610,21 @@ describe('watch create, what the trade can actually do', () => {
   });
 });
 
+describe('watch check output', () => {
+  it('carries the schedule while a watch needs checks, and null once none does', async () => {
+    await run(['watch', 'create', '--token', 'ETH', '--mode', 'alert', '--buy-below', '2000']);
+    const [w] = loadWatches();
+    expect(await run(['watch', 'check'])).toMatchObject({
+      ok: true,
+      schedule: { command: 'polygon-agent watch check' }
+    });
+    await run(['watch', 'cancel', w.id]);
+    const out = await run(['watch', 'check']);
+    expect(out).toMatchObject({ ok: true, schedule: null });
+    expect(String(out.hint)).toMatch(/can be removed/);
+  });
+});
+
 describe('wallet status without a connection', () => {
   it('still reports the watches, their alerts and missed checks', async () => {
     await run(['watch', 'create', '--token', 'ETH', '--mode', 'alert', '--buy-below', '2000']);

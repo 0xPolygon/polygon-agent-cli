@@ -252,6 +252,7 @@ const {
   confirmCommandModule,
   handleEmailLogin,
   logoutSessionWallet,
+  sessionReport,
   withdrawCommandModule
 } = await import('./wallet-session.ts');
 const { loadPending, savePending } = await import('../lib/owner/pending.ts');
@@ -370,6 +371,25 @@ describe('connect', () => {
     });
     expect(loadPending(wallet)).toBeNull();
     expect(String(out.worstCase)).toContain('$500');
+  });
+
+  it('status before the first confirm resumes the request instead of starting another', async () => {
+    const request = await connectStep1();
+    const report = await sessionReport({ wallet, withVersion: false });
+    expect(report).toMatchObject({
+      connected: false,
+      next: `polygon-agent wallet confirm --request ${request} --code <code> --name ${wallet}`,
+      pendingRequest: {
+        request,
+        action: 'connect',
+        email: 'owner@example.com',
+        approves: expect.stringContaining('Spend up to $500')
+      }
+    });
+    // Never the sign-in state the request holds.
+    const json = JSON.stringify(report);
+    expect(json).not.toContain('ownerKey');
+    expect(json).not.toContain('attempt');
   });
 
   it('a wrong code keeps the request; the right code then works', async () => {
