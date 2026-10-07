@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { z } from 'zod';
+
 // A workspace install's wrapper sets POLYGON_AGENT_HOME to its own state folder;
 // a global install keeps using ~/.polygon-agent.
 const STORAGE_DIR = process.env.POLYGON_AGENT_HOME
@@ -37,12 +39,31 @@ export interface OmsConfig {
 /** How a wallet session was established: Google or email, both chosen on the browser login page. */
 export type OmsLoginMethod = 'google' | 'email';
 
-/** Pointer record for an OMS wallet (the SDK persists the real session in its StorageManager). */
+/**
+ * Pointer record for an OMS wallet (the SDK persists the real session in its
+ * StorageManager). `access: 'session'` marks a wallet this install spends from
+ * through smart sessions (lib/session/); absent means owner mode.
+ */
 export interface OmsWalletPointer {
   walletAddress: string;
   loginMethod: OmsLoginMethod;
   createdAt: string;
+  access?: 'owner' | 'session';
+  email?: string;
+  installName?: string;
 }
+
+const OmsWalletPointerSchema = z.object({
+  walletAddress: z.string().min(1),
+  // Any string, as before: legacy values load and display as 'email'.
+  loginMethod: z
+    .string()
+    .transform((value): OmsLoginMethod => (value === 'google' ? 'google' : 'email')),
+  createdAt: z.string(),
+  access: z.enum(['owner', 'session']).optional(),
+  email: z.string().optional(),
+  installName: z.string().optional()
+});
 
 export function ensureStorageDir(): void {
   if (!fs.existsSync(STORAGE_DIR)) {
@@ -300,10 +321,12 @@ export async function loadOmsWalletPointer(name: string): Promise<OmsWalletPoint
   const walletPath = path.join(STORAGE_DIR, 'wallets', `${name}.json`);
   if (!fs.existsSync(walletPath)) return null;
   try {
-    const data = JSON.parse(fs.readFileSync(walletPath, 'utf8'));
-    // Accept any pointer with an address (loginMethod is display-only; legacy
-    // pre-browser sessions still load until they expire).
-    if (data.walletAddress && typeof data.loginMethod === 'string') return data as OmsWalletPointer;
+    // loginMethod is display-only; legacy pre-browser sessions still load until
+    // they expire.
+    const parsed = OmsWalletPointerSchema.safeParse(
+      JSON.parse(fs.readFileSync(walletPath, 'utf8'))
+    );
+    if (parsed.success) return parsed.data;
   } catch {
     // not a valid OMS pointer file
   }

@@ -1089,7 +1089,9 @@ export const swapCommand: CommandModule = {
         chainId: originChainId,
         transactions,
         broadcast: true,
-        preferNativeFee: false
+        preferNativeFee: false,
+        purpose: 'trade',
+        ref: intentId
       });
       const txHash = result.txHash;
       if (!txHash) {
@@ -2147,7 +2149,9 @@ export const x402PayCommand: CommandModule = {
           walletName,
           chainId: payChainId,
           transactions: [{ to: usdcContract, value: 0n, data: transferData }],
-          broadcast: true
+          broadcast: true,
+          purpose: 'x402',
+          ref: url
         });
         const payTxHash = fundResult.txHash!;
         process.stderr.write(`Paid via tx: ${payTxHash}\n`);
@@ -2284,7 +2288,9 @@ export const x402PayCommand: CommandModule = {
         chainId: resolvedNetwork.chainId,
         transactions: [{ to: asset, value: 0n, data: transferData }],
         broadcast: true,
-        preferNativeFee: true
+        preferNativeFee: true,
+        purpose: 'x402',
+        ref: url
       });
       process.stderr.write(`Funded via tx: ${fundResult.txHash}\n`);
 

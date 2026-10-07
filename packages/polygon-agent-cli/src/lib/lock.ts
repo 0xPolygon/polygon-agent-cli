@@ -135,11 +135,30 @@ function acquire(dir: string): number {
   throw held({ dir, generation: top });
 }
 
-// Runs fn while holding the lock directory `dir`; throws LockHeldError if a
-// live process holds it.
-export async function withLock<T>(params: { dir: string; fn: () => Promise<T> | T }): Promise<T> {
+const WAIT_POLL_MS = 100;
+
+// Acquires, retrying while a live holder has the lock, for up to waitMs.
+async function acquireWithin(params: { dir: string; waitMs: number }): Promise<number> {
+  const deadline = Date.now() + params.waitMs;
+  for (;;) {
+    try {
+      return acquire(params.dir);
+    } catch (error) {
+      if (!(error instanceof LockHeldError) || Date.now() >= deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, WAIT_POLL_MS));
+    }
+  }
+}
+
+// Runs fn while holding the lock directory `dir`. Throws LockHeldError if a
+// live process holds it, after waiting up to waitMs (default: fail at once).
+export async function withLock<T>(params: {
+  dir: string;
+  fn: () => Promise<T> | T;
+  waitMs?: number;
+}): Promise<T> {
   fs.mkdirSync(params.dir, { recursive: true, mode: 0o700 });
-  const mine = acquire(params.dir);
+  const mine = await acquireWithin({ dir: params.dir, waitMs: params.waitMs ?? 0 });
   try {
     return await params.fn();
   } finally {
