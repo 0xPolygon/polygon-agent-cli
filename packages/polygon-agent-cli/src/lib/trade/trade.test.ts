@@ -79,7 +79,7 @@ vi.mock('viem', async (importOriginal) => ({
   createPublicClient: () => ({ waitForTransactionReceipt: fake.waitForTransactionReceipt })
 }));
 
-const { quoteSwap } = await import('./quote.ts');
+const { describeTrade, quoteSwap } = await import('./quote.ts');
 const { executeSwap } = await import('./execute.ts');
 const { loadTrade, saveTrade } = await import('./state.ts');
 const { buildPlan } = await import('../session/plan.ts');
@@ -269,6 +269,57 @@ describe('quoteSwap in session mode', () => {
     expect(loadTrade(trade.intentId)).toEqual(trade);
   });
 
+  it('pays from a chain where the token bought is covered', async () => {
+    const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+    const BASE_WETH = '0x4200000000000000000000000000000000000006';
+    const tokens = [
+      { chainId: 137, ...supportedTokens(137)[0] },
+      ...supportedTokens(8453)
+        .filter((t) => t.symbol === 'USDC' || t.symbol === 'WETH')
+        .map((t) => ({ chainId: 8453, ...t }))
+    ];
+    writeApprovedPlan({
+      wallet,
+      approved: {
+        plan: buildPlan({
+          allowanceUsd: 100,
+          days: 30,
+          tokens,
+          prices: new Map([[`8453:${BASE_WETH.toLowerCase()}`, 2500]]),
+          now: new Date()
+        }),
+        approvedAt: new Date().toISOString()
+      }
+    });
+    balances([
+      { chainId: 137, token: USDC, balance: 50_000_000n },
+      { chainId: 8453, token: BASE_USDC, balance: 50_000_000n }
+    ]);
+    fake.getSessions.mockResolvedValue(
+      [137, 8453].map((chainId) => ({
+        chainId,
+        sessionId: `s${chainId}`,
+        walletId: 'w',
+        expiresAt: '2099-01-01T00:00:00Z',
+        expired: false,
+        grants: [
+          {
+            token: chainId === 137 ? USDC : BASE_USDC,
+            limit: 10n ** 30n,
+            used: 0n,
+            remaining: 10n ** 30n
+          }
+        ]
+      }))
+    );
+    // WETH isn't covered on Polygon, so Polygon's USDC can't pay for it.
+    const { trade } = await quote();
+    expect(trade).toMatchObject({
+      origin: { chainId: 8453, symbol: 'USDC' },
+      destination: { chainId: 8453, symbol: 'WETH' }
+    });
+  });
+
   it('falls back to the next stablecoin when USDC lacks the balance or the allowance', async () => {
     balances([
       { chainId: 137, token: USDC, balance: 50_000_000n },
@@ -363,6 +414,24 @@ describe('executeSwap', () => {
       intentId: trade.intentId,
       depositTransactionHash: TX
     });
+  });
+
+  it('a succeeded receipt without the received amount completes without one (live: Trails sent null)', async () => {
+    fake.waitIntentReceipt.mockResolvedValue({
+      done: true,
+      intentReceipt: {
+        status: 'SUCCEEDED',
+        destinationTransaction: { txnHash: '0xdest' },
+        summary: { destinationTokenAmount: null }
+      }
+    });
+    const { trade } = await quote();
+    const done = await executeSwap({ trade });
+    expect(done.state).toBe('completed');
+    expect(done.receivedAmount).toBeUndefined();
+    expect(() => describeTrade(done)).not.toThrow();
+    // A record saved with "null" before the fix still describes.
+    expect(() => describeTrade({ ...done, receivedAmount: 'null' })).not.toThrow();
   });
 
   it('an expired quote is refused without sending', async () => {

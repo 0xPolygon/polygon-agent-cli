@@ -28,6 +28,8 @@ export type CliErrorCode =
   | 'confirmation_required'
   | 'x402_price_exceeds_max'
   | 'daily_limit_exceeded'
+  | 'watch_limit_reached'
+  | 'watch_already_past'
   | 'rate_limited'
   | 'upstream_unavailable'
   | 'upstream_error';

@@ -11,16 +11,21 @@ import { formatUnits } from '../utils.ts';
 import { chainLabel, findSupportedToken, supportedChainIds } from './tokens.ts';
 import { spentUsdSince } from './transfer.ts';
 
+export const SESSION_ALERT_TYPES = [
+  'expired',
+  'expiring',
+  'allowance_low',
+  'limit_used',
+  'uncovered_funds',
+  'old_key_live'
+] as const;
+
 export interface Alert {
-  type:
-    | 'expired'
-    | 'expiring'
-    | 'allowance_low'
-    | 'limit_used'
-    | 'uncovered_funds'
-    | 'old_key_live';
+  type: (typeof SESSION_ALERT_TYPES)[number];
   message: string;
   command?: string;
+  // What makes this alert new (watch check raises each key once per approval).
+  key: string;
 }
 
 const DAY_MS = 86_400_000;
@@ -109,6 +114,12 @@ export function classifyHoldings(params: {
   return holdings;
 }
 
+function holdingKeys(holdings: Holding[]): string {
+  return [...new Set(holdings.map((h) => `${h.token ?? 'native'}@${h.chainId}`.toLowerCase()))]
+    .sort()
+    .join(',');
+}
+
 export function sessionAlerts(params: {
   sessions: LiveSession[];
   approved: ApprovedPlan | null;
@@ -122,7 +133,8 @@ export function sessionAlerts(params: {
     alerts.push({
       type: 'expired',
       message: 'The allowance has expired; spending is paused.',
-      command: 'polygon-agent wallet allowance renew'
+      command: 'polygon-agent wallet allowance renew',
+      key: 'expired'
     });
   } else if (live.length > 0) {
     const soonest = Math.min(...live.map((s) => Date.parse(s.expiresAt)));
@@ -132,7 +144,9 @@ export function sessionAlerts(params: {
       alerts.push({
         type: 'expiring',
         message: `The allowance expires in ${days} day${days === 1 ? '' : 's'} (${new Date(soonest).toISOString().slice(0, 10)}).`,
-        command: 'polygon-agent wallet allowance renew'
+        command: 'polygon-agent wallet allowance renew',
+        // Alerted 7 days and 1 day ahead.
+        key: days <= 1 ? 'expiring:1d' : 'expiring:7d'
       });
     }
   }
@@ -142,7 +156,8 @@ export function sessionAlerts(params: {
     alerts.push({
       type: 'allowance_low',
       message: `$${Math.max(0, allowance - params.spent).toFixed(2)} of the $${allowance} allowance is left.`,
-      command: 'polygon-agent wallet allowance set --amount <usd>'
+      command: 'polygon-agent wallet allowance set --amount <usd>',
+      key: 'allowance_low'
     });
   }
 
@@ -151,7 +166,8 @@ export function sessionAlerts(params: {
     alerts.push({
       type: 'limit_used',
       message: `The on-chain limit is used up for ${used.map((h) => `${h.symbol} on ${h.chain}`).join(', ')}.`,
-      command: 'polygon-agent wallet allowance set'
+      command: 'polygon-agent wallet allowance set',
+      key: `limit_used:${holdingKeys(used)}`
     });
   }
 
@@ -164,7 +180,9 @@ export function sessionAlerts(params: {
       message:
         `The wallet holds funds the agent can't spend: ${uncovered.map((h) => `${h.balance} ${h.symbol} on ${h.chain}`).join(', ')}. ` +
         'Tokens can be covered with a new code; native coins need the owner.',
-      command: 'polygon-agent wallet allowance set --add <token@chain>'
+      command: 'polygon-agent wallet allowance set --add <token@chain>',
+      // New when a different token or chain turns up, not when amounts change.
+      key: `uncovered_funds:${holdingKeys(uncovered)}`
     });
   }
   return alerts;

@@ -55,6 +55,7 @@ import {
 import { deleteOmsWallet, loadOmsWalletPointer } from '../lib/storage.ts';
 import { formatUnits, parseUnits } from '../lib/utils.ts';
 import { cliVersion, getLatestVersion, isNewerVersion } from '../lib/version.ts';
+import { watchStatus } from '../lib/watch/status.ts';
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -324,7 +325,7 @@ export const confirmCommandModule: CommandModule<object, ConfirmArgs> = {
 
 // --- wallet status / wallet allowance (no code) ---
 
-async function sessionReport(params: {
+export async function sessionReport(params: {
   wallet: string;
   withVersion: boolean;
 }): Promise<Record<string, unknown>> {
@@ -347,6 +348,7 @@ async function sessionReport(params: {
       connected: true,
       mode: 'owner',
       walletAddress: pointer.walletAddress,
+      watches: watchStatus(new Date()),
       ...version
     };
   }
@@ -400,6 +402,7 @@ async function sessionReport(params: {
     alerts.push({
       type: 'old_key_live',
       message: `A replaced session key of this install isn't revoked on OMS yet (${keysPendingRevocation.join(', ')}), so its sessions may still be live. It's retried automatically.`,
+      key: `old_key_live:${keysPendingRevocation.join(',')}`,
       command: `polygon-agent wallet access --revoke ${keysPendingRevocation[0]}${nameFlag(wallet)}`
     });
   }
@@ -428,6 +431,7 @@ async function sessionReport(params: {
     sessions: describeSessions({ sessions, approved }),
     holdings,
     alerts,
+    watches: watchStatus(new Date()),
     ...(pendingInfo ? { pendingRequest: pendingInfo } : {}),
     ...(warnings.length ? { warnings } : {}),
     ...version
