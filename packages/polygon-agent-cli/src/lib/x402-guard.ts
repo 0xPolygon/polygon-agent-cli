@@ -17,7 +17,7 @@ import { CliError, NOTHING_SENT_CODES } from './errors.ts';
 import { LockHeldError, withLock } from './lock.ts';
 import { findSupportedToken } from './session/tokens.ts';
 import { ensureStorageDir, STORAGE_ROOT } from './storage.ts';
-import { formatUnits } from './utils.ts';
+import { formatUnits, getReadRpcUrl, resolveNetwork } from './utils.ts';
 
 const DEFAULT_MAX_PER_CALL_USD = 1;
 const DEFAULT_DAILY_MAX_USD = 10;
@@ -141,7 +141,60 @@ export { usdText as x402UsdText };
 // Checks the price against the limits, pays, and logs the payment, one payment
 // at a time per install so concurrent calls can't both pass the daily limit.
 // A payment that fails in a way that may still have gone out is logged too.
-export async function payWithinLimits<T extends { txHash?: string }>(params: {
+// An ERC-20 balance read from the chain (not the indexer, which lags).
+export async function readTokenBalance(params: {
+  chainId: number;
+  token: `0x${string}`;
+  owner: `0x${string}`;
+}): Promise<bigint> {
+  const { createPublicClient, http } = await import('viem');
+  const chains = await import('viem/chains');
+  const chain = Object.values(chains).find((c) => c.id === params.chainId);
+  if (!chain) throw new Error(`No RPC configuration for chain ${params.chainId}`);
+  const client = createPublicClient({
+    chain,
+    transport: http(
+      process.env.SEQUENCE_PROJECT_ACCESS_KEY
+        ? getReadRpcUrl(resolveNetwork(params.chainId))
+        : chain.rpcUrls.default.http[0]
+    )
+  });
+  return client.readContract({
+    address: params.token,
+    abi: erc20Abi,
+    functionName: 'balanceOf',
+    args: [params.owner]
+  });
+}
+
+// After funding the signer: wait until the balance is visible on chain, then a
+// little longer, since the service's facilitator may read from a node a block
+// or two behind and would reject the payment as unfunded.
+export async function waitForSignerFunds(params: {
+  chainId: number;
+  token: `0x${string}`;
+  owner: `0x${string}`;
+  atLeast: bigint;
+  timeoutMs?: number;
+}): Promise<void> {
+  const deadline = Date.now() + (params.timeoutMs ?? 60_000);
+  for (;;) {
+    const balance = await readTokenBalance(params).catch(() => -1n);
+    if (balance >= params.atLeast) break;
+    if (Date.now() >= deadline) {
+      throw new CliError({
+        code: 'upstream_unavailable',
+        message: `The signer ${params.owner} was funded, but the funds aren't visible on chain yet; nothing was paid. They stay in the signer for the next call.`
+      });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+  }
+  await new Promise((resolve) => setTimeout(resolve, SETTLE_SLACK_MS));
+}
+
+const SETTLE_SLACK_MS = 4_000;
+
+export async function payWithinLimits<T extends { txHash?: string; fundedUsd?: number }>(params: {
   walletName: string;
   url: string;
   usd: number;
@@ -150,14 +203,18 @@ export async function payWithinLimits<T extends { txHash?: string }>(params: {
   pay: () => Promise<T>;
 }): Promise<T> {
   ensureStorageDir();
-  const log = (txHash?: string) =>
+  // What left the wallet: the payment's price, or less when funds already in
+  // the signer covered part of it.
+  const log = (params2: { txHash?: string; usd: number }) => {
+    if (params2.usd <= 0) return;
     recordX402Payment({
       walletName: params.walletName,
       url: params.url,
-      usd: params.usd,
-      txHash,
+      usd: params2.usd,
+      txHash: params2.txHash,
       now: new Date()
     });
+  };
   try {
     return await withLock({
       dir: path.join(STORAGE_ROOT, 'locks', 'x402.lock'),
@@ -168,10 +225,12 @@ export async function payWithinLimits<T extends { txHash?: string }>(params: {
         try {
           result = await params.pay();
         } catch (error) {
-          if (!(error instanceof CliError && NOTHING_SENT_CODES.has(error.code))) log();
+          if (!(error instanceof CliError && NOTHING_SENT_CODES.has(error.code))) {
+            log({ usd: params.usd });
+          }
           throw error;
         }
-        log(result.txHash);
+        log({ txHash: result.txHash, usd: result.fundedUsd ?? params.usd });
         return result;
       }
     });
