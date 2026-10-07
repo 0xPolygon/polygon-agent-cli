@@ -9,6 +9,7 @@ import type { FeeOptionSelection, FeeOptionWithBalance } from '@polygonlabs/oms-
 
 import { findNetworkById, isOMSWalletError, TransactionMode } from '@polygonlabs/oms-wallet';
 
+import { CliError } from './errors.ts';
 import { getOmsClient } from './oms-client.ts';
 
 export interface OmsTxTransaction {
@@ -23,6 +24,8 @@ export interface OmsTxParams {
   transactions: OmsTxTransaction[];
   broadcast: boolean;
   preferNativeFee?: boolean;
+  // Don't execute after this time (ms since epoch), e.g. a trade quote's expiry.
+  notAfter?: number;
 }
 
 export interface OmsTxResult {
@@ -99,10 +102,26 @@ export async function runOmsTx(params: OmsTxParams): Promise<OmsTxResult> {
     return { walletAddress, dryRun: true };
   }
 
+  // A deadline only makes sense for one transaction: with several, an expiry
+  // after the first executed would wrongly read as "nothing was sent".
+  if (params.notAfter !== undefined && transactions.length !== 1) {
+    throw new Error('notAfter needs exactly one transaction');
+  }
+
   const network = findNetworkById(chainId);
   if (!network) throw new Error(`Unsupported chainId for OMS: ${chainId}`);
 
-  const selectFeeOption = makeFeeSelector(preferNativeFee);
+  // The SDK calls the fee selector after preparing and right before executing
+  // (sponsored or not), so a deadline checked there is checked last.
+  const feeSelector = makeFeeSelector(preferNativeFee);
+  let expired = false;
+  const selectFeeOption: typeof feeSelector = (options) => {
+    if (params.notAfter !== undefined && Date.now() > params.notAfter) {
+      expired = true;
+      throw new Error('past notAfter before executing');
+    }
+    return feeSelector(options);
+  };
 
   // OMS sendTransaction takes a single tx. For multi-tx bundles (only `deposit`
   // sends 2: approve + supply) we submit sequentially. NON-ATOMIC: if the second
@@ -122,6 +141,13 @@ export async function runOmsTx(params: OmsTxParams): Promise<OmsTxResult> {
       });
       lastTxHash = res.txnHash ?? lastTxHash;
     } catch (e) {
+      if (expired) {
+        throw new CliError({
+          code: 'quote_expired',
+          message: 'The quote expired while preparing the transaction; nothing was sent.',
+          hint: 'Quote again.'
+        });
+      }
       if (
         isOMSWalletError(e) &&
         (e.code === 'OMS_SESSION_EXPIRED' || e.code === 'OMS_SESSION_MISSING')

@@ -16,8 +16,6 @@ export interface RunTxParams extends OmsTxParams {
   ref?: string;
   // Refuse in session mode even if the transaction would be a plain transfer.
   ownerOnly?: boolean;
-  // Don't send after this time (ms since epoch), e.g. a trade quote's expiry.
-  notAfter?: number;
 }
 export type RunTxResult = OmsTxResult;
 
