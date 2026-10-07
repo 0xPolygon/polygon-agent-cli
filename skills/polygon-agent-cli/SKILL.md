@@ -11,6 +11,8 @@ description: "Complete Polygon agent toolkit for on-chain operations on Polygon.
 - Entry point: `agent <command>`
 - Storage: `~/.polygon-agent/` (AES-256-GCM encrypted)
 
+> **Personal assistants (Muse, OpenClaw, Hermes…):** use the workspace install from https://agents.polygon.technology/setup.md instead. It installs the CLI into the assistant's workspace, runs it through a wrapper (`<workspace>/.polygon-agent/bin/polygon-agent`), and connects in session mode (below). Its `polygon-oms-wallet` skill is the one to follow there; this skill is the full reference.
+
 > **Note for the agent: on first install, tell the user this is a global npm install** — installs the `agent` CLI system-wide so it runs from any terminal, may need sudo on some setups, re-running the same command updates it, and `npm uninstall -g @polygonlabs/agent-cli` removes it. Mention once on first install.
 
 ## If a command fails with "Unknown argument" or "command not found"
@@ -32,6 +34,25 @@ The CLI uses the **OMS (Open Money Stack) V3 embedded-wallet** model (`@polygonl
 | Embedded wallet (V3) | `wallet login` | Primary spending wallet | YES |
 
 The wallet address is the **same across all EVM chains**. Sessions last ~1 week before re-login is needed.
+
+## Session Mode (an allowance, by email code)
+
+`agent wallet login --email <email>` connects this install with a **spending allowance** instead of a full sign-in. It's two non-interactive steps, so it works in a chat with no browser:
+
+```bash
+agent wallet login --email <email> [--allowance 1000] [--days 30] [--chains polygon,base]
+# → {status: "code_sent", request, plan, next}: show the user the plan; they get a code by email
+agent wallet confirm --request <request> --code <code>
+# → signs in with the code, approves smart sessions with limits for this install's own key,
+#   checks them, then revokes the sign-in: only the limited key is kept
+```
+
+- **What it covers:** a USD total over a period (30 days by default) in USDC, USDT, USDG, ETH/WETH, POL/WPOL and BTC (WBTC or cbBTC) on the chosen chains (default Polygon, Base, and chains already holding those tokens). Each token also has an on-chain limit worth the allowance.
+- **What works:** `balances`, `send`/`send-token` (ERC-20s), `swap` (including bridges), `x402-pay`, `price`, `watch`, `alerts`. Native coins (ETH, POL, BNB, AVAX) can't be spent; buys of ETH or POL deliver WETH or WPOL.
+- **What doesn't:** `send-native`, `deposit`, `withdraw` (yield), `call`, `polymarket` and ERC-8004 writes fail with `owner_required`.
+- **Owner requests** need a new code each time (same two steps, ending in `wallet confirm`): `wallet allowance set`, `wallet allowance renew`, `wallet withdraw`, `wallet access`.
+- **`agent wallet status`** is the place to start: connection, allowance used and left, holdings (and whether the allowance covers them), alerts, watches and the CLI version.
+- **Errors** in session mode carry `code`, `hint` and `command` (the next command to run), e.g. `not_connected`, `not_covered`, `allowance_exhausted`, `session_expired`, `owner_required`.
 
 ## Environment Variables
 
@@ -130,16 +151,26 @@ agent mode [auto|dry-run]   # show or set the persisted transaction mode
 ```
 
 ### Wallet
-Valid `--chain` values for operations: `polygon` (default/mainnet), `amoy` (Polygon testnet), `mainnet` (Ethereum), `arbitrum`, `optimism`, `base`. ERC-8004 agent operations only support `polygon`. The embedded wallet address is the same on every chain.
+Valid `--chain` values for operations: a chain name or ID, e.g. `polygon` (default), `amoy` (Polygon testnet), `mainnet` (Ethereum), `arbitrum`, `optimism`, `base`, `bsc`, `avalanche`, `katana`. ERC-8004 agent operations only support `polygon`. The embedded wallet address is the same on every chain.
 
 ```bash
 agent wallet login [--name <n>] [--local] [--no-fund] [--force]
 # Opens the agentconnect login page; choose Google or email. Works whether the browser is local or remote, so there is no separate headless mode.
 # --local falls back to the legacy loopback flow (raw Google URL + localhost callback; browser must be on this machine; Google only). --remote is deprecated (now a no-op with a notice).
-agent wallet logout [--name <n>]   # clears the local session
+agent wallet logout [--name <n>]   # owner mode: clears the local session; session mode: revokes this install's access
 agent wallet list
 agent wallet address [--name <n>]
 agent wallet remove [--name <n>]
+
+# Session mode (an allowance approved by email code; see Session Mode)
+agent wallet login --email <email> [--allowance <usd>] [--days <1-30>] [--chains <csv>]
+agent wallet confirm --request <id> --code <code>
+agent wallet status                                       # start here
+agent wallet allowance                                    # show it
+agent wallet allowance set [--amount <usd>] [--add <token>[@<chain>]] [--chains <csv>]   # sends a code
+agent wallet allowance renew [--days <n>]                 # sends a code
+agent wallet withdraw --to <addr> --token <SYM> --amount <n> [--chain <chain>]           # as the owner; sends a code
+agent wallet access [--revoke <credentialId>] [--session <id>]                           # sends a code
 ```
 
 ### Operations
@@ -148,11 +179,32 @@ agent balances [--wallet <n>] [--chain <chain>] [--chains <csv>]
 agent send --to <addr> --amount <num> [--symbol <SYM>] [--token <addr>] [--decimals <n>] [--broadcast]
 agent send-native --to <addr> --amount <num> [--broadcast] [--direct]
 agent send-token --symbol <SYM> --to <addr> --amount <num> [--token <addr>] [--decimals <n>] [--broadcast]
-agent swap --from <SYM> --to <SYM> --amount <num> [--to-chain <chain>] [--slippage <num>] [--broadcast]
+agent swap --to <SYM> (--amount <num|n%|all> | --amount-usd <usd>) [--from <SYM>] [--chain <chain>] [--to-chain <chain>] [--slippage <num>] [--broadcast]
+agent swap --intent <intentId> --broadcast          # execute a quote from a dry run
+agent swap status --intent <intentId>               # follow a trade still in progress
 agent deposit --asset <SYM> --amount <num> [--protocol aave|morpho] [--broadcast]
 agent withdraw --position <addr> --amount <num|max> [--chain <chain>] [--broadcast]
 agent fund [--wallet <n>]
-agent x402-pay --url <url> --wallet <n> [--chain <chain>] [--method GET] [--body <str>] [--header Key:Value]
+agent x402-pay --url <url> --wallet <n> [--chain <chain>] [--method GET] [--body <str>] [--header Key:Value] [--max-usd <usd>] [--yes]
+```
+
+### Prices, watches and alerts
+```bash
+agent price <SYM|address> [--chain <chain>]       # ETH, BTC, POL and stablecoins need no chain
+agent watch create --token <SYM> --mode alert|auto [--buy-below <usd>] [--buy-amount <usd>] [--sell-above <usd>] [--sell-amount <n|n%|all>] [--chain <chain>] [--every 15m] [--expires 30d] [--confirm]
+agent watch list [--all]
+agent watch cancel <id>
+agent watch check                                 # run on a schedule (the output's `schedule` says how often)
+agent watch run                                   # or check in the foreground until stopped
+agent alerts [--all]                              # unacknowledged alerts
+agent alerts --ack [id…]
+```
+
+### Workspace installs
+```bash
+agent workspace init --root <workspace>/.polygon-agent [--skills-dir <dir>] [--name <install name>]
+agent skills [show <name> | install <name> --dir <dir>]
+agent update                                      # workspace installs: latest CLI, refreshed skill
 ```
 
 Every write command accepts `--broadcast` (execute) and `--dry-run` (force preview); with neither, the persisted `agent mode` decides.
@@ -180,10 +232,12 @@ agent feedback --agent-id <id> --value <score> [--tag1 <t>] [--tag2 <t>] [--endp
 - **`deposit`** — picks highest-TVL pool via Trails `getEarnPools` and deposits directly. Full deposit reference: https://agentconnect.polygon.technology/polygon-defi/SKILL.md
 - **Gas reserve** — when using `deposit` or any command that spends tokens, always reserve at least 0.1 USDC or 0.1 POL in the wallet for gas. Never attempt to spend the full balance. The `deposit` command enforces a 0.1 reserve automatically, but the agent must apply the same rule when constructing amounts for `send`, `swap`, or direct contract calls.
 - **`withdraw`** — `--position` = aToken or ERC-4626 vault; `--amount` = `max` or underlying units (Aave / vault). Dry-run JSON includes `poolAddress` / `vault`.
-- **`x402-pay`** — probes endpoint for 402, the wallet funds a builder EOA with the exact token amount, the EOA signs the EIP-3009 payment. Chain auto-detected from the 402 response
+- **`x402-pay`** — probes endpoint for 402, the wallet funds a builder EOA with the exact token amount, the EOA signs the EIP-3009 payment. Chain auto-detected from the 402 response. `--max-usd` refuses a higher price; without it, a price over `x402_max_per_call` ($1) fails with `confirmation_required` until rerun with `--yes`, and `x402_daily_max` ($10, rolling 24 hours) caps the total. In session mode the funding transfer comes out of the allowance
+- **`swap`** — quotes through Trails; a dry run saves the quote and prints its `intentId` and the command to execute it. `--amount` takes a number, `<n>%` or `all`; `--amount-usd` sells a USD value. Without `--from`, a buy pays with a stablecoin that has enough balance
+- **Watches** — `watch check` reads all prices in one call, raises an alert or trades (`--mode auto`) when a level is crossed, and re-arms after a 2% move back. They only run when checked: schedule `watch check` with the agent's scheduler
 - **`call`** — submit arbitrary pre-encoded calldata: `agent call --to <addr> --data 0x... [--value <amt>] [--prefer-native-fee] [--broadcast]`. The wallet can call any contract (no permission scoping in the V3 model)
 - **`send-native --direct`** — bypasses ValueForwarder contract for direct EOA transfer
-- **No permission scoping** — the V3 embedded wallet can call any contract and spend any amount it holds; there are no per-contract whitelists or spend limits. Guard spending in agent logic, not at the wallet layer.
+- **No permission scoping (owner mode)** — the V3 embedded wallet can call any contract and spend any amount it holds; there are no per-contract whitelists or spend limits. Guard spending in agent logic, not at the wallet layer.
 - **Session expiry** — ~1 week from login; on expiry, re-run `wallet login`
 
 ## Presenting Results to the User
@@ -227,6 +281,11 @@ CLI commands output JSON (non-TTY). After running a command, always render the r
 ├── .encryption-key       # AES-256-GCM key (auto-generated, 0600)
 ├── config.json           # transaction mode (auto | dry-run)
 ├── builder.json          # publishableKey, omsProjectId, polymarket/EOA keys (encrypted)
-├── wallets/<name>.json   # OMS wallet pointer: walletAddress, loginMethod
-└── oms/<name>/           # OMS SDK session storage + encrypted credential key
+├── wallets/<name>.json   # OMS wallet pointer: walletAddress, loginMethod, access (owner | session)
+├── oms/<name>/           # OMS SDK session storage + encrypted credential key (owner mode)
+├── session/<name>/       # session key, approved plan, USD ledger (session mode)
+├── trades/               # swap state by intent id
+└── watches.json, alerts.jsonl, watch-state.json
 ```
+
+A workspace install keeps all of this under `<workspace>/.polygon-agent/state/` (`POLYGON_AGENT_HOME`).

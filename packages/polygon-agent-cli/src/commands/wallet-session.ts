@@ -325,6 +325,48 @@ export const confirmCommandModule: CommandModule<object, ConfirmArgs> = {
 
 // --- wallet status / wallet allowance (no code) ---
 
+// What a pending owner request would approve, in one sentence.
+function pendingApproves(action: OwnerAction): string {
+  switch (action.kind) {
+    case 'connect':
+    case 'allowance-set':
+    case 'renew':
+      return String(planSummary(action.plan).summary);
+    case 'withdraw':
+      return `Send ${formatUnits(action.amount, action.decimals)} ${action.symbol} on ${chainLabel(action.chainId)} to ${action.to}, as the owner.`;
+    case 'access':
+      return action.revoke
+        ? `Revoke access for ${action.revoke.credentialId}${action.revoke.sessionId ? ` (session ${action.revoke.sessionId})` : ''}.`
+        : 'List every install and sign-in with access to the wallet.';
+  }
+}
+
+interface PendingRequestInfo {
+  request: string;
+  action: OwnerAction['kind'];
+  email: string;
+  expiresAt: string;
+  approves: string;
+  next: string;
+}
+
+// A pending owner request, for `wallet status`: enough to resume it when the
+// conversation has lost track of it (who has the code, what it approves),
+// never the sign-in state it holds.
+function pendingRequestInfo(wallet: string): PendingRequestInfo | undefined {
+  const pending = loadPending(wallet);
+  // An unreadable expiry counts as expired.
+  if (!pending || !(Date.parse(pending.expiresAt) > Date.now())) return undefined;
+  return {
+    request: pending.id,
+    action: pending.action.kind,
+    email: pending.email,
+    expiresAt: pending.expiresAt,
+    approves: pendingApproves(pending.action),
+    next: confirmCommand({ wallet, request: pending.id })
+  };
+}
+
 export async function sessionReport(params: {
   wallet: string;
   withVersion: boolean;
@@ -333,11 +375,19 @@ export async function sessionReport(params: {
   const pointer = await loadOmsWalletPointer(wallet);
   const version = params.withVersion ? await versionInfo() : {};
   if (!pointer) {
+    // A first connect waiting for its code: resume it rather than send another.
+    const pendingInfo = pendingRequestInfo(wallet);
     return {
       ok: true,
       walletName: wallet,
       connected: false,
-      next: `polygon-agent wallet login --email <email>${nameFlag(wallet)}`,
+      ...(pendingInfo
+        ? {
+            pendingRequest: pendingInfo,
+            next: pendingInfo.next,
+            hint: `A code was already sent to ${pendingInfo.email}. Ask the user for it; start a new request only if they can't find it or it expires.`
+          }
+        : { next: `polygon-agent wallet login --email <email>${nameFlag(wallet)}` }),
       // Alert watches work without a connection.
       watches: watchStatus(new Date()),
       ...version
@@ -409,16 +459,7 @@ export async function sessionReport(params: {
     });
   }
 
-  const pending = loadPending(wallet);
-  const pendingInfo =
-    pending && Date.parse(pending.expiresAt) > Date.now()
-      ? {
-          request: pending.id,
-          action: pending.action.kind,
-          expiresAt: pending.expiresAt,
-          next: confirmCommand({ wallet, request: pending.id })
-        }
-      : undefined;
+  const pendingInfo = pendingRequestInfo(wallet);
 
   return {
     ok: true,

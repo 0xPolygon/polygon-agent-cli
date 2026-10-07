@@ -26,8 +26,11 @@ signs the exact payment, and retries automatically.
 Every call spends USDC from a funded Polygon wallet. Before running `x402-pay`:
 
 ```bash
-agent wallet list        # is a wallet configured?
+agent wallet status      # is a wallet connected? (session mode: allowance left)
+agent wallet list        # owner mode: is a wallet configured?
 ```
+
+Installed for a personal assistant (session mode, see https://agents.polygon.technology/setup.md)? Payments come out of the allowance; connect with `wallet login --email` instead of the browser login below.
 
 If no wallet is listed, set one up:
 
@@ -71,6 +74,17 @@ agent x402-pay \
 ```
 
 Chain and token are auto-detected from the `402` response — no manual config.
+
+### Price limits
+
+Always pass `--max-usd` with the price you expect from the catalog: a service asking more is refused and nothing is paid (`x402_price_exceeds_max`).
+
+```bash
+agent x402-pay --url "https://agent-discovery.polygon.org/api/proxy/exa/search" \
+  --wallet main --method POST --body '{"query": "polygon"}' --max-usd 0.001
+```
+
+Without `--max-usd`, a price over the per-call limit ($1 by default) fails with `confirmation_required`: ask the user, and rerun with `--yes` only if they agree. Total x402 spending is capped at $10 over a rolling 24 hours by default (`daily_limit_exceeded`).
 
 ---
 

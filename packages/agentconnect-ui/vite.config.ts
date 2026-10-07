@@ -8,6 +8,8 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
+import { writeSkillIndex } from './skills-index.ts';
+
 const pkgDir = path.dirname(fileURLToPath(import.meta.url));
 const skillsDir = path.resolve(pkgDir, '../../skills');
 
@@ -16,6 +18,8 @@ const skillsDir = path.resolve(pkgDir, '../../skills');
 // /polygon-defi/SKILL.md, etc. — the URLs the dashboard and the skills
 // themselves reference. Without this the skills are only reachable from the
 // retired connector-ui deployment.
+//
+// setup.md (the one-time install guide) is copied with them, to /setup.md.
 //
 // Also alias the canonical skill to the legacy root /SKILL.md. The repo no
 // longer has a root skills/SKILL.md (removed to stop `npx skills add` offering
@@ -41,6 +45,9 @@ function serveSkills(): Plugin {
       // Mirror skills/* into dist/* (dist already holds the built SPA; the
       // skill tree only adds .md files under new paths, no collisions).
       fs.cpSync(skillsDir, absOutDir, { recursive: true });
+      // /.well-known/agent-skills/index.json, from the skills' frontmatter. A
+      // skill with bad frontmatter fails the build.
+      writeSkillIndex({ skillsDir, outDir: absOutDir });
 
       // Legacy /SKILL.md → canonical skill content (200, not a redirect).
       const canonical = path.join(skillsDir, CANONICAL_SKILL);

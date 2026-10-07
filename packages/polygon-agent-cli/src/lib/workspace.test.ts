@@ -119,6 +119,23 @@ describe('initWorkspace', () => {
     expect(fs.readFileSync(path.join(workspace, '.gitignore'), 'utf8')).toBe('node_modules\n');
   });
 
+  it("shares ~/.polygon-agent with the global CLI's state ($HOME workspaces)", () => {
+    const home = tmpDir('pa-home-');
+    const root = path.join(home, '.polygon-agent');
+    fs.mkdirSync(path.join(root, 'wallets'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.encryption-key'), 'k');
+    const spy = vi.spyOn(os, 'homedir').mockReturnValue(home);
+    try {
+      expect(initWorkspace({ root, version: '1.0.0', sourceDir: null }).state).toBe(
+        path.join(root, 'state')
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    // The global CLI's files are untouched.
+    expect(fs.readFileSync(path.join(root, '.encryption-key'), 'utf8')).toBe('k');
+  });
+
   it('accepts a root holding only the npm install, as setup.md leaves it', () => {
     const root = path.join(tmpDir('pa-ws-'), '.polygon-agent');
     fs.mkdirSync(path.join(root, 'cli'), { recursive: true });
@@ -256,6 +273,18 @@ describe('skills', () => {
     });
     expect(value).toBe(wrapper);
     expect(fs.readdirSync(cwd)).toEqual([]);
+  });
+
+  it("renders the repo's polygon-oms-wallet skill for a wrapper", () => {
+    const repoSkills = path.resolve(import.meta.dirname, '..', '..', '..', '..', 'skills');
+    const markdown = readSkill({ sourceDir: repoSkills, name: ASSISTANT_SKILL });
+    expect(markdown).not.toBeNull();
+    const wrapper = "/ws/it's here/.polygon-agent/bin/polygon-agent";
+    const rendered = renderSkill({ markdown: markdown ?? '', wrapper });
+    const lines = rendered.split('\n').filter((l) => l.startsWith('POLYGON_AGENT='));
+    expect(lines).toEqual([`POLYGON_AGENT=${shellQuote(wrapper)}`]);
+    expect(rendered).toMatch(/^---\nname: polygon-oms-wallet\n/);
+    expect(rendered).toContain(`> **This install's CLI:** \`${wrapper}\``);
   });
 
   it('quotes with POSIX single quotes', () => {

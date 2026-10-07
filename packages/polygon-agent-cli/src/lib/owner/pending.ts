@@ -92,10 +92,13 @@ function actionToJson(action: OwnerAction): unknown {
   }
 }
 
+function pendingPath(wallet: string): string {
+  return path.join(STORAGE_ROOT, 'pending', `${wallet}.json`);
+}
+
 function pendingFile(wallet: string): string {
-  const dir = path.join(STORAGE_ROOT, 'pending');
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  return path.join(dir, `${wallet}.json`);
+  fs.mkdirSync(path.join(STORAGE_ROOT, 'pending'), { recursive: true, mode: 0o700 });
+  return pendingPath(wallet);
 }
 
 // Replacing and deleting are short, so a few seconds is plenty.
@@ -118,8 +121,11 @@ export async function savePending(request: PendingRequest): Promise<void> {
   });
 }
 
+// Reading never creates the folder (`wallet status` runs it on every call).
 export function loadPending(wallet: string): PendingRequest | null {
-  const cipher = CipherSchema.safeParse(readJsonFile(pendingFile(wallet)));
+  const file = pendingPath(wallet);
+  if (!fs.existsSync(file)) return null;
+  const cipher = CipherSchema.safeParse(readJsonFile(file));
   if (!cipher.success) return null;
   try {
     const parsed = PendingRequestSchema.safeParse(JSON.parse(decrypt(cipher.data)));

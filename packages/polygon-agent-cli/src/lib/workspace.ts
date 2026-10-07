@@ -199,8 +199,11 @@ export function initWorkspace(params: {
   }
   const state = stateDir(root);
   // Refuse a folder that holds anything else (the workspace itself, or $HOME):
-  // init would replace its .gitignore with "*".
-  if (fs.existsSync(root) && !fs.existsSync(installRecordPath(state))) {
+  // init would replace its .gitignore with "*". ~/.polygon-agent is the
+  // exception: a $HOME workspace install shares it with the global CLI's state,
+  // which ignoring everything suits.
+  const globalHome = path.join(os.homedir(), '.polygon-agent');
+  if (fs.existsSync(root) && root !== globalHome && !fs.existsSync(installRecordPath(state))) {
     const foreign = fs.readdirSync(root).filter((entry) => !ROOT_ENTRIES.has(entry));
     if (foreign.length > 0) {
       throw new Error(
