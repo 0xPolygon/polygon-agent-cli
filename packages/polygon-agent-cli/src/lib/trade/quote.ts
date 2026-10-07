@@ -63,6 +63,8 @@ export interface QuoteSwapParams {
 export interface QuotedSwap {
   trade: TradeRecord;
   warnings: string[];
+  // Fees over 10% of the input (one of the warnings).
+  highFee: boolean;
 }
 
 function maxSlippage(): number {
@@ -132,6 +134,74 @@ function sessionDestination(params: {
     });
   }
   return { chainId: params.chainId, ...token };
+}
+
+// The command covering a token with no chain named: on Polygon if the table
+// has it there, else the first chain that does.
+function addCommand(symbol: string): string {
+  const chainId =
+    [137, ...supportedChainIds()].find((candidate) =>
+      resolveSupportedSymbol({ chainId: candidate, symbol })
+    ) ?? 137;
+  return `polygon-agent wallet allowance set --add ${symbol.toUpperCase()}@${resolveNetwork(chainId).name}`;
+}
+
+function destinationCovered(params: { wallet: string; chainId: number; symbol: string }): boolean {
+  try {
+    sessionDestination(params);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Session mode: whether a watch's auto trade could run (FS §8.2). A buy needs
+// the token covered on its chain (or, without one, on some approved chain); a
+// sell needs it covered as a source on its chain (Polygon by default).
+export function assertTradeCovered(params: {
+  walletName: string;
+  side: 'buy' | 'sell';
+  symbol: string;
+  chainId?: number;
+}): void {
+  if (params.side === 'sell') {
+    sessionSource({
+      wallet: params.walletName,
+      chainId: params.chainId ?? 137,
+      symbol: params.symbol
+    });
+    return;
+  }
+  if (params.chainId !== undefined) {
+    sessionDestination({
+      wallet: params.walletName,
+      chainId: params.chainId,
+      symbol: params.symbol
+    });
+    return;
+  }
+  // Without a chain, the buy pays with a covered stablecoin and delivers on
+  // that stablecoin's chain, so some chain must cover both.
+  const chains = readApprovedPlan(params.walletName)?.plan.chains ?? [];
+  const fits = chains.some(
+    (chain) =>
+      destinationCovered({
+        wallet: params.walletName,
+        chainId: chain.chainId,
+        symbol: params.symbol
+      }) &&
+      supportedTokens(chain.chainId).some(
+        (token) =>
+          token.kind === 'usd' &&
+          covered({ wallet: params.walletName, chainId: chain.chainId, token: token.address })
+      )
+  );
+  if (fits) return;
+  throw new CliError({
+    code: 'not_covered',
+    message: `${params.symbol.toUpperCase()} isn't covered on any chain where the allowance also covers a stablecoin to pay with.`,
+    command: addCommand(params.symbol)
+  });
 }
 
 async function ownerToken(params: { chainId: number; symbol: string }): Promise<ResolvedToken> {
@@ -238,8 +308,14 @@ async function defaultSource(params: {
   chainId?: number;
   amount?: string;
   amountUsd?: number;
+  // Only chains the trade can deliver on (a session buy stays on its chain).
+  usableChain?: (chainId: number) => boolean;
+  // What's bought, for the error when no chain fits.
+  buying?: string;
 }): Promise<{ token: ResolvedToken; amount: bigint }> {
-  const chainIds = params.chainId !== undefined ? [params.chainId] : supportedChainIds();
+  const chainIds = (params.chainId !== undefined ? [params.chainId] : supportedChainIds()).filter(
+    (chainId) => params.usableChain?.(chainId) ?? true
+  );
   const candidates = chainIds
     .flatMap((chainId) =>
       supportedTokens(chainId)
@@ -257,7 +333,10 @@ async function defaultSource(params: {
   if (candidates.length === 0) {
     throw new CliError({
       code: 'not_covered',
-      message: 'No covered stablecoin to pay with. Name the token to sell with --from.'
+      message: params.usableChain
+        ? `No covered stablecoin on a chain where ${params.buying ?? 'the token'} is covered. Name the token to sell with --from, or cover ${params.buying ?? 'it'} on a chain you hold stablecoins on.`
+        : 'No covered stablecoin to pay with. Name the token to sell with --from.',
+      ...(params.usableChain && params.buying ? { command: addCommand(params.buying) } : {})
     });
   }
 
@@ -365,7 +444,20 @@ export async function quoteSwap(params: QuoteSwapParams): Promise<QuotedSwap> {
       session,
       chainId,
       amount: params.amount,
-      amountUsd: params.amountUsd
+      amountUsd: params.amountUsd,
+      // A session buy delivers on the source's chain, so only chains where the
+      // token bought is covered can pay.
+      ...(session && params.toChain === undefined
+        ? {
+            usableChain: (candidate: number) =>
+              destinationCovered({
+                wallet: params.walletName,
+                chainId: candidate,
+                symbol: params.to
+              }),
+            buying: params.to.toUpperCase()
+          }
+        : {})
     }));
   }
   if (amount <= 0n) {
@@ -425,7 +517,8 @@ export async function quoteSwap(params: QuoteSwapParams): Promise<QuotedSwap> {
   const warnings: string[] = [];
   const fromUsd = intent.quote?.fromAmountUsd ?? 0;
   const feeUsd = intent.fees?.totalFeeUsd ?? 0;
-  if (fromUsd > 0 && feeUsd / fromUsd > HIGH_FEE_SHARE) {
+  const highFee = fromUsd > 0 && feeUsd / fromUsd > HIGH_FEE_SHARE;
+  if (highFee) {
     warnings.push(
       `Fees are $${feeUsd.toFixed(2)}, ${Math.round((feeUsd / fromUsd) * 100)}% of the $${fromUsd.toFixed(2)} being traded.`
     );
@@ -478,7 +571,7 @@ export async function quoteSwap(params: QuoteSwapParams): Promise<QuotedSwap> {
     updatedAt: now.toISOString()
   };
   saveTrade(trade);
-  return { trade, warnings };
+  return { trade, warnings, highFee };
 }
 
 // How a trade reads to a person: amounts in token units.
@@ -509,7 +602,8 @@ export function describeTrade(trade: TradeRecord): Record<string, unknown> {
     quoteExpiresAt: trade.expiresAt,
     ...(trade.depositTxHash ? { depositTxHash: trade.depositTxHash } : {}),
     ...(trade.intentStatus ? { intentStatus: trade.intentStatus } : {}),
-    ...(trade.receivedAmount
+    // Records written before the fix may hold "null".
+    ...(trade.receivedAmount && /^\d+$/.test(trade.receivedAmount)
       ? { received: formatUnits(trade.receivedAmount, destination.decimals) }
       : {}),
     ...(trade.destinationTxHash ? { destinationTxHash: trade.destinationTxHash } : {}),

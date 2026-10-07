@@ -28,8 +28,10 @@ import {
   x402PayCommand
 } from './commands/operations.ts';
 import { polymarketCommand } from './commands/polymarket.ts';
+import { priceCommand } from './commands/price.ts';
 import { setupCommand } from './commands/setup.ts';
 import { walletCommand } from './commands/wallet.ts';
+import { alertsCommand, watchCommand } from './commands/watch.ts';
 import { skillsCommand, updateCommand, workspaceCommand } from './commands/workspace.ts';
 import { bigintReplacer, failureJson } from './lib/errors.ts';
 import { bootstrapOmsConfig } from './lib/storage.ts';
@@ -60,6 +62,9 @@ const parser = yargs(hideBin(process.argv))
   .command(depositCommand)
   .command(withdrawCommand)
   .command(x402PayCommand)
+  .command(priceCommand)
+  .command(watchCommand)
+  .command(alertsCommand)
   .command(registerCommand)
   .command(identityCommand)
   .command(reputationCommand)

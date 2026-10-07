@@ -287,6 +287,7 @@ async function waitForIntent(params: {
     const status = receipt?.status;
     if (res?.done && receipt) {
       if (status === 'SUCCEEDED') {
+        const received = receivedAmount(receipt.summary?.destinationTokenAmount);
         return updateTrade({
           record: trade,
           patch: {
@@ -294,9 +295,8 @@ async function waitForIntent(params: {
             intentStatus: status,
             destinationTxHash:
               receipt.destinationTransaction?.txnHash ?? receipt.originTransaction?.txnHash,
-            ...(receipt.summary?.destinationTokenAmount !== undefined
-              ? { receivedAmount: String(receipt.summary.destinationTokenAmount) }
-              : {})
+            // Trails can leave the amount out (null) of a succeeded receipt.
+            ...(received !== undefined ? { receivedAmount: received } : {})
           },
           now: new Date()
         });
@@ -320,6 +320,13 @@ async function waitForIntent(params: {
     if (Date.now() >= deadline) return trade;
     await sleep(POLL_MS);
   }
+}
+
+function receivedAmount(value: unknown): string | undefined {
+  if (typeof value === 'bigint') return value.toString();
+  if (typeof value === 'number' && Number.isInteger(value)) return String(value);
+  if (typeof value === 'string' && /^\d+$/.test(value)) return value;
+  return undefined;
 }
 
 // Moves the trade as far as it can go. Returns it in its latest state
