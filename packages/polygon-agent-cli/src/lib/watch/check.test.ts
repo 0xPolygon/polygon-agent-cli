@@ -17,6 +17,7 @@ const HOME = String(process.env.POLYGON_AGENT_HOME);
 const { runCheck } = await import('./check.ts');
 const { loadWatches, saveWatches, loadCheckState } = await import('./store.ts');
 const { readAlerts, acknowledgeAlerts } = await import('./alerts.ts');
+const { scheduleAdvice } = await import('./status.ts');
 const { withLock } = await import('../lock.ts');
 const { priceKey } = await import('../prices.ts');
 const { CliError } = await import('../errors.ts');
@@ -577,5 +578,29 @@ describe('watch check', () => {
     // Delivered once, however often it's retried.
     await runCheck(deps());
     expect(kinds()).toEqual(['watch_triggered']);
+  });
+
+  it('a cancelled watch whose outcome alert is still owed keeps the recurring check', async () => {
+    saveWatches([
+      watch({
+        mode: 'auto',
+        status: 'cancelled',
+        buyArmed: false,
+        pendingTrade: { intentId: 'intent-1', side: 'buy' }
+      })
+    ]);
+    const append = vi.spyOn(fs, 'appendFileSync').mockImplementationOnce(() => {
+      throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' });
+    });
+    await expect(runCheck(deps())).rejects.toThrow('ENOSPC');
+    append.mockRestore();
+    // The trade is settled, but its completion alert is owed.
+    expect(loadWatches()[0].pendingTrade).toBeUndefined();
+    expect(scheduleAdvice(loadWatches())).toMatchObject({ undeliveredAlerts: 1 });
+
+    clock = new Date(T0.getTime() + 60_000);
+    const result = await runCheck(deps());
+    expect(result.alerts.map((a) => a.kind)).toEqual(['auto_trade_completed']);
+    expect(scheduleAdvice(loadWatches())).toBeUndefined();
   });
 });

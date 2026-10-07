@@ -511,10 +511,16 @@ const cancelCommand: CommandModule<object, { id?: string }> = {
           ? {
               note: `Its auto ${cancelled.watch.pendingTrade.side} (intent ${cancelled.watch.pendingTrade.intentId}) is still settling; keep the recurring check until it reports.`
             }
-          : {}),
+          : cancelled.watch.outbox?.length
+            ? {
+                note: 'It has alerts the next check still has to deliver; keep the recurring check until then.'
+              }
+            : {}),
         ...(scheduleAdvice(cancelled.remaining)
           ? { schedule: scheduleAdvice(cancelled.remaining) }
-          : { hint: 'No active watches left; the recurring watch check can be removed.' })
+          : {
+              hint: 'No watches left to check, and no trades or alerts owed; the recurring watch check can be removed.'
+            })
       });
     } catch (error) {
       jsonFail(error);

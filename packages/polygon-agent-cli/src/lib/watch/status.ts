@@ -13,18 +13,25 @@ export function formatDuration(ms: number): string {
   return `${Math.round(ms / 60_000)}m`;
 }
 
+// Whether a watch still needs checks: it's active, or (cancelled or expired)
+// it has an auto trade to follow up or alerts the next check must deliver.
+export function needsChecks(watch: Watch): boolean {
+  return watch.status === 'active' || !!watch.pendingTrade || !!watch.outbox?.length;
+}
+
 // The recurring task the assistant should keep: `watch check` at the shortest
-// active interval, for as long as any watch is active or still has an auto
-// trade to follow up (a cancelled or expired one included).
+// interval among the watches that still need checks, for as long as any does.
 export function scheduleAdvice(watches: Watch[]): Record<string, unknown> | undefined {
-  const needed = watches.filter((watch) => watch.status === 'active' || watch.pendingTrade);
+  const needed = watches.filter(needsChecks);
   if (needed.length === 0) return undefined;
   const pending = needed.filter((watch) => watch.pendingTrade).length;
+  const owed = needed.reduce((sum, watch) => sum + (watch.outbox?.length ?? 0), 0);
   const every = Math.max(MIN_INTERVAL_MS, Math.min(...needed.map((watch) => watch.everyMs)));
   return {
     command: 'polygon-agent watch check',
     every: formatDuration(every),
-    ...(pending ? { pendingTrades: pending } : {})
+    ...(pending ? { pendingTrades: pending } : {}),
+    ...(owed ? { undeliveredAlerts: owed } : {})
   };
 }
 
@@ -44,9 +51,12 @@ export function watchStatus(now: Date): Record<string, unknown> {
   // The allowance alerts are reported fresh by `wallet status` itself.
   const sessionKinds: readonly string[] = SESSION_ALERT_TYPES;
   const alerts = unacknowledgedAlerts().filter((alert) => !sessionKinds.includes(alert.kind));
+  const owed = watches.reduce((sum, watch) => sum + (watch.outbox?.length ?? 0), 0);
   const result: Record<string, unknown> = {
     active: active.length,
     lastCheckAt: lastCheckAt ?? null,
+    // Alerts a failed write left for the next check to deliver.
+    ...(owed ? { undeliveredAlerts: owed } : {}),
     // The newest few; `alerts` lists them all.
     ...(alerts.length
       ? {
@@ -56,8 +66,8 @@ export function watchStatus(now: Date): Record<string, unknown> {
         }
       : {})
   };
-  // Active watches, and ended ones with a trade still to follow up.
-  const needed = watches.filter((watch) => watch.status === 'active' || watch.pendingTrade);
+  // Active watches, and ended ones with a trade or alerts still to follow up.
+  const needed = watches.filter(needsChecks);
   if (needed.length > 0) {
     const limit = 3 * Math.min(...needed.map((watch) => watch.everyMs));
     // Measured from the later of the last check and the oldest such watch
