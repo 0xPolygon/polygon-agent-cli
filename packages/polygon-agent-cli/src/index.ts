@@ -30,6 +30,7 @@ import {
 import { polymarketCommand } from './commands/polymarket.ts';
 import { setupCommand } from './commands/setup.ts';
 import { walletCommand } from './commands/wallet.ts';
+import { skillsCommand, updateCommand, workspaceCommand } from './commands/workspace.ts';
 import { bootstrapOmsConfig } from './lib/storage.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -63,7 +64,10 @@ const parser = yargs(hideBin(process.argv))
   .command(reputationCommand)
   .command(reviewsCommand)
   .command(feedbackCommand)
-  .command(polymarketCommand);
+  .command(polymarketCommand)
+  .command(workspaceCommand)
+  .command(skillsCommand)
+  .command(updateCommand);
 
 parser
   .demandCommand(1, '')
