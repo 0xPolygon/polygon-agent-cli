@@ -1,5 +1,11 @@
 # Change Log
 
+## 0.14.1
+
+### Patch Changes
+
+- b3e81d0: Make `x402-pay` respect the persisted transaction mode and shared `--broadcast` / `--dry-run` safety flags.
+
 ## 0.14.0
 
 ### Minor Changes
