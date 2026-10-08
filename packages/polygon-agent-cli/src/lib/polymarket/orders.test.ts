@@ -11,6 +11,10 @@ const region = vi.hoisted(() => ({
   value: { blocked: false, closeOnly: false, country: 'PT', region: null as string | null }
 }));
 const pusd = vi.hoisted(() => ({ value: 50_000_000n }));
+const mk = vi.hoisted(() => ({
+  market: { slug: 'will-x', conditionId: '0xc' } as Record<string, unknown>
+}));
+const updateBalanceAllowance = vi.hoisted(() => vi.fn());
 
 vi.mock('./account.ts', () => ({
   getTradingClient: async () => client,
@@ -22,7 +26,7 @@ vi.mock('./region.ts', async (o) => ({
 }));
 vi.mock('./resolve.ts', () => ({
   resolveOutcome: async () => ({
-    market: { slug: 'will-x', conditionId: '0xc' },
+    market: mk.market,
     outcome: 'yes',
     label: 'Yes',
     assetId: 'T-YES',
@@ -32,7 +36,12 @@ vi.mock('./resolve.ts', () => ({
 vi.mock('./sdk.ts', async (o) => ({
   ...(await o<Record<string, unknown>>()),
   loadSdk: async () => ({
-    root: { OrderSide: { BUY: 'BUY', SELL: 'SELL' }, OrderType: { FAK: 'FAK' } }
+    root: {
+      OrderSide: { BUY: 'BUY', SELL: 'SELL' },
+      OrderType: { FAK: 'FAK' },
+      AssetType: { CONDITIONAL: 'CONDITIONAL', CONDITIONAL_V2: 'CONDITIONAL-V2' }
+    },
+    actions: { updateBalanceAllowance }
   })
 }));
 
@@ -52,6 +61,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   delete process.env.POLYMARKET_BUILDER_CODE;
   pusd.value = 50_000_000n;
+  mk.market = { slug: 'will-x', conditionId: '0xc' };
   region.value = { blocked: false, closeOnly: false, country: 'PT', region: null };
 });
 
@@ -90,6 +100,7 @@ describe('buy', () => {
         assetId: 'T-YES',
         side: 'BUY',
         amount: '5',
+        maxSpend: '5',
         maxPrice: 0.55,
         orderType: 'FAK'
       })
@@ -181,6 +192,57 @@ describe('buy', () => {
     expect(client.placeLimitOrder).not.toHaveBeenCalled();
   });
 
+  it('caps the all-in spend (fees included) at the requested amount', async () => {
+    client.estimateMarketPrice.mockResolvedValue(0.5);
+    client.placeMarketOrder.mockResolvedValue(filled);
+    await buy({ wallet: 'main', ref: 'will-x', outcome: 'yes', usd: '5.25', broadcast: true });
+    expect(client.placeMarketOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: '5.25', maxSpend: '5.25' })
+    );
+  });
+
+  it.each([
+    ['closed', { closed: true, acceptingOrders: false }],
+    ['paused', { closed: false, acceptingOrders: false }]
+  ])('refuses a %s market before reading balances or estimating', async (_n, state) => {
+    mk.market = { slug: 'will-x', conditionId: '0xc', state };
+    pusd.value = 0n; // a balance read first would fail with insufficient_pusd instead
+    await expect(
+      buy({ wallet: 'main', ref: 'will-x', outcome: 'yes', usd: '5', broadcast: true })
+    ).rejects.toMatchObject({ code: 'market_not_accepting_orders' });
+    expect(client.estimateMarketPrice).not.toHaveBeenCalled();
+    expect(client.placeMarketOrder).not.toHaveBeenCalled();
+  });
+
+  it('allows a v2 market that is accepting orders', async () => {
+    mk.market = {
+      slug: 'will-x',
+      conditionId: '0xc',
+      version: 'v2',
+      state: { closed: false, acceptingOrders: true }
+    };
+    client.estimateMarketPrice.mockResolvedValue(0.5);
+    await expect(
+      buy({ wallet: 'main', ref: 'will-x', outcome: 'yes', usd: '5', broadcast: false })
+    ).resolves.toMatchObject({ dryRun: true });
+  });
+
+  it('rejects --expires on a market order before any call', async () => {
+    await expect(
+      buy({
+        wallet: 'main',
+        ref: 'will-x',
+        outcome: 'yes',
+        usd: '5',
+        maxPrice: 0.5,
+        expiresMinutes: 10,
+        broadcast: true
+      })
+    ).rejects.toMatchObject({ code: 'invalid_input' });
+    expect(client.estimateMarketPrice).not.toHaveBeenCalled();
+    expect(client.placeMarketOrder).not.toHaveBeenCalled();
+  });
+
   it('adds the builder code only when configured', async () => {
     client.estimateMarketPrice.mockResolvedValue(0.5);
     client.placeMarketOrder.mockResolvedValue(filled);
@@ -231,10 +293,34 @@ describe('price flag conflicts', () => {
 });
 
 describe('sell', () => {
+  // The conditional token balance, in 6-decimal base units.
   const held = (size: string) =>
-    client.listPositions.mockReturnValue({
-      firstPage: async () => ({ items: [{ assetId: 'T-YES', currentSize: size }] })
+    updateBalanceAllowance.mockResolvedValue({
+      balance: String(Math.round(Number(size) * 1e6)),
+      allowances: {}
     });
+
+  it('sizes the position from the refreshed conditional balance, not the Data API', async () => {
+    held('12.5');
+    client.estimateMarketPrice.mockResolvedValue(0.4);
+    await sell({ wallet: 'main', ref: 'will-x', outcome: 'yes', shares: 'all', broadcast: false });
+    expect(updateBalanceAllowance).toHaveBeenCalledWith(client, {
+      assetType: 'CONDITIONAL',
+      assetId: 'T-YES'
+    });
+    expect(client.listPositions).not.toHaveBeenCalled();
+  });
+
+  it('uses the CONDITIONAL-V2 asset type for a v2 market', async () => {
+    mk.market = { slug: 'will-x', conditionId: '0xc', version: 'v2' };
+    held('3');
+    client.estimateMarketPrice.mockResolvedValue(0.4);
+    await sell({ wallet: 'main', ref: 'will-x', outcome: 'yes', shares: '3', broadcast: false });
+    expect(updateBalanceAllowance).toHaveBeenCalledWith(client, {
+      assetType: 'CONDITIONAL-V2',
+      assetId: 'T-YES'
+    });
+  });
 
   it('sells all held shares', async () => {
     held('12.5');
@@ -259,7 +345,7 @@ describe('sell', () => {
   });
 
   it('refuses all with no position, posting nothing', async () => {
-    client.listPositions.mockReturnValue({ firstPage: async () => ({ items: [] }) });
+    updateBalanceAllowance.mockResolvedValue({ balance: '0', allowances: {} });
     await expect(
       sell({ wallet: 'main', ref: 'will-x', outcome: 'yes', shares: 'all', broadcast: true })
     ).rejects.toMatchObject({ code: 'insufficient_shares' });
@@ -323,6 +409,22 @@ describe('sell', () => {
     expect(client.placeMarketOrder).toHaveBeenCalledWith(
       expect.objectContaining({ side: 'SELL', shares: 3, minPrice: 0.3, orderType: 'FAK' })
     );
+  });
+
+  it('rejects --expires on a market sell before any call', async () => {
+    held('3');
+    await expect(
+      sell({
+        wallet: 'main',
+        ref: 'will-x',
+        outcome: 'yes',
+        shares: '3',
+        expiresMinutes: 10,
+        broadcast: true
+      })
+    ).rejects.toMatchObject({ code: 'invalid_input' });
+    expect(client.estimateMarketPrice).not.toHaveBeenCalled();
+    expect(client.placeMarketOrder).not.toHaveBeenCalled();
   });
 
   it('places a limit sell with an expiration', async () => {

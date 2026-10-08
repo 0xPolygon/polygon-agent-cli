@@ -26,9 +26,14 @@ describe('parseShares', () => {
     expect(parseShares('12.5')).toBe(12.5);
     expect(parseShares('all')).toBe('all');
     expect(parseShares('ALL')).toBe('all');
+    expect(parseShares('3')).toBe(3);
+    expect(parseShares(' 0.01 ')).toBe(0.01);
   });
 
-  it.each(['0', '-3', 'x'])('rejects %s', (bad) => {
-    expect(() => parseShares(bad)).toThrow(expect.objectContaining({ code: 'invalid_input' }));
-  });
+  it.each(['0', '0.00', '-3', 'x', '0x10', '1e3', '.5', '5.', ' ', 'Infinity', '+2'])(
+    'rejects %s',
+    (bad) => {
+      expect(() => parseShares(bad)).toThrow(expect.objectContaining({ code: 'invalid_input' }));
+    }
+  );
 });

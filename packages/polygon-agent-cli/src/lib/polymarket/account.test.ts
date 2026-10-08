@@ -27,7 +27,7 @@ const sdk = vi.hoisted(() => {
       secret: 'b-secret',
       passphrase: 'b-pass'
     })),
-    fetchBalanceAllowance: vi.fn(async () => ({ balance: '2500000', allowances: {} }))
+    updateBalanceAllowance: vi.fn(async () => ({ balance: '2500000', allowances: {} }))
   };
 });
 
@@ -39,7 +39,7 @@ vi.mock('./sdk.ts', async (orig) => ({
     node: { builderApiKey: (c: unknown) => ({ __builder: c }) },
     actions: {
       createBuilderApiKey: sdk.createBuilderApiKey,
-      fetchBalanceAllowance: sdk.fetchBalanceAllowance
+      updateBalanceAllowance: sdk.updateBalanceAllowance
     }
   })
 }));
@@ -118,9 +118,12 @@ describe('requireAccount / getTradingClient', () => {
 });
 
 describe('pusdBalance', () => {
-  it('reads the collateral balance in base units', async () => {
+  it('refreshes and reads the collateral balance in base units', async () => {
     await account.setupAccount('main');
     expect(await account.pusdBalance('main')).toBe(2_500_000n);
+    expect(sdk.updateBalanceAllowance).toHaveBeenCalledWith(expect.anything(), {
+      assetType: 'COLLATERAL'
+    });
   });
 });
 
