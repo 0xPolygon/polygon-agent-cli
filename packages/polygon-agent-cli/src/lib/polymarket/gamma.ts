@@ -1,6 +1,6 @@
-import type { PolymarketErrorCode } from './errors.ts';
+import type { PolymarketErrorCode } from '../errors.ts';
 
-import { CliError } from './errors.ts';
+import { CliError } from '../errors.ts';
 
 // Polymarket integration library — CLOB V2
 // Covers: Gamma API (market discovery), CLOB V2 API (trading via @polymarket/clob-client-v2), on-chain ops
