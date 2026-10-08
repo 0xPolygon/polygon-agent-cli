@@ -21,6 +21,7 @@ import { z } from 'zod';
 
 import { readConfig } from './config.ts';
 import { CliError, NOTHING_SENT_CODES } from './errors.ts';
+import { appendJsonLine } from './jsonl.ts';
 import { LockHeldError, withLock } from './lock.ts';
 import { findSupportedToken } from './session/tokens.ts';
 import { ensureStorageDir, STORAGE_ROOT } from './storage.ts';
@@ -156,22 +157,7 @@ export function checkX402Price(params: {
 
 function appendEntry(entry: Record<string, unknown>): void {
   ensureStorageDir();
-  const file = paymentsFile();
-  // A torn earlier append (no final newline) must not swallow this entry.
-  let prefix = '';
-  try {
-    const size = fs.statSync(file).size;
-    if (size > 0) {
-      const fd = fs.openSync(file, 'r');
-      const last = Buffer.alloc(1);
-      fs.readSync(fd, last, 0, 1, size - 1);
-      fs.closeSync(fd);
-      if (last.toString() !== '\n') prefix = '\n';
-    }
-  } catch {
-    // no file yet
-  }
-  fs.appendFileSync(file, `${prefix}${JSON.stringify(entry)}\n`, { mode: 0o600 });
+  appendJsonLine({ file: paymentsFile(), entry });
 }
 
 // Reserves a payment against the daily limit; returns its id.

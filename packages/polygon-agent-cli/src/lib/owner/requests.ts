@@ -4,7 +4,7 @@
 //   2. confirmOwnerRequest: sign in with the code, run the action, and always
 //      revoke the sign-in, so nothing owner-level outlives the command.
 
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomInt } from 'node:crypto';
 
 import type { CompleteEmailAuthResult } from '@polygonlabs/oms-wallet';
 
@@ -29,8 +29,9 @@ export const REQUEST_LIFETIME_MS = 10 * 60 * 1000;
 
 const ID_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';
 
+// randomInt draws without modulo bias.
 function requestId(): string {
-  return [...randomBytes(10)].map((byte) => ID_ALPHABET[byte % ID_ALPHABET.length]).join('');
+  return Array.from({ length: 10 }, () => ID_ALPHABET[randomInt(ID_ALPHABET.length)]).join('');
 }
 
 // A short-lived owner client with an in-memory session and a throwaway key.

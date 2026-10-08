@@ -9,6 +9,7 @@ import path from 'node:path';
 import { z } from 'zod';
 
 import { CliError } from '../errors.ts';
+import { appendJsonLine } from '../jsonl.ts';
 import { ensureStorageDir, STORAGE_ROOT } from '../storage.ts';
 
 const AlertSchema = z.object({
@@ -34,22 +35,7 @@ function alertsFile(): string {
 
 function append(entry: Record<string, unknown>): void {
   ensureStorageDir();
-  const file = alertsFile();
-  // A torn earlier append (no final newline) must not swallow this entry.
-  let prefix = '';
-  try {
-    const size = fs.statSync(file).size;
-    if (size > 0) {
-      const fd = fs.openSync(file, 'r');
-      const last = Buffer.alloc(1);
-      fs.readSync(fd, last, 0, 1, size - 1);
-      fs.closeSync(fd);
-      if (last.toString() !== '\n') prefix = '\n';
-    }
-  } catch {
-    // no file yet
-  }
-  fs.appendFileSync(file, `${prefix}${JSON.stringify(entry)}\n`, { mode: 0o600 });
+  appendJsonLine({ file: alertsFile(), entry });
 }
 
 export function readAlerts(): Array<StoredAlert & { ack: boolean }> {

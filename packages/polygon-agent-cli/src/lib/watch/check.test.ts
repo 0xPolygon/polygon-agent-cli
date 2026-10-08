@@ -119,6 +119,20 @@ function deps(overrides: Partial<CheckDeps> = {}) {
 
 const kinds = () => readAlerts().map((alert) => alert.kind);
 
+// The disk fills up just as an alert is appended to alerts.jsonl (other
+// writes, such as saving the watches, still go through).
+function failAlertWrite() {
+  const write = fs.writeSync;
+  let failed = false;
+  return vi.spyOn(fs, 'writeSync').mockImplementation((...args: Parameters<typeof write>) => {
+    if (!failed && typeof args[1] === 'string' && args[1].includes('"kind":')) {
+      failed = true;
+      throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' });
+    }
+    return write(...args);
+  });
+}
+
 beforeEach(() => {
   for (const file of ['watches.json', 'watch-state.json', 'alerts.jsonl']) {
     fs.rmSync(path.join(HOME, file), { force: true });
@@ -562,9 +576,7 @@ describe('watch check', () => {
 
   it("an alert that can't be written isn't lost: the next check delivers it", async () => {
     saveWatches([watch()]);
-    const append = vi.spyOn(fs, 'appendFileSync').mockImplementationOnce(() => {
-      throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' });
-    });
+    const append = failAlertWrite();
     await expect(runCheck(deps())).rejects.toThrow('ENOSPC');
     append.mockRestore();
     // The crossing is consumed, but its alert is owed.
@@ -589,9 +601,7 @@ describe('watch check', () => {
         pendingTrade: { intentId: 'intent-1', side: 'buy' }
       })
     ]);
-    const append = vi.spyOn(fs, 'appendFileSync').mockImplementationOnce(() => {
-      throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' });
-    });
+    const append = failAlertWrite();
     await expect(runCheck(deps())).rejects.toThrow('ENOSPC');
     append.mockRestore();
     // The trade is settled, but its completion alert is owed.
