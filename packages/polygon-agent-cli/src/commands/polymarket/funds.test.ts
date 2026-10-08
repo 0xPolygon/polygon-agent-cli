@@ -209,6 +209,53 @@ describe('deposit', () => {
     expect(loadPending('main')).toBeNull();
   });
 
+  it('keeps no record when the OMS wallet cannot pay the relayer fee', async () => {
+    const { makeFeeSelector } = await import('../../lib/oms-tx.ts');
+    let refusal: unknown;
+    try {
+      makeFeeSelector(false)([
+        {
+          feeOption: {
+            token: { network: '137', name: 'USDC', symbol: 'USDC', type: 'erc20' },
+            value: '5',
+            displayValue: '5'
+          },
+          selection: { token: 'USDC', index: 0 },
+          availableRaw: '0'
+        } as never
+      ]);
+    } catch (e) {
+      refusal = e;
+    }
+    m.runTx.mockRejectedValue(refusal);
+    const out = await run(['deposit', '5', '--broadcast']);
+    expect(out).toMatchObject({ ok: false, code: 'insufficient_balance' });
+    expect(String(out.error)).toMatch(/Unable to pay gas/);
+    expect(loadPending('main')).toBeNull();
+  });
+
+  it('fails with wallet_busy, sending nothing, while another deposit holds the lock', async () => {
+    const { withLock } = await import('../../lib/lock.ts');
+    const { STORAGE_ROOT } = await import('../../lib/storage.ts');
+    const out = await withLock({
+      dir: path.join(STORAGE_ROOT, 'locks', 'polymarket', 'main'),
+      fn: () => run(['deposit', '5', '--broadcast', '--no-wait'])
+    });
+    expect(out).toMatchObject({ ok: false, code: 'wallet_busy' });
+    expect(m.runTx).not.toHaveBeenCalled();
+    expect(loadPending('main')).toBeNull();
+  });
+
+  it('a dry run does not need the deposit lock', async () => {
+    const { withLock } = await import('../../lib/lock.ts');
+    const { STORAGE_ROOT } = await import('../../lib/storage.ts');
+    const out = await withLock({
+      dir: path.join(STORAGE_ROOT, 'locks', 'polymarket', 'main'),
+      fn: () => run(['deposit', '5', '--dry-run'])
+    });
+    expect(out).toMatchObject({ ok: true, dryRun: true });
+  });
+
   it('keeps a sending record when runTx fails after the transfer may have gone out', async () => {
     m.runTx.mockRejectedValue(new Error('timed out waiting for status'));
     const first = await run(['deposit', '5', '--broadcast']);
@@ -318,6 +365,7 @@ describe('withdraw', () => {
       tokenAddress: '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB'
     });
     expect(out).toMatchObject({ ok: true, txHash: '0xW', amountUsd: '3.25' });
+    expect(String(out.note)).toMatch(/pUSD transfer to Polymarket's bridge.*OMS wallet/);
   });
 
   it('refuses more than the pUSD balance', async () => {
