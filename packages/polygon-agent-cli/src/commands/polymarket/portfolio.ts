@@ -130,6 +130,15 @@ async function handleRedeem(argv: RedeemArgs): Promise<void> {
         failed.push({ conditionId: t.conditionId, error: (mapSdkError(err) as Error).message });
       }
     }
+    // Nothing redeemed at all is a failure (exit 1); a partial success stays ok.
+    if (targets.length > 0 && redeemed.length === 0) {
+      throw new CliError({
+        code: 'upstream_error',
+        message: `All ${failed.length} redemption(s) failed: ${failed[0].error}`,
+        hint: 'Check agent polymarket status, then retry agent polymarket redeem --all --broadcast.',
+        details: { redeemed, failed, ...truncatedFlag }
+      });
+    }
     ok({ redeemed, failed, ...truncatedFlag });
   } catch (err) {
     fail(err, { stack: true });

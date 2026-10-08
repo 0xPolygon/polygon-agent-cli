@@ -98,11 +98,26 @@ export async function getTradingClient(wallet: string): Promise<SecureClient> {
   return clientFor(wallet, acct, key);
 }
 
+// The builder key authorizes gasless relayer calls (approvals, transfers). It is
+// minted as the EOA itself; no deposit wallet is needed for that.
+async function mintBuilderKey(wallet: string, key: string, signer: string): Promise<void> {
+  const { root, viem, actions } = await loadSdk();
+  try {
+    const eoaClient = await root.createSecureClient({
+      signer: viem.privateKey(key),
+      wallet: signer
+    } as never);
+    const creds = await actions.createBuilderApiKey(eoaClient as never);
+    writeSecret(wallet, 'builder.json', JSON.stringify(creds));
+  } catch (err) {
+    throw mapSdkError(err);
+  }
+}
+
 export async function setupAccount(
   wallet: string
 ): Promise<{ account: StoredAccount; created: boolean; approvalsSet: boolean }> {
   const existing = loadAccount(wallet);
-  const { root, viem, actions } = await loadSdk();
   const { generatePrivateKey, privateKeyToAccount } = await import('viem/accounts');
 
   let key = readSecret(wallet, 'key.json');
@@ -119,19 +134,7 @@ export async function setupAccount(
   }
   const signer = privateKeyToAccount(key as `0x${string}`).address;
 
-  if (!readSecret(wallet, 'builder.json')) {
-    try {
-      // The builder key is minted as the EOA itself; no deposit wallet is needed for that.
-      const eoaClient = await root.createSecureClient({
-        signer: viem.privateKey(key),
-        wallet: signer
-      } as never);
-      const creds = await actions.createBuilderApiKey(eoaClient as never);
-      writeSecret(wallet, 'builder.json', JSON.stringify(creds));
-    } catch (err) {
-      throw mapSdkError(err);
-    }
-  }
+  if (!readSecret(wallet, 'builder.json')) await mintBuilderKey(wallet, key, signer);
 
   // Creating the client deploys the deposit wallet through the relayer when needed.
   const client = await clientFor(wallet, existing ?? { kind: 'deposit-wallet' }, key);
@@ -158,7 +161,12 @@ export async function setupAccount(
 }
 
 // Legacy: an imported Polymarket key whose funds sit in a Polymarket proxy wallet.
-export async function importLegacyKey(wallet: string, privateKey: string): Promise<StoredAccount> {
+// The import stands even if the builder key can't be minted; withdraw needs it,
+// and `setup` mints it later.
+export async function importLegacyKey(
+  wallet: string,
+  privateKey: string
+): Promise<{ account: StoredAccount; builderKey: boolean; warning?: string }> {
   const dir = accountDir(wallet);
   if (fs.existsSync(path.join(dir, 'key.json')) || fs.existsSync(path.join(dir, 'account.json'))) {
     throw new CliError({
@@ -188,7 +196,17 @@ export async function importLegacyKey(wallet: string, privateKey: string): Promi
   fs.rmSync(path.join(dir, 'clob.json'), { force: true });
   writeSecret(wallet, 'key.json', pk);
   writeJsonFile({ file: path.join(dir, 'account.json'), data: account });
-  return account;
+  try {
+    await mintBuilderKey(wallet, pk, signer);
+    return { account, builderKey: true };
+  } catch (err) {
+    const reason = (err as Error)?.message ?? String(err);
+    return {
+      account,
+      builderKey: false,
+      warning: `Couldn't mint a Polymarket builder key (${reason}). withdraw needs one: run agent polymarket setup --wallet ${wallet} --broadcast to mint it before withdrawing.`
+    };
+  }
 }
 
 // Refreshes the CLOB's cached view first: a plain fetch can lag a deposit or a fill.

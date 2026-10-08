@@ -17,7 +17,8 @@ const m = vi.hoisted(() => ({
   redeemPositions: vi.fn(),
   listPositions: vi.fn(),
   getPositions: vi.fn(),
-  loadPolymarketKey: vi.fn()
+  loadPolymarketKey: vi.fn(),
+  importLegacyKey: vi.fn()
 }));
 
 // A Paginated stand-in: an async iterable of pages.
@@ -68,6 +69,7 @@ vi.mock('../../lib/polymarket/account.ts', async (o) => {
       return m.account;
     },
     pusdBalance: m.pusdBalance,
+    importLegacyKey: m.importLegacyKey,
     getTradingClient: async () => client
   };
 });
@@ -239,6 +241,30 @@ describe('positions', () => {
   });
 });
 
+describe('import-key', () => {
+  const LEGACY = { kind: 'legacy-proxy', signer: '0x1', wallet: '0xLEGACYPROXY', createdAt: 'x' };
+
+  it('reports the builder key and that withdraw moves only pUSD', async () => {
+    m.importLegacyKey.mockResolvedValue({ account: LEGACY, builderKey: true });
+    const out = await run(['import-key', `0x${'ab'.repeat(32)}`]);
+    expect(out).toMatchObject({ ok: true, builderKey: true, account: { kind: 'legacy-proxy' } });
+    expect(String(out.note)).toMatch(/USDC\.e/);
+    expect(out.warning).toBeUndefined();
+    expect(JSON.stringify(out)).not.toMatch(/abab/);
+  });
+
+  it('passes through the warning when the builder key could not be minted', async () => {
+    m.importLegacyKey.mockResolvedValue({
+      account: LEGACY,
+      builderKey: false,
+      warning: 'withdraw needs one: run agent polymarket setup --wallet main --broadcast'
+    });
+    const out = await run(['import-key', `0x${'ab'.repeat(32)}`]);
+    expect(out).toMatchObject({ ok: true, builderKey: false });
+    expect(String(out.warning)).toMatch(/agent polymarket setup/);
+  });
+});
+
 describe('redeem', () => {
   beforeEach(() => {
     m.account = ACCOUNT;
@@ -282,6 +308,28 @@ describe('redeem', () => {
     expect(out.redeemed).toEqual([{ conditionId: other, txHash: '0xOK' }]);
     expect(out.failed).toHaveLength(1);
     expect(out.failed[0].conditionId).toBe(COND);
+    expect(out.ok).toBe(true);
+    expect(process.exit).not.toHaveBeenCalled();
+  });
+
+  it('fails non-zero with upstream_error when every redemption failed', async () => {
+    m.redeemPositions.mockRejectedValue(new Error('relayer down'));
+    const out = await run(['redeem', '--all', '--broadcast']);
+    expect(out).toMatchObject({
+      ok: false,
+      code: 'upstream_error',
+      redeemed: [],
+      failed: [{ conditionId: COND, error: 'relayer down' }]
+    });
+    expect(String(out.error)).toBeTruthy();
+    expect(process.exit).toHaveBeenCalledWith(1);
+    expect(vi.mocked(console.log)).not.toHaveBeenCalled();
+  });
+
+  it('an empty --all is still ok', async () => {
+    m.listPositions.mockReturnValue(pages([]));
+    const out = await run(['redeem', '--all', '--broadcast']);
+    expect(out).toEqual({ ok: true, redeemed: [], failed: [] });
   });
 
   it('reads every page and de-duplicates across them', async () => {
