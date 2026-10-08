@@ -15,7 +15,7 @@ import { formatUnits6 } from '../../lib/polymarket/amounts.ts';
 import { loadPending } from '../../lib/polymarket/deposits.ts';
 import { assertCanTrade, checkRegion } from '../../lib/polymarket/region.ts';
 import { mapSdkError } from '../../lib/polymarket/sdk.ts';
-import { fail, ok, omsAddress, walletOption } from './shared.ts';
+import { collectRedeemable, fail, ok, omsAddress, walletOption } from './shared.ts';
 
 const SETUP_STEPS = [
   'create trading key',
@@ -68,7 +68,7 @@ async function handleStatus(argv: { wallet: string }): Promise<void> {
         client.fetchTradingApprovalsState(),
         checkRegion(client),
         client.listOpenOrders().firstPage(),
-        client.listPositions({ status: 'REDEEMABLE' }).firstPage()
+        collectRedeemable(client)
       ]);
       const rows = redeemable.items as Array<{ currentValue: string }>;
       const redeemableUsd = rows.reduce((sum, p) => sum + Number(p.currentValue), 0);
@@ -80,7 +80,11 @@ async function handleStatus(argv: { wallet: string }): Promise<void> {
         approvals: approvals.isFullyApproved,
         region: { country: region.country, blocked: region.blocked, closeOnly: region.closeOnly },
         openOrders: orders.items.length,
-        redeemable: { count: rows.length, valueUsd: String(redeemableUsd) },
+        redeemable: {
+          count: rows.length,
+          valueUsd: String(redeemableUsd),
+          ...(redeemable.truncated ? { truncated: true } : {})
+        },
         ...(pending
           ? {
               pendingDeposit: {
