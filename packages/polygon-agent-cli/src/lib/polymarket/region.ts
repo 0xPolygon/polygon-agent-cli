@@ -1,5 +1,7 @@
-// Polymarket region rules. Blocked regions can't trade at all; close-only
-// regions (the US among them) can sell, cancel, redeem and withdraw but not buy.
+// Polymarket region rules, decided by Polymarket at run time: the geoblock
+// endpoint says whether this region is blocked, and the CLOB's close-only flag
+// says whether it may only close positions. Blocked regions can't trade at all;
+// close-only regions can sell, cancel, redeem and withdraw but not buy.
 
 import { CliError } from '../errors.ts';
 import { PolymarketError } from './gamma.ts';

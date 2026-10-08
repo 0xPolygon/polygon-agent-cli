@@ -95,13 +95,16 @@ function pickSide(market: SdkMarket, name: string): ResolvedOutcome {
 
 function pickFromEvent(event: SdkEvent, name: string): ResolvedOutcome {
   let n = name.trim().toLowerCase();
+  const titled = event.markets.filter((x: SdkMarket) => x.groupItemTitle);
+  // A title that itself ends in yes/no ("Vote No") wins over reading the suffix as the side.
+  const whole = titled.filter((x: SdkMarket) => String(x.groupItemTitle).toLowerCase() === n);
+  if (whole.length === 1) return side(whole[0], 'yes');
   let outcome: 'yes' | 'no' = 'yes';
   const m = n.match(/^(.*)\s+(yes|no)$/);
   if (m) {
     n = m[1];
     outcome = m[2] as 'yes' | 'no';
   }
-  const titled = event.markets.filter((x: SdkMarket) => x.groupItemTitle);
   const exact = titled.filter((x: SdkMarket) => String(x.groupItemTitle).toLowerCase() === n);
   const partial = exact.length
     ? exact

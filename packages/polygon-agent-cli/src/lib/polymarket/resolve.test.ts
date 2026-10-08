@@ -85,6 +85,41 @@ describe('resolveOutcome', () => {
     expect((await resolveOutcome('election', 'bob no')).assetId).toBe('B-N');
   });
 
+  it('matches a full entry title before reading a trailing yes/no as the side', async () => {
+    const { root } = await loadSdk();
+    pub.fetchMarket.mockRejectedValue(
+      new (root.RequestRejectedError as never as new () => Error)()
+    );
+    pub.fetchEvent.mockResolvedValue({
+      slug: 'referendum',
+      markets: [
+        market({
+          id: '1',
+          groupItemTitle: 'Vote',
+          outcomes: {
+            yes: { label: 'Yes', tokenId: 'V-Y', price: '0.3' },
+            no: { label: 'No', tokenId: 'V-N', price: '0.7' }
+          }
+        }),
+        market({
+          id: '2',
+          groupItemTitle: 'Vote No',
+          outcomes: {
+            yes: { label: 'Yes', tokenId: 'VN-Y', price: '0.6' },
+            no: { label: 'No', tokenId: 'VN-N', price: '0.4' }
+          }
+        })
+      ]
+    });
+    expect(await resolveOutcome('referendum', 'Vote No')).toMatchObject({
+      outcome: 'yes',
+      assetId: 'VN-Y'
+    });
+    expect((await resolveOutcome('referendum', 'vote')).assetId).toBe('V-Y');
+    expect((await resolveOutcome('referendum', 'vote yes')).assetId).toBe('V-Y');
+    expect((await resolveOutcome('referendum', 'Vote No no')).assetId).toBe('VN-N');
+  });
+
   it('lists the choices when the outcome is unknown', async () => {
     pub.fetchMarket.mockResolvedValue(market());
     await expect(resolveOutcome('will-x', 'maybe')).rejects.toMatchObject({
