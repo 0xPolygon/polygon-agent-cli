@@ -16,6 +16,8 @@ export interface Market {
   id: string;
   conditionId: string;
   question: string;
+  // 'v1' (CTF) or 'v2' (Polymarket V2). Decides which Gamma id field holds the token ids.
+  version: string;
   yesTokenId: string | null;
   noTokenId: string | null;
   yesPrice: number | null;
@@ -23,6 +25,8 @@ export interface Market {
   outcomes: string[];
   volume24hr: number;
   negRisk: boolean;
+  closed: boolean;
+  acceptingOrders: boolean;
   endDate: string | null;
 }
 
@@ -45,7 +49,9 @@ export const PUSD = '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB'; // pUSD — Po
 export const CTF = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045'; // Conditional Token Framework
 export const CTF_EXCHANGE = '0xE111180000d2663C0091e4f400237545B87B996B'; // CLOB V2 exchange
 export const NEG_RISK_CTF_EXCHANGE = '0xe2222d279d744050d28e00520010520000310F59'; // V2 neg-risk exchange
-export const NEG_RISK_ADAPTER = '0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296';
+// Polymarket V2 markets: positions live in PositionManager and trade on ExchangeV3.
+export const EXCHANGE_V3 = '0xe3333700cA9d93003F00f0F71f8515005F6c00Aa';
+export const POSITION_MANAGER = '0x006F54F7f9A22e0000CC2AB60031000000ae9fEF';
 export const COLLATERAL_ONRAMP = '0x93070a847efEf7F70739046A929D47a521F5B8ee'; // USDC.e → pUSD wrapping
 export const COLLATERAL_OFFRAMP = '0x2957922Eb93258b93368531d39fAcCA3B4dC5854'; // pUSD → USDC.e unwrapping
 
@@ -105,98 +111,123 @@ export async function executeViaProxyWallet(
   return hash;
 }
 
+// ─── Errors ─────────────────────────────────────────────────────────────────
+
+// Carries a stable `code` so agents can branch on the failure without parsing
+// the message.
+export class PolymarketError extends Error {
+  readonly code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = 'PolymarketError';
+    this.code = code;
+  }
+}
+
 // ─── Gamma API ──────────────────────────────────────────────────────────────
 
+export interface MarketsPage {
+  markets: Market[];
+  // Pass back as `cursor` for the next page; null on the last page.
+  nextCursor: string | null;
+}
+
+async function gammaGet(path: string, params: URLSearchParams): Promise<unknown> {
+  const res = await fetch(`${GAMMA_URL}${path}?${params}`);
+  if (!res.ok) throw new Error(`Gamma API error: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+// Open markets by 24h volume, or open markets matching `search`. Listing uses
+// Gamma's keyset endpoint (offset paging is deprecated); search uses
+// /public-search, which returns events with their markets nested.
 export async function getMarkets({
   search,
   limit = 20,
-  offset = 0
+  cursor
 }: {
   search?: string;
   limit?: number;
-  offset?: number;
-} = {}): Promise<Market[]> {
-  const fetchLimit = search ? Math.max(100, limit * 5) : limit;
+  cursor?: string;
+} = {}): Promise<MarketsPage> {
+  if (search) {
+    const params = new URLSearchParams({
+      q: search,
+      limit_per_type: String(Math.min(Math.max(limit, 5), 50)),
+      events_status: 'active'
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const body = (await gammaGet('/public-search', params)) as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const markets = ((body?.events ?? []) as any[])
+      .flatMap((e) => e.markets ?? [])
+      .filter((m) => m.active !== false && m.closed !== true)
+      .slice(0, limit)
+      .map(parseMarket);
+    return { markets, nextCursor: null };
+  }
+
   const params = new URLSearchParams({
-    limit: String(fetchLimit),
-    offset: String(offset),
-    active: 'true',
+    limit: String(limit),
     closed: 'false',
     order: 'volume24hr',
     ascending: 'false'
   });
-
-  const res = await fetch(`${GAMMA_URL}/markets?${params}`);
-  if (!res.ok) throw new Error(`Gamma API error: ${res.status} ${await res.text()}`);
-
+  if (cursor) params.set('after_cursor', cursor);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let markets: any[] = (await res.json()) as any[];
-
-  if (search) {
-    const q = search.toLowerCase();
-    markets = markets.filter((m) => (m.question || '').toLowerCase().includes(q));
-    markets = markets.slice(0, limit);
-  }
-
-  return markets.map(parseMarket);
+  const body = (await gammaGet('/markets/keyset', params)) as any;
+  return {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    markets: ((body?.markets ?? []) as any[]).map(parseMarket),
+    nextCursor: body?.next_cursor ?? null
+  };
 }
 
+// Gamma hides closed markets unless asked, so a miss is retried with closed=true.
 export async function getMarket(conditionId: string): Promise<Market> {
   const needle = conditionId.toLowerCase();
-  for (let offset = 0; offset < 500; offset += 100) {
-    const params = new URLSearchParams({
-      limit: '100',
-      offset: String(offset),
-      active: 'true',
-      closed: 'false',
-      order: 'volume24hr',
-      ascending: 'false'
-    });
-    const res = await fetch(`${GAMMA_URL}/markets?${params}`);
-    if (!res.ok) throw new Error(`Gamma API error: ${res.status} ${await res.text()}`);
+  for (const closed of [undefined, 'true']) {
+    const params = new URLSearchParams({ condition_ids: conditionId });
+    if (closed) params.set('closed', closed);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const markets: any[] = (await res.json()) as any[];
-    if (!markets?.length) break;
-    const found = markets.find((m) => m.conditionId?.toLowerCase() === needle);
-    if (found) return parseMarket(found);
-  }
-  const resClosed = await fetch(
-    `${GAMMA_URL}/markets?conditionId=${encodeURIComponent(conditionId)}&limit=100`
-  );
-  if (resClosed.ok) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const closed: any[] = (await resClosed.json()) as any[];
-    const found = (closed || []).find((m) => m.conditionId?.toLowerCase() === needle);
+    const markets = (await gammaGet('/markets', params)) as any[];
+    const found = (markets ?? []).find((m) => m.conditionId?.toLowerCase() === needle);
     if (found) return parseMarket(found);
   }
   throw new Error(`Market not found: ${conditionId}`);
 }
 
+function parseJsonArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String);
+  if (typeof value !== 'string') return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+// Polymarket V2 markets trade on a new exchange and identify outcomes by
+// `positionIds`; V1 (CTF) markets use `clobTokenIds`. Gamma can return both
+// fields, so the id field is chosen by `version`, never by presence.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function parseMarket(m: any): Market {
-  let tokenIds: string[] = [];
-  let prices: string[] = [];
-  let outcomes: string[] = [];
-  try {
-    tokenIds = JSON.parse(m.clobTokenIds || '[]');
-  } catch {
-    /* ignore */
-  }
-  try {
-    prices = JSON.parse(m.outcomePrices || '[]');
-  } catch {
-    /* ignore */
-  }
-  try {
-    outcomes = JSON.parse(m.outcomes || '["Yes","No"]');
-  } catch {
-    /* ignore */
-  }
+export function parseMarket(m: any): Market {
+  const version: string = m.version ?? 'v1';
+  const tokenIds =
+    version === 'v1'
+      ? parseJsonArray(m.clobTokenIds)
+      : version === 'v2'
+        ? parseJsonArray(m.positionIds)
+        : [];
+  const prices = parseJsonArray(m.outcomePrices);
+  const outcomes = m.outcomes === undefined ? ['Yes', 'No'] : parseJsonArray(m.outcomes);
 
   return {
     id: m.id,
     conditionId: m.conditionId,
     question: m.question,
+    version,
     yesTokenId: tokenIds[0] || null,
     noTokenId: tokenIds[1] || null,
     yesPrice: prices[0] ? Number(prices[0]) : null,
@@ -204,8 +235,27 @@ function parseMarket(m: any): Market {
     outcomes,
     volume24hr: m.volume24hr || 0,
     negRisk: !!m.negRisk,
+    closed: !!m.closed,
+    acceptingOrders: m.acceptingOrders !== false,
     endDate: m.endDate || null
   };
+}
+
+// The CLI signs CLOB orders for V1 (CTF) markets only. V2 markets need the
+// ExchangeV3 domain and PositionManager approvals, which aren't wired up yet.
+export function assertTradable(market: Market): void {
+  if (market.version !== 'v1') {
+    throw new PolymarketError(
+      'unsupported_market_version',
+      `Market ${market.conditionId} is a Polymarket ${market.version} market, which this CLI can read but not trade yet.`
+    );
+  }
+  if (market.closed || !market.acceptingOrders) {
+    throw new PolymarketError(
+      'market_not_accepting_orders',
+      `Market ${market.conditionId} is not accepting orders${market.closed ? ' (closed)' : ''}.`
+    );
+  }
 }
 
 // ─── CLOB API — public endpoints ─────────────────────────────────────────────
@@ -320,13 +370,42 @@ export async function createAndPostMarketOrder({
   return client.postOrder(order, orderType);
 }
 
-// ─── Data API — positions ────────────────────────────────────────────────────
+// ─── Data API v2 — positions ─────────────────────────────────────────────────
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function getPositions(address: string, limit = 20): Promise<any> {
-  const res = await fetch(`${DATA_URL}/positions?user=${address}&limit=${limit}`);
+export type PositionStatus = 'OPEN' | 'REDEEMABLE' | 'REDEEMABLE_LOST' | 'MERGEABLE' | 'CLOSED';
+export const POSITION_STATUSES: PositionStatus[] = [
+  'OPEN',
+  'REDEEMABLE',
+  'REDEEMABLE_LOST',
+  'MERGEABLE',
+  'CLOSED'
+];
+
+export interface PositionsPage {
+  // Rows as the Data API returns them (snake_case: current_size, avg_price, ...).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  positions: any[];
+  nextCursor: string | null;
+}
+
+// Data API v2 (v1 retires 2026-10-24): responses are wrapped in `{ data,
+// pagination }` and paged by opaque cursor. Status defaults to OPEN on the
+// server, which includes settled winners not yet redeemed.
+export async function getPositions(
+  address: string,
+  { limit = 20, status, cursor }: { limit?: number; status?: PositionStatus; cursor?: string } = {}
+): Promise<PositionsPage> {
+  const params = new URLSearchParams({ user: address, limit: String(limit) });
+  if (status) params.set('status', status);
+  if (cursor) params.set('cursor', cursor);
+  const res = await fetch(`${DATA_URL}/v2/positions?${params}`);
   if (!res.ok) throw new Error(`Data API error: ${res.status} ${await res.text()}`);
-  return res.json();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const body = (await res.json()) as any;
+  return {
+    positions: Array.isArray(body?.data) ? body.data : [],
+    nextCursor: body?.pagination?.next_cursor ?? null
+  };
 }
 
 // ─── Helper: fetch with Cloudflare retry ─────────────────────────────────────

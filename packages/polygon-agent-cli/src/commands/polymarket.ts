@@ -6,6 +6,8 @@
 
 import type { CommandModule } from 'yargs';
 
+import type { PositionStatus } from '../lib/polymarket.ts';
+
 import { resolveBroadcast, withWriteFlags } from '../lib/mode.ts';
 import {
   getMarkets,
@@ -22,28 +24,53 @@ import {
   CTF,
   CTF_EXCHANGE,
   NEG_RISK_CTF_EXCHANGE,
-  NEG_RISK_ADAPTER,
-  COLLATERAL_ONRAMP
+  EXCHANGE_V3,
+  POSITION_MANAGER,
+  COLLATERAL_ONRAMP,
+  POSITION_STATUSES,
+  assertTradable,
+  PolymarketError
 } from '../lib/polymarket.ts';
 import { loadOmsWalletPointer, savePolymarketKey, loadPolymarketKey } from '../lib/storage.ts';
 import { runTx as runDappClientTx } from '../lib/tx-dispatch.ts';
+
+// Error output carries the PolymarketError code when there is one, so agents
+// can branch on it. Unexpected errors on write paths keep their stack.
+function printError(err: unknown, { stack = false } = {}): void {
+  const coded = err instanceof PolymarketError;
+  console.error(
+    JSON.stringify({
+      ok: false,
+      ...(coded ? { code: err.code } : {}),
+      error: (err as Error).message,
+      ...(stack && !coded ? { stack: (err as Error).stack } : {})
+    })
+  );
+}
 
 // ─── handlers ────────────────────────────────────────────────────────────────
 
 async function handleMarkets(argv: {
   search?: string;
   limit?: number;
+  cursor?: string;
   offset?: number;
 }): Promise<void> {
   try {
-    const markets = await getMarkets({
+    if (argv.offset) {
+      throw new PolymarketError(
+        'offset_removed',
+        "Polymarket removed offset paging. Pass the previous response's nextCursor as --cursor instead."
+      );
+    }
+    const { markets, nextCursor } = await getMarkets({
       search: argv.search,
       limit: argv.limit ?? 20,
-      offset: argv.offset ?? 0
+      cursor: argv.cursor
     });
-    console.log(JSON.stringify({ ok: true, count: markets.length, markets }));
+    console.log(JSON.stringify({ ok: true, count: markets.length, nextCursor, markets }));
   } catch (err) {
-    console.error(JSON.stringify({ ok: false, error: (err as Error).message }));
+    printError(err);
     process.exit(1);
   }
 }
@@ -53,7 +80,7 @@ async function handleMarket(argv: { conditionId: string }): Promise<void> {
     const market = await getMarket(argv.conditionId);
     console.log(JSON.stringify({ ok: true, market }));
   } catch (err) {
-    console.error(JSON.stringify({ ok: false, error: (err as Error).message }));
+    printError(err);
     process.exit(1);
   }
 }
@@ -92,7 +119,7 @@ async function handleSetKey(argv: { privateKey: string }): Promise<void> {
       )
     );
   } catch (err) {
-    console.error(JSON.stringify({ ok: false, error: (err as Error).message }));
+    printError(err);
     process.exit(1);
   }
 }
@@ -117,17 +144,12 @@ async function handleProxyWallet(): Promise<void> {
       )
     );
   } catch (err) {
-    console.error(JSON.stringify({ ok: false, error: (err as Error).message }));
+    printError(err);
     process.exit(1);
   }
 }
 
-async function handleApprove(argv: {
-  negRisk?: boolean;
-  broadcast?: boolean;
-  dryRun?: boolean;
-}): Promise<void> {
-  const negRisk = argv.negRisk ?? false;
+async function handleApprove(argv: { broadcast?: boolean; dryRun?: boolean }): Promise<void> {
   const broadcast = resolveBroadcast(argv);
 
   try {
@@ -151,43 +173,31 @@ async function handleApprove(argv: {
       data: '0xa22cb465' + pad(operator) + pad('0x01')
     });
 
-    let txBatch;
-    let approvalLabels: string[];
-    if (negRisk) {
-      txBatch = [
-        // pUSD approvals for V2 exchange contracts
-        erc20Approve(PUSD, NEG_RISK_ADAPTER, MAX_UINT256),
-        erc20Approve(PUSD, NEG_RISK_CTF_EXCHANGE, MAX_UINT256),
-        // CTF (ERC1155) approvals for V2 exchange contracts
-        erc1155ApproveAll(CTF, CTF_EXCHANGE),
-        erc1155ApproveAll(CTF, NEG_RISK_CTF_EXCHANGE),
-        erc1155ApproveAll(CTF, NEG_RISK_ADAPTER),
-        // USDC.e approval for CollateralOnramp (wrapping USDC.e → pUSD)
-        erc20Approve(USDC_E, COLLATERAL_ONRAMP, MAX_UINT256)
-      ];
-      approvalLabels = [
-        'pUSD → NEG_RISK_ADAPTER',
-        'pUSD → NEG_RISK_CTF_EXCHANGE',
-        'CTF → CTF_EXCHANGE (V2)',
-        'CTF → NEG_RISK_CTF_EXCHANGE (V2)',
-        'CTF → NEG_RISK_ADAPTER',
-        'USDC.e → COLLATERAL_ONRAMP (for wrapping)'
-      ];
-    } else {
-      txBatch = [
-        // pUSD approval for V2 exchange contract
-        erc20Approve(PUSD, CTF_EXCHANGE, MAX_UINT256),
-        // CTF (ERC1155) approval for V2 exchange contract
-        erc1155ApproveAll(CTF, CTF_EXCHANGE),
-        // USDC.e approval for CollateralOnramp (wrapping USDC.e → pUSD)
-        erc20Approve(USDC_E, COLLATERAL_ONRAMP, MAX_UINT256)
-      ];
-      approvalLabels = [
-        'pUSD → CTF_EXCHANGE (V2)',
-        'CTF → CTF_EXCHANGE (V2)',
-        'USDC.e → COLLATERAL_ONRAMP (for wrapping)'
-      ];
-    }
+    // One batch covers every CLOB exchange (standard, neg-risk and the
+    // Polymarket V2 exchange), so no market needs a second approval run.
+    const approvals = [
+      { label: 'pUSD → CTF Exchange', tx: erc20Approve(PUSD, CTF_EXCHANGE, MAX_UINT256) },
+      {
+        label: 'pUSD → Neg Risk CTF Exchange',
+        tx: erc20Approve(PUSD, NEG_RISK_CTF_EXCHANGE, MAX_UINT256)
+      },
+      { label: 'pUSD → Polymarket V2 Exchange', tx: erc20Approve(PUSD, EXCHANGE_V3, MAX_UINT256) },
+      { label: 'Conditional Tokens → CTF Exchange', tx: erc1155ApproveAll(CTF, CTF_EXCHANGE) },
+      {
+        label: 'Conditional Tokens → Neg Risk CTF Exchange',
+        tx: erc1155ApproveAll(CTF, NEG_RISK_CTF_EXCHANGE)
+      },
+      {
+        label: 'PositionManager → Polymarket V2 Exchange',
+        tx: erc1155ApproveAll(POSITION_MANAGER, EXCHANGE_V3)
+      },
+      {
+        label: 'USDC.e → CollateralOnramp (for wrapping)',
+        tx: erc20Approve(USDC_E, COLLATERAL_ONRAMP, MAX_UINT256)
+      }
+    ];
+    const txBatch = approvals.map((a) => a.tx);
+    const approvalLabels = approvals.map((a) => a.label);
 
     if (!broadcast) {
       console.log(
@@ -197,7 +207,6 @@ async function handleApprove(argv: {
             dryRun: true,
             proxyWalletAddress,
             signerAddress: account.address,
-            negRisk,
             approvals: approvalLabels,
             note: 'Re-run with --broadcast to execute. EOA must have POL for gas.'
           },
@@ -230,7 +239,7 @@ async function handleApprove(argv: {
           ok: true,
           proxyWalletAddress,
           signerAddress: account.address,
-          negRisk,
+          approvals: approvalLabels,
           approveTxHash,
           note: 'Proxy wallet approvals set. Ready for clob-buy and sell.'
         },
@@ -239,13 +248,7 @@ async function handleApprove(argv: {
       )
     );
   } catch (err) {
-    console.error(
-      JSON.stringify(
-        { ok: false, error: (err as Error).message, stack: (err as Error).stack },
-        null,
-        2
-      )
-    );
+    printError(err, { stack: true });
     process.exit(1);
   }
 }
@@ -277,6 +280,7 @@ async function handleClobBuy(argv: {
 
   try {
     const market = await getMarket(conditionId);
+    assertTradable(market);
     const tokenId = outcomeArg === 'YES' ? market.yesTokenId : market.noTokenId;
     if (!tokenId)
       throw new Error(`Market ${conditionId} has no tokenIds (may be closed or invalid)`);
@@ -440,13 +444,7 @@ async function handleClobBuy(argv: {
       )
     );
   } catch (err) {
-    console.error(
-      JSON.stringify(
-        { ok: false, error: (err as Error).message, stack: (err as Error).stack },
-        null,
-        2
-      )
-    );
+    printError(err, { stack: true });
     process.exit(1);
   }
 }
@@ -474,6 +472,7 @@ async function handleSell(argv: {
 
   try {
     const market = await getMarket(conditionId);
+    assertTradable(market);
     const tokenId = outcomeArg === 'YES' ? market.yesTokenId : market.noTokenId;
     if (!tokenId)
       throw new Error(`Market ${conditionId} has no tokenIds (may be closed or invalid)`);
@@ -568,31 +567,36 @@ async function handleSell(argv: {
       )
     );
   } catch (err) {
-    console.error(
-      JSON.stringify(
-        { ok: false, error: (err as Error).message, stack: (err as Error).stack },
-        null,
-        2
-      )
-    );
+    printError(err, { stack: true });
     process.exit(1);
   }
 }
 
-async function handlePositions(): Promise<void> {
+async function handlePositions(argv: {
+  status?: PositionStatus;
+  limit?: number;
+  cursor?: string;
+}): Promise<void> {
   try {
     const privateKey = await loadPolymarketKey();
     const { privateKeyToAccount } = await import('viem/accounts');
     const account = privateKeyToAccount(privateKey as `0x${string}`);
     const proxyWalletAddress = await getPolymarketProxyWalletAddress(account.address);
 
-    const positions = await getPositions(proxyWalletAddress);
+    const status = argv.status ?? 'OPEN';
+    const { positions, nextCursor } = await getPositions(proxyWalletAddress, {
+      status,
+      limit: argv.limit ?? 20,
+      cursor: argv.cursor
+    });
     console.log(
       JSON.stringify(
         {
           ok: true,
           proxyWalletAddress,
-          count: Array.isArray(positions) ? positions.length : 0,
+          status,
+          count: positions.length,
+          nextCursor,
           positions
         },
         null,
@@ -600,7 +604,7 @@ async function handlePositions(): Promise<void> {
       )
     );
   } catch (err) {
-    console.error(JSON.stringify({ ok: false, error: (err as Error).message }));
+    printError(err);
     process.exit(1);
   }
 }
@@ -621,7 +625,7 @@ async function handleOrders(): Promise<void> {
       )
     );
   } catch (err) {
-    console.error(JSON.stringify({ ok: false, error: (err as Error).message }));
+    printError(err);
     process.exit(1);
   }
 }
@@ -632,7 +636,7 @@ async function handleCancel(argv: { orderId: string }): Promise<void> {
     const result = await cancelOrder(argv.orderId, privateKey);
     console.log(JSON.stringify({ ok: true, orderId: argv.orderId, result }));
   } catch (err) {
-    console.error(JSON.stringify({ ok: false, error: (err as Error).message }));
+    printError(err);
     process.exit(1);
   }
 }
@@ -651,7 +655,11 @@ export const polymarketCommand: CommandModule = {
           y
             .option('search', { type: 'string', describe: 'Filter by question text' })
             .option('limit', { type: 'number', default: 20, describe: 'Number of results' })
-            .option('offset', { type: 'number', default: 0, describe: 'Pagination offset' }),
+            .option('cursor', {
+              type: 'string',
+              describe: 'nextCursor from the previous page (listing only, not --search)'
+            })
+            .option('offset', { type: 'number', hidden: true, deprecated: 'use --cursor' }),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         handler: (argv) => handleMarkets(argv as any)
       })
@@ -687,14 +695,12 @@ export const polymarketCommand: CommandModule = {
       })
       .command({
         command: 'approve',
-        describe: 'Set proxy wallet approvals (run once before clob-buy)',
+        describe: 'Set proxy wallet approvals for all Polymarket exchanges (run once)',
         builder: (y) =>
           withWriteFlags(
-            y.option('neg-risk', {
-              type: 'boolean',
-              default: false,
-              describe: 'Set neg-risk approvals'
-            })
+            // Kept so older invocations still parse; approvals now always cover
+            // neg-risk markets.
+            y.option('neg-risk', { type: 'boolean', hidden: true, deprecated: true })
           ),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         handler: (argv) => handleApprove(argv as any)
@@ -763,9 +769,20 @@ export const polymarketCommand: CommandModule = {
       })
       .command({
         command: 'positions',
-        describe: 'List open positions for the Polymarket proxy wallet',
-        builder: (y) => y,
-        handler: () => handlePositions()
+        describe: 'List positions for the Polymarket proxy wallet',
+        builder: (y) =>
+          y
+            .option('status', {
+              type: 'string',
+              choices: POSITION_STATUSES,
+              default: 'OPEN',
+              describe:
+                'OPEN (includes unredeemed winners), REDEEMABLE, REDEEMABLE_LOST, MERGEABLE or CLOSED'
+            })
+            .option('limit', { type: 'number', default: 20, describe: 'Rows per page (max 1000)' })
+            .option('cursor', { type: 'string', describe: 'nextCursor from the previous page' }),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        handler: (argv) => handlePositions(argv as any)
       })
       .command({
         command: 'orders',

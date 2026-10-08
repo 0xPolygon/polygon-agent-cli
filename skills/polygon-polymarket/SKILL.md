@@ -101,7 +101,7 @@ The EOA only needs POL for the one-time `approve` transaction. After that, tradi
 ```bash
 agent polymarket approve --broadcast
 ```
-This sets approvals for the V2 exchange contracts and CollateralOnramp. Permanent on-chain — never needs to be run again for this EOA.
+This sets approvals for every Polymarket exchange (standard, neg-risk and the Polymarket V2 exchange) and the CollateralOnramp. Permanent on-chain. If you ran `approve` with an older CLI version, run it once more: older versions only covered one kind of market per run.
 
 ### Option B — Using the builder EOA (no Polymarket account)
 
@@ -140,15 +140,19 @@ agent polymarket markets
 # Search by keyword
 agent polymarket markets --search "bitcoin" --limit 10
 
-# Paginate
-agent polymarket markets --limit 20 --offset 20
+# Next page: pass the previous response's nextCursor
+agent polymarket markets --limit 20 --cursor <nextCursor>
 ```
+
+Listing returns `nextCursor` (null on the last page). `--offset` is gone; Polymarket removed offset paging. Search returns a single page.
 
 Key output fields per market:
 - `conditionId` — the ID needed for all trading commands
 - `question` — what the market is asking
 - `yesPrice` / `noPrice` — current probability (0 to 1, e.g. `0.65` = 65%)
-- `negRisk` — if `true`, set neg-risk approvals before trading this market
+- `version` — `v1` or `v2`. The CLI trades `v1` markets; `v2` markets (Polymarket's new exchange) can be read but not traded yet
+- `acceptingOrders` / `closed` — only trade markets that are accepting orders and not closed
+- `negRisk` — informational; `approve` already covers neg-risk markets
 - `endDate` — when the market resolves
 
 ### Get a Single Market
@@ -167,17 +171,19 @@ agent polymarket proxy-wallet
 
 Confirms which EOA and proxy wallet are active. The proxy wallet is where pUSD and tokens are held.
 
-### Set Approvals (Required After V2 Migration)
+### Set Approvals (one-time)
 
 ```bash
-# Standard markets
 agent polymarket approve --broadcast
-
-# Neg-risk markets (only if you see negRisk: true on a market you want to trade)
-agent polymarket approve --neg-risk --broadcast
 ```
 
-**All users must run this after the V2 migration** — previous V1 approvals on old exchange contracts do not carry over. V2 approvals cover: pUSD → V2 exchange, CTF → V2 exchange, and USDC.e → CollateralOnramp (for wrapping). Once set, they are permanent on-chain.
+One run covers every market type. The batch sets seven approvals from the proxy wallet:
+- pUSD → CTF Exchange, Neg Risk CTF Exchange, and Polymarket V2 Exchange
+- Conditional Tokens → CTF Exchange and Neg Risk CTF Exchange
+- PositionManager → Polymarket V2 Exchange
+- USDC.e → CollateralOnramp (for wrapping)
+
+Once set, they are permanent on-chain. Approvals from before the April 28 2026 CLOB V2 migration, or from an older CLI version, are incomplete: run it again. `--neg-risk` is still accepted but no longer needed.
 
 ### Buy a Position
 
@@ -227,10 +233,24 @@ Selling is pure off-chain — no gas, no on-chain tx. Proceeds are received as p
 ### Check Positions
 
 ```bash
+# Open positions (default). Includes resolved winners that haven't been redeemed yet
 agent polymarket positions
+
+# Only resolved positions that can be redeemed
+agent polymarket positions --status REDEEMABLE
+
+# Exited positions, and paging
+agent polymarket positions --status CLOSED --limit 50 --cursor <nextCursor>
 ```
 
-Shows all open positions in the proxy wallet with current value, P&L, and outcome.
+`--status` is one of `OPEN`, `REDEEMABLE`, `REDEEMABLE_LOST`, `MERGEABLE` or `CLOSED`. Rows come from Polymarket's Data API v2 and use snake_case. Useful fields:
+- `condition_id`, `outcome` (`Yes`/`No`), `token_id`
+- `current_size` — shares held (pass this to `sell`)
+- `avg_price`, `current_price` — entry and current price per share
+- `current_value`, `unrealized_pnl`, `realized_pnl`, `total_pnl` — in USD
+- `redeemable`, `mergeable`, `end_date`
+
+The CLI can't redeem yet. Redeemable winners can be claimed on polymarket.com.
 
 ### Check Open Orders
 
@@ -278,8 +298,7 @@ agent polymarket markets --search "bitcoin" --limit 10
 
 # 6. Get details on a specific market
 agent polymarket market 0x<conditionId>
-# → check: yesPrice, noPrice, negRisk, endDate
-# → if negRisk: true → run approve --neg-risk --broadcast first
+# → check: yesPrice, noPrice, endDate, version === "v1", acceptingOrders === true
 
 # ── ENTER A POSITION ────────────────────────────────────────────────────
 
@@ -295,7 +314,7 @@ agent polymarket clob-buy 0x<conditionId> YES 5 --broadcast
 
 # 9. Check positions
 agent polymarket positions
-# → review: size (shares), curPrice, cashPnl
+# → review: current_size (shares), current_price, unrealized_pnl
 
 # 10. Sell when ready
 agent polymarket sell 0x<conditionId> YES <shares> --broadcast
@@ -311,13 +330,13 @@ When deciding whether to buy:
 2. Run `balances` — confirm smart wallet has at least $1 USDC.e
 3. Check `positions` — avoid doubling up on already-held positions
 4. Check `markets` — use `yesPrice`/`noPrice` as probability inputs
-5. Check `negRisk` on the target market — if `true`, verify neg-risk approvals were set
+5. Confirm the target market has `version: "v1"` and `acceptingOrders: true`
 6. Use `--skip-fund` if the proxy wallet already has enough pUSD from a previous attempt
 7. Always dry-run first, then broadcast
 
 When deciding whether to sell:
-1. Get current `size` (shares) from `positions`
-2. Use `curPrice` vs `avgPrice` to assess profit/loss
+1. Get `current_size` (shares) from `positions`
+2. Use `current_price` vs `avg_price` to assess profit/loss
 3. Market sell (`sell --broadcast`) for immediate exit
 4. Limit sell (`--price 0.x --broadcast`) to wait for a better price
 
@@ -337,7 +356,10 @@ When deciding whether to sell:
 | `invalid amount for a marketable BUY order ($X), min size: $1` | Amount below CLOB minimum | Use at least $1. If pUSD was already funded, retry with `--skip-fund` |
 | `Wallet not found: main` | Not logged in | Run `agent wallet login` |
 | Session expired (`OMS_SESSION_EXPIRED`) | Login session lapsed (~1 week) | Run `agent wallet login` |
-| Approvals tx reverts after V2 migration | V1 approvals — wrong exchange contracts | Re-run `agent polymarket approve --broadcast` for V2 contracts |
+| Order fails with an allowance or balance error | Approvals missing for this market's exchange (set before the V2 migration, or with an older CLI) | Re-run `agent polymarket approve --broadcast` |
+| `code: unsupported_market_version` | The market is a Polymarket `v2` market | Not tradable with this CLI yet; pick a `v1` market |
+| `code: market_not_accepting_orders` | Market closed or paused | Pick another market |
+| `code: offset_removed` | `markets --offset` is no longer supported | Use `--cursor <nextCursor>` from the previous page |
 
 ---
 
@@ -345,7 +367,8 @@ When deciding whether to sell:
 
 - **CLOB V2** is active (since April 28, 2026). Collateral is **pUSD**, not USDC.e.
 - **All commands are dry-run by default.** `approve`, `clob-buy`, `sell` do nothing without `--broadcast`.
-- **V2 approvals are required for all users.** V1 approvals on old exchange contracts do not carry over. Run `approve --broadcast` once after migration.
+- **One `approve --broadcast` covers every market type.** Re-run it once if approvals were set before the V2 migration or with an older CLI.
+- **Error output carries a `code`** for Polymarket-specific failures (`unsupported_market_version`, `market_not_accepting_orders`, `offset_removed`). Branch on `code`, not on the message.
 - **`clob-buy` handles the full flow automatically:** transfers USDC.e from smart wallet → proxy wallet, wraps USDC.e → pUSD, then places the CLOB order (unless `--skip-fund`).
 - **Positions live in the proxy wallet**, not the OMS smart wallet. `positions` queries the proxy wallet.
 - **Sell is free.** No gas, no on-chain tx. Selling via CLOB is a signed off-chain message only. Proceeds are pUSD.
