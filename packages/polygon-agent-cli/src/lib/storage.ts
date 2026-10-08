@@ -107,34 +107,51 @@ export function ensureStorageDir(): void {
 
 export const STORAGE_ROOT = STORAGE_DIR;
 
+const errorCode = (error: unknown) =>
+  error instanceof Error && 'code' in error ? error.code : undefined;
+
+// The key file's contents, or null when there's none yet. Read first, never
+// checked by path beforehand, so nothing can change between a check and use.
+function readKeyFile(): Buffer | null {
+  try {
+    return fs.readFileSync(ENCRYPTION_KEY_FILE);
+  } catch (error) {
+    if (errorCode(error) === 'ENOENT') return null;
+    throw error;
+  }
+}
+
 // Created once, complete or not at all: written to a temp file, then linked
 // into place, which fails if another run got there first (both then use the
 // winner's key, never one each).
+function createKeyFile(): void {
+  const key = randomBytes(32);
+  const tmp = `${ENCRYPTION_KEY_FILE}.tmp-${process.pid}`;
+  try {
+    fs.writeFileSync(tmp, key, { mode: 0o600 });
+    try {
+      fs.linkSync(tmp, ENCRYPTION_KEY_FILE);
+    } catch (error) {
+      // No hard links here (FAT, some network or container mounts): an
+      // exclusive create instead; a torn one fails the length check.
+      if (errorCode(error) === 'EEXIST') throw error;
+      fs.writeFileSync(ENCRYPTION_KEY_FILE, key, { mode: 0o600, flag: 'wx' });
+    }
+  } catch (error) {
+    if (errorCode(error) !== 'EEXIST') throw error;
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
+}
+
 export function getEncryptionKey(): Buffer {
   ensureStorageDir();
-  if (!fs.existsSync(ENCRYPTION_KEY_FILE)) {
-    const key = randomBytes(32);
-    const tmp = `${ENCRYPTION_KEY_FILE}.tmp-${process.pid}`;
-    const code = (error: unknown) =>
-      error instanceof Error && 'code' in error ? error.code : undefined;
-    try {
-      fs.writeFileSync(tmp, key, { mode: 0o600 });
-      try {
-        fs.linkSync(tmp, ENCRYPTION_KEY_FILE);
-      } catch (error) {
-        // No hard links here (FAT, some network or container mounts): an
-        // exclusive create instead; a torn one fails the length check below.
-        if (code(error) === 'EEXIST') throw error;
-        fs.writeFileSync(ENCRYPTION_KEY_FILE, key, { mode: 0o600, flag: 'wx' });
-      }
-    } catch (error) {
-      if (code(error) !== 'EEXIST') throw error;
-    } finally {
-      fs.rmSync(tmp, { force: true });
-    }
+  let key = readKeyFile();
+  if (key === null) {
+    createKeyFile();
+    key = readKeyFile();
   }
-  const key = fs.readFileSync(ENCRYPTION_KEY_FILE);
-  if (key.length !== 32) {
+  if (key?.length !== 32) {
     throw new Error(`The encryption key file ${ENCRYPTION_KEY_FILE} is damaged.`);
   }
   return key;
