@@ -8,10 +8,16 @@ import { readJsonFile, writeJsonFile } from '../session/state.ts';
 import { accountDir } from './account.ts';
 
 export type PendingDeposit = {
-  txHash: string;
+  status: 'sending' | 'sent';
+  txHash: string | null;
   amountUnits: string;
   bridgeAddress: string;
   sentAt: string;
+  // Entries the bridge listed for this address before sending (newest first), so
+  // older deposits to the same static address aren't mistaken for this one.
+  baselineCount: number;
+  // pUSD held before sending.
+  pusdBefore: string;
 };
 
 const file = (wallet: string) => path.join(accountDir(wallet), 'pending-deposit.json');

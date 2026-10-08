@@ -48,8 +48,20 @@ vi.mock('../../lib/polymarket/account.ts', async (o) => ({
 }));
 
 const { depositCommand, withdrawCommand } = await import('./funds.ts');
+const { CliError } = await import('../../lib/errors.ts');
 const { saveOmsWalletPointer } = await import('../../lib/storage.ts');
 const { savePending, loadPending, clearPending } = await import('../../lib/polymarket/deposits.ts');
+
+const pend = (over: Record<string, unknown> = {}) => ({
+  status: 'sent' as const,
+  txHash: '0xOLD' as string | null,
+  amountUnits: '5000000',
+  bridgeAddress: '0xB1',
+  sentAt: 'x',
+  baselineCount: 0,
+  pusdBefore: '0',
+  ...over
+});
 
 async function run(argv: string[]) {
   const yargs = (await import('yargs')).default;
@@ -121,35 +133,20 @@ describe('deposit', () => {
   }, 20_000);
 
   it('does not send again while an earlier deposit is still pending', async () => {
-    savePending('main', {
-      txHash: '0xOLD',
-      amountUnits: '5000000',
-      bridgeAddress: '0xB1',
-      sentAt: 'x'
-    });
+    savePending('main', pend());
     const out = await run(['deposit', '5', '--broadcast']);
     expect(out).toMatchObject({ ok: false, code: 'bridge_pending', txHash: '0xOLD' });
     expect(m.runTx).not.toHaveBeenCalled();
   });
 
   it('sends again with --again', async () => {
-    savePending('main', {
-      txHash: '0xOLD',
-      amountUnits: '5000000',
-      bridgeAddress: '0xB1',
-      sentAt: 'x'
-    });
+    savePending('main', pend());
     await run(['deposit', '5', '--broadcast', '--again', '--no-wait']);
     expect(m.runTx).toHaveBeenCalledTimes(1);
   });
 
-  it('clears the record and reports upstream_error when the earlier deposit FAILED', async () => {
-    savePending('main', {
-      txHash: '0xOLD',
-      amountUnits: '5000000',
-      bridgeAddress: '0xB1',
-      sentAt: 'x'
-    });
+  it('reports upstream_error and clears the record when a NEW entry FAILED', async () => {
+    savePending('main', pend());
     m.bridgeStatus.mockResolvedValueOnce({ transactions: [{ status: 'FAILED' }] });
     const out = await run(['deposit', '5', '--broadcast']);
     expect(out).toMatchObject({ ok: false, code: 'upstream_error' });
@@ -159,17 +156,92 @@ describe('deposit', () => {
     expect(m.runTx).not.toHaveBeenCalled();
   });
 
-  it('clears a COMPLETED earlier deposit and carries on', async () => {
-    savePending('main', {
-      txHash: '0xOLD',
-      amountUnits: '5000000',
-      bridgeAddress: '0xB1',
-      sentAt: 'x'
+  it('proceeds when a NEW entry COMPLETED', async () => {
+    savePending('main', pend({ baselineCount: 1 }));
+    m.bridgeStatus.mockResolvedValueOnce({
+      transactions: [{ status: 'COMPLETED' }, { status: 'COMPLETED' }]
     });
+    await run(['deposit', '5', '--broadcast', '--no-wait']);
+    expect(m.runTx).toHaveBeenCalledTimes(1);
+  });
+
+  it('proceeds when pUSD already rose by the deposit amount', async () => {
+    savePending('main', pend({ pusdBefore: '1000000' }));
+    m.pusdBalance.mockResolvedValue(6_000_000n);
+    await run(['deposit', '5', '--broadcast', '--no-wait']);
+    expect(m.runTx).toHaveBeenCalledTimes(1);
+  });
+
+  it('an older COMPLETED entry beyond the baseline does not settle a pending deposit', async () => {
+    savePending('main', pend({ baselineCount: 1 }));
     m.bridgeStatus.mockResolvedValueOnce({ transactions: [{ status: 'COMPLETED' }] });
-    const out = await run(['deposit', '5', '--dry-run']);
-    expect(out).toMatchObject({ ok: true, dryRun: true });
+    const out = await run(['deposit', '5', '--broadcast']);
+    expect(out).toMatchObject({ ok: false, code: 'bridge_pending', txHash: '0xOLD' });
+    expect(m.runTx).not.toHaveBeenCalled();
+    expect(loadPending('main')).not.toBeNull();
+  });
+
+  it('an older FAILED entry beyond the baseline is bridge_pending, not upstream_error', async () => {
+    savePending('main', pend({ baselineCount: 1 }));
+    m.bridgeStatus.mockResolvedValueOnce({ transactions: [{ status: 'FAILED' }] });
+    const out = await run(['deposit', '5', '--broadcast']);
+    expect(out).toMatchObject({ ok: false, code: 'bridge_pending' });
+    expect(m.runTx).not.toHaveBeenCalled();
+    expect(loadPending('main')).not.toBeNull();
+  });
+
+  it('a dry run never changes the pending record', async () => {
+    savePending('main', pend());
+    m.bridgeStatus.mockResolvedValueOnce({ transactions: [{ status: 'COMPLETED' }] });
+    const settled = await run(['deposit', '5', '--dry-run']);
+    expect(settled).toMatchObject({ ok: true, dryRun: true });
+    expect(loadPending('main')).not.toBeNull();
+    m.bridgeStatus.mockResolvedValueOnce({ transactions: [{ status: 'FAILED' }] });
+    const failed = await run(['deposit', '5', '--dry-run']);
+    expect(failed).toMatchObject({ ok: false, code: 'upstream_error' });
+    expect(loadPending('main')).not.toBeNull();
+  });
+
+  it('keeps no record when runTx refuses before sending anything', async () => {
+    m.runTx.mockRejectedValue(new CliError({ code: 'insufficient_balance', message: 'no' }));
+    const out = await run(['deposit', '5', '--broadcast']);
+    expect(out).toMatchObject({ ok: false, code: 'insufficient_balance' });
     expect(loadPending('main')).toBeNull();
+  });
+
+  it('keeps a sending record when runTx fails after the transfer may have gone out', async () => {
+    m.runTx.mockRejectedValue(new Error('timed out waiting for status'));
+    const first = await run(['deposit', '5', '--broadcast']);
+    expect(first).toMatchObject({ ok: false });
+    expect(loadPending('main')).toMatchObject({ status: 'sending', txHash: null });
+    m.runTx.mockClear();
+    const second = await run(['deposit', '5', '--broadcast']);
+    expect(second).toMatchObject({ ok: false, code: 'bridge_pending' });
+    expect(m.runTx).not.toHaveBeenCalled();
+  });
+
+  it('a failing balance read while polling ends credited:false with the txHash', async () => {
+    m.pusdBalance.mockResolvedValueOnce(0n).mockRejectedValue(new Error('rpc down'));
+    const realNow = Date.now();
+    const now = vi.spyOn(Date, 'now');
+    now
+      .mockReturnValueOnce(realNow)
+      .mockReturnValueOnce(realNow)
+      .mockReturnValue(realNow + 600_000);
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void) => {
+      fn();
+      return 0;
+    }) as never);
+    const out = await run(['deposit', '5', '--broadcast']);
+    expect(out).toMatchObject({ ok: true, credited: false, txHash: '0xTX' });
+    expect(loadPending('main')).toMatchObject({ status: 'sent', txHash: '0xTX' });
+  });
+
+  it('never stores an empty hash when runTx returns none', async () => {
+    m.runTx.mockResolvedValue({ walletAddress: '0xC2F4' });
+    const out = await run(['deposit', '5', '--broadcast', '--no-wait']);
+    expect(out).toMatchObject({ ok: true, txHash: null, credited: false });
+    expect(loadPending('main')).toMatchObject({ status: 'sent', txHash: null });
   });
 
   it('dry run prints one summary and never calls runTx', async () => {
