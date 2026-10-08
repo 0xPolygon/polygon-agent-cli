@@ -105,10 +105,12 @@ async function handleStatus(argv: { wallet: string }): Promise<void> {
 
 async function handleImportKey(argv: { privateKey: string; wallet: string }): Promise<void> {
   try {
-    const account = await importLegacyKey(argv.wallet, argv.privateKey);
+    const { account, builderKey, warning } = await importLegacyKey(argv.wallet, argv.privateKey);
     ok({
       account: { kind: account.kind, wallet: account.wallet, signer: account.signer },
-      note: 'This is a legacy proxy account: it trades through the Polymarket proxy wallet that belongs to the imported key.'
+      builderKey,
+      note: 'This is a legacy proxy account: it trades through the Polymarket proxy wallet that belongs to the imported key. withdraw moves only its pUSD; USDC.e left in the proxy is not moved.',
+      ...(warning ? { warning } : {})
     });
   } catch (err) {
     fail(err);
