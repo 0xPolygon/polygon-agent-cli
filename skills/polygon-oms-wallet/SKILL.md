@@ -71,22 +71,22 @@ On `send`, `send-token`, `swap` and `x402-pay`, always pass `--dry-run` (quote o
 "$POLYGON_AGENT" price <symbol-or-address> --chain base
 ```
 
-**Buy, sell, swap, bridge.** Every buy, sell, swap or bridge goes through `swap`, which trades through Trails. You can always trade between covered tokens, so never tell the user you can't before you've run a quote.
+**Buy, sell, swap, bridge.** Every buy, sell, swap or bridge goes through `swap`, which trades through Trails. For a request the allowance covers, get a quote before telling the user a trade isn't possible.
 
-Read the amount the way the user said it:
+Read the amount the way the user said it, and sell what the wallet actually holds: take the token and chain from `holdings` in `wallet status`, not from the table (the user's BTC may be cbBTC on Base: `--from cbBTC --chain base`).
 
 | The user says | Run |
 |---|---|
 | "Buy 10 POL" (an amount of the token) | `swap --to POL --to-amount 10` |
 | "Buy $50 of ETH" (an amount in dollars) | `swap --to ETH --amount-usd 50` |
-| "Sell 0.1 ETH" | `swap --from WETH --amount 0.1` |
+| "Sell 0.1 ETH" (held as WETH on Polygon) | `swap --from WETH --amount 0.1` |
 | "Sell $20 of BTC" | `swap --from WBTC --amount-usd 20` |
 | "Sell half my ETH", "Sell all my POL" | `swap --from WETH --amount 50%`, `swap --from WPOL --amount all` |
 | "Swap 5 USDC for USDT" | `swap --from USDC --to USDT --amount 5` |
 | "Move 20 USDC to Base" (a bridge) | `swap --from USDC --to USDC --chain polygon --to-chain base --amount 20` |
 
 ```sh
-"$POLYGON_AGENT" swap --to POL --to-amount 10 --dry-run              # buy exactly 10 POL
+"$POLYGON_AGENT" swap --to POL --to-amount 10 --dry-run              # buy 10 POL (at least)
 "$POLYGON_AGENT" swap --to WETH --amount-usd 50 --dry-run            # buy $50 of ETH
 "$POLYGON_AGENT" swap --from WETH --to USDC --amount 50% --dry-run   # sell (on Polygon; --chain for another)
 "$POLYGON_AGENT" swap --intent <intentId> --broadcast                # execute a quote the user accepted
@@ -94,7 +94,7 @@ Read the amount the way the user said it:
 ```
 
 - **What pays for a buy.** Leave out `--from` unless the user named what to pay with. The CLI pays with a stablecoin that has enough (USDC, then USDT or USDG). If none does, it pays with another token the wallet holds (WETH, WPOL, …, never the one being bought) and adds a warning saying so. Tell the user what it would sell; that quote runs only once they accept it (`confirmation_required` until then).
-- **Buy exactly what was asked, never more.** If the wallet can't cover it (`insufficient_balance`), tell the user what it holds and offer the most it can buy (quote that), or funding.
+- **Keep the quantity the user asked for.** Don't round it up, or spend the whole balance instead. A `--to-amount` quote guarantees at least that much (`buy.minimum`) and may deliver a little more (`buy.expected`); tell the user both. If the wallet can't cover it (`insufficient_balance`), tell the user what it holds and offer the most it can buy (quote that), or funding.
 - **Show the quote first:** what's sold and bought (`sell`, `buy.expected`, `buy.minimum`), `feesUsd`, `priceImpact` and `quoteExpiresAt`. Execute with the `command` it prints once the user agrees. If the user's instruction was already precise ("buy $50 of ETH now"), you may go straight to `--broadcast`; the CLI still refuses a quote that costs over 10% in fees or price impact, or that pays with a token the user didn't name (`confirmation_required`). A buy by token amount (`--to-amount`) always needs its quote accepted, since its cost is only known from the quote. Show that quote and run its `command` only if the user accepts it.
 - **Buys of ETH or POL deliver WETH or WPOL.** Say so: "you'll get WPOL, wrapped POL: the same value, and the form I can trade with". Native ETH and POL can't be spent by you, so they can't pay for a buy either.
 

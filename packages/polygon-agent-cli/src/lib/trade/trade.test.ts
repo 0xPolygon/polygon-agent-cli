@@ -100,6 +100,7 @@ const USDC = getAddress('0x3c499c542cef5e3811e1192ce70d8cc03d5c3359');
 const USDT = getAddress('0xc2132d05d31c914a87c6611c10748aeb04b58e8f');
 const WETH = getAddress('0x7ceb23fd6bc0add59e62ac25578270cff1b9f619');
 const WPOL = getAddress('0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270');
+const WBTC = getAddress('0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6');
 const DEPOSIT = '0x00000000000000000000000000000000000000d0';
 const TX = `0x${'ab'.repeat(32)}`;
 
@@ -511,15 +512,73 @@ describe('quoteSwap for an exact amount to receive (--to-amount)', () => {
     });
   });
 
-  it('picks a source with room for fees, and rechecks the allowance against the quote', async () => {
-    // The estimate is $1.00; with 2x slippage and 1% for fees, USDC needs $1.02.
+  it('quotes a source whose balance covers the estimate, and lets the quote decide', async () => {
+    // The estimate is $1.00 and the quote $1.01: 1.015 USDC is enough.
+    balances([{ chainId: 137, token: USDC, balance: 1_015_000n }]);
+    fake.tokenBalance.mockResolvedValue(1_015_000n);
+    const { trade } = await quote({ to: 'POL', amount: undefined, toAmount: '10' });
+    expect(trade.origin).toMatchObject({ symbol: 'USDC', amount: '1010000' });
+  });
+
+  it('tries the next source when a quote costs more than the first can pay', async () => {
     balances([
-      { chainId: 137, token: USDC, balance: 1_015_000n },
+      { chainId: 137, token: USDC, balance: 1_025_000n },
       { chainId: 137, token: USDT, balance: 50_000_000n }
     ]);
+    fake.tokenBalance.mockImplementation(async (params: { token: string }) =>
+      params.token === USDC ? 1_025_000n : 50_000_000n
+    );
+    fake.quoteIntent.mockImplementation(async (request) =>
+      exactOutputIntent({ request, cost: 1_030_000n })
+    );
     const { trade } = await quote({ to: 'POL', amount: undefined, toAmount: '10' });
-    expect(trade.origin.symbol).toBe('USDT');
+    expect(trade.origin).toMatchObject({ symbol: 'USDT', amount: '1030000' });
+    expect(fake.quoteIntent).toHaveBeenCalledTimes(2);
+  });
 
+  it('saves only the accepted quote, and stops at the first other failure', async () => {
+    balances([
+      { chainId: 137, token: USDC, balance: 1_025_000n },
+      { chainId: 137, token: USDT, balance: 50_000_000n }
+    ]);
+    fake.tokenBalance.mockImplementation(async (params: { token: string }) =>
+      params.token === USDC ? 1_025_000n : 50_000_000n
+    );
+    let calls = 0;
+    fake.quoteIntent.mockImplementation(async (request) => {
+      const res = exactOutputIntent({ request, cost: 1_030_000n });
+      return { intent: { ...res.intent, intentId: `try-${++calls}` } };
+    });
+    const { trade } = await quote({ to: 'POL', amount: undefined, toAmount: '10' });
+    expect(trade.intentId).toBe('try-2');
+    expect(loadTrade('try-1')).toBeNull();
+
+    // A failure that isn't a shortfall, on the first source, ends the search.
+    const { QueryFailedError } = await import('@0xtrails/api');
+    const failure = new QueryFailedError();
+    fake.quoteIntent.mockReset();
+    fake.quoteIntent.mockRejectedValueOnce(failure);
+    await expect(quote({ to: 'POL', amount: undefined, toAmount: '10' })).rejects.toBe(failure);
+    expect(fake.quoteIntent).toHaveBeenCalledTimes(1);
+  });
+
+  it("after a shortfall, reports it rather than a later source's failure", async () => {
+    balances([
+      { chainId: 137, token: USDC, balance: 1_025_000n },
+      { chainId: 137, token: USDT, balance: 50_000_000n }
+    ]);
+    fake.tokenBalance.mockResolvedValue(1_025_000n);
+    const { QueryFailedError } = await import('@0xtrails/api');
+    fake.quoteIntent
+      .mockImplementationOnce(async (request) => exactOutputIntent({ request, cost: 1_030_000n }))
+      .mockRejectedValueOnce(new QueryFailedError());
+    await expect(quote({ to: 'POL', amount: undefined, toAmount: '10' })).rejects.toMatchObject({
+      code: 'insufficient_balance',
+      message: expect.stringContaining('more than the wallet holds')
+    });
+  });
+
+  it('rechecks the allowance left against the quote', async () => {
     balances([{ chainId: 137, token: USDC, balance: 50_000_000n }]);
     sessionWith({ [USDC]: 1_025_000n });
     fake.quoteIntent.mockImplementation(async (request) =>
@@ -538,14 +597,21 @@ describe('quoteSwap for an exact amount to receive (--to-amount)', () => {
     });
   });
 
-  it("refuses an amount below the token's smallest unit", async () => {
-    await expect(
-      quote({ to: 'WBTC', amount: undefined, toAmount: '0.000000001' })
-    ).rejects.toMatchObject({
-      code: 'invalid_input',
-      message: expect.stringContaining('smallest unit')
-    });
+  it("refuses digits the token can't hold, rather than buying less", async () => {
+    for (const toAmount of ['0.000000019', '0.000000001']) {
+      await expect(quote({ to: 'WBTC', amount: undefined, toAmount })).rejects.toMatchObject({
+        code: 'invalid_input',
+        message: expect.stringContaining('more decimals than WBTC has (8)')
+      });
+    }
     expect(fake.quoteIntent).not.toHaveBeenCalled();
+    // Trailing zeros are fine.
+    fake.quoteIntent.mockImplementation(async (request) =>
+      exactOutputIntent({ request, cost: 2_500_000n })
+    );
+    fake.getUsdPrices.mockResolvedValue(new Map([[`137:${WBTC.toLowerCase()}`, 250_000]]));
+    const { trade } = await quote({ to: 'WBTC', amount: undefined, toAmount: '0.0000100000' });
+    expect(trade.destination.minAmount).toBe('1000');
   });
 
   it('needs exactly one amount, and a positive one', async () => {
@@ -587,6 +653,33 @@ describe('quoteSwap paying with other holdings', () => {
     expect(result.warnings).toEqual([expect.stringMatching(/pays with 0\.004 WETH/)]);
   });
 
+  it('quotes at most three sources', async () => {
+    const WBTC_PRICE = 100_000;
+    balances([
+      { chainId: 137, token: USDC, balance: 20_000_000n },
+      { chainId: 137, token: USDT, balance: 20_000_000n },
+      { chainId: 137, token: WETH, balance: 10n ** 18n },
+      { chainId: 137, token: WBTC, balance: 100_000_000n }
+    ]);
+    sessionWith({ [USDC]: 10n ** 12n, [USDT]: 10n ** 12n, [WETH]: 10n ** 24n, [WBTC]: 10n ** 12n });
+    fake.getUsdPrices.mockResolvedValue(
+      new Map([
+        [`137:${WETH.toLowerCase()}`, 2500],
+        [`137:${WBTC.toLowerCase()}`, WBTC_PRICE],
+        [`137:${WPOL.toLowerCase()}`, 0.1]
+      ])
+    );
+    // Every quote costs more than any balance holds.
+    fake.tokenBalance.mockResolvedValue(1n);
+    fake.quoteIntent.mockImplementation(async (request) =>
+      exactOutputIntent({ request, cost: 10n ** 20n })
+    );
+    await expect(
+      quote({ to: 'POL', amount: undefined, toAmount: '100', payWithHoldings: true })
+    ).rejects.toMatchObject({ code: 'insufficient_balance' });
+    expect(fake.quoteIntent).toHaveBeenCalledTimes(3);
+  });
+
   it('pays for an exact amount with another holding too', async () => {
     fake.quoteIntent.mockImplementation(async (request) =>
       // 100 POL at $0.10: 0.004 WETH, plus a little.
@@ -601,6 +694,32 @@ describe('quoteSwap paying with other holdings', () => {
     });
     expect(result.trade.origin).toMatchObject({ symbol: 'WETH', amount: '4050000000000000' });
     expect(result.paidWithHolding).toBe(true);
+  });
+
+  it("reports a holding it couldn't price as unknown, not as too little", async () => {
+    fake.getUsdPrices.mockResolvedValue(new Map([[`137:${WPOL.toLowerCase()}`, 0.1]]));
+    await expect(
+      quote({ to: 'POL', amount: undefined, amountUsd: 10, payWithHoldings: true })
+    ).rejects.toMatchObject({ code: 'upstream_unavailable' });
+  });
+
+  it('in owner mode, WPOL can pay for native POL', async () => {
+    fake.pointer = { walletAddress: WALLET, loginMethod: 'browser', createdAt: 'x' };
+    balances([{ chainId: 137, token: WPOL, balance: 100n * 10n ** 18n }]);
+    const result = await quote({
+      to: 'POL',
+      chain: 'polygon',
+      amount: undefined,
+      amountUsd: 5,
+      payWithHoldings: true
+    });
+    expect(result.trade.origin).toMatchObject({
+      symbol: 'WPOL',
+      amount: (50n * 10n ** 18n).toString()
+    });
+    expect(result.trade.destination).toMatchObject({
+      token: '0x0000000000000000000000000000000000000000'
+    });
   });
 
   it('never pays with the stablecoin being bought', async () => {

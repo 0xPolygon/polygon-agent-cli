@@ -40,9 +40,9 @@ const QUOTE_LIFETIME_MS = 5 * 60 * 1000;
 // impact) warns, is never executed by an auto trade, and is refused when quoted
 // and broadcast in one step.
 const HIGH_FEE_SHARE = 0.1;
-// What an exact-output buy may cost over its value at current prices, beyond
-// twice the slippage, when picking a source that can pay (fees, rounding).
-const EXACT_OUTPUT_FEE_BPS = 100n;
+// Sources an exact-output buy may quote before giving up: each one whose
+// estimate fits is tried in order until a quote's cost fits too.
+const MAX_QUOTES = 3;
 const NATIVE = '0x0000000000000000000000000000000000000000';
 
 interface ResolvedToken {
@@ -314,26 +314,26 @@ function unitsForUsd(params: { usd: number; priceUsd: number; decimals: number }
 
 // How the amount was given: in the source token (`<n>`, `<n>%` or `all`), or
 // in USD: --amount-usd, or an exact-output buy's value at current prices (on
-// the destination chain), which needs `marginBps` more balance for the quote.
+// the destination chain), which only estimates what its quote will cost.
 type Sizing =
   | { kind: 'units'; amount: string }
-  | { kind: 'usd'; usdOn: (destinationChainId: number) => Promise<number>; marginBps: bigint };
+  | { kind: 'usd'; usdOn: (destinationChainId: number) => Promise<number> };
 
-// The source amount for a token, and the balance it needs.
+// The source amount for a token: what it sells, or an exact-output buy's estimate.
 async function sized(params: {
   token: ResolvedToken;
   sizing: Sizing;
   destinationChainId: number;
   balance: () => Promise<bigint>;
-}): Promise<{ amount: bigint; need: bigint }> {
+  priceOf: (token: ResolvedToken) => Promise<number>;
+}): Promise<bigint> {
   const { token, sizing } = params;
   if (sizing.kind === 'usd') {
-    const amount = unitsForUsd({
+    return unitsForUsd({
       usd: await sizing.usdOn(params.destinationChainId),
-      priceUsd: await usdPrice(token),
+      priceUsd: await params.priceOf(token),
       decimals: token.decimals
     });
-    return { amount, need: (amount * (10_000n + sizing.marginBps)) / 10_000n };
   }
   const bps = shareBps(sizing.amount);
   if (bps !== null && token.address === NATIVE) {
@@ -342,23 +342,32 @@ async function sized(params: {
       message: `Give an amount of ${token.symbol}; <n>% and all work for tokens, not the native coin.`
     });
   }
-  if (bps !== null) {
-    const amount = ((await params.balance()) * bps) / 10_000n;
-    return { amount, need: amount };
-  }
+  if (bps !== null) return ((await params.balance()) * bps) / 10_000n;
   if (!/^\d+(\.\d+)?$/.test(sizing.amount.trim())) throw invalidAmount(sizing.amount);
-  const amount = parseUnits(sizing.amount.trim(), token.decimals);
-  return { amount, need: amount };
+  return parseUnits(sizing.amount.trim(), token.decimals);
 }
 
-// Without --from: the first covered stablecoin with enough balance (and, in
-// session mode, on-chain allowance left): USDC on Polygon, USDC on other
-// chains, then other stablecoins. With --chain, only that chain. With
-// `payWithHoldings`, an amount in USD can then be paid from another covered
-// token the wallet holds (WETH, WPOL, …; largest first). Never the token bought.
-// A candidate that can't be sized (no price, the token bought not resolving on
-// its chain) is skipped.
-async function defaultSource(params: {
+// A token that can pay for the trade.
+interface Source {
+  token: ResolvedToken;
+  // Units it sells; for an exact-output buy, the estimate (the quote decides).
+  amount: bigint;
+  // A holding that isn't a stablecoin, picked without the user naming it.
+  holding: boolean;
+  // Session mode: its on-chain allowance left (null: unlimited, or not read).
+  remaining: bigint | null;
+}
+
+// Without --from: the covered stablecoins with enough balance (and, in session
+// mode, on-chain allowance left) for the amount or estimate, in order: USDC on
+// Polygon, USDC on other chains, then other stablecoins. With --chain, only
+// that chain. With `payWithHoldings`, an amount in USD can then be paid from
+// other covered tokens the wallet holds (WETH, WPOL, …; largest first). Never
+// the token bought. At most MAX_QUOTES. If none fits, a token that couldn't be
+// priced makes the answer unknown, so its error is thrown rather than
+// `insufficient_balance`; a token that can't be sized for another reason (the
+// token bought doesn't exist on its chain) is just skipped.
+async function defaultSources(params: {
   walletName: string;
   walletAddress: string;
   session: boolean;
@@ -370,16 +379,11 @@ async function defaultSource(params: {
   // Only chains the trade can deliver on (a session buy stays on its chain).
   usableChain?: (chainId: number) => boolean;
   // Whether a token is the one bought (it never pays for itself).
-  isBought: (token: ResolvedToken) => boolean;
+  isBought: (token: ResolvedToken) => Promise<boolean>;
+  priceOf: (token: ResolvedToken) => Promise<number>;
   // What's bought, for the error when no chain fits.
   buying?: string;
-}): Promise<{
-  token: ResolvedToken;
-  amount: bigint;
-  holding: boolean;
-  // Session mode: the token's on-chain allowance left (null: unlimited).
-  remaining: bigint | null;
-}> {
+}): Promise<Source[]> {
   const chainIds = (params.chainId !== undefined ? [params.chainId] : supportedChainIds()).filter(
     (chainId) => params.usableChain?.(chainId) ?? true
   );
@@ -390,15 +394,17 @@ async function defaultSource(params: {
         !params.session ||
         covered({ wallet: params.walletName, chainId: token.chainId, token: token.address })
     );
-  const candidates = usable.filter((token) => token.kind === 'usd' && !params.isBought(token));
+  const isStable = (token: ResolvedToken) =>
+    findSupportedToken({ chainId: token.chainId, address: token.address })?.kind === 'usd';
+  const stables = usable.filter(isStable);
   const rank = (token: ResolvedToken) =>
     (token.symbol === 'USDC' ? 0 : 2) + (token.chainId === 137 ? 0 : 1);
-  candidates.sort((a, b) => rank(a) - rank(b));
+  stables.sort((a, b) => rank(a) - rank(b));
   const others =
     params.payWithHoldings && params.sizing.kind === 'usd'
-      ? usable.filter((token) => token.kind !== 'usd' && !params.isBought(token))
+      ? usable.filter((token) => !isStable(token))
       : [];
-  if (candidates.length === 0 && others.length === 0) {
+  if (stables.length === 0 && others.length === 0) {
     throw new CliError({
       code: 'not_covered',
       message: params.usableChain
@@ -411,7 +417,7 @@ async function defaultSource(params: {
   const holdings = await walletHoldings({
     wallet: params.walletName,
     walletAddress: params.walletAddress,
-    chainIds: [...new Set([...candidates, ...others].map((token) => token.chainId))]
+    chainIds: [...new Set([...stables, ...others].map((token) => token.chainId))]
   });
   const balanceOf = (token: ResolvedToken) =>
     BigInt(
@@ -433,53 +439,67 @@ async function defaultSource(params: {
       })
     : [];
 
-  // Other holdings, largest in USD first; one without a price is skipped.
+  // Only tokens the wallet holds are checked against the token bought (which
+  // may take a lookup per chain in owner mode).
+  const held = async (tokens: ResolvedToken[]) => {
+    const out: ResolvedToken[] = [];
+    for (const token of tokens) {
+      if (balanceOf(token) > 0n && !(await params.isBought(token))) out.push(token);
+    }
+    return out;
+  };
+  // A missing price leaves affordability unknown; other failures just skip the token.
+  let unpriced: unknown;
+  const priceFailed = (error: unknown) => {
+    if (!(error instanceof CliError) || error.code !== 'upstream_unavailable') return;
+    unpriced ??= error;
+  };
+
+  // Other holdings, largest in USD first.
   const valued: Array<{ token: ResolvedToken; usd: number }> = [];
-  for (const token of others) {
-    const balance = balanceOf(token);
-    if (balance === 0n) continue;
-    const price = await usdPrice(token).catch(() => undefined);
-    if (price === undefined) continue;
-    valued.push({ token, usd: Number(formatUnits(balance, token.decimals)) * price });
+  for (const token of await held(others)) {
+    try {
+      const price = await params.priceOf(token);
+      valued.push({ token, usd: Number(formatUnits(balanceOf(token), token.decimals)) * price });
+    } catch (error) {
+      priceFailed(error);
+    }
   }
   valued.sort((a, b) => b.usd - a.usd);
 
-  const ordered = [
-    ...candidates.map((token) => ({ token, holding: false })),
+  const sources: Source[] = [];
+  for (const { token, holding } of [
+    ...(await held(stables)).map((token) => ({ token, holding: false })),
     ...valued.map(({ token }) => ({ token, holding: true }))
-  ];
-  let sizingError: unknown;
-  let sizedAny = false;
-  for (const { token, holding } of ordered) {
+  ]) {
+    if (sources.length === MAX_QUOTES) break;
     const balance = balanceOf(token);
-    if (balance === 0n) continue;
-    let size: { amount: bigint; need: bigint };
+    let amount: bigint;
     try {
-      size = await sized({
+      amount = await sized({
         token,
         sizing: params.sizing,
         destinationChainId: params.toChainId ?? token.chainId,
-        balance: async () => balance
+        balance: async () => balance,
+        priceOf: params.priceOf
       });
     } catch (error) {
-      sizingError ??= error;
+      priceFailed(error);
       continue;
     }
-    const { amount, need } = size;
-    sizedAny = true;
-    if (amount === 0n || need > balance) continue;
+    if (amount === 0n || amount > balance) continue;
     let remaining: bigint | null = null;
     if (params.session) {
       // Needs a live session for it (planned isn't enough), with room left.
       const live = sessionForToken({ sessions, chainId: token.chainId, token: token.address });
       if (!live) continue;
-      if (live.grant.remaining !== null && need > live.grant.remaining) continue;
+      if (live.grant.remaining !== null && amount > live.grant.remaining) continue;
       remaining = live.grant.remaining;
     }
-    return { token, amount, holding, remaining };
+    sources.push({ token, amount, holding, remaining });
   }
-  // Nothing could even be sized: that error says why.
-  if (sizingError !== undefined && !sizedAny) throw sizingError;
+  if (sources.length > 0) return sources;
+  if (unpriced !== undefined) throw unpriced;
   const where = params.chainId !== undefined ? ` on ${chainLabel(params.chainId)}` : '';
   throw new CliError({
     code: 'insufficient_balance',
@@ -488,7 +508,7 @@ async function defaultSource(params: {
   });
 }
 
-// A token to buy, as this mode resolves it.
+// A token to buy, as this mode resolves it (owner mode: "POL" is the native coin).
 async function destinationToken(params: {
   session: boolean;
   walletName: string;
@@ -507,6 +527,30 @@ async function destinationToken(params: {
 function sameToken(a: ResolvedToken, b: ResolvedToken): boolean {
   return a.chainId === b.chainId && a.address.toLowerCase() === b.address.toLowerCase();
 }
+
+// An amount to receive in the token's units. Digits the token can't hold are
+// refused rather than dropped: the buy would be for less than was asked.
+function exactUnits(params: { amount: string; token: ResolvedToken }): bigint {
+  const { amount, token } = params;
+  const fraction = amount.split('.')[1] ?? '';
+  if (/[1-9]/.test(fraction.slice(token.decimals))) {
+    throw new CliError({
+      code: 'invalid_input',
+      message: `${amount} has more decimals than ${token.symbol} has (${token.decimals}).`
+    });
+  }
+  const units = parseUnits(amount, token.decimals);
+  if (units === 0n) {
+    throw new CliError({
+      code: 'invalid_input',
+      message: `${amount} ${token.symbol} is below the token's smallest unit.`
+    });
+  }
+  return units;
+}
+
+// The quote's cost is more than the source can pay: the next source may.
+class ShortError extends CliError {}
 
 export async function quoteSwap(params: QuoteSwapParams): Promise<QuotedSwap> {
   const pointer = await loadOmsWalletPointer(params.walletName);
@@ -550,71 +594,71 @@ export async function quoteSwap(params: QuoteSwapParams): Promise<QuotedSwap> {
 
   const resolveDestination = (chainId: number) =>
     destinationToken({ session, walletName: params.walletName, chainId, symbol: params.to });
-  // An exact-output buy is sized by what it receives, at current prices.
-  const buyUsd = new Map<number, Promise<number>>();
-  const usdOfBuy = (chainId: number): Promise<number> => {
-    let usd = buyUsd.get(chainId);
-    if (!usd) {
-      usd = resolveDestination(chainId).then(
-        async (token) => Number(toAmount) * (await usdPrice(token))
-      );
-      buyUsd.set(chainId, usd);
+  // The token bought on each chain, as this mode resolves it (none if it doesn't).
+  const bought = new Map<number, Promise<ResolvedToken | undefined>>();
+  const boughtOn = (chainId: number): Promise<ResolvedToken | undefined> => {
+    let token = bought.get(chainId);
+    if (!token) {
+      token = resolveDestination(chainId).catch(() => undefined);
+      bought.set(chainId, token);
     }
-    return usd;
+    return token;
   };
+  // Prices, once per token for this quote.
+  const prices = new Map<string, Promise<number>>();
+  const priceOf = (token: ResolvedToken): Promise<number> => {
+    const key = priceKey({ chainId: token.chainId, address: token.address });
+    let price = prices.get(key);
+    if (!price) {
+      price = usdPrice(token);
+      prices.set(key, price);
+    }
+    return price;
+  };
+  // The token bought on a chain, or its resolution error.
+  const destinationOn = async (chainId: number) =>
+    (await boughtOn(chainId)) ?? resolveDestination(chainId);
+  // An exact-output buy is sized by what it receives, at current prices.
+  const usdOfBuy = async (chainId: number): Promise<number> =>
+    Number(toAmount) * (await priceOf(await destinationOn(chainId)));
   const sizing: Sizing =
     toAmount !== undefined
-      ? {
-          kind: 'usd',
-          usdOn: usdOfBuy,
-          // Trails adds the slippage to the output, and fees on top.
-          marginBps: BigInt(Math.ceil(slippage * 2 * 10_000)) + EXACT_OUTPUT_FEE_BPS
-        }
+      ? { kind: 'usd', usdOn: usdOfBuy }
       : params.amountUsd !== undefined
-        ? { kind: 'usd', usdOn: async () => params.amountUsd ?? 0, marginBps: 0n }
+        ? { kind: 'usd', usdOn: async () => params.amountUsd ?? 0 }
         : { kind: 'units', amount: params.amount ?? '' };
 
   const chainId = params.chain ? resolveNetwork(params.chain).chainId : undefined;
   const toChainId = params.toChain ? resolveNetwork(params.toChain).chainId : undefined;
-  const belowUnit = (token: ResolvedToken) =>
-    new CliError({
-      code: 'invalid_input',
-      message: `${toAmount} ${token.symbol} is below the token's smallest unit.`
-    });
   if (toAmount !== undefined) {
-    // Before picking a source, which would only find nothing to pay.
-    const likely = await resolveDestination(toChainId ?? chainId ?? 137).catch(() => undefined);
-    if (likely && parseUnits(toAmount, likely.decimals) === 0n) throw belowUnit(likely);
+    // Before picking a source, which would only find nothing to pay (on
+    // Polygon without a chain; each quote checks its own destination again).
+    const target = await boughtOn(toChainId ?? chainId ?? 137);
+    if (target) exactUnits({ amount: toAmount, token: target });
   }
-  let origin: ResolvedToken;
-  let amount: bigint;
-  let holding = false;
-  let remaining: bigint | null = null;
+
+  let sources: Source[];
   if (params.from) {
     const originChainId = chainId ?? 137;
-    origin = session
+    const token = session
       ? sessionSource({ wallet: params.walletName, chainId: originChainId, symbol: params.from })
       : await ownerToken({ chainId: originChainId, symbol: params.from });
-    const source = origin;
-    ({ amount } = await sized({
-      token: source,
+    const amount = await sized({
+      token,
       sizing,
       destinationChainId: toChainId ?? originChainId,
+      priceOf,
       balance: () =>
         tokenBalance({
           wallet: params.walletName,
-          chainId: source.chainId,
-          token: getAddress(source.address),
+          chainId: token.chainId,
+          token: getAddress(token.address),
           walletAddress
         })
-    }));
+    });
+    sources = [{ token, amount, holding: false, remaining: null }];
   } else {
-    ({
-      token: origin,
-      amount,
-      holding,
-      remaining
-    } = await defaultSource({
+    sources = await defaultSources({
       walletName: params.walletName,
       walletAddress,
       session,
@@ -622,16 +666,11 @@ export async function quoteSwap(params: QuoteSwapParams): Promise<QuotedSwap> {
       toChainId,
       sizing,
       payWithHoldings: params.payWithHoldings ?? false,
-      isBought: (token) => {
-        const bought = resolveSupportedSymbol({
-          chainId: toChainId ?? token.chainId,
-          symbol: params.to
-        });
-        return (
-          bought !== undefined &&
-          sameToken(token, { chainId: toChainId ?? token.chainId, ...bought })
-        );
+      isBought: async (token) => {
+        const target = await boughtOn(toChainId ?? token.chainId);
+        return target !== undefined && sameToken(token, target);
       },
+      priceOf,
       // A session buy delivers on the source's chain, so only chains where the
       // token bought is covered can pay.
       ...(session && toChainId === undefined
@@ -645,61 +684,116 @@ export async function quoteSwap(params: QuoteSwapParams): Promise<QuotedSwap> {
             buying: params.to.toUpperCase()
           }
         : {})
-    }));
-  }
-  if (amount <= 0n) {
-    throw new CliError({
-      code: 'insufficient_balance',
-      message: `Nothing to trade: the amount of ${origin.symbol} comes to 0.`
     });
   }
-
-  const destination = await resolveDestination(toChainId ?? origin.chainId);
-  if (sameToken(origin, destination)) {
-    throw new CliError({
-      code: 'invalid_input',
-      message: 'The source and destination are the same token on the same chain.'
-    });
-  }
-  const exactOutput =
-    toAmount !== undefined ? parseUnits(toAmount, destination.decimals) : undefined;
-  if (exactOutput === 0n) throw belowUnit(destination);
 
   if (!process.env.TRAILS_API_KEY && !process.env.SEQUENCE_PROJECT_ACCESS_KEY) {
     await ensureBuilderAccess(walletAddress);
   }
   const { TradeType } = await import('@0xtrails/api');
   const trails = await trailsClient();
-  const { intent } = await trails
-    .quoteIntent({
-      ownerAddress: walletAddress,
+
+  // One source's quote. An exact-output quote costing more than the source's
+  // balance or allowance left throws ShortError, so the next source is tried.
+  const quoteFrom = async (source: Source) => {
+    const origin = source.token;
+    let amount = source.amount;
+    if (amount <= 0n) {
+      throw new CliError({
+        code: 'insufficient_balance',
+        message: `Nothing to trade: the amount of ${origin.symbol} comes to 0.`
+      });
+    }
+    const destination = await destinationOn(toChainId ?? origin.chainId);
+    if (sameToken(origin, destination)) {
+      throw new CliError({
+        code: 'invalid_input',
+        message: 'The source and destination are the same token on the same chain.'
+      });
+    }
+    const exactOutput =
+      toAmount !== undefined ? exactUnits({ amount: toAmount, token: destination }) : undefined;
+
+    const { intent } = await trails
+      .quoteIntent({
+        ownerAddress: walletAddress,
+        originChainId: origin.chainId,
+        originTokenAddress: origin.address,
+        destinationChainId: destination.chainId,
+        destinationTokenAddress: destination.address,
+        destinationToAddress: walletAddress,
+        ...(exactOutput === undefined
+          ? { originTokenAmount: amount, tradeType: TradeType.EXACT_INPUT }
+          : { destinationTokenAmount: exactOutput, tradeType: TradeType.EXACT_OUTPUT }),
+        options: { slippageTolerance: slippage }
+      })
+      .catch(async (error: unknown) => {
+        throw await trailsError(error);
+      });
+    // An exact-output buy deposits what Trails quotes; `amount` was the estimate.
+    const estimate = amount;
+    if (exactOutput !== undefined) amount = BigInt(intent.quote?.fromAmount ?? 0n);
+    validateDeposit({
+      intent,
+      walletAddress,
       originChainId: origin.chainId,
-      originTokenAddress: origin.address,
+      originToken: origin.address,
       destinationChainId: destination.chainId,
-      destinationTokenAddress: destination.address,
-      destinationToAddress: walletAddress,
-      ...(exactOutput === undefined
-        ? { originTokenAmount: amount, tradeType: TradeType.EXACT_INPUT }
-        : { destinationTokenAmount: exactOutput, tradeType: TradeType.EXACT_OUTPUT }),
-      options: { slippageTolerance: slippage }
-    })
-    .catch(async (error: unknown) => {
-      throw await trailsError(error);
+      destinationToken: destination.address,
+      amount,
+      slippage,
+      ...(exactOutput !== undefined ? { exactOutput } : {})
     });
-  // An exact-output buy deposits what Trails quotes; `amount` was the estimate.
-  const estimate = amount;
-  if (exactOutput !== undefined) amount = BigInt(intent.quote?.fromAmount ?? 0n);
-  validateDeposit({
-    intent,
-    walletAddress,
-    originChainId: origin.chainId,
-    originToken: origin.address,
-    destinationChainId: destination.chainId,
-    destinationToken: destination.address,
-    amount,
-    slippage,
-    ...(exactOutput !== undefined ? { exactOutput } : {})
-  });
+
+    if (exactOutput !== undefined) {
+      const cost = `Buying ${toAmount} ${destination.symbol} costs ${formatUnits(amount, origin.decimals)} ${origin.symbol}`;
+      // A native source isn't in the token balances; its deposit fails alone.
+      if (origin.address !== NATIVE) {
+        const balance = await tokenBalance({
+          wallet: params.walletName,
+          chainId: origin.chainId,
+          token: getAddress(origin.address),
+          walletAddress
+        });
+        if (amount > balance) {
+          throw new ShortError({
+            code: 'insufficient_balance',
+            message: `${cost}, more than the wallet holds.`,
+            hint: params.from
+              ? 'Use a smaller amount.'
+              : 'Use a smaller amount, or name the token to sell with --from.'
+          });
+        }
+      }
+      if (source.remaining !== null && amount > source.remaining) {
+        throw new ShortError({
+          code: 'insufficient_balance',
+          message: `${cost}, more than the allowance has left for it.`,
+          hint: 'Use a smaller amount, or raise the allowance.'
+        });
+      }
+    }
+    return { origin, destination, amount, estimate, exactOutput, intent };
+  };
+
+  // Estimates only rank the sources: each quote decides, up to MAX_QUOTES.
+  let quoted: Awaited<ReturnType<typeof quoteFrom>> | undefined;
+  let holding = false;
+  let short: unknown;
+  for (const source of sources.slice(0, MAX_QUOTES)) {
+    try {
+      quoted = await quoteFrom(source);
+      holding = source.holding;
+      break;
+    } catch (error) {
+      // After a shortfall, a later source's failure (no route, …) only ends
+      // the search: the shortfall is the clearer answer.
+      if (!(error instanceof ShortError) && short === undefined) throw error;
+      short ??= error;
+    }
+  }
+  if (!quoted) throw short;
+  const { origin, destination, amount, estimate, exactOutput, intent } = quoted;
 
   const warnings: string[] = [];
   const fromUsd = intent.quote?.fromAmountUsd ?? 0;
@@ -731,32 +825,6 @@ export async function quoteSwap(params: QuoteSwapParams): Promise<QuotedSwap> {
     warnings.push(
       `No covered stablecoin holds enough, so this pays with ${formatUnits(amount, origin.decimals)} ${origin.symbol} (about $${fromUsd.toFixed(2)}).`
     );
-  }
-  if (exactOutput !== undefined && origin.address !== NATIVE) {
-    // The quote can cost a little more than the estimate the source was picked
-    // by. (A native source isn't in the token balances; its deposit fails alone.)
-    const balance = await tokenBalance({
-      wallet: params.walletName,
-      chainId: origin.chainId,
-      token: getAddress(origin.address),
-      walletAddress
-    });
-    if (amount > balance) {
-      throw new CliError({
-        code: 'insufficient_balance',
-        message: `Buying ${toAmount} ${destination.symbol} costs ${formatUnits(amount, origin.decimals)} ${origin.symbol}, more than the wallet holds.`,
-        hint: params.from
-          ? 'Use a smaller amount.'
-          : 'Use a smaller amount, or name the token to sell with --from.'
-      });
-    }
-    if (remaining !== null && amount > remaining) {
-      throw new CliError({
-        code: 'insufficient_balance',
-        message: `Buying ${toAmount} ${destination.symbol} costs ${formatUnits(amount, origin.decimals)} ${origin.symbol}, more than the allowance has left for it.`,
-        hint: 'Use a smaller amount, or raise the allowance.'
-      });
-    }
   }
 
   const now = params.now;

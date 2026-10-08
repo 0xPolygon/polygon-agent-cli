@@ -946,7 +946,7 @@ export const swapCommand: CommandModule<object, SwapArgs> = {
         .option('amount-usd', { type: 'number', describe: 'Amount to sell, in USD' })
         .option('to-amount', {
           type: 'string',
-          describe: 'Amount of --to to receive (buy exactly this much)',
+          describe: 'Amount of --to to receive (at least this much)',
           coerce: fileCoerce
         })
         .option('slippage', { type: 'number', describe: 'Slippage tolerance (default 0.005)' })
