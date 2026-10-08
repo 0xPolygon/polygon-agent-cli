@@ -38,7 +38,18 @@ export type CliErrorCode =
 export type PolymarketErrorCode =
   | 'offset_removed'
   | 'unsupported_market_version'
-  | 'market_not_accepting_orders';
+  | 'market_not_accepting_orders'
+  | 'not_set_up'
+  | 'below_bridge_minimum'
+  | 'insufficient_pusd'
+  | 'insufficient_shares'
+  | 'bridge_pending'
+  | 'region_blocked'
+  | 'region_close_only'
+  | 'price_guard'
+  | 'outcome_not_found'
+  | 'ambiguous_market'
+  | 'order_rejected';
 
 // Refusals raised before anything is sent: a spend that failed with one of
 // these certainly moved nothing.

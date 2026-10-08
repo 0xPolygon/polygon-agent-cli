@@ -7,12 +7,12 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type * as PolymarketLib from '../lib/polymarket.ts';
+import type * as PolymarketLib from '../lib/polymarket/gamma.ts';
 
 process.env.POLYGON_AGENT_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-polymarket-'));
 
 const mocks = vi.hoisted(() => ({ getMarket: vi.fn() }));
-vi.mock('../lib/polymarket.ts', async (importOriginal) => ({
+vi.mock('../lib/polymarket/gamma.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof PolymarketLib>()),
   getMarket: mocks.getMarket
 }));

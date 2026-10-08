@@ -11,7 +11,7 @@ import {
   parseMarket,
   DATA_URL,
   GAMMA_URL
-} from './polymarket.ts';
+} from './gamma.ts';
 
 const V1_MARKET = {
   id: '5009042',
