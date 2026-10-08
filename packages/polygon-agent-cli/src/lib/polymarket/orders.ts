@@ -70,6 +70,13 @@ const floor2 = (n: number) => Math.floor(n * 100) / 100;
 export async function buy(req: BuyRequest): Promise<Record<string, unknown>> {
   checkPrice('--max-price', req.maxPrice);
   checkPrice('--price', req.limitPrice);
+  if (req.limitPrice !== undefined && req.maxPrice !== undefined) {
+    throw new CliError({
+      code: 'invalid_input',
+      message:
+        'Use either --price (a limit order) or --max-price (a guarded market order), not both.'
+    });
+  }
   const units = parseUsd(req.usd);
   const usd = formatUnits6(units);
   const { root } = await loadSdk();
@@ -145,6 +152,13 @@ export async function buy(req: BuyRequest): Promise<Record<string, unknown>> {
 export async function sell(req: SellRequest): Promise<Record<string, unknown>> {
   checkPrice('--min-price', req.minPrice);
   checkPrice('--price', req.limitPrice);
+  if (req.limitPrice !== undefined && req.minPrice !== undefined) {
+    throw new CliError({
+      code: 'invalid_input',
+      message:
+        'Use either --price (a limit order) or --min-price (a guarded market order), not both.'
+    });
+  }
   const wanted = parseShares(req.shares);
   const { root } = await loadSdk();
   try {

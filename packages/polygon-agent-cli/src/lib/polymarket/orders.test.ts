@@ -192,6 +192,44 @@ describe('buy', () => {
   });
 });
 
+describe('price flag conflicts', () => {
+  const nothingCalled = () => {
+    expect(client.placeMarketOrder).not.toHaveBeenCalled();
+    expect(client.placeLimitOrder).not.toHaveBeenCalled();
+    expect(client.estimateMarketPrice).not.toHaveBeenCalled();
+  };
+
+  it('buy rejects --price with --max-price before any call', async () => {
+    await expect(
+      buy({
+        wallet: 'main',
+        ref: 'will-x',
+        outcome: 'yes',
+        usd: '5',
+        maxPrice: 0.5,
+        limitPrice: 0.9,
+        broadcast: true
+      })
+    ).rejects.toMatchObject({ code: 'invalid_input' });
+    nothingCalled();
+  });
+
+  it('sell rejects --price with --min-price before any call', async () => {
+    await expect(
+      sell({
+        wallet: 'main',
+        ref: 'will-x',
+        outcome: 'yes',
+        shares: '3',
+        minPrice: 0.5,
+        limitPrice: 0.3,
+        broadcast: true
+      })
+    ).rejects.toMatchObject({ code: 'invalid_input' });
+    nothingCalled();
+  });
+});
+
 describe('sell', () => {
   const held = (size: string) =>
     client.listPositions.mockReturnValue({
