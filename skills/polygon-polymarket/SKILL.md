@@ -5,7 +5,7 @@ description: Trade Polymarket prediction markets with the Polygon Agent CLI. Set
 
 # Polymarket skill
 
-Every command is `agent polymarket <command>`. Output is JSON on stdout, and failures are JSON on stderr with a `code`, a `hint`, and sometimes a `command` to run next. Write commands (`setup`, `deposit`, `withdraw`, `buy`, `sell`, `cancel`, `redeem`) preview by default. Add `--broadcast` to execute. Every command takes `--wallet <name>` (default `main`), the OMS wallet that owns the Polymarket account.
+Every command is `agent polymarket <command>`. Output is JSON on stdout, and failures are JSON on stderr with a `code`, a `hint`, and sometimes a `command` to run next. Write commands (`setup`, `deposit`, `withdraw`, `buy`, `sell`, `cancel`, `redeem`) preview by default. Add `--broadcast` to execute. The account, money, trading and portfolio commands take `--wallet <name>` (default `main`), the OMS wallet that owns the Polymarket account. The discovery commands (`markets`, `event`, `market`, `book`, `history`) don't take it.
 
 ## Start here
 
@@ -15,16 +15,18 @@ Run this before anything else:
 agent polymarket status
 ```
 
-Then pick the next step from what it reports:
+Then pick the next step from what it reports. Check the region rows first:
 
 | status shows | Next command |
 | --- | --- |
+| `region.blocked: true`, or any command fails with `region_blocked` | Stop. Polymarket is not available from this region. `setup`, `deposit`, `withdraw`, `buy`, `sell` and `redeem` all fail. |
+| `region.closeOnly: true` | Only close positions: `sell`, `cancel`, `redeem` and `withdraw`. `buy` fails with `region_close_only`. |
 | `setUp: false` | `agent polymarket setup --broadcast` |
 | `pusd: "0"` | `agent polymarket deposit <usd> --broadcast` (minimum $2) |
 | `pendingDeposit` present | Wait. Run `status` again in a few minutes. Do not deposit again. |
-| `region.blocked: true` | Stop. Polymarket is not available from this region. |
-| `region.closeOnly: true` | Only close positions: `sell`, `cancel`, `redeem` and `withdraw`. `buy` fails with `region_close_only`. |
 | `redeemable.count > 0` | `agent polymarket redeem --all --broadcast` |
+
+Region rules come from Polymarket at run time: its geoblock endpoint decides whether a region is blocked, and the CLOB's close-only flag decides whether it may only close positions. Don't guess them from a location. `status` shows the region only once the account is set up; before that, `setup` itself fails with `region_blocked` in a blocked region.
 
 `status` also shows `approvals`, `openOrders`, and `redeemable.valueUsd`. If `redeemable.truncated` is `true`, more than 2000 rows were redeemable. Redeem, then run `status` again.
 
@@ -38,7 +40,7 @@ OMS wallet <--withdraw-- Polymarket wallet (pUSD)
 ```
 
 - `deposit <usd>` sends Polygon USDC from the OMS wallet to Polymarket's bridge, then waits for pUSD to be credited. Minimum $2.
-- `withdraw <usd|all>` always pays the OMS wallet as Polygon USDC.
+- `withdraw <usd|all>` always pays the OMS wallet as Polygon USDC. It moves pUSD only.
 - Trades use pUSD in the Polymarket wallet. A buy never touches the OMS wallet.
 - In session mode, `deposit` is a plain USDC transfer, so it counts against the allowance. The Polymarket wallet is controlled by this install's trading key, not by the allowance, so trades and withdrawals are not limited by it.
 
@@ -58,7 +60,8 @@ agent polymarket deposit 25 --broadcast
 - Output on broadcast: `txHash`, `credited`, `amountUsd`, and `pusdBalance` when credited. `credited: false` means the bridge is still working. Run `status` later.
 - A deposit that was sent but not yet credited makes a rerun fail with `bridge_pending` (`details.txHash`). Check `status` before doing anything else.
 - If the bridge reports the earlier deposit as FAILED, the error is `upstream_error` with a hint to https://recovery.polymarket.com.
-- If the OMS wallet holds less USDC than the amount, the error is `insufficient_balance` with a `swap` hint.
+- If the OMS wallet holds less USDC than the amount, the error is `insufficient_balance` with a `swap` hint. The same code, with a hint to fund the wallet, means it can't pay the relayer fee. Nothing was sent in either case.
+- Two deposits for one wallet can't run at once. The second fails with `wallet_busy` and sends nothing. Run `status` before trying again.
 
 ### withdraw
 
@@ -67,7 +70,8 @@ agent polymarket withdraw 10           # dry run: amountUsd, from, to, via
 agent polymarket withdraw all --broadcast
 ```
 
-Fails with `insufficient_pusd` when the amount is zero or more than the balance.
+- Output on broadcast: `txHash`, `amountUsd`, `to`, and a `note`. The `txHash` is the pUSD transfer to Polymarket's bridge, not the USDC payout. The USDC arrives in the OMS wallet shortly after.
+- Fails with `insufficient_pusd` when the amount is zero or more than the balance.
 
 ## Finding markets
 
@@ -95,7 +99,7 @@ agent polymarket book some-event-slug "Bob no"     # Bob, no side
 agent polymarket buy 0xdf8e...d4a8 yes 5          # by conditionId
 ```
 
-Partial names match when only one entry contains them. `outcome_not_found` and `ambiguous_market` carry `details.choices`, the valid names. Pick one and retry.
+An entry title that matches the whole input wins over reading a trailing `yes` or `no` as the side: if an event has entries "Vote" and "Vote No", then `"Vote No"` is the "Vote No" entry's yes side, and `"Vote No no"` is its no side. Partial names match when only one entry contains them. `outcome_not_found` and `ambiguous_market` carry `details.choices`, the valid names. Pick one and retry.
 
 The `markets` listing has no slug field. Take the `conditionId` from it, or find slugs through `event` and `market`.
 
@@ -110,9 +114,11 @@ agent polymarket buy <ref> <outcome> <usd> [--max-price <0-1>] [--price <0-1> [-
 ```
 
 - Market buy: pass `--max-price` every time. Run the dry run first. Take its `estimatedPrice`, add 0.02, cap at 0.99, and use that as `--max-price`.
+- `<usd>` is the all-in spend: fees come out of it, so a market buy never spends more than the amount you pass.
+- A closed or paused market fails with `market_not_accepting_orders` before anything else is checked.
 - If the estimate is already above `--max-price`, the command fails with `price_guard` (`details.estimatedPrice`) and posts nothing. The venue enforces `--max-price` again at fill time.
 - Dry run output: `orderType`, `estimatedPrice`, `estimatedShares`.
-- Limit buy: `--price` rests an order at that price. Add `--expires <minutes>` (at least 3) to make it expire. `--price` cannot be combined with `--max-price` (`invalid_input`).
+- Limit buy: `--price` rests an order at that price. Add `--expires <minutes>` (at least 3) to make it expire. `--expires` only works with `--price`. On a market order it is `invalid_input`. `--price` cannot be combined with `--max-price` (`invalid_input`).
 - Not enough pUSD fails with `insufficient_pusd`. The hint is a `deposit` command.
 - Broadcast output: `orderId`, `status`, `filledUsd`, `filledShares`, `txHashes`.
 - A refusal from the exchange is `order_rejected`, with the exchange's code in `details.venueCode`.
@@ -123,7 +129,9 @@ agent polymarket buy <ref> <outcome> <usd> [--max-price <0-1>] [--price <0-1> [-
 agent polymarket sell <ref> <outcome> <shares|all> [--min-price <0-1>] [--price <0-1> [--expires <minutes>]]
 ```
 
-- `all` sells the whole position. If you hold nothing, the error is `insufficient_shares`. Asking for more than you hold is the same error.
+- `<shares>` is a plain decimal such as `12.5`, or `all`. `all` sells the whole position. If you hold nothing, the error is `insufficient_shares`. Asking for more than you hold is the same error.
+- Holdings come from the refreshed on-chain balance, not from `positions`, so a recent fill shows up sooner there.
+- `--expires` only works with `--price`, as for `buy`.
 - `--min-price` is the sell-side guard (`price_guard` with `details.estimatedPrice`). `--price` cannot be combined with `--min-price`.
 - `sell` works in close-only regions.
 
@@ -146,7 +154,7 @@ agent polymarket redeem --all --broadcast
 agent polymarket redeem <ref> --broadcast             # one market
 ```
 
-`positions --status` takes `OPEN` (default, includes unredeemed winners), `REDEEMABLE`, `REDEEMABLE_LOST`, `MERGEABLE` or `CLOSED`. It also takes `--limit` and `--cursor`. The `redeem --all` output has `redeemed` and `failed` lists. Redeemed value lands in the Polymarket wallet as pUSD. Use `withdraw` to move it out. If the output has `truncated: true`, run `redeem --all` again.
+`positions --status` takes `OPEN` (default, includes unredeemed winners), `REDEEMABLE`, `REDEEMABLE_LOST`, `MERGEABLE` or `CLOSED`. It also takes `--limit` and `--cursor`. The `redeem --all` output has `redeemed` and `failed` lists. If at least one redemption worked, the result is `ok: true` with the failures listed. If every one failed, the command fails with `upstream_error` and still carries both lists. Redeemed value lands in the Polymarket wallet as pUSD. Use `withdraw` to move it out. If the output has `truncated: true`, run `redeem --all` again.
 
 ## Reporting
 
@@ -164,17 +172,16 @@ agent polymarket pnl [--interval 1d|1w|1m|max]            # valueUsd, realized, 
 | `insufficient_pusd` | Not enough pUSD in the Polymarket wallet. Deposit more, or lower the amount. |
 | `insufficient_shares` | You hold fewer shares than asked, or none. Check `positions`. |
 | `bridge_pending` | An earlier deposit is not credited yet. Run `status`. Do not retry the deposit. |
-| `region_blocked` | Polymarket is not available from this region. Nothing works. |
+| `region_blocked` | Polymarket is not available from this region. `setup`, `deposit`, `withdraw`, `buy`, `sell` and `redeem` fail. Stop. |
 | `region_close_only` | This region can only close positions. Use `sell`, `cancel`, `redeem` or `withdraw`. |
 | `price_guard` | The estimated fill is worse than `--max-price` or `--min-price`. Check `details.estimatedPrice`, then loosen the guard, use a limit order, or skip. |
 | `outcome_not_found` | The outcome or market was not found. Use a name from `details.choices`, or check the slug. |
 | `ambiguous_market` | The name matches several outcomes. Pick one from `details.choices`. |
 | `order_rejected` | The exchange refused the order. Read `details.venueCode` and the message. |
 | `market_not_accepting_orders` | The market is closed or paused. Pick another market. |
-| `unsupported_market_version` | The CLI can read this market version but cannot trade it. Pick another market. |
 | `offset_removed` | `--offset` no longer exists. Use `--cursor` with the previous `nextCursor`. |
 
-General codes you will also see: `invalid_input` (bad amount or flags, including more than 6 decimals), `insufficient_balance` (OMS wallet short of USDC), `upstream_error`, `upstream_unavailable`, `rate_limited`, and the session codes (`allowance_exhausted`, `session_expired`, `not_connected`). Rate limits and upstream outages are safe to retry after a short wait, except for `deposit` (see the rules).
+General codes you will also see: `invalid_input` (bad amount or flags, including more than 6 decimals), `insufficient_balance` (OMS wallet short of USDC, or of a fee token for the relayer), `wallet_busy` (another deposit for this wallet is still running), `upstream_error`, `upstream_unavailable`, `rate_limited`, and the session codes (`allowance_exhausted`, `session_expired`, `not_connected`). Rate limits and upstream outages are safe to retry after a short wait, except for `deposit` (see the rules).
 
 ## Rules for agents
 
@@ -194,4 +201,4 @@ Accounts that traded through an older Polymarket proxy wallet can attach it:
 agent polymarket import-key <privateKey>
 ```
 
-This stores the key encrypted as a legacy proxy account. Then `withdraw all --broadcast` drains it to the OMS wallet. New users should use `setup` instead. The old names `clob-buy`, `proxy-wallet`, `approve` and `set-key` still work as hidden aliases for one release.
+This stores the key encrypted as a legacy proxy account and mints the builder key that `withdraw` needs. If minting fails, the import still succeeds and the output has a `warning`. Run `agent polymarket setup --wallet <name> --broadcast` to mint it before withdrawing. Then `withdraw all --broadcast` drains the proxy's pUSD to the OMS wallet. USDC.e left in a legacy proxy is not moved by `withdraw`. New users should use `setup` instead. The old names `clob-buy`, `proxy-wallet`, `approve` and `set-key` still work as hidden aliases for one release.
