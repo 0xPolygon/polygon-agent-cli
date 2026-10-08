@@ -6,7 +6,9 @@ import type { CommandModule } from 'yargs';
 
 import { encodeFunctionData, erc20Abi } from 'viem';
 
-import { CliError } from '../../lib/errors.ts';
+import type { PendingDeposit } from '../../lib/polymarket/deposits.ts';
+
+import { CliError, NOTHING_SENT_CODES } from '../../lib/errors.ts';
 import { resolveBroadcast, withWriteFlags } from '../../lib/mode.ts';
 import { getTradingClient, pusdBalance, requireAccount } from '../../lib/polymarket/account.ts';
 import { formatUnits6, parseUsd } from '../../lib/polymarket/amounts.ts';
@@ -39,26 +41,41 @@ type DepositArgs = {
 };
 
 // An earlier deposit is on record: settle it (credited, failed) or refuse to send again.
-async function settlePending(wallet: string): Promise<void> {
+// Read-only when `readOnly` (dry runs never change state).
+async function settlePending(wallet: string, readOnly: boolean): Promise<void> {
   const pending = loadPending(wallet);
   if (!pending) return;
   const { transactions } = await bridgeStatus(pending.bridgeAddress);
-  if (transactions.some((t) => t.status === 'COMPLETED')) {
-    clearPending(wallet);
+  // The address is static, so the list holds every deposit ever made to it, newest
+  // first. Only the entries beyond the baseline can belong to this deposit.
+  const fresh = transactions.slice(
+    0,
+    Math.max(0, transactions.length - (pending.baselineCount ?? transactions.length))
+  );
+  let settled = fresh.some((t) => t.status === 'COMPLETED');
+  if (!settled) {
+    const now = await pusdBalance(wallet);
+    settled =
+      pending.pusdBefore !== undefined &&
+      now >= BigInt(pending.pusdBefore) + (BigInt(pending.amountUnits) * 99n) / 100n;
+  }
+  if (settled) {
+    if (!readOnly) clearPending(wallet);
     return;
   }
-  if (transactions.some((t) => t.status === 'FAILED')) {
-    clearPending(wallet);
+  const amount = formatUnits6(pending.amountUnits);
+  if (fresh.some((t) => t.status === 'FAILED')) {
+    if (!readOnly) clearPending(wallet);
     throw new CliError({
       code: 'upstream_error',
-      message: `The earlier deposit of $${formatUnits6(BigInt(pending.amountUnits))} failed at Polymarket's bridge.`,
+      message: `The earlier deposit of $${amount} failed at Polymarket's bridge.`,
       hint: 'Check https://recovery.polymarket.com, then deposit again.',
       details: { txHash: pending.txHash, bridgeStatus: 'FAILED' }
     });
   }
   throw new CliError({
     code: 'bridge_pending',
-    message: `An earlier deposit of $${formatUnits6(BigInt(pending.amountUnits))} is still being credited.`,
+    message: `An earlier deposit of $${amount} is still being credited.`,
     hint: 'Check agent polymarket status, or pass --again to send another deposit anyway.',
     details: { txHash: pending.txHash, sentAt: pending.sentAt }
   });
@@ -77,7 +94,7 @@ async function handleDeposit(argv: DepositArgs): Promise<void> {
     const account = requireAccount(argv.wallet);
     assertCanTrade(await checkRegion());
 
-    if (!argv.again) await settlePending(argv.wallet);
+    if (!argv.again) await settlePending(argv.wallet, !broadcast);
 
     const from = await omsAddress(argv.wallet);
     const held = await tokenBalance({
@@ -130,21 +147,35 @@ async function handleDeposit(argv: DepositArgs): Promise<void> {
       args: [bridge as `0x${string}`, units]
     });
     const before = await pusdBalance(argv.wallet);
-    const res = await runTx({
-      walletName: argv.wallet,
-      chainId: 137,
-      transactions: [{ to: USDC, value: 0n, data }],
-      broadcast,
-      purpose: 'trade',
-      ref: 'polymarket-deposit'
-    });
-    const txHash = res.txHash ?? '';
-    savePending(argv.wallet, {
-      txHash,
+    const baselineCount = (await bridgeStatus(bridge)).transactions.length;
+    const record: PendingDeposit = {
+      status: 'sending',
+      txHash: null,
       amountUnits: units.toString(),
       bridgeAddress: bridge,
-      sentAt: new Date().toISOString()
-    });
+      sentAt: new Date().toISOString(),
+      baselineCount,
+      pusdBefore: before.toString()
+    };
+    // Recorded before sending: if the run dies after the transfer is relayed, a rerun
+    // must not send again.
+    savePending(argv.wallet, record);
+    let res;
+    try {
+      res = await runTx({
+        walletName: argv.wallet,
+        chainId: 137,
+        transactions: [{ to: USDC, value: 0n, data }],
+        broadcast,
+        purpose: 'trade',
+        ref: 'polymarket-deposit'
+      });
+    } catch (err) {
+      if (err instanceof CliError && NOTHING_SENT_CODES.has(err.code)) clearPending(argv.wallet);
+      throw err;
+    }
+    const txHash = res.txHash ?? null;
+    savePending(argv.wallet, { ...record, status: 'sent', txHash });
     if (argv.wait === false) {
       ok({ txHash, credited: false, amountUsd: formatUnits6(units) });
       return;
@@ -153,7 +184,11 @@ async function handleDeposit(argv: DepositArgs): Promise<void> {
     const deadline = Date.now() + WAIT_MS;
     let balance = before;
     while (Date.now() < deadline) {
-      balance = await pusdBalance(argv.wallet);
+      try {
+        balance = await pusdBalance(argv.wallet);
+      } catch {
+        // Money has moved: a failed read means "not yet credited", not a failed deposit.
+      }
       if (balance >= target) break;
       await new Promise((r) => setTimeout(r, POLL_MS));
     }
