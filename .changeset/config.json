@@ -10,5 +10,8 @@
   "privatePackages": {
     "version": true,
     "tag": true
+  },
+  "snapshot": {
+    "useCalculatedVersion": true
   }
 }
