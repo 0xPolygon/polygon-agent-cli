@@ -58,6 +58,74 @@ const check = (quoted: QuotedIntent, originToken = USDC, amount = AMOUNT) =>
     slippage: 0.005
   });
 
+const OUT = 400_000_000_000_000n;
+
+// An exact-output quote: AMOUNT of USDC buys exactly OUT of WETH.
+const exactOutput = (overrides: Record<string, unknown> = {}) =>
+  intent({
+    quoteRequest: {
+      destinationToAddress: WALLET,
+      destinationTokenAmount: OUT,
+      tradeType: 'EXACT_OUTPUT'
+    },
+    quote: { fromAmount: AMOUNT, toAmount: (OUT * 1009n) / 1000n, toAmountMin: OUT },
+    ...overrides
+  });
+
+const checkExact = (quoted: QuotedIntent) =>
+  validateDeposit({
+    intent: quoted,
+    walletAddress: WALLET,
+    originChainId: 137,
+    originToken: USDC,
+    destinationChainId: 137,
+    destinationToken: WETH,
+    amount: AMOUNT,
+    slippage: 0.005,
+    exactOutput: OUT
+  });
+
+describe('validateDeposit for an exact-output buy', () => {
+  it('accepts a deposit of the quoted input that guarantees the amount asked', () => {
+    expect(() => checkExact(exactOutput())).not.toThrow();
+  });
+
+  it.each([
+    [
+      'an exact-input request',
+      exactOutput({
+        quoteRequest: {
+          destinationToAddress: WALLET,
+          originTokenAmount: AMOUNT,
+          tradeType: 'EXACT_INPUT'
+        }
+      })
+    ],
+    [
+      'another amount to receive',
+      exactOutput({
+        quoteRequest: {
+          destinationToAddress: WALLET,
+          destinationTokenAmount: OUT - 1n,
+          tradeType: 'EXACT_OUTPUT'
+        }
+      })
+    ],
+    [
+      'a minimum below the amount asked',
+      exactOutput({ quote: { fromAmount: AMOUNT, toAmount: OUT, toAmountMin: OUT - 1n } })
+    ],
+    [
+      'a deposit other than the quoted input',
+      exactOutput({ quote: { fromAmount: AMOUNT - 1n, toAmount: OUT, toAmountMin: OUT } })
+    ]
+  ])('refuses %s', (_label, quoted) => {
+    expect(() => checkExact(quoted)).toThrow(
+      expect.objectContaining({ code: 'upstream_invalid_quote' })
+    );
+  });
+});
+
 describe('validateDeposit', () => {
   it('accepts exactly transfer(depositAddress, quotedAmount) on the source token', () => {
     expect(() => check(intent())).not.toThrow();

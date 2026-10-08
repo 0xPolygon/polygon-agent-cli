@@ -144,11 +144,12 @@ Before asking for anything, explain how it works: the code lets the CLI sign in 
    ```
 
    Use the code only here, once. Never store it or repeat it. If it fails with `invalid_code`, ask for the code again. If it fails with `request_expired`, start again at step 7.3. On any other error, follow its `hint` and `command`.
-6. Tell the user the result: their wallet address, the allowance and when it expires, and `worstCase` in plain words. Mention any chains in `failed` and any `warnings`.
+6. Tell the user the result in plain words, for example: "Thanks for connecting! A smart session now lets me spend up to $1,000 from your agent wallet until Nov 7, in USDC, USDT, WETH and WBTC on Polygon and Base. If you'd like higher limits, just ask." Take the details from `allowance` in the output. Mention any chains in `failed` and any `warnings`.
+7. Give the address: end your message with "Your agent wallet address is:" and send the full address as the next message, with nothing else in it, so the user can copy it in one go. Never shorten it. (If your platform sends only one message per reply, put it alone on its own line.)
 
 ## 8. Funding
 
-Run `"$ROOT/bin/polygon-agent" wallet status` again. If it shows no `holdings`, run `"$ROOT/bin/polygon-agent" fund` and give the user the address and the link in `url`. Suggest USDC on Polygon; any covered token on a covered chain works.
+Run `"$ROOT/bin/polygon-agent" wallet status` again. If it shows no `holdings`, run `"$ROOT/bin/polygon-agent" fund` and give the user the link in `url` (the address is already in its own message from step 7). Suggest USDC on Polygon; any covered token on a covered chain works.
 
 ## 9. Watches
 
@@ -159,8 +160,9 @@ Check whether your platform can run a recurring task (a Muse scheduled task, Ope
 Tell the user what they can ask for now, in plain words. For example:
 
 - "What's ETH at?" or "Tell me if BTC drops below $90k."
-- "Buy $50 of ETH", or "Sell half my ETH if it goes over $4,000."
+- "Buy 10 POL", "Buy $50 of ETH", or "Sell half my ETH if it goes over $4,000."
 - "Move 20 USDC to Base."
 - "Search the web with a paid service" (x402).
+- "Raise my limit to $2,000" (a new email code approves it).
 
 Re-run this file any time: if the wrapper is missing (the workspace was reset), it installs again; otherwise it refreshes the skill, checks the connection and moves on.

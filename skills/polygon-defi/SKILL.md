@@ -28,6 +28,10 @@ agent swap --from USDC --to USDT --amount 5 --broadcast
 
 # Custom slippage (default 0.5%)
 agent swap --from USDC --to USDT --amount 5 --slippage 0.005 --broadcast
+
+# Buy an exact amount: receive 10 POL, paying what the quote asks
+# (quote first; then execute the quote with --intent <id> --broadcast)
+agent swap --from USDC --to POL --to-amount 10
 ```
 
 ## Bridge Tokens (Cross-Chain)

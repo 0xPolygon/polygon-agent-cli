@@ -99,6 +99,7 @@ const WALLET = '0xd384ea24ca0B3a5e4BB35935C611E3dCB68Fd08e';
 const USDC = getAddress('0x3c499c542cef5e3811e1192ce70d8cc03d5c3359');
 const USDT = getAddress('0xc2132d05d31c914a87c6611c10748aeb04b58e8f');
 const WETH = getAddress('0x7ceb23fd6bc0add59e62ac25578270cff1b9f619');
+const WPOL = getAddress('0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270');
 const DEPOSIT = '0x00000000000000000000000000000000000000d0';
 const TX = `0x${'ab'.repeat(32)}`;
 
@@ -147,6 +148,39 @@ function intentFor(request: {
       },
       fees: { totalFeeUsd: 0.01 },
       expiresAt: new Date(Date.now() + 10 * 60_000).toISOString()
+    }
+  };
+}
+
+// An exact-output quote: `cost` of the source buys exactly what was asked
+// (Trails' minimum), with the slippage on top of the expected amount.
+function exactOutputIntent(params: {
+  request: {
+    originChainId: number;
+    originTokenAddress: string;
+    destinationChainId: number;
+    destinationTokenAddress: string;
+    destinationTokenAmount: bigint;
+  };
+  cost: bigint;
+  minimum?: bigint;
+}) {
+  const { request, cost } = params;
+  const res = intentFor({ ...request, originTokenAmount: cost });
+  return {
+    intent: {
+      ...res.intent,
+      quoteRequest: {
+        destinationToAddress: WALLET,
+        destinationTokenAmount: request.destinationTokenAmount,
+        tradeType: 'EXACT_OUTPUT'
+      },
+      quote: {
+        ...res.intent.quote,
+        fromAmount: cost,
+        toAmount: (request.destinationTokenAmount * 1009n) / 1000n,
+        toAmountMin: params.minimum ?? request.destinationTokenAmount
+      }
     }
   };
 }
@@ -414,6 +448,192 @@ describe('quoteSwap in session mode', () => {
     });
     const { warnings } = await quote();
     expect(warnings).toEqual([expect.stringMatching(/20%/)]);
+  });
+});
+
+describe('quoteSwap for an exact amount to receive (--to-amount)', () => {
+  beforeEach(() => {
+    fake.getUsdPrices.mockResolvedValue(
+      new Map([
+        [`137:${WETH.toLowerCase()}`, 2500],
+        [`137:${WPOL.toLowerCase()}`, 0.1]
+      ])
+    );
+    fake.quoteIntent.mockImplementation(async (request) =>
+      // 10 POL at $0.10, plus a cent of fees.
+      exactOutputIntent({ request, cost: 1_010_000n })
+    );
+    fake.tokenBalance.mockResolvedValue(50_000_000n);
+  });
+
+  it('buys exactly the amount asked, depositing what Trails quotes', async () => {
+    const { trade, highFee } = await quote({ to: 'POL', amount: undefined, toAmount: '10' });
+    expect(fake.quoteIntent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        destinationTokenAddress: WPOL,
+        destinationTokenAmount: 10n * 10n ** 18n,
+        tradeType: 'EXACT_OUTPUT'
+      })
+    );
+    expect(fake.quoteIntent.mock.calls[0][0]).not.toHaveProperty('originTokenAmount');
+    expect(trade).toMatchObject({
+      origin: { symbol: 'USDC', amount: '1010000' },
+      destination: { symbol: 'WPOL', minAmount: (10n * 10n ** 18n).toString() }
+    });
+    expect(describeTrade(trade)).toMatchObject({ buy: { minimum: '10', token: 'WPOL' } });
+    expect(highFee).toBe(false);
+  });
+
+  it('refuses a quote that guarantees less than the amount asked', async () => {
+    fake.quoteIntent.mockImplementation(async (request) =>
+      exactOutputIntent({ request, cost: 1_010_000n, minimum: 9n * 10n ** 18n })
+    );
+    await expect(quote({ to: 'POL', amount: undefined, toAmount: '10' })).rejects.toMatchObject({
+      code: 'upstream_invalid_quote'
+    });
+  });
+
+  it('flags a quote costing over 10% more than the amount is worth at current prices', async () => {
+    fake.quoteIntent.mockImplementation(async (request) =>
+      exactOutputIntent({ request, cost: 1_200_000n })
+    );
+    const { highFee, warnings } = await quote({ to: 'POL', amount: undefined, toAmount: '10' });
+    expect(highFee).toBe(true);
+    expect(warnings).toEqual([expect.stringMatching(/1\.2 USDC, 20% more than 10 WPOL/)]);
+  });
+
+  it('insufficient_balance when the quote costs more than the wallet holds', async () => {
+    // Enough by the holdings read when picking the source, short by the time it's quoted.
+    balances([{ chainId: 137, token: USDC, balance: 1_025_000n }]);
+    fake.tokenBalance.mockResolvedValue(1_000_000n);
+    await expect(quote({ to: 'POL', amount: undefined, toAmount: '10' })).rejects.toMatchObject({
+      code: 'insufficient_balance'
+    });
+  });
+
+  it('picks a source with room for fees, and rechecks the allowance against the quote', async () => {
+    // The estimate is $1.00; with 2x slippage and 1% for fees, USDC needs $1.02.
+    balances([
+      { chainId: 137, token: USDC, balance: 1_015_000n },
+      { chainId: 137, token: USDT, balance: 50_000_000n }
+    ]);
+    const { trade } = await quote({ to: 'POL', amount: undefined, toAmount: '10' });
+    expect(trade.origin.symbol).toBe('USDT');
+
+    balances([{ chainId: 137, token: USDC, balance: 50_000_000n }]);
+    sessionWith({ [USDC]: 1_025_000n });
+    fake.quoteIntent.mockImplementation(async (request) =>
+      exactOutputIntent({ request, cost: 1_030_000n })
+    );
+    await expect(quote({ to: 'POL', amount: undefined, toAmount: '10' })).rejects.toMatchObject({
+      code: 'insufficient_balance',
+      message: expect.stringContaining('more than the allowance has left')
+    });
+  });
+
+  it('reports a missing price, rather than a shortfall, when no source can be sized', async () => {
+    fake.getUsdPrices.mockResolvedValue(new Map());
+    await expect(quote({ to: 'POL', amount: undefined, toAmount: '10' })).rejects.toMatchObject({
+      code: 'upstream_unavailable'
+    });
+  });
+
+  it("refuses an amount below the token's smallest unit", async () => {
+    await expect(
+      quote({ to: 'WBTC', amount: undefined, toAmount: '0.000000001' })
+    ).rejects.toMatchObject({
+      code: 'invalid_input',
+      message: expect.stringContaining('smallest unit')
+    });
+    expect(fake.quoteIntent).not.toHaveBeenCalled();
+  });
+
+  it('needs exactly one amount, and a positive one', async () => {
+    await expect(quote({ toAmount: '10' })).rejects.toMatchObject({ code: 'invalid_input' });
+    await expect(quote({ amount: undefined, toAmount: '0' })).rejects.toMatchObject({
+      code: 'invalid_input'
+    });
+    await expect(quote({ amount: undefined, toAmount: 'ten' })).rejects.toMatchObject({
+      code: 'invalid_input'
+    });
+  });
+});
+
+describe('quoteSwap paying with other holdings', () => {
+  beforeEach(() => {
+    // Only WETH: 0.01 (about $25), and USDC that can't cover $10.
+    balances([
+      { chainId: 137, token: USDC, balance: 3_400_000n },
+      { chainId: 137, token: WETH, balance: 10_000_000_000_000_000n }
+    ]);
+    sessionWith({ [USDC]: 100_000_000n, [WETH]: 10n ** 18n });
+    fake.getUsdPrices.mockResolvedValue(
+      new Map([
+        [`137:${WETH.toLowerCase()}`, 2500],
+        [`137:${WPOL.toLowerCase()}`, 0.1]
+      ])
+    );
+  });
+
+  it('pays with another covered holding when no stablecoin holds enough, and says so', async () => {
+    const result = await quote({
+      to: 'POL',
+      amount: undefined,
+      amountUsd: 10,
+      payWithHoldings: true
+    });
+    expect(result.trade.origin).toMatchObject({ symbol: 'WETH', amount: '4000000000000000' });
+    expect(result.paidWithHolding).toBe(true);
+    expect(result.warnings).toEqual([expect.stringMatching(/pays with 0\.004 WETH/)]);
+  });
+
+  it('pays for an exact amount with another holding too', async () => {
+    fake.quoteIntent.mockImplementation(async (request) =>
+      // 100 POL at $0.10: 0.004 WETH, plus a little.
+      exactOutputIntent({ request, cost: 4_050_000_000_000_000n })
+    );
+    fake.tokenBalance.mockResolvedValue(10_000_000_000_000_000n);
+    const result = await quote({
+      to: 'POL',
+      amount: undefined,
+      toAmount: '100',
+      payWithHoldings: true
+    });
+    expect(result.trade.origin).toMatchObject({ symbol: 'WETH', amount: '4050000000000000' });
+    expect(result.paidWithHolding).toBe(true);
+  });
+
+  it('never pays with the stablecoin being bought', async () => {
+    balances([
+      { chainId: 137, token: USDC, balance: 50_000_000n },
+      { chainId: 137, token: USDT, balance: 50_000_000n }
+    ]);
+    sessionWith({ [USDC]: 100_000_000n, [USDT]: 100_000_000n });
+    const { trade } = await quote({ to: 'USDC', amount: undefined, amountUsd: 5 });
+    expect(trade.origin.symbol).toBe('USDT');
+  });
+
+  it('prefers a stablecoin that holds enough', async () => {
+    const result = await quote({
+      to: 'POL',
+      amount: undefined,
+      amountUsd: 2,
+      payWithHoldings: true
+    });
+    expect(result.trade.origin.symbol).toBe('USDC');
+    expect(result.paidWithHolding).toBe(false);
+  });
+
+  it('only with payWithHoldings (auto trades), for amounts in USD, and never with the token bought', async () => {
+    await expect(quote({ to: 'POL', amount: undefined, amountUsd: 10 })).rejects.toMatchObject({
+      code: 'insufficient_balance'
+    });
+    await expect(quote({ to: 'POL', amount: '10', payWithHoldings: true })).rejects.toMatchObject({
+      code: 'insufficient_balance'
+    });
+    await expect(
+      quote({ to: 'ETH', amount: undefined, amountUsd: 10, payWithHoldings: true })
+    ).rejects.toMatchObject({ code: 'insufficient_balance' });
   });
 });
 

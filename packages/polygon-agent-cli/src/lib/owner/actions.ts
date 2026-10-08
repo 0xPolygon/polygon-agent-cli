@@ -229,15 +229,6 @@ function approvedPlan(params: { plan: Plan; approved: ApprovedChain[]; keep?: Pl
   return { ...params.plan, chains };
 }
 
-function worstCase(plan: Plan): string {
-  const usd = `$${plan.allowanceUsd.toLocaleString('en-US')}`;
-  return (
-    `If this install were compromised, up to ${usd} worth of each covered token on each covered chain ` +
-    `could be moved out until ${plan.expiresAt.slice(0, 10)}. With mostly one token in the wallet, that's about ${usd}. ` +
-    'Revoke access any time with: polygon-agent wallet access --revoke <id>.'
-  );
-}
-
 async function requireSameWallet(params: { wallet: string; walletAddress: string }): Promise<void> {
   const pointer = await loadOmsWalletPointer(params.wallet);
   if (pointer && pointer.walletAddress.toLowerCase() !== params.walletAddress.toLowerCase()) {
@@ -301,8 +292,7 @@ async function connect(params: { context: OwnerContext; wallet: string; plan: Pl
     installName: rac.installName,
     allowance: planSummary(plan),
     failed,
-    warnings: checked.warnings,
-    worstCase: worstCase(plan)
+    warnings: checked.warnings
   };
 }
 

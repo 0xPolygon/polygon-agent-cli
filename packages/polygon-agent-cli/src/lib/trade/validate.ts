@@ -2,8 +2,9 @@
 // transfer of the quoted amount of the source token to the intent's deposit
 // address, on the source chain; the trade must belong to and deliver to the
 // wallet, with no destination call; and the minimum output must honour the
-// slippage asked for. Anything else is refused (upstream_invalid_quote) in
-// both modes: the deposit is the only thing the wallet signs.
+// slippage asked for (or, for an exact-output buy, be the amount asked for).
+// Anything else is refused (upstream_invalid_quote) in both modes: the deposit
+// is the only thing the wallet signs.
 //
 // What happens after the deposit (the routes Trails runs) can't be checked
 // locally; that part is trust in Trails.
@@ -94,6 +95,8 @@ export function validateDeposit(params: {
   destinationToken: string;
   amount: bigint;
   slippage: number;
+  // An exact-output buy: the amount to receive. `amount` is then the quoted input.
+  exactOutput?: bigint;
 }): void {
   const { intent, walletAddress } = params;
   if (!intent.intentId || !/^[\w-]+$/.test(intent.intentId)) throw invalid('bad intent id');
@@ -109,22 +112,39 @@ export function validateDeposit(params: {
   ) {
     throw invalid('the output would be used in a contract call');
   }
-  if (
-    request.originTokenAmount === undefined ||
-    BigInt(request.originTokenAmount) !== params.amount
-  ) {
-    throw invalid('the quoted amount differs from the request');
-  }
-  if (request.tradeType !== undefined && request.tradeType !== 'EXACT_INPUT') {
-    throw invalid('not an exact-input trade');
-  }
-  // The minimum output may sit below the expected output by at most the
-  // slippage (plus 0.01% for Trails' rounding).
   const expected = BigInt(intent.quote?.toAmount ?? 0);
   const minimum = BigInt(intent.quote?.toAmountMin ?? 0);
-  const bps = BigInt(Math.ceil(params.slippage * 10_000)) + 1n;
-  if (expected <= 0n || minimum <= 0n || minimum * 10_000n < expected * (10_000n - bps)) {
-    throw invalid('the minimum output is below the slippage asked for');
+  if (params.exactOutput !== undefined) {
+    // Trails puts the slippage on the output: the minimum is what was asked.
+    if (request.tradeType !== 'EXACT_OUTPUT') throw invalid('not an exact-output trade');
+    if (
+      request.destinationTokenAmount === undefined ||
+      BigInt(request.destinationTokenAmount) !== params.exactOutput
+    ) {
+      throw invalid('the quoted amount differs from the request');
+    }
+    if (minimum < params.exactOutput || expected < minimum) {
+      throw invalid('the minimum output is below the amount asked for');
+    }
+    if (params.amount <= 0n || BigInt(intent.quote?.fromAmount ?? 0) !== params.amount) {
+      throw invalid('no input amount');
+    }
+  } else {
+    if (
+      request.originTokenAmount === undefined ||
+      BigInt(request.originTokenAmount) !== params.amount
+    ) {
+      throw invalid('the quoted amount differs from the request');
+    }
+    if (request.tradeType !== undefined && request.tradeType !== 'EXACT_INPUT') {
+      throw invalid('not an exact-input trade');
+    }
+    // The minimum output may sit below the expected output by at most the
+    // slippage (plus 0.01% for Trails' rounding).
+    const bps = BigInt(Math.ceil(params.slippage * 10_000)) + 1n;
+    if (expected <= 0n || minimum <= 0n || minimum * 10_000n < expected * (10_000n - bps)) {
+      throw invalid('the minimum output is below the slippage asked for');
+    }
   }
   if (intent.originChainId !== params.originChainId) throw invalid('wrong source chain');
   if (intent.destinationChainId !== params.destinationChainId) {

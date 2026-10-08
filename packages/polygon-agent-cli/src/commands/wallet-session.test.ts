@@ -381,7 +381,7 @@ describe('connect', () => {
       email: 'owner@example.com'
     });
     expect(loadPending(wallet)).toBeNull();
-    expect(String(out.worstCase)).toContain('$500');
+    expect(out).not.toHaveProperty('worstCase');
   });
 
   it('status before the first confirm resumes the request instead of starting another', async () => {

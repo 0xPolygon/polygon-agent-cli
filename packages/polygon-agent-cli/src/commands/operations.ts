@@ -851,6 +851,7 @@ interface SwapArgs {
   to?: string;
   amount?: string;
   'amount-usd'?: number;
+  'to-amount'?: string;
   slippage?: number;
   'to-chain'?: string;
   intent?: string;
@@ -943,6 +944,11 @@ export const swapCommand: CommandModule<object, SwapArgs> = {
           coerce: fileCoerce
         })
         .option('amount-usd', { type: 'number', describe: 'Amount to sell, in USD' })
+        .option('to-amount', {
+          type: 'string',
+          describe: 'Amount of --to to receive (buy exactly this much)',
+          coerce: fileCoerce
+        })
         .option('slippage', { type: 'number', describe: 'Slippage tolerance (default 0.005)' })
         .option('to-chain', { type: 'string', describe: 'Destination chain (bridges)' })
         .option('intent', {
@@ -977,6 +983,7 @@ export const swapCommand: CommandModule<object, SwapArgs> = {
       let trade: TradeRecord;
       let warnings: string[] = [];
       let highFee = false;
+      let paidWithHolding = false;
       if (argv.intent) {
         trade = requireTrade(argv.intent);
       } else {
@@ -988,12 +995,14 @@ export const swapCommand: CommandModule<object, SwapArgs> = {
             message: 'Give the token to buy with --to.'
           });
         }
-        ({ trade, warnings, highFee } = await quoteSwap({
+        ({ trade, warnings, highFee, paidWithHolding } = await quoteSwap({
           walletName: argv.wallet || 'main',
           from: argv.from,
           to,
           amount: argv.amount,
           amountUsd: argv['amount-usd'],
+          toAmount: argv['to-amount'],
+          payWithHoldings: true,
           chain: argv.chain,
           toChain: argv['to-chain'],
           slippage: argv.slippage,
@@ -1045,12 +1054,21 @@ export const swapCommand: CommandModule<object, SwapArgs> = {
         return;
       }
 
-      // A costly quote is never executed unseen: the user accepts it by its
-      // intent (as auto trades never execute one at all).
-      if (highFee) {
+      // A costly quote, one paying with a holding the user didn't name, or an
+      // exact-output buy (it deposits what Trails asks) is never executed
+      // unseen: the user accepts it by its intent (auto trades never execute a
+      // costly one, and pay only with stablecoins).
+      const exactOutput = !argv.intent && argv['to-amount'] !== undefined;
+      if (highFee || paidWithHolding || exactOutput) {
+        const reasons = [...warnings];
+        if (exactOutput) {
+          reasons.push(
+            `Buying ${argv['to-amount']} ${trade.destination.symbol} costs ${formatUnits(trade.origin.amount, trade.origin.decimals)} ${trade.origin.symbol}, and a buy by the amount received runs only once its quote is accepted.`
+          );
+        }
         throw new CliError({
           code: 'confirmation_required',
-          message: `Not executed: ${warnings.join(' ')} Nothing was sent.`,
+          message: `Not executed: ${reasons.join(' ')} Nothing was sent.`,
           hint: 'Show the user this quote; if they accept it, run the command before it expires.',
           command: `polygon-agent swap --intent ${trade.intentId} --broadcast`,
           details: { ...describeTrade(trade), warnings }
