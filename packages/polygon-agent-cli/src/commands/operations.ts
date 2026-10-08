@@ -1944,36 +1944,39 @@ export const withdrawCommand: CommandModule = {
 // --- x402-pay ---
 export const x402PayCommand: CommandModule = {
   command: 'x402-pay',
-  describe: 'Call x402-protected resource (auto-pays 402)',
+  describe: 'Call x402-protected resource (preview by default)',
   builder: (yargs) =>
-    withWalletAndChain(yargs)
-      .option('url', {
-        type: 'string',
-        demandOption: true,
-        describe: 'URL to call',
-        coerce: fileCoerce
-      })
-      .option('method', {
-        type: 'string',
-        default: 'GET',
-        describe: 'HTTP method'
-      })
-      .option('body', {
-        type: 'string',
-        describe: 'Request body (JSON)',
-        coerce: fileCoerce
-      })
-      .option('header', {
-        type: 'string',
-        array: true,
-        describe: 'Additional header (Key:Value), repeatable'
-      }),
+    withWriteFlags(
+      withWalletAndChain(yargs)
+        .option('url', {
+          type: 'string',
+          demandOption: true,
+          describe: 'URL to call',
+          coerce: fileCoerce
+        })
+        .option('method', {
+          type: 'string',
+          default: 'GET',
+          describe: 'HTTP method'
+        })
+        .option('body', {
+          type: 'string',
+          describe: 'Request body (JSON)',
+          coerce: fileCoerce
+        })
+        .option('header', {
+          type: 'string',
+          array: true,
+          describe: 'Additional header (Key:Value), repeatable'
+        })
+    ),
   handler: async (argv) => {
     const walletName = (argv.wallet as string) || 'main';
     const url = argv.url as string;
     const method = ((argv.method as string) || 'GET').toUpperCase();
     const body = argv.body as string | undefined;
     const headerArgs = (argv.header as string[]) || [];
+    const broadcast = resolveBroadcast(argv as { broadcast?: boolean; dryRun?: boolean });
 
     try {
       const [session, builderConfig] = await Promise.all([
@@ -2086,13 +2089,42 @@ export const x402PayCommand: CommandModule = {
         const amountUnits = BigInt(Math.round(amountUsdc * 1_000_000));
         const transferData =
           '0xa9059cbb' + pad(payRecipient) + pad('0x' + amountUnits.toString(16));
+        const transactions = [{ to: usdcContract, value: 0n, data: transferData }];
+
+        if (!broadcast) {
+          console.log(
+            JSON.stringify(
+              {
+                ok: true,
+                dryRun: true,
+                walletName,
+                walletAddress: session.walletAddress,
+                url,
+                method,
+                payment: {
+                  format: 'bazaar',
+                  chain: payChain,
+                  chainId: payChainId,
+                  recipient: payRecipient,
+                  amount: amountUsdc,
+                  asset: usdcContract
+                },
+                transactions,
+                note: 'Payment not sent. Re-run with --broadcast or set `agent mode auto` to execute.'
+              },
+              bigintReplacer,
+              2
+            )
+          );
+          return;
+        }
 
         process.stderr.write(`Sending ${amountUsdc} USDC to ${payRecipient} on ${payChain}...\n`);
         const fundResult = await runDappClientTx({
           walletName,
           chainId: payChainId,
-          transactions: [{ to: usdcContract, value: 0n, data: transferData }],
-          broadcast: true
+          transactions,
+          broadcast
         });
         const payTxHash = fundResult.txHash!;
         process.stderr.write(`Paid via tx: ${payTxHash}\n`);
@@ -2220,6 +2252,35 @@ export const x402PayCommand: CommandModule = {
       const pad = (hex: string, n = 64) => String(hex).replace(/^0x/, '').padStart(n, '0');
       const transferData =
         '0xa9059cbb' + pad(eoaAccount.address) + pad('0x' + BigInt(amount).toString(16));
+      const transactions = [{ to: asset, value: 0n, data: transferData }];
+
+      if (!broadcast) {
+        console.log(
+          JSON.stringify(
+            {
+              ok: true,
+              dryRun: true,
+              walletName,
+              walletAddress: session.walletAddress,
+              signerAddress: eoaAccount.address,
+              url,
+              method,
+              payment: {
+                format: 'x402',
+                amount,
+                asset,
+                network: paymentNetwork,
+                chainId: resolvedNetwork.chainId
+              },
+              transactions,
+              note: 'Payment not sent. Re-run with --broadcast or set `agent mode auto` to execute.'
+            },
+            bigintReplacer,
+            2
+          )
+        );
+        return;
+      }
 
       process.stderr.write(
         `Funding EOA ${eoaAccount.address} with ${amount} units of ${asset}...\n`
@@ -2227,8 +2288,8 @@ export const x402PayCommand: CommandModule = {
       const fundResult = await runDappClientTx({
         walletName,
         chainId: resolvedNetwork.chainId,
-        transactions: [{ to: asset, value: 0n, data: transferData }],
-        broadcast: true,
+        transactions,
+        broadcast,
         preferNativeFee: true
       });
       process.stderr.write(`Funded via tx: ${fundResult.txHash}\n`);

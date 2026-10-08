@@ -152,7 +152,7 @@ agent swap --from <SYM> --to <SYM> --amount <num> [--to-chain <chain>] [--slippa
 agent deposit --asset <SYM> --amount <num> [--protocol aave|morpho] [--broadcast]
 agent withdraw --position <addr> --amount <num|max> [--chain <chain>] [--broadcast]
 agent fund [--wallet <n>]
-agent x402-pay --url <url> --wallet <n> [--chain <chain>] [--method GET] [--body <str>] [--header Key:Value]
+agent x402-pay --url <url> --wallet <n> [--chain <chain>] [--method GET] [--body <str>] [--header Key:Value] [--broadcast] [--dry-run]
 ```
 
 Every write command accepts `--broadcast` (execute) and `--dry-run` (force preview); with neither, the persisted `agent mode` decides.
@@ -180,7 +180,7 @@ agent feedback --agent-id <id> --value <score> [--tag1 <t>] [--tag2 <t>] [--endp
 - **`deposit`** — picks highest-TVL pool via Trails `getEarnPools` and deposits directly. Full deposit reference: https://agentconnect.polygon.technology/polygon-defi/SKILL.md
 - **Gas reserve** — when using `deposit` or any command that spends tokens, always reserve at least 0.1 USDC or 0.1 POL in the wallet for gas. Never attempt to spend the full balance. The `deposit` command enforces a 0.1 reserve automatically, but the agent must apply the same rule when constructing amounts for `send`, `swap`, or direct contract calls.
 - **`withdraw`** — `--position` = aToken or ERC-4626 vault; `--amount` = `max` or underlying units (Aave / vault). Dry-run JSON includes `poolAddress` / `vault`.
-- **`x402-pay`** — probes endpoint for 402, the wallet funds a builder EOA with the exact token amount, the EOA signs the EIP-3009 payment. Chain auto-detected from the 402 response
+- **`x402-pay`** — probes the endpoint for 402 and previews the selected payment by default. In auto mode or with `--broadcast`, the wallet funds a builder EOA with the exact token amount and completes the payment. Chain auto-detected from the 402 response
 - **`call`** — submit arbitrary pre-encoded calldata: `agent call --to <addr> --data 0x... [--value <amt>] [--prefer-native-fee] [--broadcast]`. The wallet can call any contract (no permission scoping in the V3 model)
 - **`send-native --direct`** — bypasses ValueForwarder contract for direct EOA transfer
 - **No permission scoping** — the V3 embedded wallet can call any contract and spend any amount it holds; there are no per-contract whitelists or spend limits. Guard spending in agent logic, not at the wallet layer.
