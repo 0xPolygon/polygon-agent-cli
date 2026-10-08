@@ -6,7 +6,7 @@
 
 import type { CommandModule } from 'yargs';
 
-import type { PositionStatus } from '../lib/polymarket.ts';
+import type { PositionStatus } from '../lib/polymarket/gamma.ts';
 
 import { bigintReplacer, CliError, errorJson, failureJson } from '../lib/errors.ts';
 import { resolveBroadcast, withWriteFlags } from '../lib/mode.ts';
@@ -31,7 +31,7 @@ import {
   POSITION_STATUSES,
   assertTradable,
   PolymarketError
-} from '../lib/polymarket.ts';
+} from '../lib/polymarket/gamma.ts';
 import {
   listWallets,
   loadOmsWalletPointer,

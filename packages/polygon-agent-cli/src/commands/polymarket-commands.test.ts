@@ -4,7 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type * as PolymarketLib from '../lib/polymarket.ts';
+import type * as PolymarketLib from '../lib/polymarket/gamma.ts';
 
 const mocks = vi.hoisted(() => ({
   getMarkets: vi.fn(),
@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   loadPolymarketKey: vi.fn()
 }));
 
-vi.mock('../lib/polymarket.ts', async (importOriginal) => ({
+vi.mock('../lib/polymarket/gamma.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof PolymarketLib>()),
   getMarkets: mocks.getMarkets,
   getMarket: mocks.getMarket,
@@ -31,7 +31,7 @@ vi.mock('../lib/storage.ts', () => ({
 vi.mock('../lib/tx-dispatch.ts', () => ({ runTx: vi.fn() }));
 
 const { polymarketCommand } = await import('./polymarket.ts');
-const lib = await import('../lib/polymarket.ts');
+const lib = await import('../lib/polymarket/gamma.ts');
 
 const PK = `0x${'11'.repeat(32)}`;
 
