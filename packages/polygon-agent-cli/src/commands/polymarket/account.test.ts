@@ -20,6 +20,18 @@ const m = vi.hoisted(() => ({
   loadPolymarketKey: vi.fn()
 }));
 
+// A Paginated stand-in: an async iterable of pages.
+const pages = (...items: unknown[][]) => ({
+  async *[Symbol.asyncIterator]() {
+    for (const [i, p] of items.entries())
+      yield {
+        items: p,
+        hasMore: i < items.length - 1,
+        nextCursor: i < items.length - 1 ? `c${i}` : undefined
+      };
+  }
+});
+
 const client = {
   fetchTradingApprovalsState: async () => ({ isFullyApproved: true }),
   listOpenOrders: () => ({ firstPage: async () => ({ items: [{}, {}] }) }),
@@ -109,11 +121,7 @@ beforeEach(async () => {
   m.pusdBalance.mockResolvedValue(2_500_000n);
   m.loadPolymarketKey.mockRejectedValue(new Error('none'));
   m.getPositions.mockResolvedValue({ positions: [{ a: 1 }], nextCursor: 'p2' });
-  m.listPositions.mockReturnValue({
-    firstPage: async () => ({
-      items: [{ conditionId: COND, title: 'Q', currentValue: '1.2' }]
-    })
-  });
+  m.listPositions.mockReturnValue(pages([{ conditionId: COND, title: 'Q', currentValue: '1.2' }]));
   m.redeemPositions.mockResolvedValue({ wait: async () => ({ transactionHash: '0xTX' }) });
 });
 
@@ -176,6 +184,22 @@ describe('status', () => {
   });
 });
 
+describe('status paging', () => {
+  it('sums redeemable positions across pages and flags truncation', async () => {
+    m.account = ACCOUNT;
+    m.listPositions.mockReturnValue(
+      pages([{ conditionId: COND, currentValue: '1' }], [{ conditionId: COND, currentValue: '2' }])
+    );
+    const out = await run(['status']);
+    expect(out.redeemable).toEqual({ count: 2, valueUsd: '3' });
+    const big = (n: number) =>
+      Array.from({ length: n }, () => ({ conditionId: COND, currentValue: '1' }));
+    m.listPositions.mockReturnValue(pages(big(1500), big(1500)));
+    const capped = await run(['status']);
+    expect(capped.redeemable).toEqual({ count: 2000, valueUsd: '2000', truncated: true });
+  });
+});
+
 describe('positions', () => {
   it('passes status, limit and cursor through and prints them back', async () => {
     m.account = ACCOUNT;
@@ -218,14 +242,12 @@ describe('positions', () => {
 describe('redeem', () => {
   beforeEach(() => {
     m.account = ACCOUNT;
-    m.listPositions.mockReturnValue({
-      firstPage: async () => ({
-        items: [
-          { conditionId: COND, title: 'Q', currentValue: '1.2' },
-          { conditionId: COND, title: 'Q', currentValue: '0.3' }
-        ]
-      })
-    });
+    m.listPositions.mockReturnValue(
+      pages([
+        { conditionId: COND, title: 'Q', currentValue: '1.2' },
+        { conditionId: COND, title: 'Q', currentValue: '0.3' }
+      ])
+    );
   });
 
   it('dry run lists de-duplicated positions without redeeming', async () => {
@@ -247,14 +269,12 @@ describe('redeem', () => {
 
   it('one failure does not stop the others', async () => {
     const other = '0x' + 'cd'.repeat(32);
-    m.listPositions.mockReturnValue({
-      firstPage: async () => ({
-        items: [
-          { conditionId: COND, currentValue: '1' },
-          { conditionId: other, currentValue: '1' }
-        ]
-      })
-    });
+    m.listPositions.mockReturnValue(
+      pages([
+        { conditionId: COND, currentValue: '1' },
+        { conditionId: other, currentValue: '1' }
+      ])
+    );
     m.redeemPositions
       .mockRejectedValueOnce(new Error('boom'))
       .mockResolvedValueOnce({ wait: async () => ({ transactionHash: '0xOK' }) });
@@ -262,6 +282,37 @@ describe('redeem', () => {
     expect(out.redeemed).toEqual([{ conditionId: other, txHash: '0xOK' }]);
     expect(out.failed).toHaveLength(1);
     expect(out.failed[0].conditionId).toBe(COND);
+  });
+
+  it('reads every page and de-duplicates across them', async () => {
+    const other = '0x' + 'cd'.repeat(32);
+    m.listPositions.mockReturnValue(
+      pages(
+        [{ conditionId: COND, currentValue: '1' }],
+        [
+          { conditionId: COND, currentValue: '2' },
+          { conditionId: other, currentValue: '4' }
+        ]
+      )
+    );
+    const out = await run(['redeem', '--all', '--dry-run']);
+    expect(out.positions).toEqual([
+      { conditionId: COND, title: null, valueUsd: '3' },
+      { conditionId: other, title: null, valueUsd: '4' }
+    ]);
+    expect(out.truncated).toBeUndefined();
+  });
+
+  it('flags truncation when the row cap is hit with pages left', async () => {
+    const rows = (from: number) =>
+      Array.from({ length: 1000 }, (_, i) => ({
+        conditionId: '0x' + (from + i).toString(16).padStart(64, '0'),
+        currentValue: '1'
+      }));
+    m.listPositions.mockReturnValue(pages(rows(0), rows(1000), rows(2000)));
+    const out = await run(['redeem', '--all', '--dry-run']);
+    expect(out.count).toBe(2000);
+    expect(out.truncated).toBe(true);
   });
 
   it('needs a market or --all', async () => {

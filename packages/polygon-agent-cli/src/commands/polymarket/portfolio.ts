@@ -16,7 +16,7 @@ import { assertCanTrade, checkRegion } from '../../lib/polymarket/region.ts';
 import { resolveOutcome } from '../../lib/polymarket/resolve.ts';
 import { mapSdkError } from '../../lib/polymarket/sdk.ts';
 import { loadPolymarketKey } from '../../lib/storage.ts';
-import { fail, ok, walletOption } from './shared.ts';
+import { collectRedeemable, fail, ok, walletOption } from './shared.ts';
 
 type PositionsArgs = { status?: PositionStatus; limit?: number; cursor?: string; wallet: string };
 
@@ -59,10 +59,10 @@ type RedeemArgs = {
 };
 type Redeemable = { conditionId: string; title: string | null; valueUsd: string };
 
-async function redeemablePositions(client: {
-  listPositions(req: object): { firstPage(): Promise<{ items: unknown[] }> };
-}): Promise<Redeemable[]> {
-  const page = await client.listPositions({ status: 'REDEEMABLE', pageSize: 500 }).firstPage();
+async function redeemablePositions(
+  client: Parameters<typeof collectRedeemable>[0]
+): Promise<{ positions: Redeemable[]; truncated: boolean }> {
+  const page = await collectRedeemable(client);
   const byCondition = new Map<string, Redeemable & { total: number }>();
   for (const p of page.items as Array<{
     conditionId: string;
@@ -78,11 +78,14 @@ async function redeemablePositions(client: {
       total
     });
   }
-  return [...byCondition.values()].map(({ conditionId, title, valueUsd }) => ({
-    conditionId,
-    title,
-    valueUsd
-  }));
+  return {
+    positions: [...byCondition.values()].map(({ conditionId, title, valueUsd }) => ({
+      conditionId,
+      title,
+      valueUsd
+    })),
+    truncated: page.truncated
+  };
 }
 
 async function handleRedeem(argv: RedeemArgs): Promise<void> {
@@ -98,9 +101,10 @@ async function handleRedeem(argv: RedeemArgs): Promise<void> {
     requireAccount(argv.wallet);
     assertCanTrade(await checkRegion());
     const client = await getTradingClient(argv.wallet);
-    const redeemable = await redeemablePositions(client).catch((e) => {
+    const { positions: redeemable, truncated } = await redeemablePositions(client).catch((e) => {
       throw mapSdkError(e);
     });
+    const truncatedFlag = argv.all && truncated ? { truncated: true } : {};
     let targets: Redeemable[];
     if (argv.all) {
       targets = redeemable;
@@ -112,7 +116,7 @@ async function handleRedeem(argv: RedeemArgs): Promise<void> {
       ];
     }
     if (!broadcast) {
-      ok({ dryRun: true, count: targets.length, positions: targets });
+      ok({ dryRun: true, count: targets.length, positions: targets, ...truncatedFlag });
       return;
     }
     const redeemed: Array<{ conditionId: string; txHash: string | null }> = [];
@@ -126,7 +130,7 @@ async function handleRedeem(argv: RedeemArgs): Promise<void> {
         failed.push({ conditionId: t.conditionId, error: (mapSdkError(err) as Error).message });
       }
     }
-    ok({ redeemed, failed });
+    ok({ redeemed, failed, ...truncatedFlag });
   } catch (err) {
     fail(err, { stack: true });
   }
