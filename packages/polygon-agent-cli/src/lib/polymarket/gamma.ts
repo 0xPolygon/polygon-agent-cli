@@ -2,19 +2,8 @@ import type { PolymarketErrorCode } from '../errors.ts';
 
 import { CliError } from '../errors.ts';
 
-// Polymarket integration library — CLOB V2
-// Covers: Gamma API (market discovery), CLOB V2 API (trading via @polymarket/clob-client-v2), on-chain ops
-//
-// Architecture: OMS smart wallet → Polymarket proxy wallet → CLOB
-// - OMS smart wallet funds the Polymarket proxy wallet (USDC.e transfer)
-// - Proxy wallet wraps USDC.e → pUSD via CollateralOnramp before trading
-// - EOA calls proxy.execute([approve, wrap]) to run on-chain ops FROM the proxy wallet
-// - CLOB orders use maker=proxyWallet, signer=EOA, signatureType=POLY_PROXY
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyWalletClient = any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyPublicClient = any;
+// Polymarket read helpers: Gamma API (market discovery), Data API v2 (positions), the
+// PolymarketError type, shared constants and the legacy proxy wallet address.
 
 export interface Market {
   id: string;
@@ -32,13 +21,6 @@ export interface Market {
   closed: boolean;
   acceptingOrders: boolean;
   endDate: string | null;
-}
-
-export interface ProxyTx {
-  typeCode?: number;
-  to: string;
-  value?: string | number | bigint;
-  data: string;
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -68,51 +50,6 @@ export const PROXY_WALLET_FACTORY = '0xaB45c5A4B0c941a2F231C04C3f49182e1A254052'
 export async function getPolymarketProxyWalletAddress(eoaAddress: string): Promise<string> {
   const { getProxyWalletAddress } = await import('@polymarket/sdk');
   return getProxyWalletAddress(PROXY_WALLET_FACTORY, eoaAddress);
-}
-
-// Proxy wallet ABI: proxy(Transaction[]) — selector 0x34ee9791
-const PROXY_EXECUTE_ABI = [
-  {
-    name: 'proxy',
-    type: 'function',
-    inputs: [
-      {
-        name: 'transactions',
-        type: 'tuple[]',
-        components: [
-          { name: 'typeCode', type: 'uint8' },
-          { name: 'to', type: 'address' },
-          { name: 'value', type: 'uint256' },
-          { name: 'data', type: 'bytes' }
-        ]
-      }
-    ],
-    outputs: [{ name: '', type: 'bytes[]' }]
-  }
-];
-
-// Execute a batch of transactions through the Polymarket proxy wallet (EOA is owner/caller)
-export async function executeViaProxyWallet(
-  walletClient: AnyWalletClient,
-  publicClient: AnyPublicClient,
-  proxyWalletAddress: string,
-  txs: ProxyTx[]
-): Promise<string> {
-  const { encodeFunctionData } = await import('viem');
-  const transactions = txs.map((t) => ({
-    typeCode: Number(t.typeCode ?? 1),
-    to: t.to,
-    value: BigInt(t.value || 0),
-    data: t.data
-  }));
-  const data = encodeFunctionData({
-    abi: PROXY_EXECUTE_ABI,
-    functionName: 'proxy',
-    args: [transactions]
-  });
-  const hash = await walletClient.sendTransaction({ to: PROXY_WALLET_FACTORY, data, value: 0n });
-  await publicClient.waitForTransactionReceipt({ hash });
-  return hash;
 }
 
 // ─── Errors ─────────────────────────────────────────────────────────────────
@@ -258,118 +195,6 @@ export function assertTradable(market: Market): void {
       `Market ${market.conditionId} is not accepting orders${market.closed ? ' (closed)' : ''}.`
     );
   }
-}
-
-// ─── CLOB API — public endpoints ─────────────────────────────────────────────
-
-export async function getClobPrice(tokenId: string, side = 'BUY'): Promise<number> {
-  const res = await fetch(`${CLOB_URL}/price?token_id=${tokenId}&side=${side}`);
-  if (!res.ok) throw new Error(`CLOB price error: ${res.status} ${await res.text()}`);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const data: any = await res.json();
-  return Number(data.price);
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function getOrderBook(tokenId: string): Promise<any> {
-  const res = await fetch(`${CLOB_URL}/book?token_id=${tokenId}`);
-  if (!res.ok) throw new Error(`CLOB book error: ${res.status} ${await res.text()}`);
-  return res.json();
-}
-
-// ─── CLOB V2 API — @polymarket/clob-client-v2 ──────────────────────────────
-
-async function getClobClient(
-  privateKey: string,
-  proxyWalletAddress?: string
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-): Promise<{ client: any; creds: any; address: string }> {
-  const { Wallet } = await import('ethers5');
-  const { ClobClient, SignatureTypeV2 } = await import('@polymarket/clob-client-v2');
-  const signer = new Wallet(privateKey);
-  const chainId = 137;
-  const anonClient = new ClobClient({ host: CLOB_URL, chain: chainId, signer });
-  const creds = await anonClient.createOrDeriveApiKey();
-  const signatureType = proxyWalletAddress ? SignatureTypeV2.POLY_PROXY : SignatureTypeV2.EOA;
-  const client = new ClobClient({
-    host: CLOB_URL,
-    chain: chainId,
-    signer,
-    creds,
-    signatureType,
-    funderAddress: proxyWalletAddress
-  });
-  return { client, creds, address: await signer.getAddress() };
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function getOpenOrders(privateKey: string): Promise<any> {
-  const { client } = await getClobClient(privateKey);
-  return client.getOpenOrders();
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function cancelOrder(orderId: string, privateKey: string): Promise<any> {
-  const { client } = await getClobClient(privateKey);
-  return client.cancelOrder({ orderID: orderId });
-}
-
-// ─── CLOB V2 API — order creation ───────────────────────────────────────────
-
-export async function createAndPostOrder({
-  tokenId,
-  side,
-  size,
-  price,
-  orderType = 'GTC',
-  privateKey,
-  proxyWalletAddress
-}: {
-  tokenId: string;
-  side: 'BUY' | 'SELL';
-  size: number;
-  price: number;
-  orderType?: string;
-  privateKey: string;
-  proxyWalletAddress?: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-}): Promise<any> {
-  const { client } = await getClobClient(privateKey, proxyWalletAddress);
-  // V2: client auto-fetches tickSize and negRisk from getClobMarketInfo
-  const order = await client.createOrder({
-    tokenID: tokenId,
-    price,
-    size,
-    side
-  });
-  return client.postOrder(order, orderType);
-}
-
-export async function createAndPostMarketOrder({
-  tokenId,
-  side,
-  amount,
-  orderType = 'FOK',
-  privateKey,
-  proxyWalletAddress
-}: {
-  tokenId: string;
-  side: 'BUY' | 'SELL';
-  amount: number;
-  orderType?: string;
-  privateKey: string;
-  proxyWalletAddress?: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-}): Promise<any> {
-  const { client } = await getClobClient(privateKey, proxyWalletAddress);
-  // V2: no feeRateBps — fees determined by protocol at match time
-  const order = await client.createMarketOrder({
-    tokenID: tokenId,
-    side,
-    amount,
-    orderType
-  });
-  return client.postOrder(order, orderType);
 }
 
 // ─── Data API v2 — positions ─────────────────────────────────────────────────
