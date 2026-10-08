@@ -123,3 +123,36 @@ describe('pusdBalance', () => {
     expect(await account.pusdBalance('main')).toBe(2_500_000n);
   });
 });
+
+describe('importLegacyKey', () => {
+  const pk = `0x${'ab'.repeat(32)}`;
+
+  it('refuses to overwrite an existing account and writes nothing', async () => {
+    await account.setupAccount('main');
+    const keyFile = path.join(account.accountDir('main'), 'key.json');
+    const before = fs.readFileSync(keyFile);
+    await expect(account.importLegacyKey('main', pk)).rejects.toMatchObject({
+      code: 'invalid_input'
+    });
+    expect(fs.readFileSync(keyFile).equals(before)).toBe(true);
+  });
+
+  it('leaves no builder or clob credentials after a fresh import', async () => {
+    fs.mkdirSync(account.accountDir('legacy'), { recursive: true });
+    fs.writeFileSync(path.join(account.accountDir('legacy'), 'builder.json'), '{}');
+    fs.writeFileSync(path.join(account.accountDir('legacy'), 'clob.json'), '{}');
+    await account.importLegacyKey('legacy', pk);
+    const files = fs.readdirSync(account.accountDir('legacy')).sort();
+    expect(files).toEqual(['account.json', 'key.json']);
+  });
+});
+
+describe('setupAccount with a missing key', () => {
+  it('fails with not_set_up and does not generate a new key', async () => {
+    await account.setupAccount('main');
+    const dir = account.accountDir('main');
+    fs.rmSync(path.join(dir, 'key.json'));
+    await expect(account.setupAccount('main')).rejects.toMatchObject({ code: 'not_set_up' });
+    expect(fs.existsSync(path.join(dir, 'key.json'))).toBe(false);
+  });
+});
