@@ -8,6 +8,8 @@ description: >-
 
 # Set up the Polygon OMS Agent Kit
 
+> **QA build:** installs the `muse-qa` snapshot of the CLI (npm dist-tag), for testing before release. Don't run `polygon-agent update` during QA: it would compare against the released version.
+
 **For the assistant.** Follow these steps in order. Each one is safe to re-run. Tell the user what you're doing in plain words as you go, and never paste raw JSON to them.
 
 **What this sets up (tell the user in a sentence or two):** a Polygon OMS wallet that you, their assistant, can use within an allowance they approve by email code. You can check prices, watch them, buy, sell, swap and bridge tokens, and pay for x402 services. Anything beyond the allowance needs a new code from them. The wallet stays theirs. Each code signs the CLI in as them for a moment, just long enough to make that one change (approving an allowance, a withdrawal…), then signs out again. Only that limited key is kept, never their sign-in.
@@ -82,7 +84,7 @@ If it fails, stop and tell the user why. From here on, run `npm` and `node` with
   set -e
   case "${ROOT:?Set ROOT to the install folder first}" in /absolute/path/*) echo "Set ROOT to the real install folder"; exit 1 ;; esac
   mkdir -p "$ROOT"
-  PATH="$ROOT/node/bin:$PATH" npm install --ignore-scripts --prefix "$ROOT/cli" @polygonlabs/agent-cli@latest
+  PATH="$ROOT/node/bin:$PATH" npm install --ignore-scripts --prefix "$ROOT/cli" @polygonlabs/agent-cli@muse-qa
   PATH="$ROOT/node/bin:$PATH" node "$ROOT/cli/node_modules/@polygonlabs/agent-cli/dist/index.js" \
     workspace init --root "$ROOT" --skills-dir "<skills folder>" --name "<install name>"
 )

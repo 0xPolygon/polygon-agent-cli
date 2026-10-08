@@ -149,7 +149,7 @@ export function renderSkill(params: { markdown: string; wrapper: string }): stri
   const note =
     `> **This install's CLI:** \`${params.wrapper}\`. Run it wherever this skill says ` +
     '`polygon-agent` or `agent`. If that file is missing, the workspace was reset: ' +
-    'set it up again with https://agents.polygon.technology/setup.md.\n\n';
+    'set it up again with https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/upgrade-and-muse-qa/skills/setup.md.\n\n';
   // A callback, so `$&` and the like in the path aren't replacement patterns.
   const markdown = params.markdown.replace(
     POLYGON_AGENT_LINE,

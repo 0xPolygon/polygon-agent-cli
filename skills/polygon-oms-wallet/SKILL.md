@@ -18,7 +18,7 @@ POLYGON_AGENT=<workspace>/.polygon-agent/bin/polygon-agent
 ```
 
 - Every command below is `"$POLYGON_AGENT" …`: run it by that absolute path (quoted), since nothing is on `PATH`. Commands in the CLI's own output (`next`, `command`) say `polygon-agent …`; run those by the same path.
-- If the line above still says `<workspace>`, the CLI didn't install this copy. The wrapper is at `<workspace>/.polygon-agent/bin/polygon-agent`; https://agents.polygon.technology/setup.md lists the workspace folder for each assistant. If the wrapper is missing, the workspace was reset: set it up again with setup.md.
+- If the line above still says `<workspace>`, the CLI didn't install this copy. The wrapper is at `<workspace>/.polygon-agent/bin/polygon-agent`; https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/upgrade-and-muse-qa/skills/setup.md lists the workspace folder for each assistant. If the wrapper is missing, the workspace was reset: set it up again with setup.md.
 - Output is JSON: `{"ok": true, …}`, or `{"ok": false, "error", "code", "hint", "command"}`. On an error, tell the user what `error` means in plain words and follow `hint` and `command`. Check `--help` before assuming a flag.
 
 ## Start here, every time
@@ -105,7 +105,7 @@ Read the amount the way the user said it, and sell what the wallet actually hold
 "$POLYGON_AGENT" send-token --symbol USDC --to <address> --amount 5 --chain polygon --broadcast
 ```
 
-**Paid services (x402).** The service catalog and request formats are in https://agentconnect.polygon.technology/polygon-discovery/SKILL.md; read it before the first call. Always cap the price at what the catalog lists:
+**Paid services (x402).** The service catalog and request formats are in https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/upgrade-and-muse-qa/skills/polygon-discovery/SKILL.md; read it before the first call. Always cap the price at what the catalog lists:
 
 ```sh
 "$POLYGON_AGENT" x402-pay --url <url> --method POST --body '<json>' --max-usd 0.05 --broadcast
@@ -177,6 +177,6 @@ Some features need the owner's full sign-in, which this install never keeps, so 
 
 The reference skills cover every command and flag. They're written for the CLI's owner mode, so ignore their install and login steps.
 
-- Swaps, bridges and yield: https://agentconnect.polygon.technology/polygon-defi/SKILL.md
-- x402 services: https://agentconnect.polygon.technology/polygon-discovery/SKILL.md
-- All commands: https://agentconnect.polygon.technology/polygon-agent-cli/SKILL.md
+- Swaps, bridges and yield: https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/upgrade-and-muse-qa/skills/polygon-defi/SKILL.md
+- x402 services: https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/upgrade-and-muse-qa/skills/polygon-discovery/SKILL.md
+- All commands: https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/upgrade-and-muse-qa/skills/polygon-agent-cli/SKILL.md
