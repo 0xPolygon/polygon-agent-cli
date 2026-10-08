@@ -125,7 +125,11 @@ Each prints `code_sent` and what will be approved (the plan, or the withdrawal d
 
 `"$POLYGON_AGENT" wallet logout` removes this install's access without a code. Connecting again needs a new one.
 
-Some features need the owner's full sign-in, which this install never keeps, so no code unlocks them here (`owner_required`): yield deposits and withdrawals, Polymarket, ERC-8004 identity and `call`. Sending a native coin isn't possible either (`native_not_supported`). Tell the user, and don't look for a way around it.
+Some features need the owner's full sign-in, which this install never keeps, so no code unlocks them here (`owner_required`): yield deposits and withdrawals, ERC-8004 identity and `call`. Sending a native coin isn't possible either (`native_not_supported`). Tell the user, and don't look for a way around it.
+
+### Polymarket
+
+Polymarket works in session mode. `agent polymarket setup` and `deposit` run with the allowance: a deposit is a plain USDC transfer, so it counts against the allowance. The Polymarket wallet is controlled by this install's own trading key, so trades and withdrawals back to the OMS wallet are not limited by the allowance. See the Polymarket skill.
 
 ## Rules
 

@@ -234,6 +234,23 @@ agent feedback --agent-id <id> --value 4.5 --broadcast
 agent reviews --agent-id <id> [--include-revoked]
 ```
 
+### Polymarket
+
+```bash
+agent polymarket status                    # start here
+agent polymarket setup --broadcast         # create the account; no POL needed
+agent polymarket deposit 25 --broadcast    # USDC from the OMS wallet; minimum $2
+agent polymarket markets --search "election"
+agent polymarket buy <ref> <outcome> 5 --max-price 0.6 --broadcast
+agent polymarket sell <ref> <outcome> all --min-price 0.4 --broadcast
+agent polymarket redeem --all --broadcast
+agent polymarket withdraw all --broadcast  # back to the OMS wallet as USDC
+```
+
+Markets are named by conditionId, market slug, or event slug plus outcome name (`"Bob"`, `"Bob no"`). Write commands preview unless you pass `--broadcast`. See `skills/polygon-polymarket/SKILL.md` for the full guide.
+
+Polymarket commands run on Node 22 and 24. `@polymarket/client` declares Node 24 in `engines`, so `npm install` on Node 22 may print an `EBADENGINE` warning. It is safe to ignore.
+
 ### Smart Defaults
 
 | Default       | Value                  | Override             |

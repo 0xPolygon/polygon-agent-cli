@@ -49,7 +49,7 @@ agent wallet confirm --request <request> --code <code>
 
 - **What it covers:** a USD total over a period (30 days by default) in USDC, USDT, USDG, ETH/WETH, POL/WPOL and BTC (WBTC or cbBTC) on the chosen chains (default Polygon, Base, and chains already holding those tokens). Each token also has an on-chain limit worth the allowance.
 - **What works:** `balances`, `send`/`send-token` (ERC-20s), `swap` (including bridges), `x402-pay`, `price`, `watch`, `alerts`. Native coins (ETH, POL, BNB, AVAX) can't be spent; buys of ETH or POL deliver WETH or WPOL.
-- **What doesn't:** `send-native`, `deposit`, `withdraw` (yield), `call`, `polymarket` and ERC-8004 writes fail with `owner_required`.
+- **What doesn't:** `send-native`, `deposit`, `withdraw` (yield), `call` and ERC-8004 writes fail with `owner_required`.
 - **Owner requests** need a new code each time (same two steps, ending in `wallet confirm`): `wallet allowance set`, `wallet allowance renew`, `wallet withdraw`, `wallet access`.
 - **`agent wallet status`** is the place to start: connection, allowance used and left, holdings (and whether the allowance covers them), alerts, watches and the CLI version.
 - **Errors** in session mode carry `code`, `hint` and `command` (the next command to run), e.g. `not_connected`, `not_covered`, `allowance_exhausted`, `session_expired`, `owner_required`.
@@ -188,6 +188,21 @@ agent fund [--wallet <n>]
 agent x402-pay --url <url> --wallet <n> [--chain <chain>] [--method GET] [--body <str>] [--header Key:Value] [--max-usd <usd>] [--yes]
 ```
 
+### Polymarket
+```bash
+agent polymarket status                              # start here: setup, balance, region, redeemable
+agent polymarket setup [--broadcast]                 # create the account (no POL needed)
+agent polymarket deposit <usd> [--again] [--no-wait] [--broadcast]   # min $2; counts against a session allowance
+agent polymarket withdraw <usd|all> [--broadcast]    # pays the OMS wallet as USDC
+agent polymarket markets [--search <text>] [--limit <n>] [--cursor <c>]
+agent polymarket event <slug> | market <ref> | book <ref> <outcome> | history <ref> <outcome>
+agent polymarket buy <ref> <outcome> <usd> [--max-price <0-1>] [--price <0-1>] [--expires <min>] [--broadcast]
+agent polymarket sell <ref> <outcome> <shares|all> [--min-price <0-1>] [--price <0-1>] [--expires <min>] [--broadcast]
+agent polymarket orders [--market <ref>] | cancel [<orderId>|--all|--market <ref>] [--broadcast]
+agent polymarket positions [--status OPEN|REDEEMABLE|...] | redeem [<ref>|--all] [--broadcast] | activity | pnl
+```
+Full guide: the Polymarket skill.
+
 ### Prices, watches and alerts
 ```bash
 agent price <SYM|address> [--chain <chain>]       # ETH, BTC, POL and stablecoins need no chain
@@ -280,7 +295,8 @@ CLI commands output JSON (non-TTY). After running a command, always render the r
 ~/.polygon-agent/
 ├── .encryption-key       # AES-256-GCM key (auto-generated, 0600)
 ├── config.json           # transaction mode (auto | dry-run)
-├── builder.json          # publishableKey, omsProjectId, polymarket/EOA keys (encrypted)
+├── builder.json          # publishableKey, omsProjectId, access key
+├── polymarket/<wallet>/  # Polymarket trading key, builder key, account (encrypted)
 ├── wallets/<name>.json   # OMS wallet pointer: walletAddress, loginMethod, access (owner | session)
 ├── oms/<name>/           # OMS SDK session storage + encrypted credential key (owner mode)
 ├── session/<name>/       # session key, approved plan, USD ledger (session mode)
