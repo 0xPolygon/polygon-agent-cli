@@ -41,7 +41,10 @@ async function byConditionId(ref: string): Promise<SdkMarket | null> {
   for (const closed of [undefined, true]) {
     const page = await c
       .listMarkets({ conditionIds: [ref], ...(closed ? { closed } : {}) })
-      .firstPage();
+      .firstPage()
+      .catch((e: unknown) => {
+        throw mapSdkError(e);
+      });
     if (page.items.length) return page.items[0];
   }
   return null;

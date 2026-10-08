@@ -28,6 +28,10 @@ const pub = vi.hoisted(() => ({
 
 vi.mock('./sdk.ts', async (o) => ({
   ...(await o<Record<string, unknown>>()),
+  mapSdkError: (e: unknown) =>
+    (e as { sdkFailure?: boolean })?.sdkFailure
+      ? Object.assign(new Error('mapped'), { code: 'rate_limited' })
+      : e,
   loadSdk: async () => ({
     root: {
       createPublicClient: () => pub,
@@ -102,5 +106,16 @@ describe('resolveOutcome', () => {
       ]
     });
     await expect(resolveOutcome('e', 'john')).rejects.toMatchObject({ code: 'ambiguous_market' });
+  });
+
+  it('maps SDK failures during a conditionId lookup', async () => {
+    pub.listMarkets.mockReturnValue({
+      firstPage: async () => {
+        throw Object.assign(new Error('raw'), { sdkFailure: true });
+      }
+    });
+    await expect(resolveOutcome(`0x${'a'.repeat(64)}`, 'yes')).rejects.toMatchObject({
+      code: 'rate_limited'
+    });
   });
 });
