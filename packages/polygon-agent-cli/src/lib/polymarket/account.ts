@@ -1,0 +1,187 @@
+// The Polymarket trading account for an OMS wallet name: a CLI-generated key
+// that controls a Polymarket Deposit Wallet. Polymarket's relayer deploys the
+// wallet and runs its approvals and transfers, authorized by a builder API key
+// minted from the same key. The OMS wallet never signs for Polymarket.
+
+import fs from 'node:fs';
+import path from 'node:path';
+
+import type { CipherData } from '../storage.ts';
+
+import { CliError } from '../errors.ts';
+import { readJsonFile, writeJsonFile } from '../session/state.ts';
+import { decrypt, encrypt, STORAGE_ROOT } from '../storage.ts';
+import { loadSdk, mapSdkError } from './sdk.ts';
+
+export type AccountKind = 'deposit-wallet' | 'legacy-proxy';
+export type StoredAccount = {
+  kind: AccountKind;
+  signer: string;
+  wallet: string;
+  createdAt: string;
+};
+type Creds = { key: string; secret: string; passphrase: string };
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type SecureClient = any;
+
+export function accountDir(wallet: string): string {
+  const dir = path.join(STORAGE_ROOT, 'polymarket', wallet);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  return dir;
+}
+
+function readSecret(wallet: string, name: string): string | null {
+  const data = readJsonFile(path.join(accountDir(wallet), name)) as CipherData | undefined;
+  return data ? decrypt(data) : null;
+}
+
+function writeSecret(wallet: string, name: string, value: string): void {
+  writeJsonFile({ file: path.join(accountDir(wallet), name), data: encrypt(value) });
+}
+
+export function loadAccount(wallet: string): StoredAccount | null {
+  return (readJsonFile(path.join(accountDir(wallet), 'account.json')) as StoredAccount) ?? null;
+}
+
+export function requireAccount(wallet: string): StoredAccount {
+  const acct = loadAccount(wallet);
+  if (!acct) {
+    throw new CliError({
+      code: 'not_set_up',
+      message: `No Polymarket account for wallet '${wallet}' yet.`,
+      command: `agent polymarket setup --wallet ${wallet} --broadcast`
+    });
+  }
+  return acct;
+}
+
+export function planSetup(wallet: string): { exists: boolean; account: StoredAccount | null } {
+  const account = loadAccount(wallet);
+  return { exists: account !== null, account };
+}
+
+function missingKeyError(wallet: string): CliError {
+  return new CliError({
+    code: 'not_set_up',
+    message: `The Polymarket key for wallet '${wallet}' is missing.`,
+    command: `agent polymarket setup --wallet ${wallet} --broadcast`
+  });
+}
+
+async function clientFor(
+  wallet: string,
+  acct: { kind: AccountKind; wallet?: string },
+  key: string
+): Promise<SecureClient> {
+  const { root, viem, node } = await loadSdk();
+  const builderText = readSecret(wallet, 'builder.json');
+  const clobText = readSecret(wallet, 'clob.json');
+  try {
+    const client = await root.createSecureClient({
+      signer: viem.privateKey(key),
+      ...(acct.kind === 'legacy-proxy' ? { wallet: acct.wallet } : {}),
+      ...(builderText ? { apiKey: node.builderApiKey(JSON.parse(builderText) as Creds) } : {}),
+      ...(clobText ? { credentials: JSON.parse(clobText) as Creds } : {})
+    } as never);
+    if (!clobText && client.credentials)
+      writeSecret(wallet, 'clob.json', JSON.stringify(client.credentials));
+    return client;
+  } catch (err) {
+    throw mapSdkError(err);
+  }
+}
+
+export async function getTradingClient(wallet: string): Promise<SecureClient> {
+  const acct = requireAccount(wallet);
+  const key = readSecret(wallet, 'key.json');
+  if (!key) throw missingKeyError(wallet);
+  return clientFor(wallet, acct, key);
+}
+
+export async function setupAccount(
+  wallet: string
+): Promise<{ account: StoredAccount; created: boolean; approvalsSet: boolean }> {
+  const existing = loadAccount(wallet);
+  const { root, viem, actions } = await loadSdk();
+  const { generatePrivateKey, privateKeyToAccount } = await import('viem/accounts');
+
+  let key = readSecret(wallet, 'key.json');
+  if (!key) {
+    key = generatePrivateKey();
+    writeSecret(wallet, 'key.json', key);
+  }
+  const signer = privateKeyToAccount(key as `0x${string}`).address;
+
+  if (!readSecret(wallet, 'builder.json')) {
+    try {
+      // The builder key is minted as the EOA itself; no deposit wallet is needed for that.
+      const eoaClient = await root.createSecureClient({
+        signer: viem.privateKey(key),
+        wallet: signer
+      } as never);
+      const creds = await actions.createBuilderApiKey(eoaClient as never);
+      writeSecret(wallet, 'builder.json', JSON.stringify(creds));
+    } catch (err) {
+      throw mapSdkError(err);
+    }
+  }
+
+  // Creating the client deploys the deposit wallet through the relayer when needed.
+  const client = await clientFor(wallet, existing ?? { kind: 'deposit-wallet' }, key);
+  const account: StoredAccount = existing ?? {
+    kind: 'deposit-wallet',
+    signer,
+    wallet: client.account.wallet,
+    createdAt: new Date().toISOString()
+  };
+  if (!existing)
+    writeJsonFile({ file: path.join(accountDir(wallet), 'account.json'), data: account });
+
+  let approvalsSet = false;
+  try {
+    const state = await client.fetchTradingApprovalsState();
+    if (!state.isFullyApproved) {
+      await client.setupTradingApprovals();
+      approvalsSet = true;
+    }
+  } catch (err) {
+    throw mapSdkError(err);
+  }
+  return { account, created: !existing, approvalsSet };
+}
+
+// Legacy: an imported Polymarket key whose funds sit in a Polymarket proxy wallet.
+export async function importLegacyKey(wallet: string, privateKey: string): Promise<StoredAccount> {
+  const { getPolymarketProxyWalletAddress } = await import('./gamma.ts');
+  const { privateKeyToAccount } = await import('viem/accounts');
+  const pk = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
+  if (!/^0x[0-9a-fA-F]{64}$/.test(pk)) {
+    throw new CliError({
+      code: 'invalid_input',
+      message: 'The private key must be 32 bytes of hex.'
+    });
+  }
+  const signer = privateKeyToAccount(pk as `0x${string}`).address;
+  const account: StoredAccount = {
+    kind: 'legacy-proxy',
+    signer,
+    wallet: await getPolymarketProxyWalletAddress(signer),
+    createdAt: new Date().toISOString()
+  };
+  writeSecret(wallet, 'key.json', pk);
+  writeJsonFile({ file: path.join(accountDir(wallet), 'account.json'), data: account });
+  return account;
+}
+
+export async function pusdBalance(wallet: string): Promise<bigint> {
+  const client = await getTradingClient(wallet);
+  const { root, actions } = await loadSdk();
+  try {
+    const res = await actions.fetchBalanceAllowance(client, {
+      assetType: root.AssetType.COLLATERAL
+    } as never);
+    return BigInt(res.balance);
+  } catch (err) {
+    throw mapSdkError(err);
+  }
+}
