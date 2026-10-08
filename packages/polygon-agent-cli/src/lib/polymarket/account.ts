@@ -106,6 +106,13 @@ export async function setupAccount(
   const { generatePrivateKey, privateKeyToAccount } = await import('viem/accounts');
 
   let key = readSecret(wallet, 'key.json');
+  if (!key && existing) {
+    throw new CliError({
+      code: 'not_set_up',
+      message: `The trading key for '${wallet}' is missing; the recorded Polymarket wallet ${existing.wallet} can't be controlled.`,
+      hint: 'Restore the key file, or use a different --wallet name.'
+    });
+  }
   if (!key) {
     key = generatePrivateKey();
     writeSecret(wallet, 'key.json', key);
@@ -152,6 +159,14 @@ export async function setupAccount(
 
 // Legacy: an imported Polymarket key whose funds sit in a Polymarket proxy wallet.
 export async function importLegacyKey(wallet: string, privateKey: string): Promise<StoredAccount> {
+  const dir = accountDir(wallet);
+  if (fs.existsSync(path.join(dir, 'key.json')) || fs.existsSync(path.join(dir, 'account.json'))) {
+    throw new CliError({
+      code: 'invalid_input',
+      message: `A Polymarket account already exists for '${wallet}'; importing a key would overwrite its only key.`,
+      hint: 'Withdraw first, or use a different --wallet name.'
+    });
+  }
   const { getPolymarketProxyWalletAddress } = await import('./gamma.ts');
   const { privateKeyToAccount } = await import('viem/accounts');
   const pk = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
@@ -168,8 +183,11 @@ export async function importLegacyKey(wallet: string, privateKey: string): Promi
     wallet: await getPolymarketProxyWalletAddress(signer),
     createdAt: new Date().toISOString()
   };
+  // Credentials from any earlier signer must not be paired with the imported key.
+  fs.rmSync(path.join(dir, 'builder.json'), { force: true });
+  fs.rmSync(path.join(dir, 'clob.json'), { force: true });
   writeSecret(wallet, 'key.json', pk);
-  writeJsonFile({ file: path.join(accountDir(wallet), 'account.json'), data: account });
+  writeJsonFile({ file: path.join(dir, 'account.json'), data: account });
   return account;
 }
 
