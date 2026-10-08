@@ -62,10 +62,13 @@ export function makeFeeSelector(preferNativeFee: boolean) {
         usable[0];
     }
     if (!pick) {
-      throw new Error(
-        'Unable to pay gas: wallet has no native token and no usable fee token. ' +
-          'Fund with POL (agent fund), or hold USDC for fees.'
-      );
+      // Raised before executing, so nothing was sent (insufficient_balance is in
+      // NOTHING_SENT_CODES).
+      throw new CliError({
+        code: 'insufficient_balance',
+        message: 'Unable to pay gas: wallet has no native token and no usable fee token.',
+        hint: 'Fund with POL (agent fund), or hold USDC for fees.'
+      });
     }
     // The SDK's selection carries the option's index, so two options with the
     // same symbol can't be confused.
@@ -141,6 +144,10 @@ export async function runOmsTx(params: OmsTxParams): Promise<OmsTxResult> {
       });
       lastTxHash = res.txnHash ?? lastTxHash;
     } catch (e) {
+      // The SDK wraps whatever the fee selector throws; keep our own refusal intact.
+      if (e instanceof CliError) throw e;
+      const cause = (e as { cause?: unknown })?.cause;
+      if (cause instanceof CliError) throw cause;
       if (expired) {
         throw new CliError({
           code: 'quote_expired',

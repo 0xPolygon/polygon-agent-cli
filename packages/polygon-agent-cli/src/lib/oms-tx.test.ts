@@ -1,8 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { FeeOptionWithBalance } from '@polygonlabs/oms-wallet';
 
-import { makeFeeSelector } from './oms-tx.ts';
+const oms = vi.hoisted(() => ({ sendTransaction: vi.fn() }));
+vi.mock('./oms-client.ts', () => ({
+  getOmsClient: () => ({
+    wallet: { walletAddress: '0xC2F4cAfe89AE7e1bcB86dd3f141C0a3adCEB6C17', ...oms }
+  })
+}));
+
+const { makeFeeSelector, runOmsTx } = await import('./oms-tx.ts');
 
 function option(params: {
   symbol: string;
@@ -56,6 +63,44 @@ describe('makeFeeSelector', () => {
     const opts = [
       option({ symbol: 'USDC', contractAddress: USDC, value: '5', availableRaw: '1', index: 0 })
     ];
-    expect(() => makeFeeSelector(false)(opts)).toThrow(/Unable to pay gas/);
+    expect(() => makeFeeSelector(false)(opts)).toThrow(
+      expect.objectContaining({
+        code: 'insufficient_balance',
+        message: expect.stringMatching(/Unable to pay gas/),
+        hint: expect.stringMatching(/agent fund/)
+      })
+    );
+  });
+});
+
+describe('runOmsTx', () => {
+  it('surfaces an unaffordable fee as insufficient_balance even though the SDK wraps it', async () => {
+    // The SDK calls the selector before executing and wraps whatever it throws.
+    oms.sendTransaction.mockImplementation(
+      async (p: { selectFeeOption: (o: FeeOptionWithBalance[]) => unknown }) => {
+        try {
+          p.selectFeeOption([
+            option({
+              symbol: 'USDC',
+              contractAddress: USDC,
+              value: '5',
+              availableRaw: '1',
+              index: 0
+            })
+          ]);
+        } catch (cause) {
+          throw Object.assign(new Error('wrapped by the SDK'), { cause });
+        }
+        return { txnHash: '0xnever' };
+      }
+    );
+    await expect(
+      runOmsTx({
+        walletName: 'main',
+        chainId: 137,
+        transactions: [{ to: USDC, data: '0x' }],
+        broadcast: true
+      })
+    ).rejects.toMatchObject({ code: 'insufficient_balance' });
   });
 });

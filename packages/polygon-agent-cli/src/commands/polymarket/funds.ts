@@ -4,11 +4,14 @@
 
 import type { CommandModule } from 'yargs';
 
+import path from 'node:path';
+
 import { encodeFunctionData, erc20Abi } from 'viem';
 
 import type { PendingDeposit } from '../../lib/polymarket/deposits.ts';
 
 import { CliError, NOTHING_SENT_CODES } from '../../lib/errors.ts';
+import { LockHeldError, withLock } from '../../lib/lock.ts';
 import { resolveBroadcast, withWriteFlags } from '../../lib/mode.ts';
 import { getTradingClient, pusdBalance, requireAccount } from '../../lib/polymarket/account.ts';
 import { formatUnits6, parseUsd } from '../../lib/polymarket/amounts.ts';
@@ -23,7 +26,7 @@ import { PolymarketError, PUSD } from '../../lib/polymarket/gamma.ts';
 import { assertCanTrade, checkRegion } from '../../lib/polymarket/region.ts';
 import { tokenBalance } from '../../lib/session/live.ts';
 import { checkSessionSpend } from '../../lib/session/run-tx.ts';
-import { loadOmsWalletPointer } from '../../lib/storage.ts';
+import { loadOmsWalletPointer, STORAGE_ROOT } from '../../lib/storage.ts';
 import { runTx } from '../../lib/tx-dispatch.ts';
 import { fail, ok, omsAddress, walletOption } from './shared.ts';
 
@@ -81,6 +84,25 @@ async function settlePending(wallet: string, readOnly: boolean): Promise<void> {
   });
 }
 
+// Not the session wallet lock: runTx takes that one itself in session mode, so
+// reusing it here would deadlock.
+async function withDepositLock<T>(wallet: string, fn: () => Promise<T>): Promise<T> {
+  const dir = path.join(STORAGE_ROOT, 'locks', 'polymarket', wallet);
+  try {
+    return await withLock({ dir, fn });
+  } catch (err) {
+    if (err instanceof LockHeldError && err.dir === dir) {
+      throw new CliError({
+        code: 'wallet_busy',
+        message: `Another Polymarket deposit for wallet '${wallet}' is still running. Try again when it finishes.`,
+        hint: 'Then check agent polymarket status before depositing again.',
+        cause: err
+      });
+    }
+    throw err;
+  }
+}
+
 async function handleDeposit(argv: DepositArgs): Promise<void> {
   try {
     const units = parseUsd(argv.amount);
@@ -94,88 +116,98 @@ async function handleDeposit(argv: DepositArgs): Promise<void> {
     const account = requireAccount(argv.wallet);
     assertCanTrade(await checkRegion());
 
-    if (!argv.again) await settlePending(argv.wallet, !broadcast);
+    // From the pending check to the saved 'sent' record, one deposit per wallet at a
+    // time: two concurrent runs could both pass the check and both send.
+    const sendSection = async (): Promise<{ txHash: string | null; before: bigint } | null> => {
+      if (!argv.again) await settlePending(argv.wallet, !broadcast);
 
-    const from = await omsAddress(argv.wallet);
-    const held = await tokenBalance({
-      wallet: argv.wallet,
-      chainId: 137,
-      token: USDC,
-      walletAddress: from
-    });
-    if (held < units) {
-      throw new CliError({
-        code: 'insufficient_balance',
-        message: `Wallet '${argv.wallet}' holds $${formatUnits6(held)} USDC on Polygon; the deposit needs $${formatUnits6(units)}.`,
-        hint: `agent swap --to USDC --amount ${formatUnits6(units - held)} --broadcast`
-      });
-    }
-
-    const bridge = await depositAddress(account.wallet);
-
-    if (!broadcast) {
-      // One JSON document: runTx would print its own dry-run output, so don't call it.
-      const summary: Record<string, unknown> = {
-        dryRun: true,
-        from,
-        bridgeAddress: bridge,
-        polymarketWallet: account.wallet,
-        amountUsd: formatUnits6(units)
-      };
-      const pointer = await loadOmsWalletPointer(argv.wallet);
-      if (pointer?.access === 'session') {
-        const check = await checkSessionSpend({
-          walletName: argv.wallet,
-          walletAddress: from,
-          chainId: 137,
-          token: USDC,
-          amount: units
-        });
-        summary.allowance = {
-          usd: check.usd,
-          allowanceUsd: check.allowanceUsd,
-          spentUsd: check.spentUsd
-        };
-      }
-      ok(summary);
-      return;
-    }
-
-    const data = encodeFunctionData({
-      abi: erc20Abi,
-      functionName: 'transfer',
-      args: [bridge as `0x${string}`, units]
-    });
-    const before = await pusdBalance(argv.wallet);
-    const baselineCount = (await bridgeStatus(bridge)).transactions.length;
-    const record: PendingDeposit = {
-      status: 'sending',
-      txHash: null,
-      amountUnits: units.toString(),
-      bridgeAddress: bridge,
-      sentAt: new Date().toISOString(),
-      baselineCount,
-      pusdBefore: before.toString()
-    };
-    // Recorded before sending: if the run dies after the transfer is relayed, a rerun
-    // must not send again.
-    savePending(argv.wallet, record);
-    let res;
-    try {
-      res = await runTx({
-        walletName: argv.wallet,
+      const from = await omsAddress(argv.wallet);
+      const held = await tokenBalance({
+        wallet: argv.wallet,
         chainId: 137,
-        transactions: [{ to: USDC, value: 0n, data }],
-        broadcast,
-        purpose: 'trade',
-        ref: 'polymarket-deposit'
+        token: USDC,
+        walletAddress: from
       });
-    } catch (err) {
-      if (err instanceof CliError && NOTHING_SENT_CODES.has(err.code)) clearPending(argv.wallet);
-      throw err;
-    }
-    const txHash = res.txHash ?? null;
-    savePending(argv.wallet, { ...record, status: 'sent', txHash });
+      if (held < units) {
+        throw new CliError({
+          code: 'insufficient_balance',
+          message: `Wallet '${argv.wallet}' holds $${formatUnits6(held)} USDC on Polygon; the deposit needs $${formatUnits6(units)}.`,
+          hint: `agent swap --to USDC --amount ${formatUnits6(units - held)} --broadcast`
+        });
+      }
+
+      const bridge = await depositAddress(account.wallet);
+
+      if (!broadcast) {
+        // One JSON document: runTx would print its own dry-run output, so don't call it.
+        const summary: Record<string, unknown> = {
+          dryRun: true,
+          from,
+          bridgeAddress: bridge,
+          polymarketWallet: account.wallet,
+          amountUsd: formatUnits6(units)
+        };
+        const pointer = await loadOmsWalletPointer(argv.wallet);
+        if (pointer?.access === 'session') {
+          const check = await checkSessionSpend({
+            walletName: argv.wallet,
+            walletAddress: from,
+            chainId: 137,
+            token: USDC,
+            amount: units
+          });
+          summary.allowance = {
+            usd: check.usd,
+            allowanceUsd: check.allowanceUsd,
+            spentUsd: check.spentUsd
+          };
+        }
+        ok(summary);
+        return null;
+      }
+
+      const data = encodeFunctionData({
+        abi: erc20Abi,
+        functionName: 'transfer',
+        args: [bridge as `0x${string}`, units]
+      });
+      const before = await pusdBalance(argv.wallet);
+      const baselineCount = (await bridgeStatus(bridge)).transactions.length;
+      const record: PendingDeposit = {
+        status: 'sending',
+        txHash: null,
+        amountUnits: units.toString(),
+        bridgeAddress: bridge,
+        sentAt: new Date().toISOString(),
+        baselineCount,
+        pusdBefore: before.toString()
+      };
+      // Recorded before sending: if the run dies after the transfer is relayed, a rerun
+      // must not send again.
+      savePending(argv.wallet, record);
+      let res;
+      try {
+        res = await runTx({
+          walletName: argv.wallet,
+          chainId: 137,
+          transactions: [{ to: USDC, value: 0n, data }],
+          broadcast,
+          purpose: 'trade',
+          ref: 'polymarket-deposit'
+        });
+      } catch (err) {
+        if (err instanceof CliError && NOTHING_SENT_CODES.has(err.code)) clearPending(argv.wallet);
+        throw err;
+      }
+      const txHash = res.txHash ?? null;
+      savePending(argv.wallet, { ...record, status: 'sent', txHash });
+      return { txHash, before };
+    };
+
+    // Dry runs change nothing, so they don't take the lock.
+    const sent = broadcast ? await withDepositLock(argv.wallet, sendSection) : await sendSection();
+    if (!sent) return;
+    const { txHash, before } = sent;
     if (argv.wait === false) {
       ok({ txHash, credited: false, amountUsd: formatUnits6(units) });
       return;
@@ -247,7 +279,12 @@ async function handleWithdraw(argv: WithdrawArgs): Promise<void> {
       tokenAddress: PUSD
     });
     const outcome = await handle.wait();
-    ok({ txHash: outcome.transactionHash, amountUsd: formatUnits6(amount), to: recipient });
+    ok({
+      txHash: outcome.transactionHash,
+      amountUsd: formatUnits6(amount),
+      to: recipient,
+      note: "txHash is the pUSD transfer to Polymarket's bridge. The USDC arrives in the OMS wallet shortly after."
+    });
   } catch (err) {
     fail(err, { stack: true });
   }
