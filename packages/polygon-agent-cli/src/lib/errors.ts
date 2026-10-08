@@ -32,7 +32,13 @@ export type CliErrorCode =
   | 'watch_already_past'
   | 'rate_limited'
   | 'upstream_unavailable'
-  | 'upstream_error';
+  | 'upstream_error'
+  | PolymarketErrorCode;
+
+export type PolymarketErrorCode =
+  | 'offset_removed'
+  | 'unsupported_market_version'
+  | 'market_not_accepting_orders';
 
 // Refusals raised before anything is sent: a spend that failed with one of
 // these certainly moved nothing.
