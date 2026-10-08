@@ -26,7 +26,8 @@ export function formatUnits6(units: bigint | string): string {
 export function parseShares(input: string | number): number | 'all' {
   const text = String(input).trim();
   if (text.toLowerCase() === 'all') return 'all';
-  const n = Number(text);
+  // Plain decimals only: Number() would also take '0x10' or '1e3'.
+  const n = /^\d+(\.\d+)?$/.test(text) ? Number(text) : NaN;
   if (!Number.isFinite(n) || n <= 0) {
     throw new CliError({
       code: 'invalid_input',

@@ -191,11 +191,12 @@ export async function importLegacyKey(wallet: string, privateKey: string): Promi
   return account;
 }
 
+// Refreshes the CLOB's cached view first: a plain fetch can lag a deposit or a fill.
 export async function pusdBalance(wallet: string): Promise<bigint> {
   const client = await getTradingClient(wallet);
   const { root, actions } = await loadSdk();
   try {
-    const res = await actions.fetchBalanceAllowance(client, {
+    const res = await actions.updateBalanceAllowance(client, {
       assetType: root.AssetType.COLLATERAL
     } as never);
     return BigInt(res.balance);

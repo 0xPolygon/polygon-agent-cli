@@ -41,6 +41,16 @@ function expiration(minutes?: number): { expiration?: number } {
   return { expiration: Math.floor(Date.now() / 1000) + Math.round(minutes * 60) };
 }
 
+// An expiry only applies to a resting limit order.
+function checkExpiresNeedsLimit(req: { limitPrice?: number; expiresMinutes?: number }): void {
+  if (req.expiresMinutes !== undefined && req.limitPrice === undefined) {
+    throw new CliError({
+      code: 'invalid_input',
+      message: '--expires only applies to a limit order (--price); a market order fills at once.'
+    });
+  }
+}
+
 function checkPrice(name: string, p?: number): void {
   if (p !== undefined && !(p > 0 && p < 1)) {
     throw new CliError({ code: 'invalid_input', message: `${name} must be between 0 and 1.` });
@@ -77,6 +87,7 @@ export async function buy(req: BuyRequest): Promise<Record<string, unknown>> {
         'Use either --price (a limit order) or --max-price (a guarded market order), not both.'
     });
   }
+  checkExpiresNeedsLimit(req);
   const units = parseUsd(req.usd);
   const usd = formatUnits6(units);
   const { root } = await loadSdk();
@@ -84,6 +95,12 @@ export async function buy(req: BuyRequest): Promise<Record<string, unknown>> {
     const client = await getTradingClient(req.wallet);
     assertCanOpen(await checkRegion(client));
     const r = await resolveOutcome(req.ref, req.outcome);
+    if (r.market.state?.closed || r.market.state?.acceptingOrders === false) {
+      throw new PolymarketError(
+        'market_not_accepting_orders',
+        `Market ${r.market.slug ?? r.market.conditionId} is not accepting orders${r.market.state?.closed ? ' (closed)' : ''}.`
+      );
+    }
     const held = await pusdBalance(req.wallet);
     if (held < units) {
       throw new CliError({
@@ -139,6 +156,8 @@ export async function buy(req: BuyRequest): Promise<Record<string, unknown>> {
       assetId: r.assetId,
       side: root.OrderSide.BUY,
       amount: usd,
+      // All-in cap: taker fees never push the spend past the requested amount.
+      maxSpend: usd,
       ...(req.maxPrice !== undefined ? { maxPrice: req.maxPrice } : {}),
       orderType: root.OrderType.FAK,
       ...builder()
@@ -159,17 +178,20 @@ export async function sell(req: SellRequest): Promise<Record<string, unknown>> {
         'Use either --price (a limit order) or --min-price (a guarded market order), not both.'
     });
   }
+  checkExpiresNeedsLimit(req);
   const wanted = parseShares(req.shares);
-  const { root } = await loadSdk();
+  const { root, actions } = await loadSdk();
   try {
     const client = await getTradingClient(req.wallet);
     assertCanTrade(await checkRegion(client));
     const r = await resolveOutcome(req.ref, req.outcome);
-    const page = await client.listPositions({ conditionId: r.market.conditionId }).firstPage();
-    const pos = (
-      page.items as Array<{ assetId?: string; tokenId?: string; currentSize?: string }>
-    ).find((p) => p.assetId === r.assetId || p.tokenId === r.assetId);
-    const heldShares = Number(pos?.currentSize ?? 0);
+    // The on-chain balance, refreshed by the CLOB: the Data API's positions lag fills.
+    const bal = await actions.updateBalanceAllowance(client, {
+      assetType:
+        r.market.version === 'v2' ? root.AssetType.CONDITIONAL_V2 : root.AssetType.CONDITIONAL,
+      assetId: r.assetId
+    } as never);
+    const heldShares = Number(formatUnits6(bal.balance));
     const shares = wanted === 'all' ? heldShares : wanted;
     if (!(heldShares > 0) || !(shares > 0) || shares > heldShares) {
       throw new PolymarketError(
