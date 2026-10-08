@@ -183,6 +183,15 @@ describe('initWorkspace', () => {
     expect(initWorkspace({ root, version: '1.0.0', sourceDir: null }).name).toBe('Old');
   });
 
+  it('refuses a root whose name could rewrite the skill text', () => {
+    for (const name of ['a`b', 'a\nb', 'a\u0007b']) {
+      const root = path.join(tmpDir('pa-ws-'), name, '.polygon-agent');
+      expect(() => initWorkspace({ root, version: '1.0.0', sourceDir: null })).toThrow(
+        /control characters or backticks/
+      );
+    }
+  });
+
   it('refuses a root that is a file', () => {
     const file = path.join(tmpDir('pa-ws-'), 'file');
     fs.writeFileSync(file, '');

@@ -240,11 +240,22 @@ vi.mock('@polygonlabs/oms-wallet', async (importOriginal) => {
   return { ...real, OMSWallet: FakeOMSWallet, RemoteAccessClient: FakeRemoteAccessClient };
 });
 
-vi.mock('../lib/prices.ts', async (importOriginal) => ({
-  ...(await importOriginal<typeof Prices>()),
-  getUsdPrices: async (tokens: Array<{ chainId: number; address: string }>) =>
-    new Map(tokens.map((t) => [`${t.chainId}:${t.address.toLowerCase()}`, 2500]))
-}));
+vi.mock('../lib/prices.ts', async (importOriginal) => {
+  const { findSupportedToken } = await import('../lib/session/tokens.ts');
+  return {
+    ...(await importOriginal<typeof Prices>()),
+    // POL at a POL-like price (plans refuse implausible prices); the rest $2,500.
+    getUsdPrices: async (tokens: Array<{ chainId: number; address: string }>) =>
+      new Map(
+        tokens.map((t) => [
+          `${t.chainId}:${t.address.toLowerCase()}`,
+          findSupportedToken({ chainId: t.chainId, address: t.address })?.kind === 'pol'
+            ? 0.25
+            : 2500
+        ])
+      )
+  };
+});
 
 const {
   accessCommandModule,
@@ -390,6 +401,20 @@ describe('connect', () => {
     const json = JSON.stringify(report);
     expect(json).not.toContain('ownerKey');
     expect(json).not.toContain('attempt');
+  });
+
+  it('a Ctrl-C during the sign-in takes the key, maybe an owner credential by then, off the disk', async () => {
+    const request = await connectStep1();
+    let exited = false;
+    world.onSignIn = async () => {
+      expect(() => process.emit('SIGINT')).toThrow('CLI exited');
+      exited = true;
+      // A second Ctrl-C is ignored.
+      expect(() => process.emit('SIGINT')).not.toThrow();
+    };
+    await confirm(request);
+    expect(exited).toBe(true);
+    expect(world.isPending()).toBe(false);
   });
 
   it('a wrong code keeps the request; the right code then works', async () => {
@@ -650,6 +675,31 @@ describe('owner-request safety', () => {
     const out = await confirm(String(lastJson('log').request));
     expect(out).toMatchObject({ ok: false, updated: false });
     expect(readApprovedPlan(wallet)?.plan.allowanceUsd).toBe(500);
+  });
+
+  it.each([
+    ['the zero address', '0x0000000000000000000000000000000000000000'],
+    ['the token contract', '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359']
+  ])('withdraw refuses %s, where tokens are lost, before sending a code', async (_what, to) => {
+    await confirm(await connectStep1({ chains: 'polygon' }));
+    const sentBefore = world.calls.filter((c) => c.startsWith('startEmailAuth')).length;
+    await yargsRun(withdrawCommandModule, [
+      'withdraw',
+      '--to',
+      to,
+      '--token',
+      'USDC',
+      '--amount',
+      '1',
+      '--name',
+      wallet
+    ]);
+    const line = vi
+      .mocked(console.error)
+      .mock.calls.map((call) => String(call[0]))
+      .find((l) => l.startsWith('{'));
+    expect(JSON.parse(line ?? '{}')).toMatchObject({ ok: false, code: 'invalid_input' });
+    expect(world.calls.filter((c) => c.startsWith('startEmailAuth')).length).toBe(sentBefore);
   });
 
   it('withdraw sends exactly the transfer shown in step 1, as the owner', async () => {

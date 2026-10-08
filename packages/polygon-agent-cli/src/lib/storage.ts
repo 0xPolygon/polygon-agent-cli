@@ -5,6 +5,8 @@ import path from 'node:path';
 
 import { z } from 'zod';
 
+import { CliError } from './errors.ts';
+
 // A workspace install's wrapper sets POLYGON_AGENT_HOME to its own state folder;
 // a global install keeps using ~/.polygon-agent.
 const STORAGE_DIR = process.env.POLYGON_AGENT_HOME
@@ -65,9 +67,34 @@ const OmsWalletPointerSchema = z.object({
   installName: z.string().optional()
 });
 
+// Wallet names become file and folder names (wallets/<name>.json, oms/<name>/,
+// session/<name>/, pending/<name>.json, their locks), some of which are
+// deleted recursively, so a name must never be able to leave its folder.
+const WALLET_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+export function walletName(name: string): string {
+  if (!WALLET_NAME.test(name)) {
+    throw new CliError({
+      code: 'invalid_input',
+      message: `Invalid wallet name ${JSON.stringify(name)}: use up to 64 letters, digits, '.', '-' and '_', starting with a letter or digit.`
+    });
+  }
+  return name;
+}
+
 export function ensureStorageDir(): void {
   if (!fs.existsSync(STORAGE_DIR)) {
     fs.mkdirSync(STORAGE_DIR, { recursive: true, mode: 0o700 });
+  }
+  // Owner-only, even when something else created the folder first (only a
+  // folder this user owns; one shared on purpose is left as it is).
+  const stat = fs.statSync(STORAGE_DIR);
+  if ((stat.mode & 0o777) !== 0o700 && stat.uid === process.getuid?.()) {
+    try {
+      fs.chmodSync(STORAGE_DIR, 0o700);
+    } catch {
+      // a filesystem without permissions
+    }
   }
   const subdirs = ['wallets', 'oms'];
   for (const dir of subdirs) {
@@ -80,15 +107,36 @@ export function ensureStorageDir(): void {
 
 export const STORAGE_ROOT = STORAGE_DIR;
 
+// Created once, complete or not at all: written to a temp file, then linked
+// into place, which fails if another run got there first (both then use the
+// winner's key, never one each).
 export function getEncryptionKey(): Buffer {
   ensureStorageDir();
-
-  if (fs.existsSync(ENCRYPTION_KEY_FILE)) {
-    return fs.readFileSync(ENCRYPTION_KEY_FILE);
+  if (!fs.existsSync(ENCRYPTION_KEY_FILE)) {
+    const key = randomBytes(32);
+    const tmp = `${ENCRYPTION_KEY_FILE}.tmp-${process.pid}`;
+    const code = (error: unknown) =>
+      error instanceof Error && 'code' in error ? error.code : undefined;
+    try {
+      fs.writeFileSync(tmp, key, { mode: 0o600 });
+      try {
+        fs.linkSync(tmp, ENCRYPTION_KEY_FILE);
+      } catch (error) {
+        // No hard links here (FAT, some network or container mounts): an
+        // exclusive create instead; a torn one fails the length check below.
+        if (code(error) === 'EEXIST') throw error;
+        fs.writeFileSync(ENCRYPTION_KEY_FILE, key, { mode: 0o600, flag: 'wx' });
+      }
+    } catch (error) {
+      if (code(error) !== 'EEXIST') throw error;
+    } finally {
+      fs.rmSync(tmp, { force: true });
+    }
   }
-
-  const key = randomBytes(32);
-  fs.writeFileSync(ENCRYPTION_KEY_FILE, key, { mode: 0o600 });
+  const key = fs.readFileSync(ENCRYPTION_KEY_FILE);
+  if (key.length !== 32) {
+    throw new Error(`The encryption key file ${ENCRYPTION_KEY_FILE} is damaged.`);
+  }
   return key;
 }
 
@@ -191,11 +239,17 @@ export async function listWallets(): Promise<string[]> {
   const walletsDir = path.join(STORAGE_DIR, 'wallets');
   const files = fs.readdirSync(walletsDir);
 
-  return files.filter((f) => f.endsWith('.json')).map((f) => f.replace('.json', ''));
+  // A file whose name isn't a valid wallet name (from before names were
+  // checked) is skipped: no command can use it, and it must not break those
+  // that list wallets.
+  return files
+    .filter((f) => f.endsWith('.json'))
+    .map((f) => f.slice(0, -'.json'.length))
+    .filter((name) => WALLET_NAME.test(name));
 }
 
 export async function deleteWallet(name: string): Promise<boolean> {
-  const walletPath = path.join(STORAGE_DIR, 'wallets', `${name}.json`);
+  const walletPath = path.join(STORAGE_DIR, 'wallets', `${walletName(name)}.json`);
 
   if (fs.existsSync(walletPath)) {
     fs.unlinkSync(walletPath);
@@ -236,7 +290,7 @@ export async function loadPolymarketKey(): Promise<string> {
 /** Directory holding the OMS SDK's per-wallet storage + credential key. */
 export function omsWalletDir(name: string): string {
   ensureStorageDir();
-  const dir = path.join(STORAGE_DIR, 'oms', name);
+  const dir = path.join(STORAGE_DIR, 'oms', walletName(name));
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   }
@@ -313,12 +367,12 @@ export function bootstrapOmsConfig(): void {
 
 export async function saveOmsWalletPointer(name: string, pointer: OmsWalletPointer): Promise<void> {
   ensureStorageDir();
-  const walletPath = path.join(STORAGE_DIR, 'wallets', `${name}.json`);
+  const walletPath = path.join(STORAGE_DIR, 'wallets', `${walletName(name)}.json`);
   fs.writeFileSync(walletPath, JSON.stringify(pointer, null, 2), { mode: 0o600 });
 }
 
 export async function loadOmsWalletPointer(name: string): Promise<OmsWalletPointer | null> {
-  const walletPath = path.join(STORAGE_DIR, 'wallets', `${name}.json`);
+  const walletPath = path.join(STORAGE_DIR, 'wallets', `${walletName(name)}.json`);
   if (!fs.existsSync(walletPath)) return null;
   try {
     // loginMethod is display-only; legacy pre-browser sessions still load until
@@ -335,8 +389,8 @@ export async function loadOmsWalletPointer(name: string): Promise<OmsWalletPoint
 
 /** Remove an OMS wallet's pointer + the SDK's per-wallet state dir. */
 export async function deleteOmsWallet(name: string): Promise<void> {
-  const walletPath = path.join(STORAGE_DIR, 'wallets', `${name}.json`);
+  const walletPath = path.join(STORAGE_DIR, 'wallets', `${walletName(name)}.json`);
   if (fs.existsSync(walletPath)) fs.unlinkSync(walletPath);
-  const dir = path.join(STORAGE_DIR, 'oms', name);
+  const dir = path.join(STORAGE_DIR, 'oms', walletName(name));
   if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
 }

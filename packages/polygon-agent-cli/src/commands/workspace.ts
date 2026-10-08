@@ -202,11 +202,22 @@ function runInit(root: string): z.infer<typeof InitOutput> | null {
   return parsed.success ? parsed.data : null;
 }
 
+const EXACT_VERSION = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
+
 // Installs beside the current CLI and swaps folders only once it's complete,
 // so a failed or partial install never breaks the wrapper. Run under the
 // workspace's update lock.
-function installLatest(params: { root: string; current: string }): Record<string, unknown> {
-  const { root, current } = params;
+//
+// The exact version just checked is installed (when it's known), not
+// whatever `latest` points to by then, and with install scripts off: the
+// install sits beside the session key, and nothing the CLI needs runs one
+// (cbor-x falls back to JS).
+function installUpdate(params: {
+  root: string;
+  current: string;
+  version: string;
+}): Record<string, unknown> {
+  const { root, current, version } = params;
   const cliDir = path.join(root, 'cli');
   const nextDir = `${cliDir}.next`;
   const prevDir = `${cliDir}.prev`;
@@ -215,7 +226,7 @@ function installLatest(params: { root: string; current: string }): Record<string
   // stdout stays reserved for this command's JSON.
   const install = spawnSync(
     npm.file,
-    [...npm.args, 'install', '--prefix', nextDir, `${PACKAGE_NAME}@latest`],
+    [...npm.args, 'install', '--ignore-scripts', '--prefix', nextDir, `${PACKAGE_NAME}@${version}`],
     { stdio: ['ignore', 2, 2], env: npmEnv() }
   );
   if (install.error) throw install.error;
@@ -271,7 +282,7 @@ export const updateCommand: CommandModule = {
           version: current,
           latest,
           hint: 'Not a workspace install. Update a global install with npm.',
-          command: `npm install -g ${PACKAGE_NAME}@latest`
+          command: `npm install -g --ignore-scripts ${PACKAGE_NAME}@latest`
         });
         return;
       }
@@ -284,7 +295,14 @@ export const updateCommand: CommandModule = {
       // One update per workspace at a time: they share cli.next and cli.prev.
       const result = await withLock({
         dir: path.join(stateDir(root), 'update.lock'),
-        fn: () => installLatest({ root, current })
+        // The version just checked; npm's own `latest` when the registry
+        // couldn't be read here (npm may use a mirror).
+        fn: () =>
+          installUpdate({
+            root,
+            current,
+            version: latest && EXACT_VERSION.test(latest) ? latest : 'latest'
+          })
       });
       jsonOut({ ok: true, ...result });
     } catch (error) {

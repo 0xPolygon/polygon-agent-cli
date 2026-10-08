@@ -62,10 +62,14 @@ function slotFile(params: {
 
 // Reads the slot's key, or creates it exclusively (a concurrent creator wins
 // and we read its key).
+//
+// A key file that exists but can't be read (a write cut short by a crash or a
+// full disk) is replaced only while the key was never registered (no
+// record.json); otherwise that's an error, never a silent new key.
 export function loadOrCreateRacKey(params: { wallet: string; slot: RacSlot }): Uint8Array {
   fs.mkdirSync(slotDir(params), { recursive: true, mode: 0o700 });
   const file = slotFile({ ...params, name: 'key.enc' });
-  for (;;) {
+  for (let attempt = 0; attempt < 3; attempt++) {
     const cipher = CipherSchema.safeParse(readJsonFile(file));
     if (cipher.success) return Buffer.from(decrypt(cipher.data), 'hex');
     const key = randomBytes(32);
@@ -78,7 +82,16 @@ export function loadOrCreateRacKey(params: { wallet: string; slot: RacSlot }): U
     } catch (error) {
       if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error;
     }
+    if (attempt === 1 && !fs.existsSync(slotFile({ ...params, name: 'record.json' }))) {
+      fs.rmSync(file, { force: true });
+    }
   }
+  throw new CliError({
+    code: 'not_connected',
+    message: `This install's session key (${params.slot}) is unreadable.`,
+    hint: 'Connect again with a new email code.',
+    command: 'polygon-agent wallet login --email <email>'
+  });
 }
 
 // The slot's existing key. Never creates one: a missing key (e.g. a move cut

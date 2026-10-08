@@ -18,7 +18,7 @@ import type { NewAlert, StoredAlert } from './alerts.ts';
 import type { Watch } from './store.ts';
 
 import { CliError, errorJson } from '../errors.ts';
-import { priceKey, STALE_PRICE_MS } from '../prices.ts';
+import { priceIsFresh, priceKey, STALE_PRICE_MS } from '../prices.ts';
 import { describeTrade } from '../trade/quote.ts';
 import { raiseAlert } from './alerts.ts';
 import { evaluate } from './evaluate.ts';
@@ -414,7 +414,7 @@ async function checkLocked(deps: CheckDeps): Promise<CheckResult> {
 function freshAt(params: { reading: PriceReading; at: Date }): boolean {
   const { reading } = params;
   if (reading.stale || reading.usd === undefined || !reading.updatedAt) return false;
-  return params.at.getTime() - Date.parse(reading.updatedAt) <= STALE_PRICE_MS;
+  return priceIsFresh({ updatedAtMs: Date.parse(reading.updatedAt), now: params.at.getTime() });
 }
 
 // An auto watch's trade. The quote is saved as the watch's pending trade

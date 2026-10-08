@@ -21,14 +21,20 @@ function generationFile(params: { dir: string; generation: number }): string {
   return path.join(params.dir, `${String(params.generation).padStart(12, '0')}.json`);
 }
 
-function writeHolder(params: { dir: string; generation: number; pid: number; host?: string }) {
+function writeHolder(params: {
+  dir: string;
+  generation: number;
+  pid: number;
+  host?: string;
+  startedAt?: Date;
+}) {
   fs.mkdirSync(params.dir, { recursive: true });
   fs.writeFileSync(
     generationFile(params),
     JSON.stringify({
       pid: params.pid,
       host: params.host ?? os.hostname(),
-      startedAt: new Date().toISOString()
+      startedAt: (params.startedAt ?? new Date()).toISOString()
     })
   );
 }
@@ -122,6 +128,37 @@ describe('withLock', () => {
     await expect(withLock({ dir, fn: () => 'ok' })).rejects.toThrow(/pid \d+ on /);
     expect(fs.readdirSync(dir)).toEqual(['000000000001.json']);
   });
+
+  it('takes over from a holder whose pid now belongs to a newer process (pid reuse after a restart)', async () => {
+    const dir = lockDir();
+    // This process's pid, but a lock taken a day before this process started.
+    writeHolder({
+      dir,
+      generation: 1,
+      pid: process.pid,
+      startedAt: new Date(Date.now() - process.uptime() * 1000 - 86_400_000)
+    });
+    expect(await withLock({ dir, fn: () => 'ok' })).toBe('ok');
+  });
+
+  it.runIf(fs.existsSync('/proc/self/stat'))(
+    'takes over from a holder whose pid now runs a process with another start time',
+    async () => {
+      const dir = lockDir();
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(
+        generationFile({ dir, generation: 1 }),
+        // This pid, but started at another tick than this process did.
+        JSON.stringify({
+          pid: process.pid,
+          host: os.hostname(),
+          startedAt: new Date().toISOString(),
+          startTicks: 1
+        })
+      );
+      expect(await withLock({ dir, fn: () => 'ok' })).toBe('ok');
+    }
+  );
 
   it('does not take over a lock from another host it cannot check', async () => {
     const dir = lockDir();

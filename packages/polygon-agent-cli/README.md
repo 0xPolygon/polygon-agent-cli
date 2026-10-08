@@ -105,7 +105,7 @@ agent register --name "MyAgent" --broadcast
 For assistants that keep a workspace folder across restarts, the CLI can live inside it instead of being installed globally:
 
 ```bash
-npm install --prefix <workspace>/.polygon-agent/cli @polygonlabs/agent-cli@latest
+npm install --ignore-scripts --prefix <workspace>/.polygon-agent/cli @polygonlabs/agent-cli@latest
 node <workspace>/.polygon-agent/cli/node_modules/@polygonlabs/agent-cli/dist/index.js \
   workspace init --root <workspace>/.polygon-agent [--skills-dir <dir>] [--name <install name>]
 ```
@@ -177,7 +177,7 @@ See [`SKILL.md`](https://github.com/0xPolygon/polygon-agent-cli/blob/main/skills
 For assistants that keep a workspace folder across restarts, the CLI can live inside it instead of being installed globally:
 
 ```bash
-npm install --prefix <workspace>/.polygon-agent/cli @polygonlabs/agent-cli@latest
+npm install --ignore-scripts --prefix <workspace>/.polygon-agent/cli @polygonlabs/agent-cli@latest
 node <workspace>/.polygon-agent/cli/node_modules/@polygonlabs/agent-cli/dist/index.js \
   workspace init --root <workspace>/.polygon-agent [--skills-dir <dir>] [--name <install name>]
 ```

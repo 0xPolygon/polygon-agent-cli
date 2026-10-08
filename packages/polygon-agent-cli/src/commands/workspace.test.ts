@@ -95,7 +95,7 @@ describe('update', () => {
       ok: true,
       updated: false,
       latest: '0.15.0',
-      command: 'npm install -g @polygonlabs/agent-cli@latest'
+      command: 'npm install -g --ignore-scripts @polygonlabs/agent-cli@latest'
     });
     expect(mocks.spawnSync).not.toHaveBeenCalled();
   });
@@ -131,11 +131,13 @@ describe('update', () => {
 
     const [npmFile, npmArgs, npmOpts] = mocks.spawnSync.mock.calls[0];
     expect(npmFile).toBe('npm');
+    // The exact version checked, with install scripts off.
     expect(npmArgs).toEqual([
       'install',
+      '--ignore-scripts',
       '--prefix',
       path.join(root, 'cli.next'),
-      '@polygonlabs/agent-cli@latest'
+      '@polygonlabs/agent-cli@0.15.0'
     ]);
     // npm's output must not reach stdout, which carries this command's JSON.
     expect(npmOpts.stdio).toEqual(['ignore', 2, 2]);
@@ -171,6 +173,7 @@ describe('update', () => {
         initPrints({ version: '0.14.0', skill: { name: 'polygon-oms-wallet', installed: false } })
       );
     expect(await update()).toMatchObject({ ok: true, updated: false, to: '0.14.0' });
+    expect(mocks.spawnSync.mock.calls[0][1]).toContain('@polygonlabs/agent-cli@latest');
   });
 
   it('leaves the current CLI untouched when npm install fails', async () => {

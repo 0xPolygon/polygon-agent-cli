@@ -70,6 +70,34 @@ interface Holding {
   balance: string;
   usd?: number;
   status: 'covered' | 'limit_used' | 'not_covered' | 'native_not_spendable';
+  // Not in the reviewed token table: anyone can send it, name and all.
+  unverified?: true;
+}
+
+// A symbol from a token's own contract is chosen by whoever deployed it, and
+// anyone can send the wallet one: it reaches the assistant in status and
+// alerts, so it must not be able to carry instructions. A plain short symbol
+// is kept; anything else is replaced by the token's address.
+const PLAIN_SYMBOL = /^[A-Za-z0-9.$_-]{1,12}$/;
+
+export function unverifiedSymbol(params: { symbol?: string; address: string }): string {
+  return params.symbol && PLAIN_SYMBOL.test(params.symbol)
+    ? params.symbol
+    : `token ${params.address.slice(0, 6)}…${params.address.slice(-4)}`;
+}
+
+// How to name a token a balance lists: a reviewed token by its table symbol
+// (and its contract's name), any other by a plain symbol only, marked
+// unverified.
+export function tokenLabel(params: {
+  chainId: number;
+  address: string;
+  symbol?: string;
+  name?: string;
+}): { symbol: string; name?: string; unverified?: true } {
+  const known = findSupportedToken({ chainId: params.chainId, address: params.address });
+  if (known) return { symbol: known.symbol, ...(params.name ? { name: params.name } : {}) };
+  return { symbol: unverifiedSymbol(params), unverified: true };
 }
 
 // Every non-zero balance on the supported chains, and whether the sessions cover it.
@@ -104,7 +132,11 @@ export function classifyHoldings(params: {
     holdings.push({
       chain: chainLabel(balance.chainId),
       chainId: balance.chainId,
-      symbol: balance.contractInfo?.symbol ?? known?.symbol ?? 'ERC20',
+      ...tokenLabel({
+        chainId: balance.chainId,
+        address: balance.contractAddress,
+        symbol: balance.contractInfo?.symbol
+      }),
       token: balance.contractAddress,
       balance: formatUnits(BigInt(balance.balance), decimals),
       usd: balance.balanceUSD ? Number(balance.balanceUSD) : undefined,

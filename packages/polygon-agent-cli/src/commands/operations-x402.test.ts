@@ -266,17 +266,27 @@ describe('x402-pay standard path', () => {
 
   it("records the signed authorization before sending it, with the signed offer's expiry", async () => {
     serviceAsks([exact('1000')]);
-    // The paid request's offer allows an hour, not the first offer's minute.
-    fake.paidAccepts = [{ ...exact('800'), maxTimeoutSeconds: 3600 }];
-    const in30Minutes = () => new Date(Date.now() + 30 * 60_000);
+    // The paid request's offer allows ten minutes, not the first offer's minute.
+    fake.paidAccepts = [{ ...exact('800'), maxTimeoutSeconds: 600 }];
+    const in8Minutes = () => new Date(Date.now() + 8 * 60_000);
     let promisedInFlight = -1n;
     fake.paidFetch.mockImplementation(async () => {
       // As if the process died here: the record must already be on disk.
-      promisedInFlight = pendingAuthorizations({ chainId: 137, asset: USDC, now: in30Minutes() });
+      promisedInFlight = pendingAuthorizations({ chainId: 137, asset: USDC, now: in8Minutes() });
       throw new Error('socket hang up');
     });
     await pay();
     expect(promisedInFlight).toBe(800n);
+  });
+
+  it('never sends an authorization valid for longer than 15 minutes', async () => {
+    serviceAsks([exact('1000')]);
+    // A service asking for a year-long authorization could settle it long
+    // after the call looked unpaid.
+    fake.paidAccepts = [{ ...exact('1000'), maxTimeoutSeconds: 365 * 86_400 }];
+    const out = await pay();
+    expect(fake.paidFetch).not.toHaveBeenCalled();
+    expect(JSON.stringify(out)).toMatch(/more than 15 minutes away; it was not sent/);
   });
 
   it('frees the set-aside funds once the service confirms settlement', async () => {

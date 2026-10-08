@@ -19,7 +19,7 @@ import type { Plan } from './plan.ts';
 
 import { CliError } from '../errors.ts';
 import { LockHeldError, withLock } from '../lock.ts';
-import { STORAGE_ROOT } from '../storage.ts';
+import { STORAGE_ROOT, walletName } from '../storage.ts';
 import { readInstallRecord } from '../workspace.ts';
 import { parsePlan, planToJson } from './plan.ts';
 
@@ -28,17 +28,20 @@ import { parsePlan, planToJson } from './plan.ts';
 const WALLET_LOCK_WAIT_MS = 180_000;
 
 export function sessionDir(wallet: string): string {
-  const dir = path.join(STORAGE_ROOT, 'session', wallet);
+  const dir = path.join(STORAGE_ROOT, 'session', walletName(wallet));
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   return dir;
 }
 
 export function hasSessionState(wallet: string): boolean {
-  return fs.existsSync(path.join(STORAGE_ROOT, 'session', wallet));
+  return fs.existsSync(path.join(STORAGE_ROOT, 'session', walletName(wallet)));
 }
 
 export function removeSessionState(wallet: string): void {
-  fs.rmSync(path.join(STORAGE_ROOT, 'session', wallet), { recursive: true, force: true });
+  fs.rmSync(path.join(STORAGE_ROOT, 'session', walletName(wallet)), {
+    recursive: true,
+    force: true
+  });
 }
 
 // Every session-key request and spend for a wallet runs under this lock: the
@@ -51,7 +54,7 @@ export async function withWalletLock<T>(params: {
     return await withLock({
       // Never inside session/<wallet>/: deleting a lock's directory would let
       // its generation numbers start over (see lib/lock.ts).
-      dir: path.join(STORAGE_ROOT, 'locks', 'wallets', `${params.wallet}.lock`),
+      dir: path.join(STORAGE_ROOT, 'locks', 'wallets', `${walletName(params.wallet)}.lock`),
       fn: params.fn,
       waitMs: WALLET_LOCK_WAIT_MS
     });
@@ -69,8 +72,18 @@ export async function withWalletLock<T>(params: {
 
 export function writeJsonFile(params: { file: string; data: unknown }): void {
   const tmp = `${params.file}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, `${JSON.stringify(params.data, null, 2)}\n`, { mode: 0o600 });
-  fs.renameSync(tmp, params.file);
+  try {
+    fs.writeFileSync(tmp, `${JSON.stringify(params.data, null, 2)}\n`, { mode: 0o600 });
+    fs.renameSync(tmp, params.file);
+  } catch (error) {
+    // A failed write leaves no copy behind (it may hold an encrypted request).
+    try {
+      fs.rmSync(tmp, { force: true });
+    } catch {
+      // the original error matters more
+    }
+    throw error;
+  }
 }
 
 export function readJsonFile(file: string): unknown {

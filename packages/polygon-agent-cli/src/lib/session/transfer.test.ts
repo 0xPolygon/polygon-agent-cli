@@ -58,7 +58,9 @@ function setup(overrides: Partial<Fake['state']> = {}): Fake {
     days: 30,
     tokens,
     prices: new Map(
-      tokens.filter((t) => t.kind !== 'usd').map((t) => [`137:${t.address.toLowerCase()}`, 2500])
+      tokens
+        .filter((t) => t.kind !== 'usd')
+        .map((t) => [`137:${t.address.toLowerCase()}`, t.kind === 'pol' ? 0.25 : 2500])
     ),
     now: START
   });

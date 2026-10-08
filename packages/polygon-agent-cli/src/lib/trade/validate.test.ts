@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { QuotedIntent } from './validate.ts';
 
-import { validateDeposit } from './validate.ts';
+import { validateDeposit, validateSavedDeposit } from './validate.ts';
 
 const WALLET = '0xd384ea24ca0B3a5e4BB35935C611E3dCB68Fd08e';
 const USDC = '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359';
@@ -136,5 +136,55 @@ describe('validateDeposit', () => {
         expect.objectContaining({ code: 'upstream_invalid_quote' })
       );
     }
+  });
+});
+
+describe('validateSavedDeposit', () => {
+  const saved = (deposit: { to: string; data: string; value: string }, token = USDC) => ({
+    intentId: 'i-1',
+    origin: { token, amount: String(AMOUNT) },
+    deposit,
+    depositAddress: DEPOSIT
+  });
+
+  it('passes the quoted transfer, token or native', () => {
+    expect(() =>
+      validateSavedDeposit(saved({ to: USDC, data: transfer(DEPOSIT, AMOUNT), value: '0' }))
+    ).not.toThrow();
+    expect(() =>
+      validateSavedDeposit(saved({ to: DEPOSIT, data: '0x', value: String(AMOUNT) }, NATIVE))
+    ).not.toThrow();
+  });
+
+  it.each([
+    ['another contract', { to: OTHER, data: transfer(DEPOSIT, AMOUNT), value: '0' }],
+    ['native value', { to: USDC, data: transfer(DEPOSIT, AMOUNT), value: '1' }],
+    ['another amount', { to: USDC, data: transfer(DEPOSIT, AMOUNT * 2n), value: '0' }],
+    [
+      'an approve',
+      {
+        to: USDC,
+        data: encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [OTHER, AMOUNT] }),
+        value: '0'
+      }
+    ],
+    ['arbitrary calldata', { to: USDC, data: '0xdeadbeef', value: '0' }],
+    ['another recipient', { to: USDC, data: transfer(OTHER, AMOUNT), value: '0' }]
+  ])('refuses a saved deposit edited into %s', (_what, deposit) => {
+    expect(() => validateSavedDeposit(saved(deposit))).toThrow(/no longer matches its quote/);
+  });
+
+  it('refuses a native deposit sent elsewhere', () => {
+    expect(() =>
+      validateSavedDeposit(saved({ to: OTHER, data: '0x', value: String(AMOUNT) }, NATIVE))
+    ).toThrow(/another recipient/);
+  });
+
+  it('refuses a native deposit carrying calldata', () => {
+    expect(() =>
+      validateSavedDeposit(
+        saved({ to: DEPOSIT, data: '0xdeadbeef', value: String(AMOUNT) }, NATIVE)
+      )
+    ).toThrow(/no longer matches its quote/);
   });
 });

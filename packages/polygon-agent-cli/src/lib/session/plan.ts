@@ -130,6 +130,14 @@ export function validateAllowance(params: { allowanceUsd: number; days: number }
   }
 }
 
+// Wide bands around plausible USD prices, per kind (not targets: only a feed
+// that is clearly broken falls outside them).
+const PRICE_BANDS: Partial<Record<TokenKind, [number, number]>> = {
+  eth: [100, 100_000],
+  btc: [1_000, 2_000_000],
+  pol: [0.001, 100]
+};
+
 function priceFor(params: { token: PlanToken; prices: Map<string, number> }): number {
   if (params.token.kind === 'usd') return 1;
   const price = params.prices.get(
@@ -139,6 +147,16 @@ function priceFor(params: { token: PlanToken; prices: Map<string, number> }): nu
     throw new CliError({
       code: 'upstream_unavailable',
       message: `No USD price for ${params.token.symbol} on ${chainLabel(params.token.chainId)}; not guessing a limit. Try again shortly.`
+    });
+  }
+  // The on-chain limit is the allowance at this price: a wrong price (a bad
+  // feed, a misconfigured price host) far too low would make the limit far too
+  // high. Prices outside a wide sane band are refused.
+  const band = params.token.kind ? PRICE_BANDS[params.token.kind] : undefined;
+  if (band && !(price >= band[0] && price <= band[1])) {
+    throw new CliError({
+      code: 'upstream_unavailable',
+      message: `The USD price for ${params.token.symbol} on ${chainLabel(params.token.chainId)} looks wrong ($${price}); not setting a limit from it. Try again shortly.`
     });
   }
   return price;

@@ -43,6 +43,9 @@ const TradeRecordSchema = z.object({
   // When this quote may no longer be executed (the intent's expiry, at most 5 minutes).
   expiresAt: z.string(),
   deposit: z.object({ to: z.string(), data: z.string(), value: z.string() }),
+  // The intent's deposit address, checked at quote time; the saved deposit
+  // must still pay it when sent. (Absent from records saved before it was kept.)
+  depositAddress: z.string().optional(),
   depositTxHash: z.string().optional(),
   intentStatus: z.string().optional(),
   destinationTxHash: z.string().optional(),

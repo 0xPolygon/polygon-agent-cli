@@ -36,7 +36,9 @@ export const DEFAULT_SLIPPAGE = 0.005;
 const DEFAULT_MAX_SLIPPAGE = 0.01;
 // A quote is executed within this long, even if Trails would allow longer.
 const QUOTE_LIFETIME_MS = 5 * 60 * 1000;
-// Fees above this share of the input add a warning.
+// A quote losing more than this share of its input (fees, or fees and price
+// impact) warns, is never executed by an auto trade, and is refused when quoted
+// and broadcast in one step.
 const HIGH_FEE_SHARE = 0.1;
 
 interface ResolvedToken {
@@ -561,10 +563,19 @@ export async function quoteSwap(params: QuoteSwapParams): Promise<QuotedSwap> {
   const warnings: string[] = [];
   const fromUsd = intent.quote?.fromAmountUsd ?? 0;
   const feeUsd = intent.fees?.totalFeeUsd ?? 0;
-  const highFee = fromUsd > 0 && feeUsd / fromUsd > HIGH_FEE_SHARE;
-  if (highFee) {
+  const toUsd = intent.quote?.toAmountUsd ?? 0;
+  const feeShare = fromUsd > 0 ? feeUsd / fromUsd : 0;
+  // What the trade gives up in value: fees and price impact together (a thin
+  // route can cost far more than its fees).
+  const lossShare = fromUsd > 0 && toUsd > 0 ? (fromUsd - toUsd) / fromUsd : 0;
+  const highFee = feeShare > HIGH_FEE_SHARE || lossShare > HIGH_FEE_SHARE;
+  if (feeShare > HIGH_FEE_SHARE) {
     warnings.push(
-      `Fees are $${feeUsd.toFixed(2)}, ${Math.round((feeUsd / fromUsd) * 100)}% of the $${fromUsd.toFixed(2)} being traded.`
+      `Fees are $${feeUsd.toFixed(2)}, ${Math.round(feeShare * 100)}% of the $${fromUsd.toFixed(2)} being traded.`
+    );
+  } else if (highFee) {
+    warnings.push(
+      `It returns $${toUsd.toFixed(2)} for the $${fromUsd.toFixed(2)} being traded, ${Math.round(lossShare * 100)}% less after fees and price impact.`
     );
   }
 
@@ -611,6 +622,7 @@ export async function quoteSwap(params: QuoteSwapParams): Promise<QuotedSwap> {
     },
     expiresAt: expiresAt.toISOString(),
     deposit: { to: deposit.to, data: deposit.data || '0x', value: String(deposit.value ?? 0n) },
+    depositAddress: intent.originIntentAddress,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString()
   };

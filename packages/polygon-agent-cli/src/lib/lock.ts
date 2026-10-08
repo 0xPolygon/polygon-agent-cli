@@ -26,6 +26,9 @@ const LockHolder = z.object({
   pid: z.number(),
   host: z.string(),
   startedAt: z.string(),
+  // The holder process's start time in /proc ticks (Linux), to tell it from a
+  // later process given the same pid.
+  startTicks: z.number().optional(),
   released: z.boolean().optional()
 });
 type LockHolder = z.infer<typeof LockHolder>;
@@ -88,12 +91,42 @@ function isAlive(pid: number): boolean {
   }
 }
 
+// A process's start time since boot, in clock ticks (1/100 s), from
+// /proc/<pid>/stat on Linux; null elsewhere or if it can't be read.
+function processStartTicks(pid: number): number | null {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+    // Fields after the command name (which may hold spaces) start at field 3;
+    // starttime is field 22.
+    const ticks = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19]);
+    return Number.isFinite(ticks) ? ticks : null;
+  } catch {
+    return null;
+  }
+}
+
+// A live process with the holder's pid may be another process given the same
+// pid later (after a container restart, say). On Linux their start times
+// differ; elsewhere only this process's own start can be told, from its
+// uptime, so a reused pid of another process is taken to be the holder.
+const START_SLACK_MS = 2_000;
+
+function isHolderRunning(holder: LockHolder): boolean {
+  if (!isAlive(holder.pid)) return false;
+  const ticks = processStartTicks(holder.pid);
+  if (ticks !== null && holder.startTicks !== undefined) return ticks === holder.startTicks;
+  const takenAt = Date.parse(holder.startedAt);
+  if (holder.pid !== process.pid || !Number.isFinite(takenAt)) return true;
+  return Date.now() - process.uptime() * 1000 <= takenAt + START_SLACK_MS;
+}
+
 // Gone only when provably so: released, a holder on this host whose process
-// isn't running, or a file nobody could read for a while.
+// isn't running (no process with its pid, or one that started after it took
+// the lock), or a file nobody could read for a while.
 function isGone(file: string): boolean {
   const holder = readHolder(file);
   if (holder?.released) return true;
-  if (holder) return holder.host === os.hostname() && !isAlive(holder.pid);
+  if (holder) return holder.host === os.hostname() && !isHolderRunning(holder);
   try {
     return Date.now() - fs.statSync(file).mtimeMs > UNREADABLE_STALE_MS;
   } catch {
@@ -102,10 +135,12 @@ function isGone(file: string): boolean {
 }
 
 function tryCreate(file: string): boolean {
+  const ticks = processStartTicks(process.pid);
   const holder: LockHolder = {
     pid: process.pid,
     host: os.hostname(),
-    startedAt: new Date().toISOString()
+    startedAt: new Date().toISOString(),
+    ...(ticks !== null ? { startTicks: ticks } : {})
   };
   try {
     fs.writeFileSync(file, JSON.stringify(holder), { flag: 'wx', mode: 0o600 });
@@ -151,10 +186,12 @@ function acquire(dir: string): number {
 // half-written. The file stays: the generation number must not be reused.
 function release(params: { dir: string; generation: number }): void {
   const file = generationPath(params);
+  const held = readHolder(file);
   const holder: LockHolder = {
     pid: process.pid,
     host: os.hostname(),
-    startedAt: readHolder(file)?.startedAt ?? new Date().toISOString(),
+    startedAt: held?.startedAt ?? new Date().toISOString(),
+    ...(held?.startTicks !== undefined ? { startTicks: held.startTicks } : {}),
     released: true
   };
   const tmp = `${file}.${process.pid}.tmp`;

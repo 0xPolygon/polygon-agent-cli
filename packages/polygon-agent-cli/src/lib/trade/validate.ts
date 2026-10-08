@@ -41,6 +41,50 @@ export type QuotedIntent = Pick<
   | 'quote'
 >;
 
+// The saved deposit, re-checked just before it's sent (`swap --intent` sends
+// what trades/<id>.json holds): still exactly the quoted transfer of the
+// source token to the deposit address checked at quote time.
+export function validateSavedDeposit(trade: {
+  intentId: string;
+  origin: { token: string; amount: string };
+  deposit: { to: string; data: string; value: string };
+  depositAddress?: string;
+}): void {
+  const { origin, deposit, depositAddress } = trade;
+  const changed = (reason: string) =>
+    new CliError({
+      code: 'upstream_invalid_quote',
+      message: `The saved trade ${trade.intentId} no longer matches its quote (${reason}); nothing was sent.`,
+      hint: 'Quote again.'
+    });
+  const amount = BigInt(origin.amount);
+  const value = BigInt(deposit.value);
+  if (same(origin.token, NATIVE)) {
+    if (value !== amount || (deposit.data && deposit.data !== '0x')) {
+      throw changed('not the quoted native transfer');
+    }
+    if (depositAddress && !same(deposit.to, depositAddress)) {
+      throw changed('another recipient');
+    }
+    return;
+  }
+  if (!same(deposit.to, origin.token) || value !== 0n || !isHex(deposit.data)) {
+    throw changed('not a call to the token');
+  }
+  let decoded: ReturnType<typeof decodeFunctionData<typeof erc20Abi>>;
+  try {
+    decoded = decodeFunctionData({ abi: erc20Abi, data: deposit.data });
+  } catch {
+    throw changed('not an ERC-20 call');
+  }
+  if (decoded.functionName !== 'transfer' || decoded.args[1] !== amount) {
+    throw changed('not the quoted transfer');
+  }
+  if (depositAddress && !same(decoded.args[0], depositAddress)) {
+    throw changed('another recipient');
+  }
+}
+
 export function validateDeposit(params: {
   intent: QuotedIntent;
   walletAddress: string;

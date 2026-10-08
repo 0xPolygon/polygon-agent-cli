@@ -143,7 +143,25 @@ export async function confirmOwnerRequest<T extends Record<string, unknown>>(par
   }
 
   const owner = ownerWallet(Buffer.from(request.ownerKey, 'hex'));
-  const auth = await signIn({ request, owner, code: params.code });
+  // Interrupted during the sign-in itself (Ctrl-C, kill): the key may already
+  // be an owner credential, so it leaves the disk before exiting. Repeated
+  // signals are ignored, so a second Ctrl-C can't cut this short.
+  let interrupted = false;
+  const onSignalSigningIn = (signal: NodeJS.Signals) => {
+    if (interrupted) return;
+    interrupted = true;
+    discardPendingNow(params.wallet);
+    process.exit(signal === 'SIGINT' ? 130 : 143);
+  };
+  process.on('SIGINT', onSignalSigningIn);
+  process.on('SIGTERM', onSignalSigningIn);
+  let auth: Awaited<ReturnType<typeof signIn>>;
+  try {
+    auth = await signIn({ request, owner, code: params.code });
+  } finally {
+    process.removeListener('SIGINT', onSignalSigningIn);
+    process.removeListener('SIGTERM', onSignalSigningIn);
+  }
 
   const revokeSignIn = async (): Promise<string | undefined> => {
     try {
@@ -155,12 +173,16 @@ export async function confirmOwnerRequest<T extends Record<string, unknown>>(par
       await owner.wallet.signOut().catch(() => undefined);
     }
   };
-  // Interrupted mid-action (Ctrl-C, kill): still revoke before exiting.
+  // Interrupted mid-action (Ctrl-C, kill): still revoke before exiting, and
+  // a second signal doesn't cut the revoke short.
+  let revoking = false;
   const onSignal = (signal: NodeJS.Signals) => {
+    if (revoking) return;
+    revoking = true;
     void revokeSignIn().finally(() => process.exit(signal === 'SIGINT' ? 130 : 143));
   };
-  process.once('SIGINT', onSignal);
-  process.once('SIGTERM', onSignal);
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
 
   let outcome: { ok: true; result: T } | { ok: false; error: unknown };
   try {

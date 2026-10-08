@@ -722,6 +722,13 @@ export const withdrawCommandModule: CommandModule<object, WithdrawArgs> = {
           message: 'The amount must be greater than zero.'
         });
       const to = getAddress(argv.to);
+      // Addresses that burn the tokens: nobody can withdraw them from there.
+      if (/^0x0{40}$/.test(to) || to.toLowerCase() === token.address.toLowerCase()) {
+        throw new CliError({
+          code: 'invalid_input',
+          message: `Not a withdrawal address: ${to} (${/^0x0{40}$/.test(to) ? 'the zero address' : `the ${token.symbol} contract itself`}); tokens sent there are lost.`
+        });
+      }
       const display = `${formatUnits(amount, token.decimals)} ${token.symbol}`;
       await sendCode({
         wallet,

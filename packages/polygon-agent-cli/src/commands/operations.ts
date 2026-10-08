@@ -16,6 +16,7 @@ import { isWalletFunded } from '../lib/indexer.ts';
 import { resolveBroadcast, withWriteFlags } from '../lib/mode.ts';
 import { getOmsClient, loginUiBaseUrl } from '../lib/oms-client.ts';
 import { checkSessionSpend } from '../lib/session/run-tx.ts';
+import { tokenLabel } from '../lib/session/status.ts';
 import { findSupportedToken } from '../lib/session/tokens.ts';
 import { listTransfers } from '../lib/session/transfer.ts';
 import { loadOmsWalletPointer, loadBuilderConfig } from '../lib/storage.ts';
@@ -34,9 +35,12 @@ import {
   fileCoerce
 } from '../lib/utils.ts';
 import {
+  assertAuthorizationLifetime,
   isBazaarBody,
   parseBazaarPayment,
   markAuthorizationPending,
+  MAX_AUTHORIZATION_SECONDS,
+  noRedirectFetch,
   pendingAuthorizations,
   readTokenBalance,
   releaseX402Reservation,
@@ -81,6 +85,8 @@ type BalanceRowJson =
       type: 'erc20';
       symbol: string;
       name?: string;
+      // Not a reviewed token: its own symbol and name are anyone's choice.
+      unverified?: true;
       contractAddress: string;
       balance: string;
     };
@@ -119,8 +125,12 @@ async function fetchBalancesRowsForChain(
     .filter((b: ContractTokenBalance) => !!b.contractAddress)
     .map((b: ContractTokenBalance) => ({
       type: 'erc20' as const,
-      symbol: b.contractInfo?.symbol || 'ERC20',
-      name: b.contractInfo?.name || undefined,
+      ...tokenLabel({
+        chainId: network.chainId,
+        address: b.contractAddress as string,
+        symbol: b.contractInfo?.symbol,
+        name: b.contractInfo?.name || undefined
+      }),
       contractAddress: b.contractAddress as string,
       balance: formatUnits(b.balance || '0', b.contractInfo?.decimals ?? 18)
     }));
@@ -966,6 +976,7 @@ export const swapCommand: CommandModule<object, SwapArgs> = {
       const broadcast = resolveBroadcast(argv);
       let trade: TradeRecord;
       let warnings: string[] = [];
+      let highFee = false;
       if (argv.intent) {
         trade = requireTrade(argv.intent);
       } else {
@@ -977,7 +988,7 @@ export const swapCommand: CommandModule<object, SwapArgs> = {
             message: 'Give the token to buy with --to.'
           });
         }
-        ({ trade, warnings } = await quoteSwap({
+        ({ trade, warnings, highFee } = await quoteSwap({
           walletName: argv.wallet || 'main',
           from: argv.from,
           to,
@@ -1032,6 +1043,18 @@ export const swapCommand: CommandModule<object, SwapArgs> = {
           )
         );
         return;
+      }
+
+      // A costly quote is never executed unseen: the user accepts it by its
+      // intent (as auto trades never execute one at all).
+      if (highFee) {
+        throw new CliError({
+          code: 'confirmation_required',
+          message: `Not executed: ${warnings.join(' ')} Nothing was sent.`,
+          hint: 'Show the user this quote; if they accept it, run the command before it expires.',
+          command: `polygon-agent swap --intent ${trade.intentId} --broadcast`,
+          details: { ...describeTrade(trade), warnings }
+        });
       }
 
       reportTrade(await executeSwap({ trade, timeoutMs }));
@@ -1925,7 +1948,7 @@ export const x402PayCommand: CommandModule = {
 
       const eoaAccount = privateKeyToAccount(builderConfig.privateKey as `0x${string}`);
 
-      const probe = await fetch(url, {
+      const probe = await noRedirectFetch(url, {
         method,
         body: body || undefined,
         headers: (() => {
@@ -2067,7 +2090,7 @@ export const x402PayCommand: CommandModule = {
 
             let response: Response;
             try {
-              response = await fetch(url, {
+              response = await noRedirectFetch(url, {
                 method,
                 headers: retryHeaders,
                 body: body || undefined,
@@ -2197,6 +2220,13 @@ export const x402PayCommand: CommandModule = {
       }
 
       const { amount, asset, network: paymentNetwork } = req;
+      // Checked again on what's actually signed; refused here, before funding.
+      if (req.maxTimeoutSeconds > MAX_AUTHORIZATION_SECONDS) {
+        throw new CliError({
+          code: 'invalid_input',
+          message: `The service asks for a payment authorization valid for ${req.maxTimeoutSeconds} s, more than ${MAX_AUTHORIZATION_SECONDS / 60} minutes; nothing was paid.`
+        });
+      }
 
       // Pay on the chain the selected requirement names; a different --chain
       // only steers the choice, it never redirects the payment.
@@ -2377,6 +2407,7 @@ export const x402PayCommand: CommandModule = {
             if (signedAuth.amount > fundAmount) {
               throw new Error('The signed amount is more than was valued; it was not sent.');
             }
+            assertAuthorizationLifetime({ validBefore: signedAuth.validBefore, now: new Date() });
             markAuthorizationPending({
               id: reservationId,
               chainId: resolvedNetwork.chainId,
@@ -2386,7 +2417,7 @@ export const x402PayCommand: CommandModule = {
             });
             sent = true;
           });
-          const fetchWithPayment = wrapFetchWithPayment(fetch, client);
+          const fetchWithPayment = wrapFetchWithPayment(noRedirectFetch, client);
 
           // Ensure a JSON body is parseable upstream: set Content-Type when a body is
           // present and the caller didn't specify one (mirrors the bazaar path).

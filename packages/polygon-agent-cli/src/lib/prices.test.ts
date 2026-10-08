@@ -44,6 +44,15 @@ describe('getPriceReadings', () => {
     expect((await getPriceReadings({ tokens: [t], now: NOW })).get(priceKey(t))?.stale).toBe(true);
   });
 
+  it('a price dated in the future (beyond a minute of skew) is stale', async () => {
+    const t = token();
+    trailsSays([{ address: t.address, priceUsd: 2500, updatedAt: '2026-10-07T12:05:00Z' }]);
+    expect((await getPriceReadings({ tokens: [t], now: NOW })).get(priceKey(t))?.stale).toBe(true);
+    const u = token();
+    trailsSays([{ address: u.address, priceUsd: 2500, updatedAt: '2026-10-07T12:00:30Z' }]);
+    expect((await getPriceReadings({ tokens: [u], now: NOW })).get(priceKey(u))?.stale).toBe(false);
+  });
+
   it("a token Trails can't price is stale, with no price or time", async () => {
     const t = token();
     trailsSays([{ address: t.address, priceUsd: null, updatedAt: '0001-01-01T00:00:00Z' }]);

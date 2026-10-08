@@ -194,6 +194,11 @@ export function initWorkspace(params: {
   sourceDir?: string | null;
 }): InitResult {
   const root = path.resolve(params.root);
+  // The path is written into the skill's text (and a shell line): control
+  // characters or backticks would let a folder name rewrite what it says.
+  if (/[\u0000-\u001f\u007f`]/.test(root)) {
+    throw new Error('--root may not contain control characters or backticks.');
+  }
   if (fs.existsSync(root) && !fs.statSync(root).isDirectory()) {
     throw new Error(`--root is not a directory: ${root}`);
   }

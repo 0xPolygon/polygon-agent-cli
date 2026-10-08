@@ -233,3 +233,21 @@ describe('swap deposit confirmation', () => {
     expect(mocks.executeIntent).not.toHaveBeenCalled();
   });
 });
+
+describe('swap in one step (quote and --broadcast together)', () => {
+  it('never executes a quote that loses over 10% unseen: it is refused with the command to accept it', async () => {
+    // $0.10 in, $0.07 out: fees are small, but price impact takes 30%.
+    mocks.quoteIntent.mockResolvedValue({
+      intent: { ...quotedIntent(), quote: { ...quotedIntent().quote, toAmountUsd: 0.07 } }
+    });
+    await expect(swap()).rejects.toThrow('CLI exited');
+    expect(mocks.runTx).not.toHaveBeenCalled();
+    const output = JSON.parse(vi.mocked(console.error).mock.calls[0][0] as string);
+    expect(output).toMatchObject({
+      ok: false,
+      code: 'confirmation_required',
+      command: `polygon-agent swap --intent ${intentId} --broadcast`
+    });
+    expect(output.error).toMatch(/30% less/);
+  });
+});

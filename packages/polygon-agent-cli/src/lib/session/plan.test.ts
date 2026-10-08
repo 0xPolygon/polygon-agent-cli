@@ -92,6 +92,21 @@ describe('buildPlan', () => {
     ).toThrow(CliError);
   });
 
+  it.each([
+    ['WETH', 0.000001],
+    ['WETH', 5_000_000],
+    ['WBTC', 1],
+    ['WPOL', 0]
+  ])('refuses a %s price of $%d rather than set a runaway limit from it', (symbol, price) => {
+    const token = polygon.find((t) => t.symbol === symbol);
+    if (!token) throw new Error(`no ${symbol}`);
+    const all = byPrice(polygon);
+    all.set(priceKey({ chainId: token.chainId, address: token.address }), price);
+    expect(() =>
+      buildPlan({ allowanceUsd: 1000, days: 30, tokens: polygon, prices: all, now: NOW })
+    ).toThrow(/looks wrong/);
+  });
+
   it('refuses more than 127 tokens on a chain', () => {
     const many: PlanToken[] = Array.from({ length: 128 }, (_, i) => ({
       chainId: 137,

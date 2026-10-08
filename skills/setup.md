@@ -82,12 +82,13 @@ If it fails, stop and tell the user why. From here on, run `npm` and `node` with
   set -e
   case "${ROOT:?Set ROOT to the install folder first}" in /absolute/path/*) echo "Set ROOT to the real install folder"; exit 1 ;; esac
   mkdir -p "$ROOT"
-  PATH="$ROOT/node/bin:$PATH" npm install --prefix "$ROOT/cli" @polygonlabs/agent-cli@latest
+  PATH="$ROOT/node/bin:$PATH" npm install --ignore-scripts --prefix "$ROOT/cli" @polygonlabs/agent-cli@latest
   PATH="$ROOT/node/bin:$PATH" node "$ROOT/cli/node_modules/@polygonlabs/agent-cli/dist/index.js" \
     workspace init --root "$ROOT" --skills-dir "<skills folder>" --name "<install name>"
 )
 ```
 
+- `--ignore-scripts`: nothing the CLI needs runs an install script, and none should run beside the wallet's keys.
 - `--skills-dir` is the skills folder from step 1. Leave it out if your platform has none.
 - `--name` is what the wallet owner sees in their list of installs with access, like "OpenClaw on laptop". It defaults to the host name.
 - `workspace init` writes the wrapper `$ROOT/bin/polygon-agent` (the only command you'll use from now on), the state folder and a `.gitignore`, so workspace backups never pick it up. It also installs the `polygon-oms-wallet` skill, already pointed at the wrapper.

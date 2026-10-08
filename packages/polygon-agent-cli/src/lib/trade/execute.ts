@@ -29,6 +29,7 @@ import { loadOmsWalletPointer, STORAGE_ROOT } from '../storage.ts';
 import { runTx } from '../tx-dispatch.ts';
 import { getReadRpcUrl, resolveNetwork } from '../utils.ts';
 import { loadTrade, updateTrade } from './state.ts';
+import { validateSavedDeposit } from './validate.ts';
 
 const RECEIPT_TIMEOUT_MS = 60_000;
 const EXECUTE_RETRY_MS = 3_000;
@@ -104,6 +105,7 @@ async function sendDeposit(params: {
     });
   }
   await requireSameWallet(trade);
+  validateSavedDeposit(trade);
   let current = updateTrade({ record: trade, patch: { state: 'depositing' }, now: new Date() });
   try {
     const result = await runTx({

@@ -76,13 +76,22 @@ export interface PriceReading {
 
 const cache = new Map<string, { usd?: number; updatedAtMs: number; fetchedAt: number }>();
 
+const CLOCK_SKEW_MS = 60_000;
+
+// A price is fresh for 5 minutes after its timestamp. One dated in the future
+// (beyond a minute of clock skew) can't be judged, so it counts as stale.
+export function priceIsFresh(params: { updatedAtMs: number; now: number }): boolean {
+  const age = params.now - params.updatedAtMs;
+  return Number.isFinite(age) && age >= -CLOCK_SKEW_MS && age <= STALE_PRICE_MS;
+}
+
 // Staleness is judged when read, not when fetched.
 function toReading(params: { usd?: number; updatedAtMs: number; now: number }): PriceReading {
   const { usd, updatedAtMs: at, now } = params;
   return {
     ...(usd !== undefined ? { usd } : {}),
     ...(Number.isFinite(at) && at > 0 ? { updatedAt: new Date(at).toISOString() } : {}),
-    stale: !(usd !== undefined && Number.isFinite(at) && now - at <= STALE_PRICE_MS)
+    stale: !(usd !== undefined && priceIsFresh({ updatedAtMs: at, now }))
   };
 }
 

@@ -160,6 +160,37 @@ function appendEntry(entry: Record<string, unknown>): void {
   appendJsonLine({ file: paymentsFile(), entry });
 }
 
+// How long a signed authorization may stay valid. The service picks it
+// (maxTimeoutSeconds); a long one could settle long after the call looked
+// unpaid and was paid again, and keeps its signer funds promised all along.
+export const MAX_AUTHORIZATION_SECONDS = 15 * 60;
+
+export function assertAuthorizationLifetime(params: { validBefore: Date; now: Date }): void {
+  if (params.validBefore.getTime() > params.now.getTime() + MAX_AUTHORIZATION_SECONDS * 1000) {
+    throw new Error(
+      `The service asks for a payment authorization valid until ${params.validBefore.toISOString()}, more than ${MAX_AUTHORIZATION_SECONDS / 60} minutes away; it was not sent.`
+    );
+  }
+}
+
+// fetch that never follows a redirect: a service can't bounce the request
+// (with its payment and custom headers) to another host, or have one on the
+// local network answered for it. A redirect is an error naming its target.
+export const noRedirectFetch: typeof fetch = async (input, init) => {
+  const response = await fetch(input, { ...init, redirect: 'manual' });
+  if (response.status >= 300 && response.status < 400) {
+    const location = response.headers.get('location');
+    // Not a nothing-sent code: a paid request may be redirected after the
+    // payment went with it.
+    throw new CliError({
+      code: 'upstream_error',
+      message: `The service redirected the request${location ? ` to ${location}` : ''}; redirects aren't followed. Nothing was paid unless the output says so.`,
+      hint: 'If the new address is the same service, call it directly.'
+    });
+  }
+  return response;
+};
+
 // Reserves a payment against the daily limit; returns its id.
 export function recordX402Payment(params: {
   walletName: string;
