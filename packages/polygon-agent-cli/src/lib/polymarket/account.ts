@@ -667,27 +667,37 @@ export function previousTradingKeyAddresses(wallet: string): string[] {
 // The SDK only refuses this way when the derived Deposit Wallet was never deployed.
 const NOT_DEPLOYED = /Deposit Wallet deployment requires/;
 
-// Sweeps the pUSD of the Deposit Wallet an older trading key controls to `mainAddress`.
-// Returns null when there is nothing to sweep (no deployed wallet, or 0 pUSD): then the
-// only calls made are the client creation and the balance read.
-export async function sweepOldKey(p: {
-  owner: OmsWalletLike;
-  target: { id: string; address: string };
+type KeySweep = {
+  account: string | null;
+  balance: bigint;
+  // The client that read the account (the probe, or the one that sent); null if undeployed.
+  client: SecureClient | null;
+  withdrawn?: { amount: bigint; txHash: string | null };
+};
+
+// The one money-moving path for a trading key held in OMS: probe its Deposit Wallet without a
+// builder key, read the pUSD, and only when `broadcast` and non-zero mint a builder key and
+// withdraw everything to `mainAddress`. An undeployed wallet yields `account: null`.
+async function sweepTradingKeyAccount(p: {
+  signer: ReturnType<typeof omsSigner>;
+  address: string;
   mainAddress: string;
-}): Promise<{ withdrawnUsd: string; txHash: string | null } | null> {
-  const signer = omsSigner(p.owner, { walletId: p.target.id, address: p.target.address });
+  broadcast: boolean;
+}): Promise<KeySweep> {
   const acct: KeyAccount = { kind: 'deposit-wallet' };
   let probe: SecureClient;
   try {
-    probe = await createClient({ signer, acct, builder: null, clob: null });
+    probe = await createClient({ signer: p.signer, acct, builder: null, clob: null });
   } catch (err) {
-    if (NOT_DEPLOYED.test(errorText(err))) return null;
+    if (NOT_DEPLOYED.test(errorText(err))) return { account: null, balance: 0n, client: null };
     throw err;
   }
-  if ((await pusdBalanceOf(probe)) === 0n) return null;
-  const builder = await mintBuilderCreds(signer, p.target.address);
+  const balance = await pusdBalanceOf(probe);
+  const account = probe.account.wallet as string;
+  if (!p.broadcast || balance === 0n) return { account, balance, client: probe };
+  const builder = await mintBuilderCreds(p.signer, p.address);
   const client = await createClient({
-    signer,
+    signer: p.signer,
     acct,
     builder,
     clob: (probe.credentials as Creds | undefined) ?? null
@@ -698,7 +708,31 @@ export async function sweepOldKey(p: {
     recipient: p.mainAddress,
     broadcast: true
   });
-  return { withdrawnUsd: formatUnits6(res.amount), txHash: res.txHash ?? null };
+  return {
+    account,
+    balance,
+    client,
+    withdrawn: { amount: res.amount, txHash: res.txHash ?? null }
+  };
+}
+
+// Sweeps the pUSD of the Deposit Wallet an older trading key controls to `mainAddress`.
+// Returns null when there is nothing to sweep (no deployed wallet, or 0 pUSD): then the
+// only calls made are the client creation and the balance read.
+export async function sweepOldKey(p: {
+  owner: OmsWalletLike;
+  target: { id: string; address: string };
+  mainAddress: string;
+}): Promise<{ withdrawnUsd: string; txHash: string | null } | null> {
+  const signer = omsSigner(p.owner, { walletId: p.target.id, address: p.target.address });
+  const res = await sweepTradingKeyAccount({
+    signer,
+    address: p.target.address,
+    mainAddress: p.mainAddress,
+    broadcast: true
+  });
+  if (!res.withdrawn) return null;
+  return { withdrawnUsd: formatUnits6(res.withdrawn.amount), txHash: res.withdrawn.txHash };
 }
 
 // The first page of OPEN positions, summarized. A failed read is reported, never thrown:
@@ -726,6 +760,7 @@ export type OtherKeyRecovery = {
   account: string | null;
   pusd: string;
   legacyProxy?: { address: string; balances: { pusd: string; usdcE: string } };
+  legacyProxyError?: string;
   positionsLeft: unknown;
   positionsTruncated?: true;
   positionsError?: string;
@@ -746,48 +781,34 @@ export async function recoverOtherKey(p: {
 }): Promise<OtherKeyRecovery> {
   const { target } = p;
   const signer = omsSigner(p.owner, { walletId: target.id, address: target.address });
-  const acct: KeyAccount = { kind: 'deposit-wallet' };
-  const legacy = await legacyProxyBalances(target.address);
-  const base = {
-    address: target.address,
-    ...(legacy.funded
-      ? { legacyProxy: { address: legacy.address, balances: legacy.balances } }
-      : {})
+  const base: { address: string } & Pick<OtherKeyRecovery, 'legacyProxy' | 'legacyProxyError'> = {
+    address: target.address
   };
-  let probe: SecureClient;
   try {
-    probe = await createClient({ signer, acct, builder: null, clob: null });
-  } catch (err) {
-    if (!NOT_DEPLOYED.test(errorText(err))) throw err;
-    return { ...base, account: null, pusd: '0', positionsLeft: [] };
+    const legacy = await legacyProxyBalances(target.address);
+    if (legacy.funded) base.legacyProxy = { address: legacy.address, balances: legacy.balances };
+  } catch (error) {
+    // A failed read must not block recovering the Deposit Wallet.
+    base.legacyProxyError = errorText(error);
   }
-  const balance = await pusdBalanceOf(probe);
-  const plan = { ...base, account: probe.account.wallet as string, pusd: formatUnits6(balance) };
-  if (!p.broadcast || balance === 0n) {
-    return {
-      ...plan,
-      ...(await openPositions(probe)),
-      ...(p.broadcast ? { withdrawnUsd: '0' } : {})
-    } as OtherKeyRecovery;
-  }
-  const builder = await mintBuilderCreds(signer, target.address);
-  const client = await createClient({
+  const res = await sweepTradingKeyAccount({
     signer,
-    acct,
-    builder,
-    clob: (probe.credentials as Creds | undefined) ?? null
+    address: target.address,
+    mainAddress: p.mainAddress,
+    broadcast: p.broadcast
   });
-  const res = await withdrawAll({
-    client,
-    account: plan.account,
-    recipient: p.mainAddress,
-    broadcast: true
-  });
+  if (!res.client) return { ...base, account: null, pusd: '0', positionsLeft: [] };
   return {
-    ...plan,
-    withdrawnUsd: formatUnits6(res.amount),
-    txHash: res.txHash ?? null,
-    ...(await openPositions(client))
+    ...base,
+    account: res.account,
+    pusd: formatUnits6(res.balance),
+    ...(p.broadcast
+      ? {
+          withdrawnUsd: res.withdrawn ? formatUnits6(res.withdrawn.amount) : '0',
+          ...(res.withdrawn ? { txHash: res.withdrawn.txHash } : {})
+        }
+      : {}),
+    ...(await openPositions(res.client))
   } as OtherKeyRecovery;
 }
 

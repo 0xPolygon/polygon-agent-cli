@@ -211,6 +211,20 @@ async function otherTradingKeys(
   }
 }
 
+// Only wallets labelled as Polymarket trading keys can be recovered, same as `otherTradingKeys`.
+async function isPolymarketKey(
+  w: { listWallets(): Promise<Array<{ address: string; keyOrigin?: string; reference?: string }>> },
+  address: string
+): Promise<boolean> {
+  return (await w.listWallets()).some(
+    (x) =>
+      x.keyOrigin === 'imported' &&
+      x.address.toLowerCase() === address.toLowerCase() &&
+      typeof x.reference === 'string' &&
+      x.reference.startsWith(TRADING_KEY_REFERENCE)
+  );
+}
+
 async function otherKeysField(wallet: string): Promise<Record<string, unknown>> {
   const keys = await otherTradingKeys(wallet);
   return keys.length > 0 ? { otherTradingKeys: keys } : {};
@@ -300,7 +314,7 @@ async function handleRecover(argv: RecoverArgs): Promise<void> {
     let result: Record<string, unknown>;
     try {
       const target = await findTradingKeyWallet(w, { address: argv.address });
-      if (!target) {
+      if (!target || !(await isPolymarketKey(w, target.address))) {
         throw new CliError({
           code: 'invalid_input',
           message: 'No Polymarket trading key with that address in your OMS account.'

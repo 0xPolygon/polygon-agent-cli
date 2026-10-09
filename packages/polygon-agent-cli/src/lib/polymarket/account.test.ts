@@ -1032,6 +1032,14 @@ describe('recoverOtherKey', () => {
     expect(sdk.created.every((c) => c.wallet !== proxy)).toBe(true);
   });
 
+  it('reports a failed legacy proxy read and still recovers the Deposit Wallet', async () => {
+    sdk.chain.fail = new Error('rpc down');
+    const out = await run(false);
+    expect(out.legacyProxyError).toMatch(/rpc down/);
+    expect(out.legacyProxy).toBeUndefined();
+    expect(out).toMatchObject({ account: DEPOSIT_WALLET, pusd: '2.5' });
+  });
+
   it('reports no account when the Deposit Wallet was never deployed', async () => {
     sdk.createSecureClient.mockRejectedValueOnce(
       new Error('Deposit Wallet deployment requires a Relayer API Key or Builder API Key.')
