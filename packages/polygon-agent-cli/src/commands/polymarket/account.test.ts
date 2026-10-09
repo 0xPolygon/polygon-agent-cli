@@ -198,6 +198,36 @@ describe('setup', () => {
     expect(m.setupAccount).not.toHaveBeenCalled();
   });
 
+  it("dry run in owner mode lists a restore instead of a new key when OMS holds this install's key", async () => {
+    const found = { id: 'w-old', address: '0x00000000000000000000000000000000000000A1' };
+    m.findTradingKeyWallet.mockResolvedValue(found);
+    const out = await run(['setup', '--dry-run']);
+    expect(out).toMatchObject({ ok: true, dryRun: true, exists: false });
+    expect(out.steps).toEqual([
+      'restore the trading key from OMS',
+      'mint builder key',
+      'deploy Deposit Wallet (gasless)',
+      'set trading approvals (gasless)',
+      'approve the legacy NegRiskAdapter for neg-risk markets (gasless)'
+    ]);
+    expect(m.findTradingKeyWallet).toHaveBeenCalledWith(m.omsWallet, {
+      reference: installTradingKeyReference()
+    });
+    expect(m.restoreFromOms).not.toHaveBeenCalled();
+    expect(m.ensureMainWallet).not.toHaveBeenCalled();
+    expect(m.setupAccount).not.toHaveBeenCalled();
+    expect(m.ensureTradingKey).not.toHaveBeenCalled();
+  });
+
+  it('dry run lists a new key when signed out or when OMS holds no key for this install', async () => {
+    const out = await run(['setup', '--dry-run']);
+    expect(out.steps[0]).toBe('create trading key');
+    m.omsWallet.walletAddress = undefined;
+    m.findTradingKeyWallet.mockClear();
+    expect((await run(['setup', '--dry-run'])).steps[0]).toBe('create trading key');
+    expect(m.findTradingKeyWallet).not.toHaveBeenCalled();
+  });
+
   it('dry run drops finished steps when the account exists', async () => {
     m.account = ACCOUNT;
     const out = await run(['setup', '--dry-run']);
@@ -242,7 +272,7 @@ describe('setup', () => {
       TRADING_KEY,
       installTradingKeyReference()
     );
-    expect(out.backup).toEqual({ omsWalletId: 'w-imported', imported: true });
+    expect(out.backup).toEqual({ backedUp: true, omsWalletId: 'w-imported', imported: true });
     expect(readBackup('main')).toMatchObject({ omsWalletId: 'w-imported', address: '0xAbC' });
     expect(m.ensureMainWallet).toHaveBeenCalledWith('main');
     expect(fs.readFileSync(accountFile('main', 'backup.json'), 'utf8')).not.toContain(TRADING_KEY);
@@ -257,7 +287,7 @@ describe('setup', () => {
       imported: false
     });
     const out = await run(['setup', '--broadcast']);
-    expect(out.backup).toEqual({ omsWalletId: 'w-imported', imported: false });
+    expect(out.backup).toEqual({ backedUp: true, omsWalletId: 'w-imported', imported: false });
     expect(readBackup('main')?.omsWalletId).toBe('w-imported');
   });
 
@@ -293,6 +323,7 @@ describe('setup', () => {
     m.ensureMainWallet.mockRejectedValue(new Error('no main wallet'));
     const out = await run(['setup', '--broadcast']);
     expect(out.backup).toEqual({
+      backedUp: true,
       omsWalletId: 'w-imported',
       imported: true,
       mainWalletError: 'no main wallet'

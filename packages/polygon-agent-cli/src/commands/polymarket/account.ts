@@ -42,6 +42,7 @@ const SETUP_STEPS = [
   'set trading approvals (gasless)'
 ];
 const BACKUP_STEP = 'back up the trading key to OMS';
+const RESTORE_STEP = 'restore the trading key from OMS';
 const LEGACY_STEP = 'approve the legacy NegRiskAdapter for neg-risk markets (gasless)';
 
 type SetupArgs = { wallet: string; broadcast?: boolean; dryRun?: boolean };
@@ -76,7 +77,7 @@ async function backUpInOwnerMode(wallet: string): Promise<Record<string, unknown
       at: new Date().toISOString(),
       kind: loadAccount(wallet)?.kind ?? 'deposit-wallet'
     });
-    result = { omsWalletId: res.omsWalletId, imported: res.imported };
+    result = { backedUp: true, omsWalletId: res.omsWalletId, imported: res.imported };
   } catch (error) {
     result = {
       backedUp: false,
@@ -139,6 +140,25 @@ async function restoreInOwnerMode(wallet: string): Promise<Record<string, unknow
   };
 }
 
+// Dry run, owner mode, no local key: whether `setup --broadcast` would restore this install's
+// key from OMS rather than create one. Read-only: one listWallets, no wallet switch, no
+// signing. Signed out, or on any error, it reports false (the broadcast run checks again).
+async function wouldRestoreFromOms(wallet: string): Promise<boolean> {
+  if (hasLocalKey(wallet) || !(await isOwnerMode(wallet))) return false;
+  const w = getOmsClient(wallet).wallet;
+  if (!w.walletAddress) return false;
+  try {
+    const known = loadAccount(wallet)?.signer ?? readBackup(wallet)?.address;
+    const found = await findTradingKeyWallet(
+      w,
+      known ? { address: known } : { reference: installTradingKeyReference() }
+    );
+    return found !== null;
+  } catch {
+    return false;
+  }
+}
+
 async function handleSetup(argv: SetupArgs): Promise<void> {
   try {
     const broadcast = resolveBroadcast(argv);
@@ -150,15 +170,23 @@ async function handleSetup(argv: SetupArgs): Promise<void> {
       const legacyMissing = exists
         ? !(await legacyNegRiskApproved(await getTradingClient(argv.wallet)))
         : true;
+      // A restore records the OMS backup itself, so it needs no separate backup step.
+      const restore = !exists && (await wouldRestoreFromOms(argv.wallet));
       ok({
         dryRun: true,
         exists,
         ...(account ? { account } : {}),
         // Approvals are re-checked on every run; everything before them is done once.
         steps: [
-          ...(exists ? SETUP_STEPS.slice(3) : SETUP_STEPS),
+          ...(exists
+            ? SETUP_STEPS.slice(3)
+            : restore
+              ? [RESTORE_STEP, ...SETUP_STEPS.slice(1)]
+              : SETUP_STEPS),
           ...(legacyMissing ? [LEGACY_STEP] : []),
-          ...(!readBackup(argv.wallet) && (await isOwnerMode(argv.wallet)) ? [BACKUP_STEP] : [])
+          ...(!restore && !readBackup(argv.wallet) && (await isOwnerMode(argv.wallet))
+            ? [BACKUP_STEP]
+            : [])
         ]
       });
       return;
