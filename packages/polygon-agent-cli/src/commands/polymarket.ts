@@ -6,6 +6,7 @@
 
 import type { CommandModule } from 'yargs';
 
+import { bigintReplacer, CliError, errorJson, failureJson } from '../lib/errors.ts';
 import { resolveBroadcast, withWriteFlags } from '../lib/mode.ts';
 import {
   getMarkets,
@@ -25,8 +26,28 @@ import {
   NEG_RISK_ADAPTER,
   COLLATERAL_ONRAMP
 } from '../lib/polymarket.ts';
-import { loadOmsWalletPointer, savePolymarketKey, loadPolymarketKey } from '../lib/storage.ts';
+import {
+  listWallets,
+  loadOmsWalletPointer,
+  savePolymarketKey,
+  loadPolymarketKey
+} from '../lib/storage.ts';
 import { runTx as runDappClientTx } from '../lib/tx-dispatch.ts';
+
+// Approvals, orders and sells are signed by the Polymarket EOA, outside the OMS
+// wallet's smart sessions, so no allowance limits them. An install with any
+// wallet connected in session mode can't use them; a per-wallet check could be
+// sidestepped by naming another wallet.
+async function refuseInSessionMode(): Promise<void> {
+  for (const name of await listWallets()) {
+    if ((await loadOmsWalletPointer(name))?.access === 'session') {
+      throw new CliError({
+        code: 'owner_required',
+        message: `Polymarket trading needs the wallet owner; this install's wallet '${name}' is connected with an allowance, which only covers token transfers.`
+      });
+    }
+  }
+}
 
 // ─── handlers ────────────────────────────────────────────────────────────────
 
@@ -43,7 +64,7 @@ async function handleMarkets(argv: {
     });
     console.log(JSON.stringify({ ok: true, count: markets.length, markets }));
   } catch (err) {
-    console.error(JSON.stringify({ ok: false, error: (err as Error).message }));
+    console.error(JSON.stringify(errorJson(err), bigintReplacer));
     process.exit(1);
   }
 }
@@ -53,7 +74,7 @@ async function handleMarket(argv: { conditionId: string }): Promise<void> {
     const market = await getMarket(argv.conditionId);
     console.log(JSON.stringify({ ok: true, market }));
   } catch (err) {
-    console.error(JSON.stringify({ ok: false, error: (err as Error).message }));
+    console.error(JSON.stringify(errorJson(err), bigintReplacer));
     process.exit(1);
   }
 }
@@ -92,7 +113,7 @@ async function handleSetKey(argv: { privateKey: string }): Promise<void> {
       )
     );
   } catch (err) {
-    console.error(JSON.stringify({ ok: false, error: (err as Error).message }));
+    console.error(JSON.stringify(errorJson(err), bigintReplacer));
     process.exit(1);
   }
 }
@@ -117,7 +138,7 @@ async function handleProxyWallet(): Promise<void> {
       )
     );
   } catch (err) {
-    console.error(JSON.stringify({ ok: false, error: (err as Error).message }));
+    console.error(JSON.stringify(errorJson(err), bigintReplacer));
     process.exit(1);
   }
 }
@@ -131,6 +152,7 @@ async function handleApprove(argv: {
   const broadcast = resolveBroadcast(argv);
 
   try {
+    await refuseInSessionMode();
     const privateKey = await loadPolymarketKey();
     const { privateKeyToAccount } = await import('viem/accounts');
     const account = privateKeyToAccount(privateKey as `0x${string}`);
@@ -239,13 +261,7 @@ async function handleApprove(argv: {
       )
     );
   } catch (err) {
-    console.error(
-      JSON.stringify(
-        { ok: false, error: (err as Error).message, stack: (err as Error).stack },
-        null,
-        2
-      )
-    );
+    console.error(JSON.stringify(failureJson(err), bigintReplacer, 2));
     process.exit(1);
   }
 }
@@ -276,6 +292,7 @@ async function handleClobBuy(argv: {
   }
 
   try {
+    await refuseInSessionMode();
     const market = await getMarket(conditionId);
     const tokenId = outcomeArg === 'YES' ? market.yesTokenId : market.noTokenId;
     if (!tokenId)
@@ -356,7 +373,9 @@ async function handleClobBuy(argv: {
         chainId: 137,
         transactions: [{ to: USDC_E, value: 0n, data: transferData }],
         broadcast: true,
-        preferNativeFee: false
+        preferNativeFee: false,
+        // Polymarket runs on the builder EOA; session mode doesn't fund it.
+        ownerOnly: true
       });
       fundTxHash = fundResult.txHash ?? null;
       process.stderr.write(`[polymarket] Funded: ${fundTxHash}\n`);
@@ -440,13 +459,7 @@ async function handleClobBuy(argv: {
       )
     );
   } catch (err) {
-    console.error(
-      JSON.stringify(
-        { ok: false, error: (err as Error).message, stack: (err as Error).stack },
-        null,
-        2
-      )
-    );
+    console.error(JSON.stringify(failureJson(err), bigintReplacer, 2));
     process.exit(1);
   }
 }
@@ -473,6 +486,7 @@ async function handleSell(argv: {
   }
 
   try {
+    await refuseInSessionMode();
     const market = await getMarket(conditionId);
     const tokenId = outcomeArg === 'YES' ? market.yesTokenId : market.noTokenId;
     if (!tokenId)
@@ -568,13 +582,7 @@ async function handleSell(argv: {
       )
     );
   } catch (err) {
-    console.error(
-      JSON.stringify(
-        { ok: false, error: (err as Error).message, stack: (err as Error).stack },
-        null,
-        2
-      )
-    );
+    console.error(JSON.stringify(failureJson(err), bigintReplacer, 2));
     process.exit(1);
   }
 }
@@ -600,7 +608,7 @@ async function handlePositions(): Promise<void> {
       )
     );
   } catch (err) {
-    console.error(JSON.stringify({ ok: false, error: (err as Error).message }));
+    console.error(JSON.stringify(errorJson(err), bigintReplacer));
     process.exit(1);
   }
 }
@@ -621,7 +629,7 @@ async function handleOrders(): Promise<void> {
       )
     );
   } catch (err) {
-    console.error(JSON.stringify({ ok: false, error: (err as Error).message }));
+    console.error(JSON.stringify(errorJson(err), bigintReplacer));
     process.exit(1);
   }
 }
@@ -632,7 +640,7 @@ async function handleCancel(argv: { orderId: string }): Promise<void> {
     const result = await cancelOrder(argv.orderId, privateKey);
     console.log(JSON.stringify({ ok: true, orderId: argv.orderId, result }));
   } catch (err) {
-    console.error(JSON.stringify({ ok: false, error: (err as Error).message }));
+    console.error(JSON.stringify(errorJson(err), bigintReplacer));
     process.exit(1);
   }
 }

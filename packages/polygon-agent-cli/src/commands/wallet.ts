@@ -12,7 +12,8 @@ import type { TxMode } from '../lib/mode.ts';
 import type { OmsLoginMethod } from '../lib/storage.ts';
 
 import { runBrowserLogin } from '../lib/browser-login.ts';
-import { ensureBuilderAccessKey, makeDefaultProvisionDeps } from '../lib/builder-provision.ts';
+import { provisionBuilderOnce } from '../lib/builder-provision.ts';
+import { CliError, jsonFail } from '../lib/errors.ts';
 import { makeLoginRelay } from '../lib/login-relay-client.ts';
 import { isTxModeSet, loadTxMode, saveTxMode } from '../lib/mode.ts';
 import { startOidcCallbackServer } from '../lib/oidc-callback-server.ts';
@@ -26,6 +27,15 @@ import {
 } from '../lib/storage.ts';
 import { isTTY, inkRender } from '../ui/render.js';
 import { showFunding } from './operations.ts';
+import {
+  accessCommandModule,
+  allowanceCommandModule,
+  confirmCommandModule,
+  handleEmailLogin,
+  logoutSessionWallet,
+  statusCommandModule,
+  withdrawCommandModule
+} from './wallet-session.ts';
 import { WalletListUI, WalletAddressUI } from './wallet-ui.js';
 
 // Compact JSON output for AI agent consumers (single line, no stack traces)
@@ -68,6 +78,10 @@ interface LoginArgs {
   local: boolean;
   remote: boolean;
   relayUrl?: string;
+  email?: string;
+  allowance?: number;
+  days?: number;
+  chains?: string;
 }
 
 // Print the auth URL (copy-paste fallback) and try to open it in a browser.
@@ -109,13 +123,19 @@ async function obtainLoopbackCallbackUrl(
 }
 
 async function handleLogin(argv: LoginArgs): Promise<void> {
+  // --email connects this install in session mode with a code (no browser).
+  if (argv.email !== undefined) return handleEmailLogin(argv);
   try {
+    await refuseSessionWallet({ name: argv.name, action: 'login' });
     const oms = getOmsClient(argv.name);
     // Zero-setup onboarding: give this agent its own Builder project + access
     // key (indexer and Trails quota). Best-effort: a failure never fails the
     // login; re-running `wallet login` retries it, no fresh browser auth needed.
     async function provisionBuilder(walletAddress: string): Promise<boolean> {
-      const provision = await ensureBuilderAccessKey(walletAddress, makeDefaultProvisionDeps());
+      const provision = await provisionBuilderOnce({ walletAddress }).catch((error: unknown) => ({
+        provisioned: false,
+        reason: String(error)
+      }));
       const ok = provision.provisioned || provision.reason === 'existing';
       if (!ok) {
         process.stderr.write(
@@ -230,8 +250,20 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
       await showFunding(argv.name, walletAddress, 137, { openBrowser: argv.local });
     }
   } catch (error) {
-    jsonOut({ ok: false, error: (error as Error).message });
-    process.exit(1);
+    jsonFail(error);
+  }
+}
+
+// A session-mode wallet's access lives on OMS: dropping or replacing it locally
+// would leave its session key live. Only logout (which revokes it) may.
+async function refuseSessionWallet(params: { name: string; action: string }): Promise<void> {
+  const pointer = await loadOmsWalletPointer(params.name);
+  if (pointer?.access === 'session') {
+    throw new CliError({
+      code: 'invalid_input',
+      message: `Wallet '${params.name}' is connected in session mode; '${params.action}' would leave its access live.`,
+      command: `polygon-agent wallet logout${params.name === 'main' ? '' : ` --name ${params.name}`}`
+    });
   }
 }
 
@@ -243,6 +275,12 @@ interface LogoutArgs {
 async function handleLogout(argv: LogoutArgs): Promise<void> {
   const name = argv.name;
   try {
+    const pointer = await loadOmsWalletPointer(name);
+    if (pointer?.access === 'session') {
+      const result = await logoutSessionWallet(name);
+      jsonOut({ ok: true, walletName: name, loggedOut: true, ...result });
+      return;
+    }
     try {
       const oms = getOmsClient(name);
       await oms.wallet.signOut();
@@ -252,8 +290,7 @@ async function handleLogout(argv: LogoutArgs): Promise<void> {
     await deleteOmsWallet(name);
     jsonOut({ ok: true, walletName: name, loggedOut: true });
   } catch (error) {
-    jsonOut({ ok: false, error: (error as Error).message });
-    process.exit(1);
+    jsonFail(error);
   }
 }
 
@@ -340,6 +377,7 @@ async function handleRemove(argv: RemoveArgs): Promise<void> {
   const name = argv.name;
 
   try {
+    await refuseSessionWallet({ name, action: 'remove' });
     // Remove OMS session state (storage + credential key) if present, plus the
     // wallet pointer file.
     await deleteOmsWallet(name);
@@ -351,22 +389,41 @@ async function handleRemove(argv: RemoveArgs): Promise<void> {
 
     jsonOut({ ok: true, walletName: name });
   } catch (error) {
-    jsonOut({ ok: false, error: (error as Error).message });
-    process.exit(1);
+    jsonFail(error);
   }
 }
 
 // --- Main wallet command ---
 export const walletCommand: CommandModule = {
   command: 'wallet',
-  describe: 'Manage wallets (login, logout, list, address, remove)',
+  describe:
+    'Manage wallets (login, confirm, status, allowance, withdraw, access, logout, list, address, remove)',
   builder: (yargs) =>
     yargs
       .command({
         command: 'login',
-        describe: 'Log in from the browser (choose Google or email on the login page)',
+        describe:
+          'Log in from the browser (owner mode), or with --email connect this install with a spending allowance (session mode)',
         builder: (y) =>
           y
+            .option('email', {
+              type: 'string',
+              describe:
+                "Session mode: the owner's email; a code is sent to it (then run wallet confirm)"
+            })
+            .option('allowance', {
+              type: 'number',
+              describe: 'Session mode: USD the agent may spend (default 1000)'
+            })
+            .option('days', {
+              type: 'number',
+              describe: 'Session mode: allowance period in days, 1–30 (default 30)'
+            })
+            .option('chains', {
+              type: 'string',
+              describe:
+                'Session mode: chains to cover, comma-separated (default Polygon, Base, and chains holding covered tokens)'
+            })
             .option('name', {
               type: 'string',
               default: 'main',
@@ -416,7 +473,8 @@ export const walletCommand: CommandModule = {
       })
       .command({
         command: 'logout',
-        describe: 'Log out and clear the local OMS V3 session',
+        describe:
+          "Log out: in session mode, revoke this install's access; in owner mode, clear the local session",
         builder: (y) =>
           y.option('name', {
             type: 'string',
@@ -452,6 +510,11 @@ export const walletCommand: CommandModule = {
           }),
         handler: (argv) => handleRemove(argv as unknown as RemoveArgs)
       })
+      .command(confirmCommandModule)
+      .command(statusCommandModule)
+      .command(allowanceCommandModule)
+      .command(withdrawCommandModule)
+      .command(accessCommandModule)
       .demandCommand(1, '')
       .showHelpOnFail(true),
   handler: () => {}

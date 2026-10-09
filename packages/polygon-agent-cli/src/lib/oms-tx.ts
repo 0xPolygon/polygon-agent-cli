@@ -5,10 +5,11 @@
 // existing command call sites need only swap which implementation they call (via
 // the runTx dispatch). Internally maps onto oms.wallet.sendTransaction.
 
-import type { FeeOptionWithBalance } from '@polygonlabs/oms-wallet';
+import type { FeeOptionSelection, FeeOptionWithBalance } from '@polygonlabs/oms-wallet';
 
 import { findNetworkById, isOMSWalletError, TransactionMode } from '@polygonlabs/oms-wallet';
 
+import { CliError } from './errors.ts';
 import { getOmsClient } from './oms-client.ts';
 
 export interface OmsTxTransaction {
@@ -23,6 +24,8 @@ export interface OmsTxParams {
   transactions: OmsTxTransaction[];
   broadcast: boolean;
   preferNativeFee?: boolean;
+  // Don't execute after this time (ms since epoch), e.g. a trade quote's expiry.
+  notAfter?: number;
 }
 
 export interface OmsTxResult {
@@ -36,8 +39,11 @@ const USDC_POLYGON = '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359';
 
 // Build a selectFeeOption callback mirroring the legacy fee logic:
 // prefer native gas if requested, else prefer USDC, always gated on affordability.
-function makeFeeSelector(preferNativeFee: boolean) {
-  return (opts: FeeOptionWithBalance[]) => {
+// Sponsored transactions call it with an empty list (oms-wallet >= 0.3); returning
+// undefined lets them proceed with no fee.
+export function makeFeeSelector(preferNativeFee: boolean) {
+  return (opts: FeeOptionWithBalance[]): FeeOptionSelection | undefined => {
+    if (opts.length === 0) return undefined;
     const usable = opts.filter(
       (o) => o.availableRaw != null && BigInt(o.availableRaw) >= BigInt(o.feeOption.value)
     );
@@ -61,7 +67,9 @@ function makeFeeSelector(preferNativeFee: boolean) {
           'Fund with POL (agent fund), or hold USDC for fees.'
       );
     }
-    return { token: pick.feeOption.token.symbol };
+    // The SDK's selection carries the option's index, so two options with the
+    // same symbol can't be confused.
+    return pick.selection;
   };
 }
 
@@ -94,10 +102,26 @@ export async function runOmsTx(params: OmsTxParams): Promise<OmsTxResult> {
     return { walletAddress, dryRun: true };
   }
 
+  // A deadline only makes sense for one transaction: with several, an expiry
+  // after the first executed would wrongly read as "nothing was sent".
+  if (params.notAfter !== undefined && transactions.length !== 1) {
+    throw new Error('notAfter needs exactly one transaction');
+  }
+
   const network = findNetworkById(chainId);
   if (!network) throw new Error(`Unsupported chainId for OMS: ${chainId}`);
 
-  const selectFeeOption = makeFeeSelector(preferNativeFee);
+  // The SDK calls the fee selector after preparing and right before executing
+  // (sponsored or not), so a deadline checked there is checked last.
+  const feeSelector = makeFeeSelector(preferNativeFee);
+  let expired = false;
+  const selectFeeOption: typeof feeSelector = (options) => {
+    if (params.notAfter !== undefined && Date.now() > params.notAfter) {
+      expired = true;
+      throw new Error('past notAfter before executing');
+    }
+    return feeSelector(options);
+  };
 
   // OMS sendTransaction takes a single tx. For multi-tx bundles (only `deposit`
   // sends 2: approve + supply) we submit sequentially. NON-ATOMIC: if the second
@@ -117,6 +141,13 @@ export async function runOmsTx(params: OmsTxParams): Promise<OmsTxResult> {
       });
       lastTxHash = res.txnHash ?? lastTxHash;
     } catch (e) {
+      if (expired) {
+        throw new CliError({
+          code: 'quote_expired',
+          message: 'The quote expired while preparing the transaction; nothing was sent.',
+          hint: 'Quote again.'
+        });
+      }
       if (
         isOMSWalletError(e) &&
         (e.code === 'OMS_SESSION_EXPIRED' || e.code === 'OMS_SESSION_MISSING')

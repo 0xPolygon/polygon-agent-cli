@@ -7,6 +7,7 @@ import type { ContractTokenBalance } from '@polygonlabs/oms-wallet';
 import { findNetworkById } from '@polygonlabs/oms-wallet';
 
 import { getOmsClient } from '../lib/oms-client.ts';
+import { tokenLabel } from '../lib/session/status.ts';
 import { loadOmsWalletPointer } from '../lib/storage.ts';
 import { resolveNetwork, formatUnits } from '../lib/utils.ts';
 import { Header, KV, Err, Divider, DryRunBanner, TxResult } from '../ui/components.js';
@@ -69,7 +70,13 @@ export function BalancesUI({ walletName, chainOverride }: BalancesUIProps) {
         ];
 
         for (const b of (res.balances || []) as ContractTokenBalance[]) {
-          const sym = b.contractInfo?.symbol || 'ERC20';
+          const sym = b.contractAddress
+            ? tokenLabel({
+                chainId: network.chainId,
+                address: b.contractAddress,
+                symbol: b.contractInfo?.symbol
+              }).symbol
+            : 'ERC20';
           const dec = b.contractInfo?.decimals ?? 18;
           const tokenAddr = b.contractAddress ? shortAddr(b.contractAddress) : '';
           rows.push({

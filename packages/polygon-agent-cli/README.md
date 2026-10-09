@@ -100,6 +100,21 @@ agent register --name "MyAgent" --broadcast
 
 > Write commands preview by default — omit `--broadcast` to dry-run, or run `agent mode auto` once to always broadcast (`--dry-run` still previews any single command). See [`SKILL.md`](https://github.com/0xPolygon/polygon-agent-cli/blob/main/skills/polygon-agent-cli/SKILL.md) for the full agent-consumable reference.
 
+### Workspace installs
+
+For assistants that keep a workspace folder across restarts, the CLI can live inside it instead of being installed globally:
+
+```bash
+npm install --ignore-scripts --prefix <workspace>/.polygon-agent/cli @polygonlabs/agent-cli@latest
+node <workspace>/.polygon-agent/cli/node_modules/@polygonlabs/agent-cli/dist/index.js \
+  workspace init --root <workspace>/.polygon-agent [--skills-dir <dir>] [--name <install name>]
+```
+
+`workspace init` writes a wrapper at `<workspace>/.polygon-agent/bin/polygon-agent` that runs the CLI with its state in `<workspace>/.polygon-agent/state/`, a `.gitignore` that keeps the folder out of git, and `state/install.json`. Run everything through the wrapper. It is safe to re-run.
+
+- `skills show <name>` prints a bundled skill; `skills install [name] --dir <dir>` writes it to `<dir>/<name>/SKILL.md`. Through the wrapper, both add the wrapper's path to the skill.
+- `update` installs the latest CLI into the workspace and refreshes it. Outside a workspace install, it prints the global npm command.
+
 ---
 
 ## Core Components
@@ -156,6 +171,21 @@ The CLI ships with agent-friendly documentation designed to be consumed directly
 Once installed, the agent receives the full skill context — including wallet setup, token operations, and ERC-8004 registration, and can execute autonomously.
 
 See [`SKILL.md`](https://github.com/0xPolygon/polygon-agent-cli/blob/main/skills/polygon-agent-cli/SKILL.md) for the full agent-consumable reference.
+
+### Workspace installs
+
+For assistants that keep a workspace folder across restarts, the CLI can live inside it instead of being installed globally:
+
+```bash
+npm install --ignore-scripts --prefix <workspace>/.polygon-agent/cli @polygonlabs/agent-cli@latest
+node <workspace>/.polygon-agent/cli/node_modules/@polygonlabs/agent-cli/dist/index.js \
+  workspace init --root <workspace>/.polygon-agent [--skills-dir <dir>] [--name <install name>]
+```
+
+`workspace init` writes a wrapper at `<workspace>/.polygon-agent/bin/polygon-agent` that runs the CLI with its state in `<workspace>/.polygon-agent/state/`, a `.gitignore` that keeps the folder out of git, and `state/install.json`. Run everything through the wrapper. It is safe to re-run.
+
+- `skills show <name>` prints a bundled skill; `skills install [name] --dir <dir>` writes it to `<dir>/<name>/SKILL.md`. Through the wrapper, both add the wrapper's path to the skill.
+- `update` installs the latest CLI into the workspace and refreshes it. Outside a workspace install, it prints the global npm command.
 
 ---
 
@@ -227,6 +257,7 @@ No environment variables are required. The CLI ships a default OMS Builder publi
 | `TRAILS_API_KEY`           | —                                           | Optional Trails API key for higher rate limits on swap / bridge / earn calls.   |
 | `POLYGON_AGENT_LOGIN_UI`   | `https://agentconnect.polygon.technology`   | Base URL of the browser login page opened by `wallet login`.                   |
 | `POLYGON_AGENT_OIDC_RELAY` | `https://oidc-relay.polygon.technology`     | Base URL of the OIDC handoff and login relay used by `wallet login`.           |
+| `POLYGON_AGENT_HOME`       | `~/.polygon-agent`                          | Folder for all CLI state (wallets, keys, config). Set by a workspace install's wrapper. |
 
 ---
 

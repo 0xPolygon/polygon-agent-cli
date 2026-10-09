@@ -31,8 +31,11 @@ deleted_classes = ["SessionRelay"]
 [env.production]
 name = "agentconnect-production"
 
+# agents.polygon.technology serves the assistant install guide (/setup.md)
+# and the skills from the same assets.
 routes = [
-  { pattern = "agentconnect.polygon.technology", custom_domain = true }
+  { pattern = "agentconnect.polygon.technology", custom_domain = true },
+  { pattern = "agents.polygon.technology", custom_domain = true }
 ]
 
 [[env.production.migrations]]
