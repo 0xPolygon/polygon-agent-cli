@@ -30,7 +30,7 @@ Region rules come from Polymarket at run time: its geoblock endpoint decides whe
 
 `status` also shows `approvals`, `openOrders`, and `redeemable.valueUsd`. If `redeemable.truncated` is `true`, more than 2000 rows were redeemable. Redeem, then run `status` again.
 
-If `status.otherTradingKeys` is non-empty, those are other installs' keys or an old key from before a reinstall. `polymarket recover <address> --broadcast` (owner mode only) moves that account's cash back to the OMS wallet. Run it without `--broadcast` first to see the balance and open positions.
+If `status.otherTradingKeys` is non-empty, those are other installs' keys or an old key from before a reinstall. `polymarket recover <address> --broadcast` (owner mode only) moves that account's cash back to the OMS wallet. Run it without `--broadcast` first to see the balance and open positions. Don't recover a key another install is still using: it would move that install's trading cash to the main wallet.
 
 `setup` needs no key import and no POL. It creates a trading key, deploys the Polymarket wallet, and sets approvals through Polymarket's relayer. It is safe to rerun: it only redoes the approvals check once the account exists.
 
@@ -40,7 +40,7 @@ The trading key lives on this machine, and only it can move funds out of the Pol
 
 When the backup happens:
 
-- Owner mode: `setup --broadcast` imports the key with the existing sign-in. Rerun `setup --broadcast` on an account that predates the backup. The result has `backup: { omsWalletId, imported }`. If it fails, the result has `backup.backedUp: false` with an `error` and the setup itself still succeeds. With the key present but no owner sign-in, the result has `backup: { backedUp: false, hint: 'agent wallet login' }`. With the key missing and no sign-in, `setup` refuses with `not_set_up`, because OMS can't be checked for a backup. Run `agent wallet login` and rerun it.
+- Owner mode: `setup --broadcast` imports the key with the existing sign-in. Rerun `setup --broadcast` on an account that predates the backup. The result has `backup: { backedUp: true, omsWalletId, imported }`. If it fails, the result has `backup.backedUp: false` with an `error` and the setup itself still succeeds. With the key present but no owner sign-in, the result has `backup: { backedUp: false, hint: 'agent wallet login' }`. With the key missing and no sign-in, `setup` refuses with `not_set_up`, because OMS can't be checked for a backup. Run `agent wallet login` and rerun it.
 - Session mode: every confirmed owner request (connect, allowance, renew, withdraw, access) backs it up with the owner sign-in it already has. It creates the key first if there is none. Connecting needs no extra step, and the owner request never fails because of it. The outcome is in the request's `polymarket` field (`backedUp`, or `backedUp: false` with an `error`).
 
 `status` shows two fields about this:
@@ -52,10 +52,19 @@ When the backup happens:
 
 A wiped machine loses nothing, as long as the user reinstalls with the same `--name` (see setup.md), because the backup is found by that label.
 
-- Owner mode: run `setup --broadcast`. It restores the account from OMS and never makes a new key over it (`restored: true`, `signer: "oms"`).
-- Session mode: the next confirmed owner request recovers it. It withdraws all pUSD from the old account to the OMS wallet, archives the old records under `polymarket/<wallet>/previous-<timestamp>/`, then creates a new key and backs it up. Run `setup --broadcast` afterwards to deploy the new account. Open positions stay in the old account and are reachable in owner mode. If a deposit is still being credited, or a legacy proxy still holds funds, the recovery stops after the sweep (`backedUp: false` with an `error`). The pUSD has already moved to the OMS wallet and the result reports it in `recovered`, but the old key stays in use and the next owner request retries the rotation. For the legacy proxy case the hint is to sign in with `agent wallet login` to use it through OMS. If local records name the lost key and OMS holds no backup of it, nothing is changed and no new key is made. With no local records and no OMS key for this install name, the step creates a new key and backs it up.
+- Owner mode: run `setup --broadcast`. It restores the account from OMS and never makes a new key over it (`restored: true`, `signer: "oms"`). Its dry run lists `restore the trading key from OMS` instead of `create trading key` when OMS holds this install's key.
+- Session mode: the next confirmed owner request recovers it. It withdraws all pUSD from the old account to the OMS wallet, archives the old records under `polymarket/<wallet>/previous-<timestamp>/`, then creates a new key and backs it up. Run `setup --broadcast` afterwards to deploy the new account. If local records name the lost key and OMS holds no backup of it, nothing is changed and no new key is made. With no local records and no OMS key for this install name, the step creates a new key and backs it up.
 
-`status.otherTradingKeys` lists backed-up keys this install doesn't track (owner mode only), such as another install's key or one from before a reinstall. `polymarket recover <address> --broadcast` moves that account's pUSD to the OMS wallet. It refuses addresses that are not Polymarket trading keys in the OMS account and this install's own key. It leaves open positions in place, and a dry run lists them.
+The recovery never replaces a key that still controls something. It then stops with `backedUp: false` and an `error`, and the old key stays in use:
+
+- No local records say what kind of account the key had, and its legacy proxy holds funds. This stops before any sweep, so the result has no `recovered`. The hint is "Run wallet logout, then agent wallet login to use it through OMS."
+- The rest stop after the sweep. The pUSD has already moved to the OMS wallet and `recovered` reports it.
+  - The old account still holds open positions (`positionsLeft`), or they couldn't be read (`positionsError`). The hint is "Positions remain in the old Polymarket account. Sell or redeem them from an owner install (wallet logout, then agent wallet login, then polymarket setup --broadcast restores the account), then the next owner approval finishes the recovery."
+  - A deposit to the old account is still being credited (`pendingDeposit`). The hint is "Retry after it settles. The next owner approval (email code) retries this."
+  - The account is a recorded legacy proxy and the proxy still holds funds (`legacyProxy`), since withdraw moves only pUSD. The hint is "Run wallet logout, then agent wallet login to use it through OMS."
+  - Any other failure after the sweep has the hint "The next owner approval (email code) retries this."
+
+`status.otherTradingKeys` lists backed-up keys this install doesn't track (owner mode only), such as another install's key or one from before a reinstall. `polymarket recover <address> --broadcast` moves that account's pUSD to the OMS wallet. It refuses addresses that are not Polymarket trading keys in the OMS account and this install's own key. It leaves open positions in place, and a dry run lists them. Don't recover a key another install is still using: it would move that install's trading cash to the main wallet, and that install could no longer trade with it until it deposits again.
 
 ## How money moves
 
