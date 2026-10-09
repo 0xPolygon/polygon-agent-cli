@@ -719,6 +719,20 @@ describe('recover', () => {
   const found = { id: 'w-other', address: OTHER_KEY };
 
   beforeEach(() => {
+    m.omsWallet.listWallets.mockResolvedValue([
+      {
+        id: 'w-other',
+        address: OTHER_KEY,
+        keyOrigin: 'imported',
+        reference: 'polymarket-trading-key:vm'
+      },
+      {
+        id: 'w-x',
+        address: '0x00000000000000000000000000000000000000C3',
+        keyOrigin: 'imported',
+        reference: 'notes'
+      }
+    ]);
     m.findTradingKeyWallet.mockResolvedValue(found);
     m.recoverOtherKey.mockResolvedValue({
       address: OTHER_KEY,
@@ -726,6 +740,15 @@ describe('recover', () => {
       pusd: '3',
       positionsLeft: [{ title: 'Q' }]
     });
+  });
+
+  it('refuses an imported wallet that is not a Polymarket trading key', async () => {
+    const stray = '0x00000000000000000000000000000000000000C3';
+    m.findTradingKeyWallet.mockResolvedValue({ id: 'w-x', address: stray });
+    const out = await run(['recover', stray, '--broadcast']);
+    expect(out).toMatchObject({ ok: false, code: 'invalid_input' });
+    expect(JSON.stringify(out)).toContain('No Polymarket trading key with that address');
+    expect(m.recoverOtherKey).not.toHaveBeenCalled();
   });
 
   it('refuses session mode', async () => {
@@ -755,6 +778,14 @@ describe('recover', () => {
 
   it("refuses this install's current key", async () => {
     m.findTradingKeyWallet.mockResolvedValue({ id: 'w-this', address: THIS_KEY });
+    m.omsWallet.listWallets.mockResolvedValue([
+      {
+        id: 'w-this',
+        address: THIS_KEY,
+        keyOrigin: 'imported',
+        reference: 'polymarket-trading-key:laptop'
+      }
+    ]);
     writeBackup('main', { ...BACKUP, address: THIS_KEY.toLowerCase() });
     const out = await run(['recover', THIS_KEY, '--broadcast']);
     expect(out).toMatchObject({ ok: false, code: 'invalid_input' });
