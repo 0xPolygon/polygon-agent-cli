@@ -2,10 +2,35 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { FeeOptionWithBalance } from '@polygonlabs/oms-wallet';
 
-const oms = vi.hoisted(() => ({ sendTransaction: vi.fn() }));
+const MAIN = '0xC2F4cAfe89AE7e1bcB86dd3f141C0a3adCEB6C17';
+const IMPORTED = '0x1111111111111111111111111111111111111111';
+const oms = vi.hoisted(() => {
+  const state = { walletAddress: '0xC2F4cAfe89AE7e1bcB86dd3f141C0a3adCEB6C17' as string };
+  return {
+    state,
+    sendTransaction: vi.fn(),
+    sentFrom: [] as string[],
+    listWallets: vi.fn(),
+    useWallet: vi.fn()
+  };
+});
 vi.mock('./oms-client.ts', () => ({
   getOmsClient: () => ({
-    wallet: { walletAddress: '0xC2F4cAfe89AE7e1bcB86dd3f141C0a3adCEB6C17', ...oms }
+    wallet: {
+      get walletAddress() {
+        return oms.state.walletAddress;
+      },
+      sendTransaction: oms.sendTransaction,
+      listWallets: oms.listWallets,
+      useWallet: oms.useWallet
+    }
+  })
+}));
+vi.mock('./storage.ts', () => ({
+  loadOmsWalletPointer: async () => ({
+    walletAddress: '0xC2F4cAfe89AE7e1bcB86dd3f141C0a3adCEB6C17',
+    loginMethod: 'email',
+    createdAt: ''
   })
 }));
 
@@ -70,6 +95,49 @@ describe('makeFeeSelector', () => {
         hint: expect.stringMatching(/agent fund/)
       })
     );
+  });
+});
+
+describe('runOmsTx wallet guard', () => {
+  it('switches a session left on the imported wallet back to main before sending', async () => {
+    oms.state.walletAddress = IMPORTED;
+    oms.listWallets.mockResolvedValue([
+      { id: 'w-imp', address: IMPORTED, keyOrigin: 'imported' },
+      { id: 'w-main', address: MAIN, keyOrigin: 'generated' }
+    ]);
+    oms.useWallet.mockImplementation(async ({ walletId }: { walletId: string }) => {
+      oms.state.walletAddress = walletId === 'w-main' ? MAIN : IMPORTED;
+    });
+    oms.sentFrom.length = 0;
+    oms.sendTransaction.mockImplementation(async () => {
+      oms.sentFrom.push(oms.state.walletAddress);
+      return { txnHash: '0xok' };
+    });
+    const result = await runOmsTx({
+      walletName: 'main',
+      chainId: 137,
+      transactions: [{ to: USDC, data: '0x' }],
+      broadcast: true
+    });
+    expect(oms.useWallet).toHaveBeenCalledWith({ walletId: 'w-main' });
+    expect(oms.sentFrom).toEqual([MAIN]);
+    expect(result.walletAddress).toBe(MAIN);
+  });
+
+  it('refuses to send when the pointer wallet is not on the account', async () => {
+    oms.state.walletAddress = IMPORTED;
+    oms.sendTransaction.mockClear();
+    oms.listWallets.mockResolvedValue([{ id: 'w-imp', address: IMPORTED, keyOrigin: 'imported' }]);
+    await expect(
+      runOmsTx({
+        walletName: 'main',
+        chainId: 137,
+        transactions: [{ to: USDC, data: '0x' }],
+        broadcast: true
+      })
+    ).rejects.toMatchObject({ code: 'not_connected' });
+    expect(oms.sendTransaction).not.toHaveBeenCalled();
+    oms.state.walletAddress = MAIN;
   });
 });
 

@@ -14,7 +14,7 @@ const GOOGLE_PROVIDER = Symbol('oms-relay-oidc-provider-google');
 
 // A scripted fake: nextAction() pops the queue (null = pending tick), and every
 // published status is recorded for assertions.
-function makeFakes(actionQueue: Array<LoginAction | null>) {
+function makeFakes(actionQueue: Array<LoginAction | null>, mainAddress = '0xW') {
   const statuses: LoginStatus[] = [];
   const calls: string[] = [];
   let time = 0;
@@ -46,6 +46,10 @@ function makeFakes(actionQueue: Array<LoginAction | null>) {
         if (p.code === 'BAD') throw new Error('invalid code');
         return { walletAddress: '0xW' };
       }
+    },
+    selectMainWallet: async () => {
+      calls.push('selectMain');
+      return { address: mainAddress };
     },
     oidcProviderGoogle: GOOGLE_PROVIDER,
     announce: async (url) => {
@@ -165,5 +169,31 @@ describe('runBrowserLogin', () => {
     };
     await expect(runBrowserLogin(deps, OPTS)).rejects.toThrow(/Relay poll failed/);
     expect(statuses.at(-1)).toEqual({ status: 'error', message: 'Relay poll failed (500)' });
+  });
+
+  it('reports the main wallet address, not the one automatic selection picked', async () => {
+    const { deps, statuses, calls } = makeFakes(
+      [{ type: 'google' }, { type: 'oidc-callback', callbackUrl: 'https://ui.test/login?x=1' }],
+      '0xMAIN'
+    );
+    const result = await runBrowserLogin(deps, OPTS);
+    expect(result.walletAddress).toBe('0xMAIN');
+    expect(statuses).toContainEqual({ status: 'done', walletAddress: '0xMAIN' });
+    expect(calls.indexOf('selectMain')).toBeGreaterThan(
+      calls.indexOf('completeOidc:https://ui.test/login?x=1')
+    );
+  });
+
+  it('selects the main wallet after an email code too', async () => {
+    const { deps, calls } = makeFakes(
+      [
+        { type: 'email', email: 'a@b.c' },
+        { type: 'otp', code: '123456' }
+      ],
+      '0xMAIN'
+    );
+    const result = await runBrowserLogin(deps, OPTS);
+    expect(result).toEqual({ walletAddress: '0xMAIN', loginMethod: 'email' });
+    expect(calls).toContain('selectMain');
   });
 });
