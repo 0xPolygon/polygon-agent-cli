@@ -26,7 +26,12 @@ import {
   PUSD,
   USDC_E
 } from './gamma.ts';
-import { backupTradingKey, findTradingKeyWallet, omsSigner } from './oms-key.ts';
+import {
+  backupTradingKey,
+  findTradingKeyWallet,
+  installTradingKeyReference,
+  omsSigner
+} from './oms-key.ts';
 import { loadSdk, mapSdkError } from './sdk.ts';
 import { pusdBalanceOf, withdrawAll } from './withdraw.ts';
 
@@ -166,7 +171,7 @@ export async function getTradingClient(wallet: string): Promise<SecureClient> {
   // generate a replacement, because only the old key controls the old account.
   const owner = await ownerSession(wallet);
   if (!owner) throw readBackup(wallet) ? keyBackedUpError() : missingKeyError(wallet);
-  const found = await findTradingKeyWallet(owner, acct.signer);
+  const found = await findTradingKeyWallet(owner, { address: acct.signer });
   if (!found) throw missingKeyError(wallet);
   return storedClient(
     wallet,
@@ -605,7 +610,8 @@ export async function restoreFromOms(p: {
     });
   }
   if (minted) writeSecret(wallet, 'builder.json', JSON.stringify(builder));
-  if (!readSecret(wallet, 'clob.json') && client.credentials)
+  // Without local records, leftover credentials may belong to another signer: replace them.
+  if ((!local || !readSecret(wallet, 'clob.json')) && client.credentials)
     writeSecret(wallet, 'clob.json', JSON.stringify(client.credentials));
   const account: StoredAccount = local ?? {
     kind,
@@ -641,8 +647,25 @@ export function localTradingKeyAddresses(): Set<string> {
   return out;
 }
 
+// The trading keys this install used before for `wallet`: the signers and backup addresses
+// recorded in its archived previous-* folders. Never another install's keys.
+export function previousTradingKeyAddresses(wallet: string): string[] {
+  const dir = accountFile(wallet, '');
+  if (!fs.existsSync(dir)) return [];
+  const out = new Map<string, string>();
+  for (const name of fs.readdirSync(dir)) {
+    if (!name.startsWith(PREVIOUS_PREFIX)) continue;
+    const acct = readJsonFile(path.join(dir, name, 'account.json')) as StoredAccount | undefined;
+    const backup = readJsonFile(path.join(dir, name, 'backup.json')) as BackupRecord | undefined;
+    for (const address of [acct?.signer, backup?.address]) {
+      if (address) out.set(address.toLowerCase(), address);
+    }
+  }
+  return [...out.values()];
+}
+
 // The SDK only refuses this way when the derived Deposit Wallet was never deployed.
-const NOT_DEPLOYED = /requires a Relayer API Key or Builder API Key/;
+const NOT_DEPLOYED = /Deposit Wallet deployment requires/;
 
 // Sweeps the pUSD of the Deposit Wallet an older trading key controls to `mainAddress`.
 // Returns null when there is nothing to sweep (no deployed wallet, or 0 pUSD): then the
@@ -827,7 +850,7 @@ export async function recoverAccount(p: {
       }
     });
     const key = await ensureTradingKey(wallet);
-    const res = await backupTradingKey(owner, key);
+    const res = await backupTradingKey(owner, key, installTradingKeyReference());
     writeBackup(wallet, {
       omsWalletId: res.omsWalletId,
       address: res.address,

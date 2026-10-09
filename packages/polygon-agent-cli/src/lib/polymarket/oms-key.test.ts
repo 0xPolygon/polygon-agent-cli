@@ -10,6 +10,7 @@ import {
   omsSigner,
   selectMainWallet,
   TRADING_KEY_REFERENCE,
+  tradingKeyReference,
   withActiveWallet
 } from './oms-key.ts';
 
@@ -99,7 +100,10 @@ function fakeOms(
 
 const MAIN = mkAccount('main', 'enclave');
 const IMPORTED = mkAccount('imp-x', 'imported', 'other');
-const TK = mkAccount('imp-tk', 'imported', TRADING_KEY_REFERENCE);
+const REF_A = tradingKeyReference('install-a');
+const TK = mkAccount('imp-tk', 'imported', REF_A);
+// Backed up before references were per install: the bare prefix.
+const BARE = mkAccount('imp-bare', 'imported', TRADING_KEY_REFERENCE);
 
 describe('selectMainWallet', () => {
   it('picks the expected address case-insensitively and switches to it', async () => {
@@ -137,34 +141,76 @@ describe('selectMainWallet', () => {
   });
 });
 
+describe('tradingKeyReference', () => {
+  it('labels the key with the install name under the prefix', () => {
+    expect(tradingKeyReference('laptop')).toBe('polymarket-trading-key:laptop');
+  });
+
+  it('lower-cases and replaces characters outside [a-z0-9._-]', () => {
+    expect(tradingKeyReference('James MacBook Pro/2')).toBe(
+      'polymarket-trading-key:james-macbook-pro-2'
+    );
+    expect(tradingKeyReference('Muse_1.local')).toBe('polymarket-trading-key:muse_1.local');
+  });
+
+  it('trims long names so the whole reference fits in 64 characters', () => {
+    const ref = tradingKeyReference('x'.repeat(200));
+    expect(ref).toHaveLength(64);
+    expect(ref.startsWith('polymarket-trading-key:')).toBe(true);
+  });
+});
+
 describe('findTradingKeyWallet', () => {
-  it('matches an imported wallet by address', async () => {
-    const f = fakeOms([MAIN, IMPORTED, TK], 'main');
-    expect(await findTradingKeyWallet(f.w, IMPORTED.address.toLowerCase())).toEqual({
+  it('matches an imported wallet by exact address, whatever its reference', async () => {
+    const f = fakeOms([MAIN, IMPORTED, TK, BARE], 'main');
+    expect(await findTradingKeyWallet(f.w, { address: IMPORTED.address.toLowerCase() })).toEqual({
       id: 'imp-x',
       address: IMPORTED.address
     });
+    expect(await findTradingKeyWallet(f.w, { address: BARE.address })).toEqual({
+      id: 'imp-bare',
+      address: BARE.address
+    });
   });
 
-  it('falls back to the trading key reference without an address', async () => {
-    const f = fakeOms([MAIN, IMPORTED, TK], 'main');
-    expect(await findTradingKeyWallet(f.w)).toEqual({ id: 'imp-tk', address: TK.address });
+  it('matches by exact reference only', async () => {
+    const f = fakeOms([MAIN, IMPORTED, TK, BARE], 'main');
+    expect(await findTradingKeyWallet(f.w, { reference: REF_A })).toEqual({
+      id: 'imp-tk',
+      address: TK.address
+    });
+    expect(
+      await findTradingKeyWallet(f.w, { reference: tradingKeyReference('install-b') })
+    ).toBeNull();
   });
 
-  it('picks the newest trading key by reference when OMS holds several', async () => {
-    const NEWER = mkAccount('imp-tk2', 'imported', TRADING_KEY_REFERENCE);
+  it('never finds a bare-prefix key by reference', async () => {
+    const f = fakeOms([MAIN, BARE], 'main');
+    expect(
+      await findTradingKeyWallet(f.w, { reference: tradingKeyReference('install-a') })
+    ).toBeNull();
+    expect(await findTradingKeyWallet(f.w, {})).toBeNull();
+  });
+
+  it('picks the newest key with the reference when OMS holds several', async () => {
+    const NEWER = mkAccount('imp-tk2', 'imported', REF_A);
     const f = fakeOms([MAIN, TK, IMPORTED, NEWER], 'main');
-    expect(await findTradingKeyWallet(f.w)).toEqual({ id: 'imp-tk2', address: NEWER.address });
+    expect(await findTradingKeyWallet(f.w, { reference: REF_A })).toEqual({
+      id: 'imp-tk2',
+      address: NEWER.address
+    });
   });
 
-  it('does not match by reference when the address differs', async () => {
+  it('does not match by reference when an address is given and differs', async () => {
     const f = fakeOms([MAIN, TK], 'main');
-    expect(await findTradingKeyWallet(f.w, IMPORTED.address)).toBeNull();
+    expect(
+      await findTradingKeyWallet(f.w, { address: IMPORTED.address, reference: REF_A })
+    ).toBeNull();
   });
 
   it('never returns the main wallet', async () => {
     const f = fakeOms([MAIN, TK], 'main');
-    expect(await findTradingKeyWallet(f.w, MAIN.address)).toBeNull();
+    expect(await findTradingKeyWallet(f.w, { address: MAIN.address })).toBeNull();
   });
 });
 
@@ -202,33 +248,37 @@ describe('backupTradingKey', () => {
 
   it('imports once, restores the active wallet, and is idempotent', async () => {
     const f = fakeOms([MAIN], 'main');
-    const first = await backupTradingKey(f.w, key);
+    const first = await backupTradingKey(f.w, key, REF_A);
     expect(first).toMatchObject({ address, imported: true });
     expect(f.getActive()).toBe('main');
     expect(f.calls.filter((c) => c === 'import')).toHaveLength(1);
 
-    const second = await backupTradingKey(f.w, key);
+    const second = await backupTradingKey(f.w, key, REF_A);
     expect(second).toEqual({ omsWalletId: first.omsWalletId, address, imported: false });
     expect(f.calls.filter((c) => c === 'import')).toHaveLength(1);
     expect(f.getActive()).toBe('main');
   });
 
-  it('imports with the trading key reference', async () => {
+  it('imports with the given install reference', async () => {
     const f = fakeOms([MAIN], 'main');
-    await backupTradingKey(f.w, key);
-    expect(f.imports).toEqual([{ type: 'ethereum', reference: TRADING_KEY_REFERENCE }]);
+    await backupTradingKey(f.w, key, REF_A);
+    expect(f.imports).toEqual([
+      { type: 'ethereum', reference: 'polymarket-trading-key:install-a' }
+    ]);
     expect(TRADING_KEY_REFERENCE).toBe('polymarket-trading-key');
   });
 
   it('restores to the main wallet when there was no active wallet', async () => {
     const f = fakeOms([MAIN], undefined);
-    await backupTradingKey(f.w, key);
+    await backupTradingKey(f.w, key, REF_A);
     expect(f.getActive()).toBe('main');
   });
 
   it('throws upstream_error on an address mismatch and still restores the wallet', async () => {
     const f = fakeOms([MAIN], 'main', { importAddress: IMPORTED.address });
-    await expect(backupTradingKey(f.w, key)).rejects.toMatchObject({ code: 'upstream_error' });
+    await expect(backupTradingKey(f.w, key, REF_A)).rejects.toMatchObject({
+      code: 'upstream_error'
+    });
     expect(f.getActive()).toBe('main');
   });
 });

@@ -753,6 +753,25 @@ describe('restoreFromOms (owner mode, local key missing)', () => {
     expect(account.hasLocalKey('main')).toBe(false);
   });
 
+  it('without account.json, replaces leftover CLOB credentials that may belong to another signer', async () => {
+    const lost = privateKeyToAccount(`0x${'a4'.repeat(32)}`).address;
+    const file = path.join(account.accountDir('leftover'), 'clob.json');
+    const { encrypt, decrypt } = await import('../storage.ts');
+    fs.writeFileSync(file, JSON.stringify(encrypt(JSON.stringify({ key: 'stale' }))));
+    await account.restoreFromOms({
+      wallet: 'leftover',
+      owner: fakeOwner(lost) as never,
+      target: { id: 'w-old', address: lost }
+    });
+    // The leftover was not passed to the SDK, and the file now holds the new credentials.
+    expect(sdk.created[1].credentials).toBeUndefined();
+    expect(JSON.parse(decrypt(JSON.parse(fs.readFileSync(file, 'utf8'))))).toEqual({
+      key: 'clob-key',
+      secret: 'clob-secret',
+      passphrase: 'clob-pass'
+    });
+  });
+
   it('restores a legacy-proxy account when backup.json records that kind', async () => {
     const lost = privateKeyToAccount(`0x${'a2'.repeat(32)}`).address;
     const proxy = await getPolymarketProxyWalletAddress(lost);
@@ -915,6 +934,19 @@ describe('sweepOldKey', () => {
     });
     expect(out).toBeNull();
     expect(sdk.createBuilderApiKey).not.toHaveBeenCalled();
+  });
+
+  it('treats only the Deposit Wallet deployment refusal as not deployed', async () => {
+    sdk.createSecureClient.mockRejectedValueOnce(
+      new Error('Gasless transfer requires a Relayer API Key or Builder API Key.')
+    );
+    await expect(
+      account.sweepOldKey({
+        owner: fakeOwner(old) as never,
+        target: { id: 'w-old', address: old },
+        mainAddress: MAIN
+      })
+    ).rejects.toThrow(/Gasless transfer/);
   });
 
   it('sweeps a funded account to the main wallet through OMS', async () => {

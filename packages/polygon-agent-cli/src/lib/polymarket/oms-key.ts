@@ -12,8 +12,26 @@ import type { OMSWalletClient } from '@polygonlabs/oms-wallet';
 import { findNetworkById } from '@polygonlabs/oms-wallet';
 
 import { CliError } from '../errors.ts';
+import { installName } from '../session/state.ts';
 
+// The prefix of every trading key's OMS reference. One OMS account can have several installs
+// (a laptop, an assistant), so each install labels its own key: `<prefix>:<install name>`.
 export const TRADING_KEY_REFERENCE = 'polymarket-trading-key';
+const MAX_REFERENCE_LENGTH = 64;
+
+export function tradingKeyReference(install: string): string {
+  const prefix = `${TRADING_KEY_REFERENCE}:`;
+  const name = install
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]/g, '-')
+    .slice(0, MAX_REFERENCE_LENGTH - prefix.length);
+  return `${prefix}${name || 'install'}`;
+}
+
+// This install's trading-key reference.
+export function installTradingKeyReference(): string {
+  return tradingKeyReference(installName());
+}
 
 export type OmsWalletLike = Pick<
   OMSWalletClient,
@@ -98,26 +116,27 @@ export function withActiveWallet<T>(
   });
 }
 
+// With `address`: the imported wallet with exactly that address, whatever its reference
+// (keys recorded locally, including ones backed up before references were per install).
+// With `reference`: the newest imported wallet with exactly that reference (listWallets is
+// oldest first). Never matches by the bare prefix.
 export async function findTradingKeyWallet(
   w: OmsWalletLike,
-  address?: string
+  by: { address?: string; reference?: string }
 ): Promise<{ id: string; address: string } | null> {
   const imported = (await w.listWallets()).filter((x) => x.keyOrigin === 'imported');
-  if (address) {
-    const byAddress = imported.find((x) => sameAddress(x.address, address));
-    if (byAddress) return { id: byAddress.id, address: byAddress.address };
-  }
-  // listWallets is oldest first. After a recovery OMS holds the swept old key and the new
-  // one under the same reference; the newest is the current trading key.
-  const byRef = imported.findLast(
-    (x) => x.reference === TRADING_KEY_REFERENCE && (!address || sameAddress(x.address, address))
-  );
-  return byRef ? { id: byRef.id, address: byRef.address } : null;
+  const match = by.address
+    ? imported.find((x) => sameAddress(x.address, by.address))
+    : by.reference
+      ? imported.findLast((x) => x.reference === by.reference)
+      : undefined;
+  return match ? { id: match.id, address: match.address } : null;
 }
 
 export function backupTradingKey(
   w: OmsWalletLike,
-  privateKey: `0x${string}`
+  privateKey: `0x${string}`,
+  reference: string
 ): Promise<{ omsWalletId: string; address: string; imported: boolean }> {
   const address = privateKeyToAccount(privateKey).address;
   return serialized(w, async () => {
@@ -131,7 +150,7 @@ export function backupTradingKey(
       result = await w.importWallet({
         type: 'ethereum',
         privateKey,
-        reference: TRADING_KEY_REFERENCE
+        reference
       });
     } finally {
       await restoreWallet(w, previous);

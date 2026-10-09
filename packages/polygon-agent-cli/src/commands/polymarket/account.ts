@@ -22,7 +22,11 @@ import {
 } from '../../lib/polymarket/account.ts';
 import { formatUnits6 } from '../../lib/polymarket/amounts.ts';
 import { loadPending } from '../../lib/polymarket/deposits.ts';
-import { backupTradingKey, findTradingKeyWallet } from '../../lib/polymarket/oms-key.ts';
+import {
+  backupTradingKey,
+  findTradingKeyWallet,
+  installTradingKeyReference
+} from '../../lib/polymarket/oms-key.ts';
 import { assertCanTrade, checkRegion } from '../../lib/polymarket/region.ts';
 import { mapSdkError } from '../../lib/polymarket/sdk.ts';
 import { loadOmsWalletPointer } from '../../lib/storage.ts';
@@ -62,7 +66,7 @@ async function backUpInOwnerMode(wallet: string): Promise<Record<string, unknown
   let result: Record<string, unknown>;
   try {
     const key = await ensureTradingKey(wallet);
-    const res = await backupTradingKey(w, key);
+    const res = await backupTradingKey(w, key, installTradingKeyReference());
     writeBackup(wallet, {
       omsWalletId: res.omsWalletId,
       address: res.address,
@@ -103,7 +107,10 @@ async function restoreInOwnerMode(wallet: string): Promise<Record<string, unknow
   let mainWalletError: string | undefined;
   try {
     const known = loadAccount(wallet)?.signer ?? readBackup(wallet)?.address;
-    const found = await findTradingKeyWallet(w, known);
+    const found = await findTradingKeyWallet(
+      w,
+      known ? { address: known } : { reference: installTradingKeyReference() }
+    );
     if (found) restored = await restoreFromOms({ wallet, owner: w, target: found });
   } catch (error) {
     failure = error;
