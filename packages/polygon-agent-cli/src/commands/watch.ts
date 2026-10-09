@@ -128,11 +128,25 @@ export async function quoteWatchTrade(params: {
   } catch (error) {
     if (
       !(error instanceof CliError) ||
-      (error.code !== 'insufficient_balance' && error.code !== 'not_covered')
+      (error.code !== 'insufficient_balance' &&
+        error.code !== 'not_covered' &&
+        !(error.code === 'quote_unavailable' && error.details?.retrySource === true))
     ) {
       throw error;
     }
-    return quoteSwap({ ...buy, toChain: chain });
+    return quoteSwap({ ...buy, toChain: chain, excludeSourceChains: [watch.chain] }).catch(
+      (fallbackError: unknown) => {
+        // No remote funding doesn't prove the funded local route can't trade.
+        if (
+          error.code === 'quote_unavailable' &&
+          fallbackError instanceof CliError &&
+          (fallbackError.code === 'insufficient_balance' || fallbackError.code === 'not_covered')
+        ) {
+          throw error;
+        }
+        throw fallbackError;
+      }
+    );
   }
 }
 

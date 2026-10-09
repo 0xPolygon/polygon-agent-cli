@@ -22,6 +22,8 @@ export type CliErrorCode =
   | 'chain_required'
   | 'invalid_input'
   | 'wallet_busy'
+  | 'quote_unavailable'
+  | 'quote_search_incomplete'
   | 'quote_expired'
   | 'upstream_invalid_quote'
   | 'trade_failed'

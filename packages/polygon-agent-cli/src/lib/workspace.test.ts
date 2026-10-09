@@ -5,6 +5,7 @@ import path from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { shellQuote } from './shell.ts';
 import {
   ASSISTANT_SKILL,
   initWorkspace,
@@ -12,7 +13,6 @@ import {
   readInstallRecord,
   readSkill,
   renderSkill,
-  shellQuote,
   WRAPPER_SCRIPT
 } from './workspace.ts';
 

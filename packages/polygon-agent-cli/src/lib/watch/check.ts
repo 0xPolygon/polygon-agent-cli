@@ -69,7 +69,13 @@ const TERMINAL = new Set(['completed', 'failed', 'refunded']);
 // Failures that say nothing about the trade itself: the level stays armed and
 // the next check tries again.
 // (quote_expired: a deadline passed before the deposit; nothing was sent.)
-const RETRYABLE = new Set(['wallet_busy', 'rate_limited', 'upstream_unavailable', 'quote_expired']);
+const RETRYABLE = new Set([
+  'wallet_busy',
+  'rate_limited',
+  'upstream_unavailable',
+  'quote_search_incomplete',
+  'quote_expired'
+]);
 
 function usd(value: number): string {
   return `$${value.toLocaleString('en-US', { maximumFractionDigits: value < 1 ? 6 : 2 })}`;

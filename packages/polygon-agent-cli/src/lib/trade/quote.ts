@@ -29,6 +29,7 @@ import {
 import { loadOmsWalletPointer } from '../storage.ts';
 import { getTokenConfig } from '../tokens.ts';
 import { formatUnits, parseUnits, resolveNetwork } from '../utils.ts';
+import { previewSwapCommand } from './command.ts';
 import { saveTrade } from './state.ts';
 import { validateDeposit } from './validate.ts';
 
@@ -40,8 +41,7 @@ const QUOTE_LIFETIME_MS = 5 * 60 * 1000;
 // impact) warns, is never executed by an auto trade, and is refused when quoted
 // and broadcast in one step.
 const HIGH_FEE_SHARE = 0.1;
-// Sources an exact-output buy may quote before giving up: each one whose
-// estimate fits is tried in order until a quote's cost fits too.
+// Bound upstream requests, without mistaking an incomplete search for a shortfall.
 const MAX_QUOTES = 3;
 const NATIVE = '0x0000000000000000000000000000000000000000';
 
@@ -66,9 +66,11 @@ export interface QuoteSwapParams {
   chain?: string;
   toChain?: string;
   slippage?: number;
-  // Without `from`, an amount in USD may be paid from another covered holding
-  // when no stablecoin holds enough (the swap command; never auto trades).
+  // Without `from`, USD and exact-output buys may quote another covered holding
+  // when stablecoins look short or their quotes fail (never auto trades).
   payWithHoldings?: boolean;
+  // A named-chain watch's second search skips its exhausted local source chain.
+  excludeSourceChains?: number[];
   now: Date;
 }
 
@@ -170,6 +172,7 @@ async function trailsError(error: unknown): Promise<unknown> {
     TimeoutError,
     UnavailableError,
     WebrpcBadResponseError,
+    WebrpcError,
     WebrpcRequestFailedError
   } = await import('@0xtrails/api');
   const message = error instanceof Error ? error.message : String(error);
@@ -190,7 +193,7 @@ async function trailsError(error: unknown): Promise<unknown> {
     error instanceof UnavailableError ||
     error instanceof TimeoutError ||
     error instanceof WebrpcRequestFailedError ||
-    badResponse >= 500
+    (error instanceof WebrpcError && error.status >= 500)
   ) {
     return new CliError({
       code: 'upstream_unavailable',
@@ -356,25 +359,29 @@ interface Source {
   holding: boolean;
   // Session mode: its on-chain allowance left (null: unlimited, or not read).
   remaining: bigint | null;
+  // Ordering only: 0/1 stablecoin fits/near, 2/3 other holding fits/near,
+  // 4/5 remaining stablecoins/holdings. Nothing is excluded by an estimate.
+  fundingRank: number;
 }
 
-// Without --from: the covered stablecoins with enough balance (and, in session
-// mode, on-chain allowance left) for the amount or estimate, in order: USDC on
-// Polygon, USDC on other chains, then other stablecoins. With --chain, only
-// that chain. With `payWithHoldings`, an amount in USD can then be paid from
-// other covered tokens the wallet holds (WETH, WPOL, …; largest first). Never
-// the token bought. At most MAX_QUOTES. If none fits, a token that couldn't be
-// priced makes the answer unknown, so its error is thrown rather than
-// `insufficient_balance`; a token that can't be sized for another reason (the
-// token bought doesn't exist on its chain) is just skipped.
+// Within each affordability band prefer USDC on Polygon, then USDC elsewhere,
+// then other stablecoins; other holdings rank by USD balance. Never pay with
+// the destination token itself. Skip sources without a live grant/capacity
+// or price, or with an unavailable destination or invalid precision, retaining
+// unknown pricing outcomes. Exact-output estimates only order candidates;
+// low balances remain available to the bounded quote search.
 async function defaultSources(params: {
   walletName: string;
   walletAddress: string;
   session: boolean;
   chainId?: number;
+  excludeSourceChains?: number[];
   // The bridge's destination; without it, the trade delivers on the source's chain.
   toChainId?: number;
   sizing: Sizing;
+  exactOutput: boolean;
+  // Check precision on the actual destination chain, before considering a source.
+  validateDestination: (chainId: number) => Promise<void>;
   payWithHoldings: boolean;
   // Only chains the trade can deliver on (a session buy stays on its chain).
   usableChain?: (chainId: number) => boolean;
@@ -383,9 +390,10 @@ async function defaultSources(params: {
   priceOf: (token: ResolvedToken) => Promise<number>;
   // What's bought, for the error when no chain fits.
   buying?: string;
-}): Promise<Source[]> {
+}): Promise<{ sources: Source[]; unpriced?: unknown }> {
   const chainIds = (params.chainId !== undefined ? [params.chainId] : supportedChainIds()).filter(
-    (chainId) => params.usableChain?.(chainId) ?? true
+    (chainId) =>
+      !params.excludeSourceChains?.includes(chainId) && (params.usableChain?.(chainId) ?? true)
   );
   const usable = chainIds
     .flatMap((chainId) => supportedTokens(chainId).map((token) => ({ chainId, ...token })))
@@ -444,7 +452,12 @@ async function defaultSources(params: {
   const held = async (tokens: ResolvedToken[]) => {
     const out: ResolvedToken[] = [];
     for (const token of tokens) {
-      if (balanceOf(token) > 0n && !(await params.isBought(token))) out.push(token);
+      if (balanceOf(token) === 0n) continue;
+      if (params.session) {
+        const live = sessionForToken({ sessions, chainId: token.chainId, token: token.address });
+        if (!live || live.grant.remaining === 0n) continue;
+      }
+      if (!(await params.isBought(token))) out.push(token);
     }
     return out;
   };
@@ -468,13 +481,22 @@ async function defaultSources(params: {
   valued.sort((a, b) => b.usd - a.usd);
 
   const sources: Source[] = [];
+  let precisionError: unknown;
   for (const { token, holding } of [
     ...(await held(stables)).map((token) => ({ token, holding: false })),
     ...valued.map(({ token }) => ({ token, holding: true }))
   ]) {
-    if (sources.length === MAX_QUOTES) break;
     const balance = balanceOf(token);
     let amount: bigint;
+    try {
+      await params.validateDestination(params.toChainId ?? token.chainId);
+    } catch (error) {
+      if (error instanceof CliError && error.code === 'invalid_input') {
+        precisionError ??= error;
+        continue;
+      }
+      throw error;
+    }
     try {
       amount = await sized({
         token,
@@ -487,19 +509,30 @@ async function defaultSources(params: {
       priceFailed(error);
       continue;
     }
-    if (amount === 0n || amount > balance) continue;
+    if (!params.exactOutput && (amount === 0n || amount > balance)) continue;
     let remaining: bigint | null = null;
     if (params.session) {
       // Needs a live session for it (planned isn't enough), with room left.
       const live = sessionForToken({ sessions, chainId: token.chainId, token: token.address });
       if (!live) continue;
-      if (live.grant.remaining !== null && amount > live.grant.remaining) continue;
+      if (!params.exactOutput && live.grant.remaining !== null && amount > live.grant.remaining) {
+        continue;
+      }
       remaining = live.grant.remaining;
     }
-    sources.push({ token, amount, holding, remaining });
+    const capacity = remaining === null || balance < remaining ? balance : remaining;
+    const fits = amount <= capacity;
+    // A 90% near-miss gets priority, not eligibility. Quotes can beat estimates.
+    const near = capacity * 100n >= amount * 90n;
+    const fundingRank = holding ? (fits ? 2 : near ? 3 : 5) : fits ? 0 : near ? 1 : 4;
+    sources.push({ token, amount, holding, remaining, fundingRank });
   }
-  if (sources.length > 0) return sources;
+  if (sources.length > 0) {
+    sources.sort((a, b) => a.fundingRank - b.fundingRank);
+    return { sources, unpriced };
+  }
   if (unpriced !== undefined) throw unpriced;
+  if (precisionError !== undefined) throw precisionError;
   const where = params.chainId !== undefined ? ` on ${chainLabel(params.chainId)}` : '';
   throw new CliError({
     code: 'insufficient_balance',
@@ -552,6 +585,87 @@ function exactUnits(params: { amount: string; token: ResolvedToken }): bigint {
 // The quote's cost is more than the source can pay: the next source may.
 class ShortError extends CliError {}
 
+// Only failures from quoteIntent carry this retry decision. Deposit validation
+// errors never enter this class, and high-impact failures never relax slippage.
+class QuoteAttemptError extends CliError {
+  retrySource: boolean;
+  unsupportedOriginChain?: number;
+
+  constructor(params: {
+    message: string;
+    command: string;
+    reason: string;
+    cause: unknown;
+    retrySource: boolean;
+    unsupportedOriginChain?: number;
+  }) {
+    super({
+      code: 'quote_unavailable',
+      message: params.message,
+      command: params.command,
+      hint: 'Nothing was sent. Retry the preview later or choose another supported source or destination; keep the requested amount and price limits.',
+      details: { reason: params.reason, retrySource: params.retrySource },
+      cause: params.cause
+    });
+    this.retrySource = params.retrySource;
+    this.unsupportedOriginChain = params.unsupportedOriginChain;
+  }
+}
+
+async function quoteAttemptError(params: {
+  error: unknown;
+  origin: ResolvedToken;
+  destination: ResolvedToken;
+  command: string;
+}): Promise<unknown> {
+  const { error, origin, destination, command } = params;
+  const mapped = await trailsError(error);
+  if (mapped !== error) return mapped;
+  const {
+    QueryFailedError,
+    HighPriceImpactError,
+    UnsupportedNetworkError,
+    FeeOnTransferTokenError,
+    WebrpcError
+  } = await import('@0xtrails/api');
+  if (!(error instanceof WebrpcError)) return error;
+  const pair = `${origin.symbol} on ${chainLabel(origin.chainId)} to ${destination.symbol} on ${chainLabel(destination.chainId)}`;
+  let retrySource = false;
+  let unsupportedOriginChain: number | undefined;
+  let reason = 'upstream_rejected';
+  let explanation = 'Trails could not provide a quote';
+  if (error instanceof QueryFailedError) {
+    reason = 'query_failed';
+    retrySource = true;
+  } else if (error instanceof HighPriceImpactError) {
+    reason = 'high_price_impact';
+    explanation = 'Trails refused the quote because of high price impact';
+    retrySource = true;
+  } else if (error instanceof UnsupportedNetworkError) {
+    reason = 'unsupported_network';
+    explanation = 'Trails reports an unsupported network';
+    // Trails names the unsupported chain, origin or destination, in the cause.
+    // Unknown/new wording stays non-retryable; do not guess which end failed.
+    if (error.cause === `origin chain ${origin.chainId} is not supported`) {
+      unsupportedOriginChain = origin.chainId;
+      retrySource = true;
+    }
+  } else if (error instanceof FeeOnTransferTokenError) {
+    reason = 'fee_on_transfer_token';
+    explanation = 'Trails does not support a fee-on-transfer token in this pair';
+    // This SDK error does not identify which token failed. Changing the source
+    // may leave the same unsupported destination, so ask rather than guessing.
+  }
+  return new QuoteAttemptError({
+    message: `${explanation} for ${pair}.`,
+    reason,
+    retrySource,
+    unsupportedOriginChain,
+    command,
+    cause: error
+  });
+}
+
 export async function quoteSwap(params: QuoteSwapParams): Promise<QuotedSwap> {
   const pointer = await loadOmsWalletPointer(params.walletName);
   if (!pointer) {
@@ -578,6 +692,13 @@ export async function quoteSwap(params: QuoteSwapParams): Promise<QuotedSwap> {
       code: 'invalid_input',
       message: `Slippage must be above 0 and at most ${max} (max_slippage in config.json).`
     });
+  }
+  if (
+    params.amount !== undefined &&
+    shareBps(params.amount) === null &&
+    !/^\d+(\.\d+)?$/.test(params.amount.trim())
+  ) {
+    throw invalidAmount(params.amount);
   }
   const toAmount = params.toAmount?.trim();
   if (toAmount !== undefined && (!/^\d+(\.\d+)?$/.test(toAmount) || Number(toAmount) <= 0)) {
@@ -630,19 +751,24 @@ export async function quoteSwap(params: QuoteSwapParams): Promise<QuotedSwap> {
 
   const chainId = params.chain ? resolveNetwork(params.chain).chainId : undefined;
   const toChainId = params.toChain ? resolveNetwork(params.toChain).chainId : undefined;
-  if (toAmount !== undefined) {
-    // Before picking a source, which would only find nothing to pay (on
-    // Polygon without a chain; each quote checks its own destination again).
-    const target = await boughtOn(toChainId ?? chainId ?? 137);
-    if (target) exactUnits({ amount: toAmount, token: target });
-  }
+  const validateDestination = async (destinationChainId: number) => {
+    if (toAmount !== undefined) {
+      const target = await boughtOn(destinationChainId);
+      if (target) exactUnits({ amount: toAmount, token: target });
+    }
+  };
+  // A fixed destination's precision does not depend on finding a funded source.
+  const fixedDestinationChain = toChainId ?? chainId;
+  if (fixedDestinationChain !== undefined) await validateDestination(fixedDestinationChain);
 
   let sources: Source[];
+  let unpriced: unknown;
   if (params.from) {
     const originChainId = chainId ?? 137;
     const token = session
       ? sessionSource({ wallet: params.walletName, chainId: originChainId, symbol: params.from })
       : await ownerToken({ chainId: originChainId, symbol: params.from });
+    await validateDestination(toChainId ?? originChainId);
     const amount = await sized({
       token,
       sizing,
@@ -656,15 +782,18 @@ export async function quoteSwap(params: QuoteSwapParams): Promise<QuotedSwap> {
           walletAddress
         })
     });
-    sources = [{ token, amount, holding: false, remaining: null }];
+    sources = [{ token, amount, holding: false, remaining: null, fundingRank: 0 }];
   } else {
-    sources = await defaultSources({
+    ({ sources, unpriced } = await defaultSources({
       walletName: params.walletName,
       walletAddress,
       session,
       chainId,
       toChainId,
+      excludeSourceChains: params.excludeSourceChains,
       sizing,
+      exactOutput: toAmount !== undefined,
+      validateDestination,
       payWithHoldings: params.payWithHoldings ?? false,
       isBought: async (token) => {
         const target = await boughtOn(toChainId ?? token.chainId);
@@ -684,7 +813,7 @@ export async function quoteSwap(params: QuoteSwapParams): Promise<QuotedSwap> {
             buying: params.to.toUpperCase()
           }
         : {})
-    });
+    }));
   }
 
   if (!process.env.TRAILS_API_KEY && !process.env.SEQUENCE_PROJECT_ACCESS_KEY) {
@@ -698,7 +827,7 @@ export async function quoteSwap(params: QuoteSwapParams): Promise<QuotedSwap> {
   const quoteFrom = async (source: Source) => {
     const origin = source.token;
     let amount = source.amount;
-    if (amount <= 0n) {
+    if (toAmount === undefined && amount <= 0n) {
       throw new CliError({
         code: 'insufficient_balance',
         message: `Nothing to trade: the amount of ${origin.symbol} comes to 0.`
@@ -728,7 +857,12 @@ export async function quoteSwap(params: QuoteSwapParams): Promise<QuotedSwap> {
         options: { slippageTolerance: slippage }
       })
       .catch(async (error: unknown) => {
-        throw await trailsError(error);
+        throw await quoteAttemptError({
+          error,
+          origin,
+          destination,
+          command: previewSwapCommand({ request: params, source: origin })
+        });
       });
     // An exact-output buy deposits what Trails quotes; `amount` was the estimate.
     const estimate = amount;
@@ -776,23 +910,55 @@ export async function quoteSwap(params: QuoteSwapParams): Promise<QuotedSwap> {
     return { origin, destination, amount, estimate, exactOutput, intent };
   };
 
-  // Estimates only rank the sources: each quote decides, up to MAX_QUOTES.
+  // Quote queries may fail for one pair; outages and validation errors stop
+  // immediately. A generic query failure is never described as proven no-route.
   let quoted: Awaited<ReturnType<typeof quoteFrom>> | undefined;
   let holding = false;
   let short: unknown;
-  for (const source of sources.slice(0, MAX_QUOTES)) {
+  let quoteFailure: unknown;
+  let pendingSources = [...sources];
+  let quotesTried = 0;
+  while (pendingSources.length > 0 && quotesTried < MAX_QUOTES) {
+    const source = pendingSources.shift();
+    if (!source) break;
+    quotesTried++;
     try {
       quoted = await quoteFrom(source);
       holding = source.holding;
       break;
     } catch (error) {
-      // After a shortfall, a later source's failure (no route, …) only ends
-      // the search: the shortfall is the clearer answer.
-      if (!(error instanceof ShortError) && short === undefined) throw error;
-      short ??= error;
+      if (error instanceof ShortError) short ??= error;
+      else if (error instanceof QuoteAttemptError && error.retrySource) {
+        quoteFailure ??= error;
+        if (error.unsupportedOriginChain !== undefined) {
+          pendingSources = pendingSources.filter(
+            (s) => s.token.chainId !== error.unsupportedOriginChain
+          );
+        }
+      } else throw error;
     }
   }
-  if (!quoted) throw short;
+  if (!quoted) {
+    const firstUntried = pendingSources[0];
+    if (firstUntried) {
+      const untriedSources = pendingSources.map(({ token }) => ({
+        token: token.symbol,
+        chain: token.chainId,
+        chainName: chainLabel(token.chainId),
+        command: previewSwapCommand({ request: params, source: token })
+      }));
+      throw new CliError({
+        code: 'quote_search_incomplete',
+        message: `No usable quote in the first ${quotesTried} attempts. Other funding tokens have not been quoted; affordability is still unknown.`,
+        hint: 'Run the preview command for an untried source, then show what it would sell and get approval. Nothing was sent.',
+        command: previewSwapCommand({ request: params, source: firstUntried.token }),
+        details: { quotesTried, untriedSources }
+      });
+    }
+    if (unpriced !== undefined) throw unpriced;
+    if (quoteFailure !== undefined) throw quoteFailure;
+    throw short;
+  }
   const { origin, destination, amount, estimate, exactOutput, intent } = quoted;
 
   const warnings: string[] = [];
@@ -823,7 +989,7 @@ export async function quoteSwap(params: QuoteSwapParams): Promise<QuotedSwap> {
   }
   if (holding) {
     warnings.push(
-      `No covered stablecoin holds enough, so this pays with ${formatUnits(amount, origin.decimals)} ${origin.symbol} (about $${fromUsd.toFixed(2)}).`
+      `This quote pays with ${formatUnits(amount, origin.decimals)} ${origin.symbol} (about $${fromUsd.toFixed(2)}).`
     );
   }
 

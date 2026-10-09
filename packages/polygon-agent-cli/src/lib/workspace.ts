@@ -14,6 +14,7 @@ import path from 'node:path';
 
 import { z } from 'zod';
 
+import { shellQuote } from './shell.ts';
 import { cliPackageRoot } from './version.ts';
 
 // The assistant skill workspace init installs.
@@ -143,11 +144,6 @@ export function readSkill(params: { sourceDir: string | null; name: string }): s
 // the frontmatter. A skill that defines `POLYGON_AGENT=<placeholder>` on a line
 // of its own also gets that line set to the wrapper's absolute path.
 const POLYGON_AGENT_LINE = /^POLYGON_AGENT=.*$/m;
-
-// POSIX single quotes: nothing inside is expanded. A quote becomes '\''.
-export function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
-}
 
 export function renderSkill(params: { markdown: string; wrapper: string }): string {
   const note =

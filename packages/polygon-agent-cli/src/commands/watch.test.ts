@@ -423,21 +423,91 @@ describe('quoteWatchTrade', () => {
     expect(calls[0]).not.toHaveProperty('from');
   });
 
-  it('a buy on a chain pays from that chain first, then from anywhere', async () => {
-    const calls: Array<Record<string, unknown>> = [];
+  it.each([
+    new CliError({ code: 'insufficient_balance', message: 'no' }),
+    ...['query_failed', 'high_price_impact', 'unsupported_network'].map(
+      (reason) =>
+        new CliError({
+          code: 'quote_unavailable',
+          message: 'no',
+          details: { reason, retrySource: true }
+        })
+    )
+  ])(
+    'a buy on a chain pays from that chain first, then from anywhere after %j',
+    async (failure) => {
+      const calls: Array<Record<string, unknown>> = [];
+      fake.quoteSwap = async (params) => {
+        calls.push(params as Record<string, unknown>);
+        if (calls.length === 1) throw failure;
+        return {};
+      };
+      await quoteWatchTrade({
+        watch: { ...base, chain: 8453, buyBelow: 2000, buyAmountUsd: 5 },
+        side: 'buy',
+        now
+      });
+      expect(calls[0]).toMatchObject({ chain: '8453', toChain: '8453' });
+      expect(calls[1]).toMatchObject({ toChain: '8453', excludeSourceChains: [8453] });
+      expect(calls[1]).not.toHaveProperty('chain');
+    }
+  );
+
+  it.each([
+    { code: 'insufficient_balance', preserveLocal: true },
+    { code: 'not_covered', preserveLocal: true },
+    { code: 'upstream_unavailable', preserveLocal: false },
+    { code: 'upstream_invalid_quote', preserveLocal: false }
+  ] as const)(
+    'preserves local uncertainty only for a remote funding shortfall: $code',
+    async ({ code, preserveLocal }) => {
+      const local = new CliError({
+        code: 'quote_unavailable',
+        message: 'query failed',
+        details: { retrySource: true }
+      });
+      const remote = new CliError({ code, message: 'remote failure' });
+      let calls = 0;
+      fake.quoteSwap = async () => {
+        throw ++calls === 1 ? local : remote;
+      };
+      await expect(
+        quoteWatchTrade({
+          watch: { ...base, chain: 8453, buyBelow: 2000, buyAmountUsd: 5 },
+          side: 'buy',
+          now
+        })
+      ).rejects.toBe(preserveLocal ? local : remote);
+      expect(calls).toBe(2);
+    }
+  );
+
+  it.each([
+    new CliError({ code: 'upstream_unavailable', message: 'outage' }),
+    new CliError({ code: 'rate_limited', message: 'quota' }),
+    new CliError({ code: 'upstream_invalid_quote', message: 'invalid' }),
+    ...['unsupported_network', 'fee_on_transfer_token'].map(
+      (reason) =>
+        new CliError({
+          code: 'quote_unavailable',
+          message: 'no',
+          details: { reason, retrySource: false }
+        })
+    )
+  ])('does not retry a named-chain buy after a non-source failure: %j', async (failure) => {
+    const calls: unknown[] = [];
     fake.quoteSwap = async (params) => {
-      calls.push(params as Record<string, unknown>);
-      if (calls.length === 1) throw new CliError({ code: 'insufficient_balance', message: 'no' });
-      return {};
+      calls.push(params);
+      throw failure;
     };
-    await quoteWatchTrade({
-      watch: { ...base, chain: 8453, buyBelow: 2000, buyAmountUsd: 5 },
-      side: 'buy',
-      now
-    });
-    expect(calls[0]).toMatchObject({ chain: '8453', toChain: '8453' });
-    expect(calls[1]).toMatchObject({ toChain: '8453' });
-    expect(calls[1]).not.toHaveProperty('chain');
+    await expect(
+      quoteWatchTrade({
+        watch: { ...base, chain: 8453, buyBelow: 2000, buyAmountUsd: 5 },
+        side: 'buy',
+        now
+      })
+    ).rejects.toBe(failure);
+    expect(calls).toHaveLength(1);
   });
 });
 

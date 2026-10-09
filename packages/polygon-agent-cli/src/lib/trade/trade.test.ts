@@ -371,7 +371,11 @@ describe('quoteSwap in session mode', () => {
     await expect(quote()).rejects.toMatchObject({ code: 'rate_limited' });
     const other = new QueryFailedError();
     fake.quoteIntent.mockRejectedValueOnce(other);
-    await expect(quote()).rejects.toBe(other);
+    await expect(quote()).rejects.toMatchObject({
+      code: 'quote_unavailable',
+      details: { reason: 'query_failed' },
+      cause: other
+    });
   });
 
   it('falls back to the next stablecoin when USDC lacks the balance or the allowance', async () => {
@@ -554,27 +558,28 @@ describe('quoteSwap for an exact amount to receive (--to-amount)', () => {
     expect(loadTrade('try-1')).toBeNull();
 
     // A failure that isn't a shortfall, on the first source, ends the search.
-    const { QueryFailedError } = await import('@0xtrails/api');
-    const failure = new QueryFailedError();
+    const { UnavailableError } = await import('@0xtrails/api');
+    const failure = new UnavailableError();
     fake.quoteIntent.mockReset();
     fake.quoteIntent.mockRejectedValueOnce(failure);
-    await expect(quote({ to: 'POL', amount: undefined, toAmount: '10' })).rejects.toBe(failure);
+    await expect(quote({ to: 'POL', amount: undefined, toAmount: '10' })).rejects.toMatchObject({
+      code: 'upstream_unavailable'
+    });
     expect(fake.quoteIntent).toHaveBeenCalledTimes(1);
   });
 
-  it("after a shortfall, reports it rather than a later source's failure", async () => {
+  it('after a shortfall, preserves a later upstream outage', async () => {
     balances([
       { chainId: 137, token: USDC, balance: 1_025_000n },
       { chainId: 137, token: USDT, balance: 50_000_000n }
     ]);
     fake.tokenBalance.mockResolvedValue(1_025_000n);
-    const { QueryFailedError } = await import('@0xtrails/api');
+    const { UnavailableError } = await import('@0xtrails/api');
     fake.quoteIntent
       .mockImplementationOnce(async (request) => exactOutputIntent({ request, cost: 1_030_000n }))
-      .mockRejectedValueOnce(new QueryFailedError());
+      .mockRejectedValueOnce(new UnavailableError());
     await expect(quote({ to: 'POL', amount: undefined, toAmount: '10' })).rejects.toMatchObject({
-      code: 'insufficient_balance',
-      message: expect.stringContaining('more than the wallet holds')
+      code: 'upstream_unavailable'
     });
   });
 
@@ -676,7 +681,21 @@ describe('quoteSwap paying with other holdings', () => {
     );
     await expect(
       quote({ to: 'POL', amount: undefined, toAmount: '100', payWithHoldings: true })
-    ).rejects.toMatchObject({ code: 'insufficient_balance' });
+    ).rejects.toMatchObject({
+      code: 'quote_search_incomplete',
+      command: expect.stringContaining('--to-amount 100'),
+      details: {
+        quotesTried: 3,
+        untriedSources: [
+          {
+            token: 'WETH',
+            chain: 137,
+            chainName: 'Polygon',
+            command: expect.stringContaining('--dry-run')
+          }
+        ]
+      }
+    });
     expect(fake.quoteIntent).toHaveBeenCalledTimes(3);
   });
 
@@ -1000,5 +1019,425 @@ describe('executeSwap', () => {
     expect(await executeSwap({ trade: running })).toMatchObject({ state: 'completed' });
     expect(fake.runTx).toHaveBeenCalledTimes(1);
     expect(fake.executeIntent).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('funding search regressions from Muse review', () => {
+  beforeEach(() => {
+    fake.getUsdPrices.mockResolvedValue(new Map([[`137:${WPOL.toLowerCase()}`, 0.1]]));
+    fake.quoteIntent.mockImplementation(async (request) =>
+      exactOutputIntent({ request, cost: 1_030_000n })
+    );
+    fake.tokenBalance.mockResolvedValue(1_025_000n);
+  });
+
+  it('does not exclude a source when its estimate exceeds its balance and allowance', async () => {
+    balances([{ chainId: 137, token: USDC, balance: 1_015_000n }]);
+    sessionWith({ [USDC]: 1_015_000n });
+    fake.getUsdPrices.mockResolvedValue(new Map([[`137:${WPOL.toLowerCase()}`, 0.102]]));
+    fake.tokenBalance.mockResolvedValue(1_015_000n);
+    fake.quoteIntent.mockImplementation(async (request) =>
+      exactOutputIntent({ request, cost: 1_010_000n })
+    );
+    const result = await quote({ to: 'POL', amount: undefined, toAmount: '10' });
+    expect(result.trade.origin.amount).toBe('1010000');
+    expect(fake.quoteIntent).toHaveBeenCalledTimes(1);
+  });
+
+  it('remembers an unpriced eligible holding after another source is quoted and falls short', async () => {
+    balances([
+      { chainId: 137, token: USDC, balance: 1_025_000n },
+      { chainId: 137, token: WETH, balance: 10n ** 18n }
+    ]);
+    sessionWith({ [USDC]: 100_000_000n, [WETH]: 10n ** 18n });
+    await expect(
+      quote({ to: 'POL', amount: undefined, toAmount: '10', payWithHoldings: true })
+    ).rejects.toMatchObject({ code: 'upstream_unavailable' });
+    expect(fake.quoteIntent).toHaveBeenCalledTimes(1);
+  });
+
+  it('tries another funded source after a Trails query failure', async () => {
+    balances([
+      { chainId: 137, token: USDC, balance: 50_000_000n },
+      { chainId: 137, token: USDT, balance: 50_000_000n }
+    ]);
+    fake.tokenBalance.mockResolvedValue(50_000_000n);
+    const { QueryFailedError } = await import('@0xtrails/api');
+    fake.quoteIntent.mockRejectedValueOnce(new QueryFailedError());
+    const result = await quote({ to: 'POL', amount: undefined, toAmount: '10' });
+    expect(result.trade.origin.symbol).toBe('USDT');
+    expect(fake.quoteIntent).toHaveBeenCalledTimes(2);
+  });
+
+  it('describes holding payment without claiming funded stablecoins lack funds', async () => {
+    balances([
+      { chainId: 137, token: USDC, balance: 50_000_000n },
+      { chainId: 137, token: WETH, balance: 10n ** 18n }
+    ]);
+    sessionWith({ [USDC]: 100_000_000n, [WETH]: 10n ** 18n });
+    fake.getUsdPrices.mockResolvedValue(new Map([[`137:${WETH.toLowerCase()}`, 2500]]));
+    const { QueryFailedError } = await import('@0xtrails/api');
+    fake.quoteIntent
+      .mockImplementation(async (request) => intentFor(request))
+      .mockRejectedValueOnce(new QueryFailedError());
+    const result = await quote({
+      to: 'POL',
+      amount: undefined,
+      amountUsd: 5,
+      payWithHoldings: true
+    });
+    expect(result.paidWithHolding).toBe(true);
+    expect(result.warnings).toEqual([expect.stringContaining('This quote pays with 0.002 WETH')]);
+    expect(result.warnings.join(' ')).not.toContain('No covered stablecoin');
+  });
+
+  it('does not replace a route failure with another source shortfall', async () => {
+    balances([
+      { chainId: 137, token: USDC, balance: 1_025_000n },
+      { chainId: 137, token: USDT, balance: 50_000_000n }
+    ]);
+    const { QueryFailedError } = await import('@0xtrails/api');
+    const failure = new QueryFailedError();
+    fake.quoteIntent
+      .mockImplementationOnce(async (request) => exactOutputIntent({ request, cost: 1_030_000n }))
+      .mockRejectedValueOnce(failure);
+    await expect(quote({ to: 'POL', amount: undefined, toAmount: '10' })).rejects.toMatchObject({
+      code: 'quote_unavailable',
+      details: { reason: 'query_failed' },
+      cause: failure
+    });
+  });
+
+  it('never hides an invalid quote after an earlier source shortfall', async () => {
+    balances([
+      { chainId: 137, token: USDC, balance: 1_025_000n },
+      { chainId: 137, token: USDT, balance: 50_000_000n }
+    ]);
+    fake.quoteIntent
+      .mockImplementationOnce(async (request) => exactOutputIntent({ request, cost: 1_030_000n }))
+      .mockImplementationOnce(async (request) =>
+        exactOutputIntent({ request, cost: 1_010_000n, minimum: 1n })
+      );
+    await expect(quote({ to: 'POL', amount: undefined, toAmount: '10' })).rejects.toMatchObject({
+      code: 'upstream_invalid_quote'
+    });
+  });
+
+  it.each(['oops', '101%', '-1', '0%'])(
+    'rejects invalid source amount %s before looking for holdings',
+    async (amount) => {
+      balances([]);
+      await expect(quote({ amount })).rejects.toMatchObject({ code: 'invalid_input' });
+      expect(fake.walletHoldings).not.toHaveBeenCalled();
+      expect(fake.quoteIntent).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([{ toChain: 'polygon' }, { chain: 'polygon' }])(
+    'validates fixed destination precision without any funding: %j',
+    async (destination) => {
+      balances([]);
+      await expect(
+        quote({ ...destination, to: 'USDC', amount: undefined, toAmount: '1.1234567' })
+      ).rejects.toMatchObject({ code: 'invalid_input' });
+      expect(fake.walletHoldings).not.toHaveBeenCalled();
+      expect(fake.quoteIntent).not.toHaveBeenCalled();
+    }
+  );
+
+  it('uses BNB destination precision when selecting a source without a named chain', async () => {
+    const bnb = supportedTokens(56);
+    const bnbUsd = bnb.find((t) => t.symbol === 'USDC');
+    const bnbEth = bnb.find((t) => t.symbol === 'ETH');
+    if (!bnbUsd || !bnbEth) throw new Error('missing fixture');
+    const tokens = [
+      ...supportedTokens(137)
+        .filter((t) => t.kind === 'usd')
+        .map((t) => ({ chainId: 137, ...t })),
+      ...bnb
+        .filter((t) => t.symbol === 'USDC' || t.symbol === 'ETH')
+        .map((t) => ({ chainId: 56, ...t }))
+    ];
+    writeApprovedPlan({
+      wallet,
+      approved: {
+        plan: buildPlan({
+          allowanceUsd: 100,
+          days: 30,
+          tokens,
+          prices: new Map([[`56:${bnbEth.address.toLowerCase()}`, 2500]]),
+          now: new Date()
+        }),
+        approvedAt: new Date().toISOString()
+      }
+    });
+    // Polygon can fund a quote but its USDC cannot represent the requested precision.
+    balances([
+      { chainId: 137, token: USDT, balance: 50_000_000n },
+      { chainId: 56, token: bnbEth.address, balance: 10n ** 18n }
+    ]);
+    fake.getUsdPrices.mockResolvedValue(new Map([[`56:${bnbEth.address.toLowerCase()}`, 2500]]));
+    const sessions = await fake.getSessions();
+    fake.getSessions.mockResolvedValue([
+      ...sessions,
+      {
+        chainId: 56,
+        sessionId: 's-bnb',
+        walletId: 'w',
+        expiresAt: '2099-01-01T00:00:00Z',
+        expired: false,
+        grants: [{ token: bnbEth.address, limit: 10n ** 18n, used: 0n, remaining: 10n ** 18n }]
+      }
+    ]);
+    fake.tokenBalance.mockResolvedValue(10n ** 18n);
+    fake.quoteIntent.mockImplementation(async (request) =>
+      exactOutputIntent({ request, cost: 500_000_000_000_000n })
+    );
+    const result = await quote({
+      to: 'USDC',
+      amount: undefined,
+      toAmount: '1.123456789',
+      payWithHoldings: true
+    });
+    expect(result.trade.destination).toMatchObject({
+      chainId: 56,
+      minAmount: '1123456789000000000'
+    });
+    expect(fake.quoteIntent).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('funding priorities and classified quote failures', () => {
+  beforeEach(() => {
+    balances([
+      { chainId: 137, token: USDC, balance: 100_000n },
+      { chainId: 137, token: USDT, balance: 50_000n },
+      { chainId: 137, token: WETH, balance: 10n ** 18n }
+    ]);
+    sessionWith({ [USDC]: 100_000_000n, [USDT]: 100_000_000n, [WETH]: 10n ** 18n });
+    fake.getUsdPrices.mockResolvedValue(
+      new Map([
+        [`137:${WPOL.toLowerCase()}`, 0.1],
+        [`137:${WETH.toLowerCase()}`, 2500]
+      ])
+    );
+    fake.tokenBalance.mockResolvedValue(10n ** 18n);
+    fake.quoteIntent.mockImplementation(async (request) =>
+      exactOutputIntent({ request, cost: 400_000_000_000_000n })
+    );
+  });
+
+  it('quotes a funded holding before dust stablecoins', async () => {
+    const result = await quote({
+      to: 'POL',
+      amount: undefined,
+      toAmount: '10',
+      payWithHoldings: true
+    });
+    expect(result.trade.origin.symbol).toBe('WETH');
+    expect(fake.quoteIntent).toHaveBeenCalledTimes(1);
+  });
+
+  it('prefers a near-miss stablecoin, but still quotes a far-below-estimate token later', async () => {
+    balances([
+      { chainId: 137, token: USDC, balance: 950_000n },
+      { chainId: 137, token: WETH, balance: 10n ** 18n }
+    ]);
+    fake.quoteIntent.mockImplementation(async (request) =>
+      exactOutputIntent({ request, cost: 940_000n })
+    );
+    const near = await quote({
+      to: 'POL',
+      amount: undefined,
+      toAmount: '10',
+      payWithHoldings: true
+    });
+    expect(near.trade.origin.symbol).toBe('USDC');
+    balances([{ chainId: 137, token: USDC, balance: 100_000n }]);
+    fake.tokenBalance.mockResolvedValue(100_000n);
+    fake.quoteIntent.mockImplementation(async (request) =>
+      exactOutputIntent({ request, cost: 90_000n })
+    );
+    const low = await quote({
+      to: 'POL',
+      amount: undefined,
+      toAmount: '10',
+      payWithHoldings: true
+    });
+    expect(low.trade.origin.amount).toBe('90000');
+  });
+
+  it('uses remaining grant capacity when ranking a funded holding against stablecoins', async () => {
+    balances([
+      { chainId: 137, token: USDC, balance: 50_000_000n },
+      { chainId: 137, token: WETH, balance: 10n ** 18n }
+    ]);
+    sessionWith({ [USDC]: 50_000n, [WETH]: 10n ** 18n });
+    const result = await quote({
+      to: 'POL',
+      amount: undefined,
+      toAmount: '10',
+      payWithHoldings: true
+    });
+    expect(result.trade.origin.symbol).toBe('WETH');
+  });
+
+  it('tries another source after high price impact without relaxing slippage', async () => {
+    const { HighPriceImpactError } = await import('@0xtrails/api');
+    fake.quoteIntent.mockRejectedValueOnce(new HighPriceImpactError());
+    fake.quoteIntent.mockImplementation(async (request) =>
+      exactOutputIntent({ request, cost: 90_000n })
+    );
+    const result = await quote({
+      to: 'POL',
+      amount: undefined,
+      toAmount: '10',
+      payWithHoldings: true,
+      slippage: 0.003
+    });
+    expect(result.trade.origin.symbol).toBe('USDC');
+    expect(fake.quoteIntent).toHaveBeenCalledTimes(2);
+    for (const [request] of fake.quoteIntent.mock.calls)
+      expect(request.options.slippageTolerance).toBe(0.003);
+  });
+
+  it.each([
+    'QueryFailedError',
+    'FeeOnTransferTokenError',
+    'UnsupportedNetworkError',
+    'NotFoundError'
+  ] as const)(
+    'reports %s as structured uncertainty without a stack or invented no-route diagnosis',
+    async (name) => {
+      const sdk = await import('@0xtrails/api');
+      const { failureJson } = await import('../errors.ts');
+      fake.quoteIntent.mockRejectedValue(new sdk[name]());
+      let failure: unknown;
+      try {
+        await quote({ from: 'USDC', to: 'POL', amount: undefined, toAmount: '10' });
+      } catch (error) {
+        failure = error;
+      }
+      const out = failureJson(failure);
+      expect(out).toMatchObject({
+        ok: false,
+        code: 'quote_unavailable',
+        command: expect.stringContaining('--dry-run')
+      });
+      expect(out).not.toHaveProperty('stack');
+      expect(String(out.error)).not.toMatch(/no route/i);
+      expect(fake.quoteIntent).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it.each(['FeeOnTransferTokenError', 'UnsupportedNetworkError'] as const)(
+    'does not guess another source can fix an ambiguous %s',
+    async (name) => {
+      const sdk = await import('@0xtrails/api');
+      fake.quoteIntent.mockRejectedValueOnce(new sdk[name]());
+      await expect(
+        quote({ to: 'POL', amount: undefined, toAmount: '10', payWithHoldings: true })
+      ).rejects.toMatchObject({ code: 'quote_unavailable' });
+      expect(fake.quoteIntent).toHaveBeenCalledTimes(1);
+    }
+  );
+});
+
+// Dollar buys (including watch quotes) may fall back to another covered chain.
+// A named destination remains pinned regardless of which chain pays.
+describe('stablecoin fallback across chains', () => {
+  const BASE_USDC = getAddress('0x833589fcd6edb6e08f4c7c32d4f71b54bda02913');
+  beforeEach(() => {
+    const tokens = [137, 8453].flatMap((chainId) =>
+      supportedTokens(chainId)
+        .filter((t) => t.symbol === 'USDC' || t.symbol === 'USDT' || t.symbol === 'WETH')
+        .map((t) => ({ chainId, ...t }))
+    );
+    writeApprovedPlan({
+      wallet,
+      approved: {
+        plan: buildPlan({
+          allowanceUsd: 100,
+          days: 30,
+          tokens,
+          prices: new Map(
+            tokens
+              .filter((t) => t.kind === 'eth')
+              .map((t) => [`${t.chainId}:${t.address.toLowerCase()}`, 2500])
+          ),
+          now: new Date()
+        }),
+        approvedAt: new Date().toISOString()
+      }
+    });
+    balances([
+      { chainId: 137, token: USDC, balance: 50_000_000n },
+      { chainId: 137, token: USDT, balance: 50_000_000n },
+      { chainId: 8453, token: BASE_USDC, balance: 50_000_000n }
+    ]);
+    fake.getSessions.mockResolvedValue(
+      [137, 8453].map((chainId) => ({
+        chainId,
+        sessionId: `s-${chainId}`,
+        walletId: 'w',
+        expiresAt: '2099-01-01T00:00:00Z',
+        expired: false,
+        grants: tokens
+          .filter((t) => t.chainId === chainId)
+          .map((t) => ({
+            token: t.address,
+            limit: 100_000_000n,
+            used: 0n,
+            remaining: 100_000_000n
+          }))
+      }))
+    );
+  });
+  it('skips exhausted local funding in the second watch search', async () => {
+    const result = await quote({
+      to: 'ETH',
+      amount: undefined,
+      amountUsd: 5,
+      toChain: 'polygon',
+      excludeSourceChains: [137]
+    });
+    expect(result.trade.origin.chainId).toBe(8453);
+    expect(result.trade.destination.chainId).toBe(137);
+    expect(fake.quoteIntent).toHaveBeenCalledTimes(1);
+    expect(fake.quoteIntent.mock.calls[0]?.[0]).toMatchObject({ originChainId: 8453 });
+  });
+
+  it.each([undefined, 'polygon'])(
+    'retains destination %s when a dollar buy retries on Base',
+    async (toChain) => {
+      const { QueryFailedError } = await import('@0xtrails/api');
+      fake.quoteIntent.mockRejectedValueOnce(new QueryFailedError());
+      const result = await quote({ to: 'ETH', amount: undefined, amountUsd: 5, toChain });
+      expect(result.trade.origin.chainId).toBe(8453);
+      expect(result.trade.destination.chainId).toBe(toChain === undefined ? 8453 : 137);
+      expect(result.paidWithHolding).toBe(false);
+    }
+  );
+  it('skips all candidates on an explicitly unsupported origin chain', async () => {
+    const { UnsupportedNetworkError } = await import('@0xtrails/api');
+    fake.quoteIntent.mockRejectedValueOnce(
+      new UnsupportedNetworkError({ cause: 'origin chain 137 is not supported' })
+    );
+    const result = await quote({ to: 'ETH', amount: undefined, amountUsd: 5 });
+    expect(result.trade.origin.chainId).toBe(8453);
+    expect(fake.quoteIntent).toHaveBeenCalledTimes(2);
+  });
+  it('does not retry a fixed unsupported destination', async () => {
+    const { UnsupportedNetworkError } = await import('@0xtrails/api');
+    fake.quoteIntent.mockRejectedValueOnce(
+      new UnsupportedNetworkError({ cause: 'destination chain 137 is not supported' })
+    );
+    await expect(
+      quote({ to: 'ETH', amount: undefined, amountUsd: 5, toChain: 'polygon' })
+    ).rejects.toMatchObject({
+      code: 'quote_unavailable',
+      details: { reason: 'unsupported_network' }
+    });
+    expect(fake.quoteIntent).toHaveBeenCalledTimes(1);
   });
 });

@@ -220,18 +220,21 @@ describe('watch check', () => {
     expect(loadWatches()[0].buyArmed).toBe(false);
   });
 
-  it('a passing failure to quote keeps the level armed for the next check', async () => {
-    saveWatches([watch({ mode: 'auto', buyAmountUsd: 1 })]);
-    const d = deps({
-      quote: vi.fn(async () => {
-        throw new CliError({ code: 'rate_limited', message: 'slow down' });
-      })
-    });
-    const result = await runCheck(d);
-    expect(result.alerts).toEqual([]);
-    expect(result.warnings?.[0]).toMatch(/retrying at the next check/);
-    expect(loadWatches()[0].buyArmed).toBe(true);
-  });
+  it.each(['rate_limited', 'quote_search_incomplete'] as const)(
+    '%s keeps the level armed for the next check',
+    async (code) => {
+      saveWatches([watch({ mode: 'auto', buyAmountUsd: 1 })]);
+      const d = deps({
+        quote: vi.fn(async () => {
+          throw new CliError({ code, message: 'try again' });
+        })
+      });
+      const result = await runCheck(d);
+      expect(result.alerts).toEqual([]);
+      expect(result.warnings?.[0]).toMatch(/retrying at the next check/);
+      expect(loadWatches()[0].buyArmed).toBe(true);
+    }
+  );
 
   it("doesn't execute a quote whose fees are over 10%", async () => {
     saveWatches([watch({ mode: 'auto', buyAmountUsd: 1 })]);
