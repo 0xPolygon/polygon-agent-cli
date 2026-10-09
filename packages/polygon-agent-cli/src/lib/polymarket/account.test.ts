@@ -26,7 +26,10 @@ const sdk = vi.hoisted(() => {
       return { wait: async () => ({ transactionHash: '0xSWEEP' }) };
     }),
     listPositions: vi.fn(() => ({
-      firstPage: async () => ({ items: sdk.positions, hasMore: false })
+      firstPage: async () => {
+        if (sdk.positionsFail) throw sdk.positionsFail;
+        return { items: sdk.positions, hasMore: false };
+      }
     }))
   });
   const chain = {
@@ -40,6 +43,7 @@ const sdk = vi.hoisted(() => {
     owner: null as unknown,
     transferFail: null as Error | null,
     positions: [] as Array<Record<string, unknown>>,
+    positionsFail: null as Error | null,
     withdrawAddress: vi.fn(async () => '0xB2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2'),
     bridgeStatus: vi.fn(
       async (): Promise<{ transactions: Array<{ status: string }> }> => ({ transactions: [] })
@@ -115,6 +119,7 @@ beforeEach(() => {
   sdk.owner = null;
   sdk.transferFail = null;
   sdk.positions = [];
+  sdk.positionsFail = null;
   sdk.chain.balances = {};
   vi.clearAllMocks();
   fs.rmSync(path.join(String(process.env.POLYGON_AGENT_HOME), 'polymarket'), {
@@ -464,7 +469,7 @@ describe('getTradingClient with the key missing locally', () => {
     expect(owner.walletAddress).toBe(MAIN);
   });
 
-  it('fails with not_set_up and a sign-in hint without an owner session, making no key', async () => {
+  it('fails with not_set_up and a session-mode hint without an owner session, making no key', async () => {
     const signer = await accountWithLostKey('main');
     account.writeBackup('main', { omsWalletId: 'w-old', address: signer, at: 'x' });
     await pointer('session');
@@ -472,7 +477,7 @@ describe('getTradingClient with the key missing locally', () => {
     await expect(account.getTradingClient('main')).rejects.toMatchObject({
       code: 'not_set_up',
       message: 'The Polymarket key is not on this machine; it is backed up in your OMS account.',
-      hint: 'Sign in with agent wallet login to use it.'
+      hint: 'The next owner approval (email code) recovers it into a new key, or run wallet logout, then agent wallet login to use it through OMS.'
     });
     expect(account.hasLocalKey('main')).toBe(false);
     expect(sdk.createSecureClient).not.toHaveBeenCalled();
@@ -512,15 +517,6 @@ describe('recoverAccount', () => {
   it('sweeps pUSD to the main wallet, archives the old records, creates and backs up a new key', async () => {
     const signer = await accountWithLostKey('rec');
     const before = snapshot(account.accountDir('rec'));
-    sdk.positions = [
-      {
-        title: 'Will it rain?',
-        outcome: 'Yes',
-        conditionId: '0xc1',
-        currentSize: '10',
-        currentValue: '4.2'
-      }
-    ];
     const owner = fakeOwner(signer);
     const out = await account.recoverAccount({
       wallet: 'rec',
@@ -537,15 +533,7 @@ describe('recoverAccount', () => {
         withdrawnUsd: '2.5',
         txHash: '0xSWEEP',
         previousAccount: DEPOSIT_WALLET,
-        positionsLeft: [
-          {
-            title: 'Will it rain?',
-            outcome: 'Yes',
-            conditionId: '0xc1',
-            shares: '10',
-            valueUsd: '4.2'
-          }
-        ]
+        positionsLeft: []
       }
     });
     // The old account signs through OMS, with its stored builder key: nothing is minted.
@@ -581,6 +569,71 @@ describe('recoverAccount', () => {
     });
     expect(account.loadAccount('rec')).toBeNull();
     expect(owner.walletAddress).toBe(MAIN);
+  });
+
+  it('refuses to rotate while the old account holds open positions, after the sweep', async () => {
+    const signer = await accountWithLostKey('rec');
+    const dir = account.accountDir('rec');
+    const before = snapshot(dir);
+    sdk.positions = [
+      {
+        title: 'Will it rain?',
+        outcome: 'Yes',
+        conditionId: '0xc1',
+        currentSize: '10',
+        currentValue: '4.2'
+      }
+    ];
+    const owner = fakeOwner(signer);
+    const out = await account.recoverAccount({
+      wallet: 'rec',
+      owner: owner as never,
+      mainAddress: MAIN,
+      target: { id: 'w-old', address: signer }
+    });
+    const left = [
+      { title: 'Will it rain?', outcome: 'Yes', conditionId: '0xc1', shares: '10', valueUsd: '4.2' }
+    ];
+    expect(out).toMatchObject({
+      backedUp: false,
+      omsWalletId: 'w-old',
+      recovered: { withdrawnUsd: '2.5', txHash: '0xSWEEP', positionsLeft: left },
+      positionsLeft: left,
+      error: 'Positions remain in the old Polymarket account; the key was not replaced.',
+      hint: 'Positions remain in the old Polymarket account. Sell or redeem them from an owner install (wallet logout, then agent wallet login, then polymarket setup --broadcast restores the account), then the next owner approval finishes the recovery.'
+    });
+    expect(out).not.toHaveProperty('created');
+    expect(sdk.clients[0].transferErc20).toHaveBeenCalledTimes(1);
+    expect(snapshot(dir)).toEqual(before);
+    expect(previousDirs('rec')).toHaveLength(0);
+    expect(account.hasLocalKey('rec')).toBe(false);
+    expect(owner.importWallet).not.toHaveBeenCalled();
+    expect(owner.walletAddress).toBe(MAIN);
+  });
+
+  it('refuses to rotate when the open positions cannot be read', async () => {
+    const signer = await accountWithLostKey('rec');
+    const dir = account.accountDir('rec');
+    const before = snapshot(dir);
+    const owner = fakeOwner(signer);
+    sdk.positionsFail = new Error('data api down');
+    const out = await account.recoverAccount({
+      wallet: 'rec',
+      owner: owner as never,
+      mainAddress: MAIN,
+      target: { id: 'w-old', address: signer }
+    });
+    expect(out).toMatchObject({
+      backedUp: false,
+      omsWalletId: 'w-old',
+      recovered: { withdrawnUsd: '2.5', txHash: '0xSWEEP', positionsLeft: null },
+      positionsLeft: null,
+      positionsError: expect.stringContaining('data api down'),
+      error: 'Positions remain in the old Polymarket account; the key was not replaced.'
+    });
+    expect(snapshot(dir)).toEqual(before);
+    expect(account.hasLocalKey('rec')).toBe(false);
+    expect(owner.importWallet).not.toHaveBeenCalled();
   });
 
   it('a withdraw failure changes nothing on disk and creates no key', async () => {
