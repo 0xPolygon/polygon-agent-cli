@@ -1,6 +1,6 @@
 # Polymarket trading key backed by OMS
 
-Date: 2026-10-09. Status: approved in conversation (James). Addendum to `2026-10-08-polymarket-v2-design.md`. Branch: `polymarket-v2` (PR #146).
+Date: 2026-10-09. Status: implemented. Addendum to `2026-10-08-polymarket-v2-design.md`. Branch: `polymarket-v2` (PR #146).
 
 ## Problem
 
