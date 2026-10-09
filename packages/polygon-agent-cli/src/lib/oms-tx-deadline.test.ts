@@ -21,6 +21,8 @@ vi.mock('./oms-client.ts', () => ({
   })
 }));
 
+vi.mock('./storage.ts', () => ({ loadOmsWalletPointer: async () => null }));
+
 const { runOmsTx } = await import('./oms-tx.ts');
 
 const tx = { to: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', data: '0x', value: 0n };

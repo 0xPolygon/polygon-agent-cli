@@ -18,6 +18,7 @@ import { makeLoginRelay } from '../lib/login-relay-client.ts';
 import { isTxModeSet, loadTxMode, saveTxMode } from '../lib/mode.ts';
 import { startOidcCallbackServer } from '../lib/oidc-callback-server.ts';
 import { getOmsClient, loginUiBaseUrl, oidcRelayBaseUrl } from '../lib/oms-client.ts';
+import { selectMainWallet } from '../lib/polymarket/oms-key.ts';
 import {
   listWallets,
   deleteWallet,
@@ -168,6 +169,11 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
 
     let walletAddress: string;
     let loginMethod: OmsLoginMethod;
+    // Automatic wallet selection can land on an imported wallet (the Polymarket key); the
+    // pointer must always hold the user's main wallet.
+    const existingPointer = await loadOmsWalletPointer(argv.name);
+    const selectMain = () =>
+      selectMainWallet(oms.wallet, { expectedAddress: existingPointer?.walletAddress });
 
     if (argv.local) {
       if (argv.provider !== 'google') {
@@ -183,7 +189,7 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
       if (!result) {
         throw new Error('OIDC login did not complete: no wallet result returned.');
       }
-      walletAddress = result.walletAddress;
+      walletAddress = (await selectMain()).address;
       loginMethod = 'google';
     } else {
       if (argv.remote) {
@@ -209,6 +215,7 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
             startEmailAuth: (p) => oms.wallet.startEmailAuth(p),
             completeEmailAuth: (p) => oms.wallet.completeEmailAuth(p)
           },
+          selectMainWallet: selectMain,
           oidcProviderGoogle: OmsRelayOidcProviders.google,
           announce: announceAuthUrl,
           sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),

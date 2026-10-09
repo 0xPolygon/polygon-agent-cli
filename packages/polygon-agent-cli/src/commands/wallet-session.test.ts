@@ -48,7 +48,13 @@ const world = vi.hoisted(() => ({
   pendingDuringRun: [] as boolean[],
   // Runs while the code is being checked (e.g. a new step 1 in another process).
   onSignIn: undefined as undefined | (() => Promise<void>),
-  sent: [] as Array<{ to: string; data: string; network: number }>
+  sent: [] as Array<{ to: string; data: string; network: number }>,
+  // The account's wallets; undefined means one main wallet at walletAddress.
+  wallets: undefined as
+    | undefined
+    | Array<{ id: string; address: string; keyOrigin: 'generated' | 'imported' }>,
+  // Where automatic selection lands at sign-in; undefined means walletAddress.
+  autoSelectAddress: undefined as string | undefined
 }));
 
 const httpError = (status: number, name?: string) =>
@@ -76,6 +82,19 @@ vi.mock('@polygonlabs/oms-wallet', async (importOriginal) => {
       sessionLifetimeSeconds: number;
     };
     credentialId = `owner-${Math.random()}`;
+    walletAddress: string | undefined;
+
+    async listWallets() {
+      return (
+        world.wallets ?? [{ id: 'w-main', address: world.walletAddress, keyOrigin: 'generated' }]
+      );
+    }
+    async useWallet(params: { walletId: string }) {
+      world.calls.push(`useWallet:${params.walletId}`);
+      this.walletAddress = (await this.listWallets()).find(
+        (w) => w.id === params.walletId
+      )?.address;
+    }
 
     async startEmailAuth(params: { email: string; sessionLifetimeSeconds: number }) {
       world.calls.push(`startEmailAuth:${params.sessionLifetimeSeconds}`);
@@ -93,6 +112,7 @@ vi.mock('@polygonlabs/oms-wallet', async (importOriginal) => {
       if (params.code !== world.code) throw httpError(400, 'AnswerIncorrect');
       world.ownerCredentials.add(this.credentialId);
       world.calls.push('signedIn');
+      this.walletAddress = world.autoSelectAddress ?? world.walletAddress;
       return {
         walletAddress: world.walletAddress,
         credential: { credentialId: this.credentialId }
@@ -308,6 +328,8 @@ beforeEach(() => {
   world.credentialRevokeError = undefined;
   world.sessionReadError = undefined;
   world.walletAddress = '0xd384ea24ca0B3a5e4BB35935C611E3dCB68Fd08e';
+  world.wallets = undefined;
+  world.autoSelectAddress = undefined;
   world.isPending = () =>
     fs.existsSync(path.join(String(process.env.POLYGON_AGENT_HOME), 'pending', `${wallet}.json`));
   world.pendingDuringRun.length = 0;
@@ -625,10 +647,25 @@ describe('owner-request safety', () => {
     world.walletAddress = '0x1111111111111111111111111111111111111111';
     world.calls.length = 0;
     const out = await confirm(request);
-    expect(out).toMatchObject({ ok: false, code: 'invalid_input', ownerSignInRevoked: true });
+    // The account has no wallet at the connected address, so selection refuses it.
+    expect(out).toMatchObject({ ok: false, code: 'not_connected', ownerSignInRevoked: true });
     expect(world.calls).toContain('revokeAccess:owner');
     expect(world.calls.some((c) => c.startsWith('authorize'))).toBe(false);
     expect(readApprovedPlan(wallet)?.plan.allowanceUsd).toBe(500);
+  });
+
+  it('acts on the main wallet when sign-in auto-selected an imported one', async () => {
+    world.wallets = [
+      { id: 'w-imp', address: '0x2222222222222222222222222222222222222222', keyOrigin: 'imported' },
+      { id: 'w-main', address: world.walletAddress, keyOrigin: 'generated' }
+    ];
+    world.autoSelectAddress = '0x2222222222222222222222222222222222222222';
+    const out = await confirm(await connectStep1({ chains: 'polygon' }));
+    expect(out).toMatchObject({ ok: true, ownerSignInRevoked: true });
+    expect(world.calls).toContain('useWallet:w-main');
+    expect(world.calls.indexOf('useWallet:w-main')).toBeLessThan(
+      world.calls.findIndex((c) => c.startsWith('authorize'))
+    );
   });
 
   it('revokes a session that differs from the plan in any way', async () => {
