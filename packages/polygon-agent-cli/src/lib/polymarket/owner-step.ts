@@ -4,25 +4,34 @@
 
 import { privateKeyToAccount } from 'viem/accounts';
 
+import type { RecoveryResult } from './account.ts';
 import type { OmsWalletLike } from './oms-key.ts';
 
 import {
   ensureTradingKey,
   hasLocalKey,
   loadAccount,
+  localTradingKeyAddresses,
   readBackup,
   recoverAccount,
+  sweepOldKey,
   writeBackup
 } from './account.ts';
-import { backupTradingKey, findTradingKeyWallet, selectMainWallet } from './oms-key.ts';
+import {
+  backupTradingKey,
+  findTradingKeyWallet,
+  selectMainWallet,
+  TRADING_KEY_REFERENCE
+} from './oms-key.ts';
 
-export type OwnerStepResult = {
-  backedUp: boolean;
-  omsWalletId?: string;
-  created?: boolean;
-  recovered?: Record<string, unknown>;
-  error?: string;
+type SweepEntry =
+  | { address: string; withdrawnUsd: string; txHash: string | null }
+  | { address: string; error: string };
+
+export type OwnerStepResult = RecoveryResult & {
   mainWalletError?: string;
+  sweptPrevious?: SweepEntry[];
+  sweepError?: string;
 };
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -33,7 +42,8 @@ async function backUp(wallet: string, owner: OmsWalletLike, created: boolean) {
   writeBackup(wallet, {
     omsWalletId: res.omsWalletId,
     address: res.address,
-    at: new Date().toISOString()
+    at: new Date().toISOString(),
+    kind: loadAccount(wallet)?.kind ?? 'deposit-wallet'
   });
   return { backedUp: true, omsWalletId: res.omsWalletId, ...(created ? { created: true } : {}) };
 }
@@ -46,7 +56,9 @@ async function recoverMissingKey(p: {
   owner: OmsWalletLike;
   mainAddress: string;
   found: { id: string; address: string } | null;
+  attempted: Set<string>;
 }): Promise<OwnerStepResult> {
+  if (p.found) p.attempted.add(p.found.address.toLowerCase());
   if (!p.found) {
     return {
       backedUp: false,
@@ -65,6 +77,7 @@ async function step(p: {
   wallet: string;
   owner: OmsWalletLike;
   mainAddress: string;
+  attempted: Set<string>;
 }): Promise<OwnerStepResult> {
   const { wallet, owner } = p;
   if (hasLocalKey(wallet)) {
@@ -90,16 +103,53 @@ async function step(p: {
   return backUp(wallet, owner, true);
 }
 
+// Older trading keys in OMS (a key replaced on a wiped machine, a recovered account) can
+// still hold pUSD. Sweeps each funded one to the main wallet, one at a time (the OMS signer
+// is not reentrant). Keys this machine still uses, under any wallet name, are left alone.
+async function sweepPrevious(
+  p: { owner: OmsWalletLike; mainAddress: string },
+  exclude: Set<string>
+): Promise<SweepEntry[]> {
+  const skip = new Set([...exclude, ...localTradingKeyAddresses()]);
+  const older = (await p.owner.listWallets()).filter(
+    (x) =>
+      x.keyOrigin === 'imported' &&
+      x.reference === TRADING_KEY_REFERENCE &&
+      !skip.has(x.address.toLowerCase())
+  );
+  const out: SweepEntry[] = [];
+  for (const x of older) {
+    try {
+      const swept = await sweepOldKey({
+        owner: p.owner,
+        target: { id: x.id, address: x.address },
+        mainAddress: p.mainAddress
+      });
+      if (swept) out.push({ address: x.address, ...swept });
+    } catch (error) {
+      out.push({ address: x.address, error: message(error) });
+    }
+  }
+  return out;
+}
+
 export async function polymarketOwnerStep(p: {
   wallet: string;
   owner: OmsWalletLike;
   mainAddress: string;
 }): Promise<OwnerStepResult> {
   let result: OwnerStepResult;
+  const attempted = new Set<string>();
   try {
-    result = await step(p);
+    result = await step({ ...p, attempted });
   } catch (error) {
     result = { backedUp: false, error: message(error) };
+  }
+  try {
+    const swept = await sweepPrevious(p, attempted);
+    if (swept.length > 0) result = { ...result, sweptPrevious: swept };
+  } catch (error) {
+    result = { ...result, sweepError: message(error) };
   }
   try {
     await selectMainWallet(p.owner, { expectedAddress: p.mainAddress });
