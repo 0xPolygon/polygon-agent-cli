@@ -40,20 +40,20 @@ The trading key lives on this machine, and only it can move funds out of the Pol
 
 When the backup happens:
 
-- Owner mode: `setup --broadcast` imports the key with the existing sign-in. Rerun `setup --broadcast` on an account that predates the backup. The result has `backup: { omsWalletId, imported }`. If it fails, the result has `backup.backedUp: false` with an `error` and the setup itself still succeeds.
+- Owner mode: `setup --broadcast` imports the key with the existing sign-in. Rerun `setup --broadcast` on an account that predates the backup. The result has `backup: { omsWalletId, imported }`. If it fails, the result has `backup.backedUp: false` with an `error` and the setup itself still succeeds. With the key present but no owner sign-in, the result has `backup: { backedUp: false, hint: 'agent wallet login' }`. With the key missing and no sign-in, `setup` refuses with `not_set_up`, because OMS can't be checked for a backup. Run `agent wallet login` and rerun it.
 - Session mode: every confirmed owner request (connect, allowance, renew, withdraw, access) backs it up with the owner sign-in it already has. It creates the key first if there is none. Connecting needs no extra step, and the owner request never fails because of it. The outcome is in the request's `polymarket` field (`backedUp`, or `backedUp: false` with an `error`).
 
 `status` shows two fields about this:
 
 | Field | Meaning |
 | --- | --- |
-| `signer` | `local`: the key file is on this machine. `oms`: it is gone and OMS signs as the backed-up key. Status, trading, redeem and withdraw all keep working. |
+| `signer` | `local`: the key file is on this machine. `oms`: it is gone and OMS signs as the backed-up key. Status, trading, redeem and withdraw all keep working. This is owner mode only. In session mode with the key gone, commands fail with `not_set_up` until the next owner approval recovers it. |
 | `backup` | `{ backedUp: true, omsWalletId }` once the key is in OMS. `{ backedUp: false }` if not. |
 
 A wiped machine loses nothing, as long as the user reinstalls with the same `--name` (see setup.md), because the backup is found by that label.
 
 - Owner mode: run `setup --broadcast`. It restores the account from OMS and never makes a new key over it (`restored: true`, `signer: "oms"`).
-- Session mode: the next confirmed owner request recovers it. It withdraws all pUSD from the old account to the OMS wallet, archives the old records under `polymarket/<wallet>/previous/`, then creates a new key and backs it up. Run `setup --broadcast` afterwards to deploy the new account. Open positions stay in the old account and are reachable in owner mode. If a deposit is still being credited, or a legacy proxy still holds funds, the recovery stops and changes nothing (`backedUp: false` with an `error`). If OMS holds no backup, nothing is changed and no new key is made.
+- Session mode: the next confirmed owner request recovers it. It withdraws all pUSD from the old account to the OMS wallet, archives the old records under `polymarket/<wallet>/previous-<timestamp>/`, then creates a new key and backs it up. Run `setup --broadcast` afterwards to deploy the new account. Open positions stay in the old account and are reachable in owner mode. If a deposit is still being credited, or a legacy proxy still holds funds, the recovery stops after the sweep (`backedUp: false` with an `error`). The pUSD has already moved to the OMS wallet and the result reports it in `recovered`, but the old key stays in use and the next owner request retries the rotation. For the legacy proxy case the hint is to sign in with `agent wallet login` to use it through OMS. If local records name the lost key and OMS holds no backup of it, nothing is changed and no new key is made. With no local records and no OMS key for this install name, the step creates a new key and backs it up.
 
 `status.otherTradingKeys` lists backed-up keys this install doesn't track (owner mode only), such as another install's key or one from before a reinstall. `polymarket recover <address> --broadcast` moves that account's pUSD to the OMS wallet. It refuses addresses that are not Polymarket trading keys in the OMS account and this install's own key. It leaves open positions in place, and a dry run lists them.
 
