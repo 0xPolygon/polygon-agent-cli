@@ -234,6 +234,14 @@ describe('withActiveWallet', () => {
     expect(f.getActive()).toBe('main');
   });
 
+  it('restores to the main wallet when the previous active wallet was an imported key', async () => {
+    const f = fakeOms([MAIN, IMPORTED, TK], 'imp-x');
+    await withActiveWallet(f.w, 'imp-tk', async () => {
+      expect(f.getActive()).toBe('imp-tk');
+    });
+    expect(f.getActive()).toBe('main');
+  });
+
   it('just runs fn when the target is already active', async () => {
     const f = fakeOms([MAIN, IMPORTED], 'main');
     const out = await withActiveWallet(f.w, 'main', async () => 7);
@@ -270,6 +278,12 @@ describe('backupTradingKey', () => {
 
   it('restores to the main wallet when there was no active wallet', async () => {
     const f = fakeOms([MAIN], undefined);
+    await backupTradingKey(f.w, key, REF_A);
+    expect(f.getActive()).toBe('main');
+  });
+
+  it('restores to the main wallet when the previous active wallet was an imported key', async () => {
+    const f = fakeOms([MAIN, IMPORTED], 'imp-x');
     await backupTradingKey(f.w, key, REF_A);
     expect(f.getActive()).toBe('main');
   });
