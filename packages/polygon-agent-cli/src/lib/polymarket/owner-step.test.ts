@@ -107,10 +107,64 @@ describe('polymarketOwnerStep', () => {
     expect(owner.walletAddress).toBe(MAIN);
   });
 
-  it('never throws when selecting the main wallet fails', async () => {
+  it('puts a failed final main-wallet select in mainWalletError after a good backup', async () => {
+    const owner = fakeOwner();
+    owner.importWallet.mockImplementationOnce(async ({ privateKey }) => {
+      const address = privateKeyToAccount(privateKey).address;
+      const w = { id: 'w-imported', address, keyOrigin: 'imported' };
+      (await owner.listWallets()).push(w);
+      owner.walletAddress = MAIN;
+      owner.listWallets.mockRejectedValue(new Error('boom'));
+      return { wallet: w };
+    });
+    const out = await polymarketOwnerStep({ wallet, owner: owner as never, mainAddress: MAIN });
+    expect(out).toEqual({
+      backedUp: true,
+      omsWalletId: 'w-imported',
+      created: true,
+      mainWalletError: 'boom'
+    });
+  });
+
+  it('never throws when listing wallets fails from the start', async () => {
     const owner = fakeOwner();
     owner.listWallets.mockRejectedValue(new Error('boom'));
     const out = await polymarketOwnerStep({ wallet, owner: owner as never, mainAddress: MAIN });
     expect(out).toEqual({ backedUp: false, error: 'boom' });
+  });
+
+  it('routes to recovery, never creating a key, when OMS already holds a trading key and nothing is local', async () => {
+    const owner = fakeOwner();
+    (await owner.listWallets()).push({
+      id: 'w-old',
+      address: '0xOLD',
+      keyOrigin: 'imported',
+      reference: 'polymarket-trading-key'
+    });
+    const out = await polymarketOwnerStep({ wallet, owner: owner as never, mainAddress: MAIN });
+    expect(out.backedUp).toBe(false);
+    expect(out.omsWalletId).toBe('w-old');
+    expect(out.error).toMatch(/0xOLD/);
+    expect(owner.importWallet).not.toHaveBeenCalled();
+    expect(hasLocalKey(wallet)).toBe(false);
+  });
+
+  it('re-backs up when backup.json records a different address than the local key', async () => {
+    const owner = fakeOwner();
+    await polymarketOwnerStep({ wallet, owner: owner as never, mainAddress: MAIN });
+    const file = accountFile(wallet, 'backup.json');
+    const rec = JSON.parse(fs.readFileSync(file, 'utf8'));
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        ...rec,
+        address: '0x0000000000000000000000000000000000000001',
+        omsWalletId: 'stale'
+      })
+    );
+    const out = await polymarketOwnerStep({ wallet, owner: owner as never, mainAddress: MAIN });
+    expect(out).toEqual({ backedUp: true, omsWalletId: 'w-imported' });
+    expect(readBackup(wallet)?.omsWalletId).toBe('w-imported');
+    expect(owner.importWallet).toHaveBeenCalledTimes(1);
   });
 });
