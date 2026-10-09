@@ -6,7 +6,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { privateKeyToAccount } from 'viem/accounts';
+
 import type { CipherData } from '../storage.ts';
+import type { PendingDeposit } from './deposits.ts';
 import type { OmsWalletLike } from './oms-key.ts';
 
 import { CliError } from '../errors.ts';
@@ -14,7 +17,15 @@ import { getOmsClient } from '../oms-client.ts';
 import { readJsonFile, writeJsonFile } from '../session/state.ts';
 import { decrypt, encrypt, loadOmsWalletPointer, STORAGE_ROOT } from '../storage.ts';
 import { formatUnits6 } from './amounts.ts';
-import { CTF, LEGACY_NEG_RISK_ADAPTER, PUSD } from './gamma.ts';
+import { bridgeStatus } from './bridge.ts';
+import { loadPending } from './deposits.ts';
+import {
+  CTF,
+  getPolymarketProxyWalletAddress,
+  LEGACY_NEG_RISK_ADAPTER,
+  PUSD,
+  USDC_E
+} from './gamma.ts';
 import { backupTradingKey, findTradingKeyWallet, omsSigner } from './oms-key.ts';
 import { loadSdk, mapSdkError } from './sdk.ts';
 import { pusdBalanceOf, withdrawAll } from './withdraw.ts';
@@ -211,10 +222,10 @@ const ERC1155_APPROVED_ABI = [
 ] as const;
 
 // A failed read of the chain (transport, HTTP, timeout, rate limit) is an upstream problem.
-function mapChainReadError(err: unknown): CliError {
+function mapChainReadError(err: unknown, what = 'the legacy NegRiskAdapter approvals'): CliError {
   if (err instanceof CliError) return err;
   const e = err as { status?: number; code?: number; message?: string; shortMessage?: string };
-  const message = `Couldn't read the legacy NegRiskAdapter approvals from Polygon: ${e?.shortMessage ?? e?.message ?? String(err)}`;
+  const message = `Couldn't read ${what} from Polygon: ${e?.shortMessage ?? e?.message ?? String(err)}`;
   const limited = e?.status === 429 || e?.code === -32005;
   return new CliError({
     code: limited ? 'rate_limited' : 'upstream_unavailable',
@@ -223,13 +234,11 @@ function mapChainReadError(err: unknown): CliError {
   });
 }
 
-async function readLegacyNegRiskApprovals(
-  client: SecureClient
-): Promise<{ pusd: boolean; ctf: boolean }> {
+async function polygonReader() {
   const { createPublicClient, http } = await import('viem');
   const { polygon } = await import('viem/chains');
   const { getReadRpcUrl, resolveNetwork } = await import('../utils.ts');
-  const chain = createPublicClient({
+  return createPublicClient({
     chain: polygon,
     transport: http(
       process.env.SEQUENCE_PROJECT_ACCESS_KEY
@@ -237,6 +246,12 @@ async function readLegacyNegRiskApprovals(
         : polygon.rpcUrls.default.http[0]
     )
   });
+}
+
+async function readLegacyNegRiskApprovals(
+  client: SecureClient
+): Promise<{ pusd: boolean; ctf: boolean }> {
+  const chain = await polygonReader();
   const owner = client.account.wallet as `0x${string}`;
   try {
     const [allowance, ctf] = await Promise.all([
@@ -316,7 +331,8 @@ export function hasLocalKey(wallet: string): boolean {
 }
 
 // Records which OMS wallet holds the imported copy of the trading key. No secret.
-export type BackupRecord = { omsWalletId: string; address: string; at: string };
+// `kind` is absent on records written before it was added.
+export type BackupRecord = { omsWalletId: string; address: string; at: string; kind?: AccountKind };
 
 export function readBackup(wallet: string): BackupRecord | null {
   return (readJsonFile(accountFile(wallet, 'backup.json')) as BackupRecord | undefined) ?? null;
@@ -348,6 +364,12 @@ export async function setupAccount(
   if (!existing)
     writeJsonFile({ file: path.join(accountDir(wallet), 'account.json'), data: account });
 
+  return { account, created: !existing, approvalsSet: await runApprovals(client) };
+}
+
+// Sets any missing trading approvals (the SDK's and the legacy NegRiskAdapter's).
+// Returns whether it set anything.
+async function runApprovals(client: SecureClient): Promise<boolean> {
   let approvalsSet = false;
   try {
     const state = await client.fetchTradingApprovalsState();
@@ -370,7 +392,7 @@ export async function setupAccount(
       throw mapSdkError(err);
     }
   }
-  return { account, created: !existing, approvalsSet };
+  return approvalsSet;
 }
 
 // Legacy: an imported Polymarket key whose funds sit in a Polymarket proxy wallet.
@@ -430,6 +452,9 @@ export async function pusdBalance(wallet: string): Promise<bigint> {
 // Records of an account whose key was lost, kept beside the new account.
 export const PREVIOUS_PREFIX = 'previous-';
 
+const sameAddress = (a: string | undefined, b: string | undefined): boolean =>
+  a !== undefined && b !== undefined && a.toLowerCase() === b.toLowerCase();
+
 // Moves everything in polymarket/<wallet>/ except earlier archives into a new
 // previous-<timestamp>/ folder. On a wiped machine there may be nothing to move, so
 // the old account's identity is written there from what recovery learned.
@@ -454,37 +479,225 @@ export type RecoveryResult = {
   omsWalletId?: string;
   created?: boolean;
   recovered?: Record<string, unknown>;
+  pendingDeposit?: Record<string, unknown>;
+  legacyProxy?: { address: string; balances: { pusd: string; usdcE: string } };
   error?: string;
+  hint?: string;
 };
 
 const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-// Rebuilds a client for the old account, signing through OMS as its backed-up key. Uses the
+const ERC20_BALANCE_ABI = [
+  {
+    type: 'function',
+    name: 'balanceOf',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }]
+  }
+] as const;
+
+// The pUSD and USDC.e held by the legacy Polymarket proxy wallet that belongs to `signer`.
+async function legacyProxyBalances(signer: string): Promise<{
+  address: string;
+  funded: boolean;
+  balances: { pusd: string; usdcE: string };
+}> {
+  const address = await getPolymarketProxyWalletAddress(signer);
+  const chain = await polygonReader();
+  const read = (token: string) =>
+    chain.readContract({
+      address: token as `0x${string}`,
+      abi: ERC20_BALANCE_ABI,
+      functionName: 'balanceOf',
+      args: [address as `0x${string}`]
+    });
+  try {
+    const [pusd, usdcE] = await Promise.all([read(PUSD), read(USDC_E)]);
+    return {
+      address,
+      funded: pusd > 0n || usdcE > 0n,
+      balances: { pusd: formatUnits6(pusd), usdcE: formatUnits6(usdcE) }
+    };
+  } catch (err) {
+    throw mapChainReadError(err, 'the legacy proxy wallet balances');
+  }
+}
+
+type KeyAccount = { kind: AccountKind; wallet?: string };
+
+// What the local records say about the account `target` controls, if they describe it.
+function recordedAccount(
+  wallet: string,
+  target: { address: string }
+): { local: StoredAccount | null; kind?: AccountKind } {
+  const acct = loadAccount(wallet);
+  const local = acct && sameAddress(acct.signer, target.address) ? acct : null;
+  const backup = readBackup(wallet);
+  const kind =
+    local?.kind ??
+    (backup && sameAddress(backup.address, target.address) ? backup.kind : undefined);
+  return { local, kind };
+}
+
+async function keyAccount(
+  target: { address: string },
+  local: StoredAccount | null,
+  kind: AccountKind
+): Promise<KeyAccount> {
+  if (kind !== 'legacy-proxy') return { kind };
+  return {
+    kind,
+    wallet: local?.wallet ?? (await getPolymarketProxyWalletAddress(target.address))
+  };
+}
+
+// Builds a client for the account a key held in OMS controls, signing through OMS. Uses the
 // local builder key when the local records belong to this key, otherwise mints one as the
-// EOA (as setup does). Writes nothing to disk.
-async function oldAccountClient(p: {
+// EOA (as setup does). Writes nothing to disk; `minted` says whether the builder key is new.
+async function omsKeyClient(p: {
   wallet: string;
   owner: OmsWalletLike;
   target: { id: string; address: string };
   local: StoredAccount | null;
-}): Promise<SecureClient> {
+  acct: KeyAccount;
+}): Promise<{ client: SecureClient; builder: Creds; minted: boolean }> {
   const signer = omsSigner(p.owner, { walletId: p.target.id, address: p.target.address });
-  const ours = p.local !== null && p.local.signer.toLowerCase() === p.target.address.toLowerCase();
-  const builder =
-    (ours ? readCreds(p.wallet, 'builder.json') : null) ??
-    (await mintBuilderCreds(signer, p.target.address));
-  return createClient({
+  const stored = p.local ? readCreds(p.wallet, 'builder.json') : null;
+  const builder = stored ?? (await mintBuilderCreds(signer, p.target.address));
+  const client = await createClient({
     signer,
-    acct: ours && p.local ? p.local : { kind: 'deposit-wallet' },
+    acct: p.acct,
     builder,
-    clob: ours ? readCreds(p.wallet, 'clob.json') : null
+    clob: p.local ? readCreds(p.wallet, 'clob.json') : null
   });
+  return { client, builder, minted: !stored };
 }
+
+// Owner mode, local key missing, OMS holds the key: rebuilds the account's local records
+// (account.json, backup.json, builder key) and sets any missing approvals, all signed
+// through OMS. Never creates a key.
+export async function restoreFromOms(p: {
+  wallet: string;
+  owner: OmsWalletLike;
+  target: { id: string; address: string };
+}): Promise<{ account: StoredAccount; approvalsSet: boolean; backup: BackupRecord }> {
+  const { wallet, owner, target } = p;
+  const { local, kind: recordedKind } = recordedAccount(wallet, target);
+  if (loadAccount(wallet) && !local) {
+    throw new CliError({
+      code: 'invalid_input',
+      message: `The recorded Polymarket account for '${wallet}' belongs to a different key than OMS holds.`
+    });
+  }
+  let kind = recordedKind;
+  if (!kind) {
+    // Unknown kind: an imported legacy key keeps its funds in its proxy wallet.
+    kind = (await legacyProxyBalances(target.address)).funded ? 'legacy-proxy' : 'deposit-wallet';
+  }
+  const acct = await keyAccount(target, local, kind);
+  const { client, builder, minted } = await omsKeyClient({ wallet, owner, target, local, acct });
+  const walletAddress = (acct.wallet ?? client.account.wallet) as string;
+  if (local && !sameAddress(local.wallet, walletAddress)) {
+    throw new CliError({
+      code: 'upstream_error',
+      message: `The backed-up key controls ${walletAddress}, not the recorded Polymarket wallet ${local.wallet}.`
+    });
+  }
+  if (minted) writeSecret(wallet, 'builder.json', JSON.stringify(builder));
+  if (!readSecret(wallet, 'clob.json') && client.credentials)
+    writeSecret(wallet, 'clob.json', JSON.stringify(client.credentials));
+  const account: StoredAccount = local ?? {
+    kind,
+    signer: target.address,
+    wallet: walletAddress,
+    createdAt: new Date().toISOString()
+  };
+  if (!local) writeJsonFile({ file: path.join(accountDir(wallet), 'account.json'), data: account });
+  const backup: BackupRecord = {
+    omsWalletId: target.id,
+    address: target.address,
+    at: new Date().toISOString(),
+    kind
+  };
+  writeBackup(wallet, backup);
+  return { account, approvalsSet: await runApprovals(client), backup };
+}
+
+// Every trading-key address this machine still uses or knows of as current, across all
+// wallet names (account.json, backup.json, key.json). Archived accounts are not included.
+export function localTradingKeyAddresses(): Set<string> {
+  const out = new Set<string>();
+  const root = path.join(STORAGE_ROOT, 'polymarket');
+  if (!fs.existsSync(root)) return out;
+  for (const name of fs.readdirSync(root)) {
+    const acct = loadAccount(name);
+    if (acct?.signer) out.add(acct.signer.toLowerCase());
+    const backup = readBackup(name);
+    if (backup?.address) out.add(backup.address.toLowerCase());
+    const key = readSecret(name, 'key.json');
+    if (key) out.add(privateKeyToAccount(key as `0x${string}`).address.toLowerCase());
+  }
+  return out;
+}
+
+// The SDK only refuses this way when the derived Deposit Wallet was never deployed.
+const NOT_DEPLOYED = /requires a Relayer API Key or Builder API Key/;
+
+// Sweeps the pUSD of the Deposit Wallet an older trading key controls to `mainAddress`.
+// Returns null when there is nothing to sweep (no deployed wallet, or 0 pUSD): then the
+// only calls made are the client creation and the balance read.
+export async function sweepOldKey(p: {
+  owner: OmsWalletLike;
+  target: { id: string; address: string };
+  mainAddress: string;
+}): Promise<{ withdrawnUsd: string; txHash: string | null } | null> {
+  const signer = omsSigner(p.owner, { walletId: p.target.id, address: p.target.address });
+  const acct: KeyAccount = { kind: 'deposit-wallet' };
+  let probe: SecureClient;
+  try {
+    probe = await createClient({ signer, acct, builder: null, clob: null });
+  } catch (err) {
+    if (NOT_DEPLOYED.test(errorText(err))) return null;
+    throw err;
+  }
+  if ((await pusdBalanceOf(probe)) === 0n) return null;
+  const builder = await mintBuilderCreds(signer, p.target.address);
+  const client = await createClient({
+    signer,
+    acct,
+    builder,
+    clob: (probe.credentials as Creds | undefined) ?? null
+  });
+  const res = await withdrawAll({
+    client,
+    account: client.account.wallet as string,
+    recipient: p.mainAddress,
+    broadcast: true
+  });
+  return { withdrawnUsd: formatUnits6(res.amount), txHash: res.txHash ?? null };
+}
+
+// An earlier deposit to the old account that the bridge hasn't finished. Entries beyond
+// the recorded baseline belong to it; COMPLETED or FAILED means it is over.
+async function unsettledDeposit(wallet: string): Promise<PendingDeposit | null> {
+  const pending = loadPending(wallet);
+  if (!pending) return null;
+  const { transactions } = await bridgeStatus(pending.bridgeAddress);
+  const fresh = transactions.slice(
+    0,
+    Math.max(0, transactions.length - (pending.baselineCount ?? transactions.length))
+  );
+  return fresh.some((t) => t.status === 'COMPLETED' || t.status === 'FAILED') ? null : pending;
+}
+
+const RETRY_HINT = 'The next owner sign-in retries the recovery.';
 
 // Session-mode recovery, run during a confirmed owner request when the local trading key is
 // gone but OMS holds it (`target`). Sweeps the old account's pUSD to `mainAddress`, archives
 // the old records, then creates and backs up a new key. If anything fails before the sweep
-// completes, nothing on disk changes and no new key is created.
+// completes, nothing on disk changes and no new key is created. The key is never replaced
+// while a deposit to the old account is in flight, or while funds sit in a legacy proxy.
 export async function recoverAccount(p: {
   wallet: string;
   owner: OmsWalletLike;
@@ -492,14 +705,34 @@ export async function recoverAccount(p: {
   target: { id: string; address: string };
 }): Promise<RecoveryResult> {
   const { wallet, owner, mainAddress, target } = p;
-  const local = loadAccount(wallet);
+  const { local, kind: recordedKind } = recordedAccount(wallet, target);
   let client: SecureClient;
+  let kind: AccountKind;
   let withdrawnUsd = '0';
   let txHash: string | null = null;
   try {
-    client = await oldAccountClient({ wallet, owner, target, local });
-    const oldWallet = client.account.wallet as string;
-    if (local && local.wallet.toLowerCase() !== oldWallet.toLowerCase()) {
+    if (recordedKind) {
+      kind = recordedKind;
+    } else {
+      // Unknown kind: never rotate away from a funded legacy proxy, and never derive (and so
+      // deploy) a Deposit Wallet for a key whose funds live in one.
+      const legacy = await legacyProxyBalances(target.address);
+      if (legacy.funded) {
+        return {
+          backedUp: false,
+          omsWalletId: target.id,
+          legacyProxy: { address: legacy.address, balances: legacy.balances },
+          error:
+            'The backed-up key controls a funded legacy Polymarket proxy wallet; the key was not replaced.',
+          hint: 'Sign in with agent wallet login to use it through OMS.'
+        };
+      }
+      kind = 'deposit-wallet';
+    }
+    const acct = await keyAccount(target, local, kind);
+    ({ client } = await omsKeyClient({ wallet, owner, target, local, acct }));
+    const oldWallet = (acct.wallet ?? client.account.wallet) as string;
+    if (local && !sameAddress(local.wallet, oldWallet)) {
       throw new CliError({
         code: 'upstream_error',
         message: `The backed-up key controls ${oldWallet}, not the recorded Polymarket wallet ${local.wallet}.`
@@ -538,17 +771,59 @@ export async function recoverAccount(p: {
   }
 
   try {
+    const pending = await unsettledDeposit(wallet);
+    if (pending) {
+      return {
+        backedUp: false,
+        omsWalletId: target.id,
+        recovered,
+        pendingDeposit: {
+          amountUsd: formatUnits6(pending.amountUnits),
+          txHash: pending.txHash,
+          sentAt: pending.sentAt
+        },
+        error:
+          'An earlier deposit to the old account is still being credited; the key was not replaced.',
+        hint: `Retry after it settles. ${RETRY_HINT}`
+      };
+    }
+    if (kind === 'legacy-proxy') {
+      // withdraw moves only pUSD: USDC.e left in the proxy keeps the old key in use.
+      const legacy = await legacyProxyBalances(target.address);
+      if (legacy.funded) {
+        return {
+          backedUp: false,
+          omsWalletId: target.id,
+          recovered,
+          legacyProxy: { address: legacy.address, balances: legacy.balances },
+          error: 'Funds remain in the legacy Polymarket proxy wallet; the key was not replaced.',
+          hint: 'Sign in with agent wallet login to use it through OMS.'
+        };
+      }
+    }
+  } catch (error) {
+    return {
+      backedUp: false,
+      omsWalletId: target.id,
+      recovered,
+      error: errorText(error),
+      hint: RETRY_HINT
+    };
+  }
+
+  try {
     recovered.previousRecords = archiveAccount(wallet, {
       account: local ?? {
-        kind: 'deposit-wallet',
+        kind,
         signer: target.address,
         wallet: previousAccount,
         createdAt: new Date().toISOString()
       },
-      backup: readBackup(wallet) ?? {
+      backup: {
         omsWalletId: target.id,
         address: target.address,
-        at: new Date().toISOString()
+        at: new Date().toISOString(),
+        kind
       }
     });
     const key = await ensureTradingKey(wallet);
@@ -556,7 +831,8 @@ export async function recoverAccount(p: {
     writeBackup(wallet, {
       omsWalletId: res.omsWalletId,
       address: res.address,
-      at: new Date().toISOString()
+      at: new Date().toISOString(),
+      kind: 'deposit-wallet'
     });
     return { backedUp: true, omsWalletId: res.omsWalletId, created: true, recovered };
   } catch (error) {

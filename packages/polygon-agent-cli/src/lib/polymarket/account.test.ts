@@ -29,13 +29,21 @@ const sdk = vi.hoisted(() => {
       firstPage: async () => ({ items: sdk.positions, hasMore: false })
     }))
   });
-  const chain = { allowance: 0n, approved: false, fail: null as Error | null };
+  const chain = {
+    allowance: 0n,
+    approved: false,
+    fail: null as Error | null,
+    balances: {} as Record<string, bigint>
+  };
   const reads: Array<Record<string, unknown>> = [];
   return {
     owner: null as unknown,
     transferFail: null as Error | null,
     positions: [] as Array<Record<string, unknown>>,
     withdrawAddress: vi.fn(async () => '0xB2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2'),
+    bridgeStatus: vi.fn(
+      async (): Promise<{ transactions: Array<{ status: string }> }> => ({ transactions: [] })
+    ),
     created,
     chain,
     reads,
@@ -62,6 +70,10 @@ vi.mock('viem', async (orig) => ({
     readContract: async (req: { functionName: string }) => {
       sdk.reads.push(req);
       if (sdk.chain.fail) throw sdk.chain.fail;
+      if (req.functionName === 'balanceOf') {
+        const token = String((req as { address?: string }).address).toLowerCase();
+        return sdk.chain.balances[token] ?? 0n;
+      }
       return req.functionName === 'allowance' ? sdk.chain.allowance : sdk.chain.approved;
     }
   })
@@ -82,7 +94,8 @@ vi.mock('./sdk.ts', async (orig) => ({
 
 vi.mock('./bridge.ts', async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
-  withdrawAddress: sdk.withdrawAddress
+  withdrawAddress: sdk.withdrawAddress,
+  bridgeStatus: sdk.bridgeStatus
 }));
 
 vi.mock('../oms-client.ts', () => ({ getOmsClient: () => ({ wallet: sdk.owner }) }));
@@ -102,6 +115,7 @@ beforeEach(() => {
   sdk.owner = null;
   sdk.transferFail = null;
   sdk.positions = [];
+  sdk.chain.balances = {};
   vi.clearAllMocks();
   fs.rmSync(path.join(String(process.env.POLYGON_AGENT_HOME), 'polymarket'), {
     recursive: true,
@@ -679,5 +693,245 @@ describe('recoverAccount', () => {
       fs.existsSync(path.join(String(process.env.POLYGON_AGENT_HOME), 'polymarket', 'wiped2'))
     ).toBe(false);
     expect(owner.importWallet).not.toHaveBeenCalled();
+  });
+});
+
+const USDC_E_TOKEN = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
+const { getPolymarketProxyWalletAddress } = await import('./gamma.ts');
+const { savePending } = await import('./deposits.ts');
+const signerOf = (opts: Record<string, unknown>) =>
+  (opts.signer as { getAddress(): Promise<string> }).getAddress();
+
+describe('restoreFromOms (owner mode, local key missing)', () => {
+  it('rebuilds a wiped account from OMS: records and builder key, approvals, and no key file', async () => {
+    const lost = privateKeyToAccount(`0x${'a1'.repeat(32)}`).address;
+    const owner = fakeOwner(lost);
+    const res = await account.restoreFromOms({
+      wallet: 'restored',
+      owner: owner as never,
+      target: { id: 'w-old', address: lost }
+    });
+    expect(res.account).toMatchObject({
+      kind: 'deposit-wallet',
+      signer: lost,
+      wallet: DEPOSIT_WALLET
+    });
+    expect(res.approvalsSet).toBe(true);
+    expect(account.loadAccount('restored')).toEqual(res.account);
+    expect(account.readBackup('restored')).toMatchObject({
+      omsWalletId: 'w-old',
+      address: lost,
+      kind: 'deposit-wallet'
+    });
+    // Builder key minted as the EOA through OMS, then stored encrypted.
+    expect(sdk.created[0].wallet).toBe(lost);
+    expect(await signerOf(sdk.created[0])).toBe(lost);
+    expect(sdk.createBuilderApiKey).toHaveBeenCalledTimes(1);
+    const builderText = fs.readFileSync(account.accountFile('restored', 'builder.json'), 'utf8');
+    expect(builderText).not.toMatch(/b-secret/);
+    expect(sdk.clients[1].setupTradingApprovals).toHaveBeenCalledTimes(1);
+    expect(account.hasLocalKey('restored')).toBe(false);
+    expect(owner.importWallet).not.toHaveBeenCalled();
+    expect(owner.walletAddress).toBe(MAIN);
+  });
+
+  it('with account.json present and the key missing, keeps the records and reuses the builder key', async () => {
+    const signer = await accountWithLostKey('main');
+    const before = account.loadAccount('main');
+    const res = await account.restoreFromOms({
+      wallet: 'main',
+      owner: fakeOwner(signer) as never,
+      target: { id: 'w-old', address: signer }
+    });
+    expect(res.account).toEqual(before);
+    expect(sdk.createBuilderApiKey).not.toHaveBeenCalled();
+    expect(await signerOf(sdk.created[0])).toBe(signer);
+    expect(account.readBackup('main')).toMatchObject({
+      omsWalletId: 'w-old',
+      kind: 'deposit-wallet'
+    });
+    expect(account.hasLocalKey('main')).toBe(false);
+  });
+
+  it('restores a legacy-proxy account when backup.json records that kind', async () => {
+    const lost = privateKeyToAccount(`0x${'a2'.repeat(32)}`).address;
+    const proxy = await getPolymarketProxyWalletAddress(lost);
+    account.writeBackup('legacy-r', {
+      omsWalletId: 'w-old',
+      address: lost,
+      at: 'x',
+      kind: 'legacy-proxy'
+    });
+    const res = await account.restoreFromOms({
+      wallet: 'legacy-r',
+      owner: fakeOwner(lost) as never,
+      target: { id: 'w-old', address: lost }
+    });
+    expect(res.account).toMatchObject({ kind: 'legacy-proxy', wallet: proxy });
+    expect(sdk.created[1].wallet).toBe(proxy);
+  });
+
+  it('restores as legacy-proxy when the kind is unknown and the proxy holds funds', async () => {
+    const lost = privateKeyToAccount(`0x${'a3'.repeat(32)}`).address;
+    sdk.chain.balances[USDC_E_TOKEN.toLowerCase()] = 1_000_000n;
+    const res = await account.restoreFromOms({
+      wallet: 'legacy-u',
+      owner: fakeOwner(lost) as never,
+      target: { id: 'w-old', address: lost }
+    });
+    expect(res.account.kind).toBe('legacy-proxy');
+    expect(res.account.wallet).toBe(await getPolymarketProxyWalletAddress(lost));
+  });
+});
+
+describe('recoverAccount refusals', () => {
+  it('refuses to rotate while a deposit to the old account is in flight', async () => {
+    const signer = await accountWithLostKey('rec');
+    savePending('rec', {
+      status: 'sent',
+      txHash: '0xDEP',
+      amountUnits: '5000000',
+      bridgeAddress: '0xB1',
+      sentAt: 'then',
+      baselineCount: 0,
+      pusdBefore: '0'
+    });
+    const dir = account.accountDir('rec');
+    const before = snapshot(dir);
+    const owner = fakeOwner(signer);
+    const out = await account.recoverAccount({
+      wallet: 'rec',
+      owner: owner as never,
+      mainAddress: MAIN,
+      target: { id: 'w-old', address: signer }
+    });
+    expect(out).toMatchObject({
+      backedUp: false,
+      omsWalletId: 'w-old',
+      recovered: { withdrawnUsd: '2.5', txHash: '0xSWEEP' },
+      pendingDeposit: { amountUsd: '5', txHash: '0xDEP', sentAt: 'then' }
+    });
+    expect(out.hint).toMatch(/after it settles/);
+    expect(snapshot(dir)).toEqual(before);
+    expect(account.hasLocalKey('rec')).toBe(false);
+    expect(owner.importWallet).not.toHaveBeenCalled();
+  });
+
+  it('rotates once the bridge reports the pending deposit completed', async () => {
+    const signer = await accountWithLostKey('rec');
+    savePending('rec', {
+      status: 'sent',
+      txHash: '0xDEP',
+      amountUnits: '5000000',
+      bridgeAddress: '0xB1',
+      sentAt: 'then',
+      baselineCount: 0,
+      pusdBefore: '0'
+    });
+    sdk.bridgeStatus.mockResolvedValueOnce({ transactions: [{ status: 'COMPLETED' }] });
+    const out = await account.recoverAccount({
+      wallet: 'rec',
+      owner: fakeOwner(signer) as never,
+      mainAddress: MAIN,
+      target: { id: 'w-old', address: signer }
+    });
+    expect(out).toMatchObject({ backedUp: true, created: true });
+    expect(sdk.bridgeStatus).toHaveBeenCalledWith('0xB1');
+  });
+
+  it('refuses to rotate an unknown-kind key whose legacy proxy holds funds, touching nothing', async () => {
+    const lost = privateKeyToAccount(`0x${'b1'.repeat(32)}`).address;
+    sdk.chain.balances[PUSD_TOKEN.toLowerCase()] = 7_000_000n;
+    const owner = fakeOwner(lost);
+    const out = await account.recoverAccount({
+      wallet: 'legacy-w',
+      owner: owner as never,
+      mainAddress: MAIN,
+      target: { id: 'w-old', address: lost }
+    });
+    expect(out).toMatchObject({
+      backedUp: false,
+      omsWalletId: 'w-old',
+      legacyProxy: {
+        address: await getPolymarketProxyWalletAddress(lost),
+        balances: { pusd: '7', usdcE: '0' }
+      }
+    });
+    expect(sdk.createSecureClient).not.toHaveBeenCalled();
+    expect(
+      fs.existsSync(path.join(String(process.env.POLYGON_AGENT_HOME), 'polymarket', 'legacy-w'))
+    ).toBe(false);
+    expect(owner.importWallet).not.toHaveBeenCalled();
+  });
+
+  it('sweeps a recorded legacy-proxy account from its proxy wallet', async () => {
+    const lost = privateKeyToAccount(`0x${'b2'.repeat(32)}`).address;
+    const proxy = await getPolymarketProxyWalletAddress(lost);
+    account.writeBackup('legacy-k', {
+      omsWalletId: 'w-old',
+      address: lost,
+      at: 'x',
+      kind: 'legacy-proxy'
+    });
+    const out = await account.recoverAccount({
+      wallet: 'legacy-k',
+      owner: fakeOwner(lost) as never,
+      mainAddress: MAIN,
+      target: { id: 'w-old', address: lost }
+    });
+    expect(sdk.created[1].wallet).toBe(proxy);
+    expect(sdk.withdrawAddress).toHaveBeenCalledWith({ wallet: proxy, recipient: MAIN });
+    expect(out).toMatchObject({ backedUp: true, recovered: { withdrawnUsd: '2.5' } });
+  });
+});
+
+describe('sweepOldKey', () => {
+  const old = privateKeyToAccount(`0x${'c1'.repeat(32)}`).address;
+
+  it('reads the balance only and returns null for an empty account', async () => {
+    sdk.updateBalanceAllowance.mockResolvedValueOnce({ balance: '0', allowances: {} });
+    const out = await account.sweepOldKey({
+      owner: fakeOwner(old) as never,
+      target: { id: 'w-old', address: old },
+      mainAddress: MAIN
+    });
+    expect(out).toBeNull();
+    expect(sdk.created).toHaveLength(1);
+    expect(sdk.created[0].apiKey).toBeUndefined();
+    expect(sdk.createBuilderApiKey).not.toHaveBeenCalled();
+    expect(sdk.withdrawAddress).not.toHaveBeenCalled();
+  });
+
+  it('returns null when the key never had a deployed Deposit Wallet', async () => {
+    sdk.createSecureClient.mockRejectedValueOnce(
+      new Error(
+        'Deposit Wallet deployment requires a Relayer API Key or Builder API Key in the client configuration.'
+      )
+    );
+    const out = await account.sweepOldKey({
+      owner: fakeOwner(old) as never,
+      target: { id: 'w-old', address: old },
+      mainAddress: MAIN
+    });
+    expect(out).toBeNull();
+    expect(sdk.createBuilderApiKey).not.toHaveBeenCalled();
+  });
+
+  it('sweeps a funded account to the main wallet through OMS', async () => {
+    const out = await account.sweepOldKey({
+      owner: fakeOwner(old) as never,
+      target: { id: 'w-old', address: old },
+      mainAddress: MAIN
+    });
+    expect(out).toEqual({ withdrawnUsd: '2.5', txHash: '0xSWEEP' });
+    expect(await signerOf(sdk.created[0])).toBe(old);
+    expect(sdk.createBuilderApiKey).toHaveBeenCalledTimes(1);
+    const sweeper = sdk.clients.at(-1)!;
+    expect(sweeper.transferErc20).toHaveBeenCalledWith({
+      amount: 2_500_000n,
+      recipientAddress: '0xB2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2',
+      tokenAddress: PUSD_TOKEN
+    });
+    expect(sdk.withdrawAddress).toHaveBeenCalledWith({ wallet: DEPOSIT_WALLET, recipient: MAIN });
   });
 });

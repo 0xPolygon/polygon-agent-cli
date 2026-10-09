@@ -2,6 +2,7 @@
 
 import type { CommandModule } from 'yargs';
 
+import { CliError } from '../../lib/errors.ts';
 import { resolveBroadcast, withWriteFlags } from '../../lib/mode.ts';
 import { getOmsClient } from '../../lib/oms-client.ts';
 import { ensureMainWallet } from '../../lib/oms-tx.ts';
@@ -15,12 +16,13 @@ import {
   planSetup,
   pusdBalance,
   readBackup,
+  restoreFromOms,
   setupAccount,
   writeBackup
 } from '../../lib/polymarket/account.ts';
 import { formatUnits6 } from '../../lib/polymarket/amounts.ts';
 import { loadPending } from '../../lib/polymarket/deposits.ts';
-import { backupTradingKey } from '../../lib/polymarket/oms-key.ts';
+import { backupTradingKey, findTradingKeyWallet } from '../../lib/polymarket/oms-key.ts';
 import { assertCanTrade, checkRegion } from '../../lib/polymarket/region.ts';
 import { mapSdkError } from '../../lib/polymarket/sdk.ts';
 import { loadOmsWalletPointer } from '../../lib/storage.ts';
@@ -64,7 +66,8 @@ async function backUpInOwnerMode(wallet: string): Promise<Record<string, unknown
     writeBackup(wallet, {
       omsWalletId: res.omsWalletId,
       address: res.address,
-      at: new Date().toISOString()
+      at: new Date().toISOString(),
+      kind: loadAccount(wallet)?.kind ?? 'deposit-wallet'
     });
     result = { omsWalletId: res.omsWalletId, imported: res.imported };
   } catch (error) {
@@ -80,6 +83,50 @@ async function backUpInOwnerMode(wallet: string): Promise<Record<string, unknown
     result = { ...result, mainWalletError: errorText(error) };
   }
   return result;
+}
+
+// Owner mode with the local key missing: OMS may hold it (a wiped machine, or a key moved
+// aside). Then the account is restored and signed through OMS; a new key is never made over
+// it. Returns null only when OMS holds no trading key, so setup may create one.
+async function restoreInOwnerMode(wallet: string): Promise<Record<string, unknown> | null> {
+  const w = getOmsClient(wallet).wallet;
+  if (!w.walletAddress) {
+    throw new CliError({
+      code: 'not_set_up',
+      message:
+        "The Polymarket key is not on this machine, and OMS can't be checked for a backup while signed out.",
+      hint: 'Sign in with agent wallet login, then run setup again.'
+    });
+  }
+  let restored: Awaited<ReturnType<typeof restoreFromOms>> | null = null;
+  let failure: unknown;
+  let mainWalletError: string | undefined;
+  try {
+    const known = loadAccount(wallet)?.signer ?? readBackup(wallet)?.address;
+    const found = await findTradingKeyWallet(w, known);
+    if (found) restored = await restoreFromOms({ wallet, owner: w, target: found });
+  } catch (error) {
+    failure = error;
+  }
+  try {
+    await ensureMainWallet(wallet);
+  } catch (error) {
+    // Never masks the restore's own failure; reported alongside a good restore.
+    mainWalletError = error instanceof Error ? error.message : String(error);
+  }
+  if (failure) throw failure;
+  if (!restored) return null;
+  const { account, approvalsSet, backup } = restored;
+  return {
+    account: { kind: account.kind, wallet: account.wallet, signer: account.signer },
+    created: false,
+    restored: true,
+    signer: 'oms',
+    approvalsSet,
+    backup: { backedUp: true, omsWalletId: backup.omsWalletId },
+    ...(mainWalletError ? { mainWalletError } : {}),
+    next: 'agent polymarket deposit <usd> --broadcast'
+  };
 }
 
 async function handleSetup(argv: SetupArgs): Promise<void> {
@@ -105,6 +152,13 @@ async function handleSetup(argv: SetupArgs): Promise<void> {
         ]
       });
       return;
+    }
+    if ((await isOwnerMode(argv.wallet)) && !hasLocalKey(argv.wallet)) {
+      const restored = await restoreInOwnerMode(argv.wallet);
+      if (restored) {
+        ok(restored);
+        return;
+      }
     }
     const { account, created, approvalsSet } = await setupAccount(argv.wallet);
     const backup = (await isOwnerMode(argv.wallet))
