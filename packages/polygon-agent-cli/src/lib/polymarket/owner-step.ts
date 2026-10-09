@@ -12,6 +12,7 @@ import {
   hasLocalKey,
   loadAccount,
   localTradingKeyAddresses,
+  previousTradingKeyAddresses,
   readBackup,
   recoverAccount,
   sweepOldKey,
@@ -20,8 +21,8 @@ import {
 import {
   backupTradingKey,
   findTradingKeyWallet,
-  selectMainWallet,
-  TRADING_KEY_REFERENCE
+  installTradingKeyReference,
+  selectMainWallet
 } from './oms-key.ts';
 
 type SweepEntry =
@@ -38,7 +39,7 @@ const message = (e: unknown): string => (e instanceof Error ? e.message : String
 
 async function backUp(wallet: string, owner: OmsWalletLike, created: boolean) {
   const key = await ensureTradingKey(wallet);
-  const res = await backupTradingKey(owner, key);
+  const res = await backupTradingKey(owner, key, installTradingKeyReference());
   writeBackup(wallet, {
     omsWalletId: res.omsWalletId,
     address: res.address,
@@ -94,40 +95,37 @@ async function step(p: {
   const backup = readBackup(wallet);
   if (local || backup) {
     const known = local?.signer ?? backup?.address;
-    const found = known ? await findTradingKeyWallet(owner, known) : null;
+    const found = known ? await findTradingKeyWallet(owner, { address: known }) : null;
     return recoverMissingKey({ ...p, found });
   }
-  // A wiped machine loses account.json too: if OMS already holds the key, recover, never re-create.
-  const found = await findTradingKeyWallet(owner);
+  // A wiped machine loses account.json too: if OMS holds this install's key, recover it, never
+  // re-create. Keys other installs labelled are theirs: this install then makes its own.
+  const found = await findTradingKeyWallet(owner, { reference: installTradingKeyReference() });
   if (found) return recoverMissingKey({ ...p, found });
   return backUp(wallet, owner, true);
 }
 
-// Older trading keys in OMS (a key replaced on a wiped machine, a recovered account) can
-// still hold pUSD. Sweeps each funded one to the main wallet, one at a time (the OMS signer
-// is not reentrant). Keys this machine still uses, under any wallet name, are left alone.
+// Keys this install replaced (recorded in its previous-* folders) can still hold pUSD, e.g.
+// a deposit credited after the recovery. Sweeps each funded one to the main wallet, one at a
+// time (the OMS signer is not reentrant). Unknown keys and other installs' keys are never
+// touched, nor any key this machine still uses under some wallet name.
 async function sweepPrevious(
-  p: { owner: OmsWalletLike; mainAddress: string },
+  p: { wallet: string; owner: OmsWalletLike; mainAddress: string },
   exclude: Set<string>
 ): Promise<SweepEntry[]> {
+  const previous = previousTradingKeyAddresses(p.wallet);
+  if (previous.length === 0) return [];
   const skip = new Set([...exclude, ...localTradingKeyAddresses()]);
-  const older = (await p.owner.listWallets()).filter(
-    (x) =>
-      x.keyOrigin === 'imported' &&
-      x.reference === TRADING_KEY_REFERENCE &&
-      !skip.has(x.address.toLowerCase())
-  );
   const out: SweepEntry[] = [];
-  for (const x of older) {
+  for (const address of previous) {
+    if (skip.has(address.toLowerCase())) continue;
     try {
-      const swept = await sweepOldKey({
-        owner: p.owner,
-        target: { id: x.id, address: x.address },
-        mainAddress: p.mainAddress
-      });
-      if (swept) out.push({ address: x.address, ...swept });
+      const target = await findTradingKeyWallet(p.owner, { address });
+      if (!target) continue;
+      const swept = await sweepOldKey({ owner: p.owner, target, mainAddress: p.mainAddress });
+      if (swept) out.push({ address: target.address, ...swept });
     } catch (error) {
-      out.push({ address: x.address, error: message(error) });
+      out.push({ address, error: message(error) });
     }
   }
   return out;
