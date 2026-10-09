@@ -14,6 +14,7 @@ import { CliError, errorJson, httpStatus, jsonFail, jsonOut } from '../lib/error
 import { runOwnerAction } from '../lib/owner/actions.ts';
 import { deletePending, loadPending } from '../lib/owner/pending.ts';
 import { confirmOwnerRequest, startOwnerRequest } from '../lib/owner/requests.ts';
+import { loadAccount } from '../lib/polymarket/account.ts';
 import { getUsdPrices } from '../lib/prices.ts';
 import { walletHoldings } from '../lib/session/live.ts';
 import {
@@ -367,6 +368,20 @@ function pendingRequestInfo(wallet: string): PendingRequestInfo | undefined {
   };
 }
 
+// The Polymarket account is controlled by this install, not by the allowance, so
+// the status says so. Reads the stored account file only: no SDK, no network.
+function polymarketStatus(wallet: string): Record<string, unknown> {
+  const account = loadAccount(wallet);
+  if (!account) return {};
+  return {
+    polymarket: {
+      wallet: account.wallet,
+      kind: account.kind,
+      note: 'Money moved to Polymarket is controlled by this install, not by the allowance. Check it with: polymarket status'
+    }
+  };
+}
+
 export async function sessionReport(params: {
   wallet: string;
   withVersion: boolean;
@@ -400,6 +415,7 @@ export async function sessionReport(params: {
       connected: true,
       mode: 'owner',
       walletAddress: pointer.walletAddress,
+      ...polymarketStatus(wallet),
       watches: watchStatus(new Date()),
       ...version
     };
@@ -475,6 +491,7 @@ export async function sessionReport(params: {
     holdings,
     alerts,
     watches: watchStatus(new Date()),
+    ...polymarketStatus(wallet),
     ...(pendingInfo ? { pendingRequest: pendingInfo } : {}),
     ...(warnings.length ? { warnings } : {}),
     ...version
