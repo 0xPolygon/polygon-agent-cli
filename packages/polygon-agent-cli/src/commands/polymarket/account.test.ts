@@ -23,6 +23,9 @@ const m = vi.hoisted(() => ({
   ensureTradingKey: vi.fn(),
   backupTradingKey: vi.fn(),
   ensureMainWallet: vi.fn(),
+  findTradingKeyWallet: vi.fn(),
+  restoreFromOms: vi.fn(),
+  localKey: false,
   omsWallet: { walletAddress: '0xC2F4cAfe89AE7e1bcB86dd3f141C0a3adCEB6C17' as string | undefined }
 }));
 
@@ -77,12 +80,15 @@ vi.mock('../../lib/polymarket/account.ts', async (o) => {
     legacyNegRiskApproved: m.legacyApproved,
     importLegacyKey: m.importLegacyKey,
     ensureTradingKey: m.ensureTradingKey,
+    hasLocalKey: () => m.localKey,
+    restoreFromOms: m.restoreFromOms,
     getTradingClient: async () => client
   };
 });
 vi.mock('../../lib/polymarket/oms-key.ts', async (o) => ({
   ...(await o<Record<string, unknown>>()),
-  backupTradingKey: m.backupTradingKey
+  backupTradingKey: m.backupTradingKey,
+  findTradingKeyWallet: m.findTradingKeyWallet
 }));
 vi.mock('../../lib/oms-client.ts', async (o) => ({
   ...(await o<Record<string, unknown>>()),
@@ -140,6 +146,8 @@ beforeEach(async () => {
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
   vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
   m.account = null;
+  m.localKey = false;
+  m.findTradingKeyWallet.mockResolvedValue(null);
   fs.rmSync(path.join(String(process.env.POLYGON_AGENT_HOME), 'polymarket'), {
     recursive: true,
     force: true
@@ -273,6 +281,7 @@ describe('setup', () => {
   });
 
   it('still succeeds without a live owner session', async () => {
+    m.localKey = true;
     m.omsWallet.walletAddress = undefined;
     const out = await run(['setup', '--broadcast']);
     expect(out).toMatchObject({
@@ -282,6 +291,77 @@ describe('setup', () => {
     });
     expect(m.backupTradingKey).not.toHaveBeenCalled();
     expect(readBackup('main')).toBeNull();
+  });
+
+  it('owner mode without a local key refuses while signed out: OMS may hold the key', async () => {
+    m.omsWallet.walletAddress = undefined;
+    const out = await run(['setup', '--broadcast']);
+    expect(out).toMatchObject({ ok: false, code: 'not_set_up' });
+    expect(m.setupAccount).not.toHaveBeenCalled();
+    expect(m.ensureTradingKey).not.toHaveBeenCalled();
+  });
+
+  it('owner mode on a wiped machine restores the account OMS holds instead of making a key', async () => {
+    const found = { id: 'w-old', address: '0x00000000000000000000000000000000000000A1' };
+    m.findTradingKeyWallet.mockResolvedValue(found);
+    m.restoreFromOms.mockResolvedValue({
+      account: { kind: 'deposit-wallet', signer: found.address, wallet: WALLET, createdAt: 'x' },
+      approvalsSet: true,
+      backup: { omsWalletId: 'w-old', address: found.address, at: 'x', kind: 'deposit-wallet' }
+    });
+    const out = await run(['setup', '--broadcast']);
+    expect(m.findTradingKeyWallet).toHaveBeenCalledWith(m.omsWallet, undefined);
+    expect(m.restoreFromOms).toHaveBeenCalledWith({
+      wallet: 'main',
+      owner: m.omsWallet,
+      target: found
+    });
+    expect(out).toMatchObject({
+      ok: true,
+      created: false,
+      restored: true,
+      signer: 'oms',
+      approvalsSet: true,
+      account: { wallet: WALLET, signer: found.address },
+      backup: { backedUp: true, omsWalletId: 'w-old' }
+    });
+    expect(m.setupAccount).not.toHaveBeenCalled();
+    expect(m.ensureTradingKey).not.toHaveBeenCalled();
+    expect(m.backupTradingKey).not.toHaveBeenCalled();
+    expect(m.ensureMainWallet).toHaveBeenCalledWith('main');
+  });
+
+  it('owner mode with account.json but no key looks up the recorded signer and restores', async () => {
+    m.account = { ...ACCOUNT, signer: '0x00000000000000000000000000000000000000A2' };
+    const found = { id: 'w-old', address: '0x00000000000000000000000000000000000000A2' };
+    m.findTradingKeyWallet.mockResolvedValue(found);
+    m.restoreFromOms.mockResolvedValue({
+      account: m.account,
+      approvalsSet: false,
+      backup: { omsWalletId: 'w-old', address: found.address, at: 'x' }
+    });
+    const out = await run(['setup', '--broadcast']);
+    expect(m.findTradingKeyWallet).toHaveBeenCalledWith(m.omsWallet, found.address);
+    expect(out).toMatchObject({ ok: true, restored: true, signer: 'oms' });
+    expect(m.setupAccount).not.toHaveBeenCalled();
+  });
+
+  it('owner mode creates as before when OMS holds no trading key', async () => {
+    const out = await run(['setup', '--broadcast']);
+    expect(m.findTradingKeyWallet).toHaveBeenCalledTimes(1);
+    expect(m.restoreFromOms).not.toHaveBeenCalled();
+    expect(m.setupAccount).toHaveBeenCalledWith('main');
+    expect(out).toMatchObject({ ok: true, created: true });
+  });
+
+  it('a failed restore fails setup without making a key, and still restores the main wallet', async () => {
+    m.findTradingKeyWallet.mockResolvedValue({ id: 'w-old', address: '0xA1' });
+    m.restoreFromOms.mockRejectedValue(new Error('relayer down'));
+    const out = await run(['setup', '--broadcast']);
+    expect(JSON.stringify(out)).toMatch(/relayer down/);
+    expect(out.ok).toBe(false);
+    expect(m.setupAccount).not.toHaveBeenCalled();
+    expect(m.ensureMainWallet).toHaveBeenCalledWith('main');
   });
 
   it('session mode does not try OMS and reports the recorded backup', async () => {
