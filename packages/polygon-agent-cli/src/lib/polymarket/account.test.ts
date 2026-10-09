@@ -22,10 +22,12 @@ const sdk = vi.hoisted(() => {
     approveErc20: vi.fn(async () => ({ wait: async () => ({ transactionHash: '0xa' }) })),
     approveErc1155ForAll: vi.fn(async () => ({ wait: async () => ({ transactionHash: '0xb' }) }))
   });
-  const chain = { allowance: 0n, approved: false };
+  const chain = { allowance: 0n, approved: false, fail: null as Error | null };
+  const reads: Array<Record<string, unknown>> = [];
   return {
     created,
     chain,
+    reads,
     clientApprovals,
     clients: [] as Array<ReturnType<typeof client>>,
     createSecureClient: vi.fn(async (opts: Record<string, unknown>) => {
@@ -46,8 +48,11 @@ const sdk = vi.hoisted(() => {
 vi.mock('viem', async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
   createPublicClient: () => ({
-    readContract: async ({ functionName }: { functionName: string }) =>
-      functionName === 'allowance' ? sdk.chain.allowance : sdk.chain.approved
+    readContract: async (req: { functionName: string }) => {
+      sdk.reads.push(req);
+      if (sdk.chain.fail) throw sdk.chain.fail;
+      return req.functionName === 'allowance' ? sdk.chain.allowance : sdk.chain.approved;
+    }
   })
 }));
 
@@ -71,6 +76,8 @@ beforeEach(() => {
   sdk.clients.length = 0;
   sdk.chain.allowance = 0n;
   sdk.chain.approved = false;
+  sdk.chain.fail = null;
+  sdk.reads.length = 0;
   sdk.clientApprovals.isFullyApproved = false;
   vi.clearAllMocks();
   fs.rmSync(path.join(String(process.env.POLYGON_AGENT_HOME), 'polymarket'), {
@@ -163,6 +170,40 @@ describe('legacy NegRiskAdapter approvals', () => {
     expect(c.approveErc1155ForAll).toHaveBeenCalledTimes(1);
   });
 
+  it('reads the pUSD allowance and CTF approval for the wallet and adapter', async () => {
+    await account.setupAccount('main');
+    const wallet = '0xD0000000000000000000000000000000000000D0';
+    expect(sdk.reads).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          address: '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB',
+          functionName: 'allowance',
+          args: [wallet, ADAPTER]
+        }),
+        expect.objectContaining({
+          address: '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045',
+          functionName: 'isApprovedForAll',
+          args: [wallet, ADAPTER]
+        })
+      ])
+    );
+  });
+
+  it('fails with upstream_unavailable and sends no approval when the read fails', async () => {
+    sdk.chain.fail = new Error('HTTP request failed');
+    await expect(account.setupAccount('main')).rejects.toMatchObject({
+      code: 'upstream_unavailable'
+    });
+    const c = sdk.clients.at(-1)!;
+    expect(c.approveErc20).not.toHaveBeenCalled();
+    expect(c.approveErc1155ForAll).not.toHaveBeenCalled();
+  });
+
+  it('maps a 429 read to rate_limited', async () => {
+    sdk.chain.fail = Object.assign(new Error('Too many requests'), { status: 429 });
+    await expect(account.setupAccount('main')).rejects.toMatchObject({ code: 'rate_limited' });
+  });
+
   it('legacyNegRiskApproved needs both', async () => {
     await account.setupAccount('main');
     const c = sdk.clients.at(-1)!;
@@ -170,6 +211,15 @@ describe('legacy NegRiskAdapter approvals', () => {
     expect(await account.legacyNegRiskApproved(c)).toBe(false);
     sdk.chain.approved = true;
     expect(await account.legacyNegRiskApproved(c)).toBe(true);
+  });
+});
+
+describe('read paths', () => {
+  it('loadAccount for a wallet without an account creates no directory', () => {
+    expect(account.loadAccount('ghost')).toBeNull();
+    expect(
+      fs.existsSync(path.join(String(process.env.POLYGON_AGENT_HOME), 'polymarket', 'ghost'))
+    ).toBe(false);
   });
 });
 

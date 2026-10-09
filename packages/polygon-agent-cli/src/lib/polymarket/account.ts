@@ -31,8 +31,13 @@ export function accountDir(wallet: string): string {
   return dir;
 }
 
+// Read paths join only: they must not create the account directory.
+export function accountFile(wallet: string, name: string): string {
+  return path.join(STORAGE_ROOT, 'polymarket', wallet, name);
+}
+
 function readSecret(wallet: string, name: string): string | null {
-  const data = readJsonFile(path.join(accountDir(wallet), name)) as CipherData | undefined;
+  const data = readJsonFile(accountFile(wallet, name)) as CipherData | undefined;
   return data ? decrypt(data) : null;
 }
 
@@ -41,7 +46,7 @@ function writeSecret(wallet: string, name: string, value: string): void {
 }
 
 export function loadAccount(wallet: string): StoredAccount | null {
-  return (readJsonFile(path.join(accountDir(wallet), 'account.json')) as StoredAccount) ?? null;
+  return (readJsonFile(accountFile(wallet, 'account.json')) as StoredAccount) ?? null;
 }
 
 export function requireAccount(wallet: string): StoredAccount {
@@ -143,12 +148,33 @@ const ERC1155_APPROVED_ABI = [
   }
 ] as const;
 
+// A failed read of the chain (transport, HTTP, timeout, rate limit) is an upstream problem.
+function mapChainReadError(err: unknown): CliError {
+  if (err instanceof CliError) return err;
+  const e = err as { status?: number; code?: number; message?: string; shortMessage?: string };
+  const message = `Couldn't read the legacy NegRiskAdapter approvals from Polygon: ${e?.shortMessage ?? e?.message ?? String(err)}`;
+  const limited = e?.status === 429 || e?.code === -32005;
+  return new CliError({
+    code: limited ? 'rate_limited' : 'upstream_unavailable',
+    message,
+    cause: err
+  });
+}
+
 async function readLegacyNegRiskApprovals(
   client: SecureClient
 ): Promise<{ pusd: boolean; ctf: boolean }> {
   const { createPublicClient, http } = await import('viem');
   const { polygon } = await import('viem/chains');
-  const chain = createPublicClient({ chain: polygon, transport: http() });
+  const { getReadRpcUrl, resolveNetwork } = await import('../utils.ts');
+  const chain = createPublicClient({
+    chain: polygon,
+    transport: http(
+      process.env.SEQUENCE_PROJECT_ACCESS_KEY
+        ? getReadRpcUrl(resolveNetwork(polygon.id))
+        : polygon.rpcUrls.default.http[0]
+    )
+  });
   const owner = client.account.wallet as `0x${string}`;
   try {
     const [allowance, ctf] = await Promise.all([
@@ -167,7 +193,7 @@ async function readLegacyNegRiskApprovals(
     ]);
     return { pusd: allowance >= MAX_ALLOWANCE_FLOOR, ctf };
   } catch (err) {
-    throw mapSdkError(err);
+    throw mapChainReadError(err);
   }
 }
 

@@ -75,7 +75,7 @@ async function handleStatus(argv: { wallet: string }): Promise<void> {
       const [pusd, approvals, legacyApproved, region, orders, redeemable] = await Promise.all([
         pusdBalance(argv.wallet),
         client.fetchTradingApprovalsState(),
-        legacyNegRiskApproved(client),
+        legacyNegRiskApproved(client).catch(() => null),
         checkRegion(client),
         client.listOpenOrders().firstPage(),
         collectRedeemable(client)
@@ -87,7 +87,8 @@ async function handleStatus(argv: { wallet: string }): Promise<void> {
         setUp: true,
         account: { kind: account.kind, wallet: account.wallet },
         pusd: formatUnits6(pusd),
-        approvals: approvals.isFullyApproved && legacyApproved,
+        approvals: approvals.isFullyApproved && legacyApproved === true,
+        ...(legacyApproved === null ? { approvalsCheck: 'unavailable' } : {}),
         region: { country: region.country, blocked: region.blocked, closeOnly: region.closeOnly },
         openOrders: orders.items.length,
         redeemable: {

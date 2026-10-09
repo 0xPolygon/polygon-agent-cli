@@ -198,6 +198,18 @@ describe('status', () => {
     expect(out.pendingDeposit).toBeUndefined();
   });
 
+  it('degrades to approvals false when the legacy check is unavailable', async () => {
+    m.account = ACCOUNT;
+    m.legacyApproved.mockRejectedValue(new Error('rpc down'));
+    const out = await run(['status']);
+    expect(out).toMatchObject({
+      ok: true,
+      approvals: false,
+      approvalsCheck: 'unavailable',
+      pusd: '2.5'
+    });
+  });
+
   it('reports approvals false when a legacy approval is missing', async () => {
     m.account = ACCOUNT;
     m.legacyApproved.mockResolvedValue(false);
