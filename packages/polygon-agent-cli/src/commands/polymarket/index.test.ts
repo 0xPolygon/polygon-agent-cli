@@ -19,6 +19,7 @@ describe('polymarketCommand', () => {
       'setup',
       'status',
       'import-key',
+      'recover',
       'deposit',
       'withdraw',
       'markets',
