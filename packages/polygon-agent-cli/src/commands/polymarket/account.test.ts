@@ -109,6 +109,7 @@ vi.mock('../../lib/storage.ts', async (o) => ({
 }));
 
 const cmds = await import('./account.ts');
+const { installTradingKeyReference } = await import('../../lib/polymarket/oms-key.ts');
 const portfolio = await import('./portfolio.ts');
 const { saveOmsWalletPointer } = await import('../../lib/storage.ts');
 const { accountFile, readBackup, writeBackup } = await import('../../lib/polymarket/account.ts');
@@ -222,7 +223,11 @@ describe('setup', () => {
   it('owner mode backs up once, writes backup.json and restores the main wallet', async () => {
     const out = await run(['setup', '--broadcast']);
     expect(m.backupTradingKey).toHaveBeenCalledTimes(1);
-    expect(m.backupTradingKey).toHaveBeenCalledWith(m.omsWallet, TRADING_KEY);
+    expect(m.backupTradingKey).toHaveBeenCalledWith(
+      m.omsWallet,
+      TRADING_KEY,
+      installTradingKeyReference()
+    );
     expect(out.backup).toEqual({ omsWalletId: 'w-imported', imported: true });
     expect(readBackup('main')).toMatchObject({ omsWalletId: 'w-imported', address: '0xAbC' });
     expect(m.ensureMainWallet).toHaveBeenCalledWith('main');
@@ -310,7 +315,10 @@ describe('setup', () => {
       backup: { omsWalletId: 'w-old', address: found.address, at: 'x', kind: 'deposit-wallet' }
     });
     const out = await run(['setup', '--broadcast']);
-    expect(m.findTradingKeyWallet).toHaveBeenCalledWith(m.omsWallet, undefined);
+    // No local record: only this install's own label is looked up.
+    expect(m.findTradingKeyWallet).toHaveBeenCalledWith(m.omsWallet, {
+      reference: installTradingKeyReference()
+    });
     expect(m.restoreFromOms).toHaveBeenCalledWith({
       wallet: 'main',
       owner: m.omsWallet,
@@ -341,7 +349,7 @@ describe('setup', () => {
       backup: { omsWalletId: 'w-old', address: found.address, at: 'x' }
     });
     const out = await run(['setup', '--broadcast']);
-    expect(m.findTradingKeyWallet).toHaveBeenCalledWith(m.omsWallet, found.address);
+    expect(m.findTradingKeyWallet).toHaveBeenCalledWith(m.omsWallet, { address: found.address });
     expect(out).toMatchObject({ ok: true, restored: true, signer: 'oms' });
     expect(m.setupAccount).not.toHaveBeenCalled();
   });

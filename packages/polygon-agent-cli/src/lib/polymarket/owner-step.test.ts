@@ -19,6 +19,11 @@ vi.mock('./account.ts', async (o) => ({
 const { privateKeyToAccount } = await import('viem/accounts');
 const { accountDir, accountFile, readBackup, hasLocalKey } = await import('./account.ts');
 const { polymarketOwnerStep } = await import('./owner-step.ts');
+const { installTradingKeyReference, tradingKeyReference } = await import('./oms-key.ts');
+
+// This install's label, and another install's on the same OMS account.
+const OURS = installTradingKeyReference();
+const THEIRS = tradingKeyReference('some-other-install');
 
 const MAIN = '0xC2F4cAfe89AE7e1bcB86dd3f141C0a3adCEB6C17';
 
@@ -127,8 +132,9 @@ describe('polymarketOwnerStep', () => {
         id: 'w-other',
         address: '0xOTHER',
         keyOrigin: 'imported',
-        reference: 'polymarket-trading-key'
+        reference: OURS
       },
+      // Backed up before references were per install: found by its recorded address.
       { id: 'w-old', address: signer, keyOrigin: 'imported', reference: 'polymarket-trading-key' }
     );
     owner.walletAddress = '0xdead';
@@ -166,8 +172,7 @@ describe('polymarketOwnerStep', () => {
       backedUp: true,
       omsWalletId: 'w-imported',
       created: true,
-      mainWalletError: 'boom',
-      sweepError: 'boom'
+      mainWalletError: 'boom'
     });
   });
 
@@ -175,16 +180,16 @@ describe('polymarketOwnerStep', () => {
     const owner = fakeOwner();
     owner.listWallets.mockRejectedValue(new Error('boom'));
     const out = await polymarketOwnerStep({ wallet, owner: owner as never, mainAddress: MAIN });
-    expect(out).toEqual({ backedUp: false, error: 'boom', sweepError: 'boom' });
+    expect(out).toEqual({ backedUp: false, error: 'boom' });
   });
 
-  it('routes to recovery, never creating a key, when OMS already holds a trading key and nothing is local', async () => {
+  it("after a wipe, recovers this install's own key (same install name), never creating one", async () => {
     const owner = fakeOwner();
     (await owner.listWallets()).push({
       id: 'w-old',
       address: '0xOLD',
       keyOrigin: 'imported',
-      reference: 'polymarket-trading-key'
+      reference: OURS
     });
     recoverAccount.mockResolvedValue({
       backedUp: false,
@@ -209,7 +214,7 @@ describe('polymarketOwnerStep', () => {
       id: 'w-old',
       address: '0xOLD',
       keyOrigin: 'imported',
-      reference: 'polymarket-trading-key'
+      reference: OURS
     });
     recoverAccount.mockRejectedValue(new Error('boom'));
     owner.walletAddress = '0xOLD';
@@ -237,19 +242,56 @@ describe('polymarketOwnerStep', () => {
     expect(owner.importWallet).toHaveBeenCalledTimes(1);
   });
 
-  describe('sweeping older trading keys', () => {
-    const OLDER = '0x00000000000000000000000000000000000000B1';
-    const OLDER2 = '0x00000000000000000000000000000000000000B2';
-    const addOlder = async (owner: ReturnType<typeof fakeOwner>, id: string, address: string) =>
+  describe('two installs on one OMS account', () => {
+    it("a new install with no local key makes its own and leaves the other install's key alone", async () => {
+      const owner = fakeOwner();
       (await owner.listWallets()).push({
-        id,
-        address,
+        id: 'w-a',
+        address: '0x00000000000000000000000000000000000000A0',
+        keyOrigin: 'imported',
+        reference: THEIRS
+      });
+      const out = await polymarketOwnerStep({ wallet, owner: owner as never, mainAddress: MAIN });
+      expect(out).toEqual({ backedUp: true, omsWalletId: 'w-imported', created: true });
+      expect(recoverAccount).not.toHaveBeenCalled();
+      expect(sweepOldKey).not.toHaveBeenCalled();
+      expect(owner.importWallet).toHaveBeenCalledWith(expect.objectContaining({ reference: OURS }));
+      expect(owner.useWallet).not.toHaveBeenCalledWith({ walletId: 'w-a' });
+    });
+
+    it("a bare-prefix key with no local record is not taken as this install's", async () => {
+      const owner = fakeOwner();
+      (await owner.listWallets()).push({
+        id: 'w-bare',
+        address: '0x00000000000000000000000000000000000000A3',
         keyOrigin: 'imported',
         reference: 'polymarket-trading-key'
       });
+      const out = await polymarketOwnerStep({ wallet, owner: owner as never, mainAddress: MAIN });
+      expect(out).toMatchObject({ backedUp: true, created: true });
+      expect(recoverAccount).not.toHaveBeenCalled();
+      expect(sweepOldKey).not.toHaveBeenCalled();
+    });
+  });
 
-    // A key made on a wiped machine before the owner signed in again: OMS still holds the
-    // older, funded one.
+  describe('sweeping keys this install replaced', () => {
+    const OLDER = '0x00000000000000000000000000000000000000B1';
+    const OLDER2 = '0x00000000000000000000000000000000000000B2';
+    const addOlder = async (owner: ReturnType<typeof fakeOwner>, id: string, address: string) =>
+      (await owner.listWallets()).push({ id, address, keyOrigin: 'imported', reference: OURS });
+    // An earlier recovery archived this install's old account under previous-*.
+    const archive = (folder: string, signer: string, backupAddress = signer) => {
+      const dir = path.join(accountDir(wallet), `previous-${folder}`);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, 'account.json'),
+        JSON.stringify({ kind: 'deposit-wallet', wallet: '0x2', signer })
+      );
+      fs.writeFileSync(
+        path.join(dir, 'backup.json'),
+        JSON.stringify({ omsWalletId: 'x', address: backupAddress, at: 'x' })
+      );
+    };
     const withCurrentKey = async () => {
       const owner = fakeOwner();
       await polymarketOwnerStep({ wallet, owner: owner as never, mainAddress: MAIN });
@@ -257,9 +299,10 @@ describe('polymarketOwnerStep', () => {
       return owner;
     };
 
-    it('sweeps an older funded key to the main wallet and leaves the current key alone', async () => {
+    it('sweeps an archived funded key to the main wallet and leaves the current key alone', async () => {
       const owner = await withCurrentKey();
       await addOlder(owner, 'w-older', OLDER);
+      archive('1', OLDER);
       sweepOldKey.mockResolvedValueOnce({ withdrawnUsd: '3', txHash: '0xS' });
       const out = await polymarketOwnerStep({ wallet, owner: owner as never, mainAddress: MAIN });
       expect(out).toEqual({
@@ -273,13 +316,27 @@ describe('polymarketOwnerStep', () => {
         target: { id: 'w-older', address: OLDER },
         mainAddress: MAIN
       });
-      expect(recoverAccount).not.toHaveBeenCalled();
       expect(owner.walletAddress).toBe(MAIN);
     });
 
-    it('skips an older key with nothing to sweep without reporting it', async () => {
+    it("never sweeps keys it has no archive for: unknown keys or other installs'", async () => {
       const owner = await withCurrentKey();
       await addOlder(owner, 'w-older', OLDER);
+      (await owner.listWallets()).push({
+        id: 'w-a',
+        address: OLDER2,
+        keyOrigin: 'imported',
+        reference: THEIRS
+      });
+      const out = await polymarketOwnerStep({ wallet, owner: owner as never, mainAddress: MAIN });
+      expect(sweepOldKey).not.toHaveBeenCalled();
+      expect(out).toEqual({ backedUp: true, omsWalletId: 'w-imported' });
+    });
+
+    it('skips an archived key with nothing to sweep without reporting it', async () => {
+      const owner = await withCurrentKey();
+      await addOlder(owner, 'w-older', OLDER);
+      archive('1', OLDER);
       const out = await polymarketOwnerStep({ wallet, owner: owner as never, mainAddress: MAIN });
       expect(sweepOldKey).toHaveBeenCalledTimes(1);
       expect(out).toEqual({ backedUp: true, omsWalletId: 'w-imported' });
@@ -289,6 +346,8 @@ describe('polymarketOwnerStep', () => {
       const owner = await withCurrentKey();
       await addOlder(owner, 'w-older', OLDER);
       await addOlder(owner, 'w-older2', OLDER2);
+      archive('1', OLDER);
+      archive('2', OLDER2);
       sweepOldKey
         .mockRejectedValueOnce(new Error('relayer down'))
         .mockResolvedValueOnce({ withdrawnUsd: '1', txHash: '0xT' });
@@ -311,13 +370,20 @@ describe('polymarketOwnerStep', () => {
       );
       const owner = await withCurrentKey();
       await addOlder(owner, 'w-older', OLDER);
+      archive('1', OLDER);
       await polymarketOwnerStep({ wallet, owner: owner as never, mainAddress: MAIN });
       expect(sweepOldKey).not.toHaveBeenCalled();
     });
 
     it('does not sweep the key it just tried to recover', async () => {
+      const signer = '0x00000000000000000000000000000000000000C1';
+      fs.writeFileSync(
+        path.join(accountDir(wallet), 'account.json'),
+        JSON.stringify({ kind: 'deposit-wallet', wallet: '0x1', signer })
+      );
+      archive('1', signer);
       const owner = fakeOwner();
-      await addOlder(owner, 'w-older', OLDER);
+      await addOlder(owner, 'w-old', signer);
       await polymarketOwnerStep({ wallet, owner: owner as never, mainAddress: MAIN });
       expect(recoverAccount).toHaveBeenCalledTimes(1);
       expect(sweepOldKey).not.toHaveBeenCalled();
