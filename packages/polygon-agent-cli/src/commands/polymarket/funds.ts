@@ -18,12 +18,12 @@ import { formatUnits6, parseUsd } from '../../lib/polymarket/amounts.ts';
 import {
   BRIDGE_MIN_DEPOSIT_UNITS,
   bridgeStatus,
-  depositAddress,
-  withdrawAddress
+  depositAddress
 } from '../../lib/polymarket/bridge.ts';
 import { clearPending, loadPending, savePending } from '../../lib/polymarket/deposits.ts';
-import { PolymarketError, PUSD } from '../../lib/polymarket/gamma.ts';
+import { PolymarketError } from '../../lib/polymarket/gamma.ts';
 import { assertCanTrade, checkRegion } from '../../lib/polymarket/region.ts';
+import { assertWithdrawable, sendWithdraw, withdrawRoute } from '../../lib/polymarket/withdraw.ts';
 import { tokenBalance } from '../../lib/session/live.ts';
 import { checkSessionSpend } from '../../lib/session/run-tx.ts';
 import { loadOmsWalletPointer, STORAGE_ROOT } from '../../lib/storage.ts';
@@ -254,14 +254,9 @@ async function handleWithdraw(argv: WithdrawArgs): Promise<void> {
     assertCanTrade(await checkRegion());
     const balance = await pusdBalance(argv.wallet);
     const amount = String(argv.amount).toLowerCase() === 'all' ? balance : parseUsd(argv.amount);
-    if (amount === 0n || amount > balance) {
-      throw new PolymarketError(
-        'insufficient_pusd',
-        `The Polymarket wallet holds $${formatUnits6(balance)} pUSD.`
-      );
-    }
+    assertWithdrawable(amount, balance);
     const recipient = await omsAddress(argv.wallet);
-    const bridge = await withdrawAddress({ wallet: account.wallet, recipient });
+    const bridge = await withdrawRoute({ account: account.wallet, recipient });
     if (!broadcast) {
       ok({
         dryRun: true,
@@ -273,14 +268,9 @@ async function handleWithdraw(argv: WithdrawArgs): Promise<void> {
       return;
     }
     const client = await getTradingClient(argv.wallet);
-    const handle = await client.transferErc20({
-      amount,
-      recipientAddress: bridge,
-      tokenAddress: PUSD
-    });
-    const outcome = await handle.wait();
+    const { txHash } = await sendWithdraw(client, { amount, via: bridge });
     ok({
-      txHash: outcome.transactionHash,
+      txHash,
       amountUsd: formatUnits6(amount),
       to: recipient,
       note: "txHash is the pUSD transfer to Polymarket's bridge. The USDC arrives in the OMS wallet shortly after."
