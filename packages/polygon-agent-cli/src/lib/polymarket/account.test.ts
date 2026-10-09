@@ -317,3 +317,25 @@ describe('setupAccount with a missing key', () => {
     expect(fs.existsSync(path.join(dir, 'key.json'))).toBe(false);
   });
 });
+
+describe('ensureTradingKey and backup record', () => {
+  it('generates once, reuses the key, and deploys nothing', async () => {
+    const first = await account.ensureTradingKey('main');
+    expect(first).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(await account.ensureTradingKey('main')).toBe(first);
+    expect(sdk.createSecureClient).not.toHaveBeenCalled();
+  });
+
+  it('reads a missing backup without creating the account directory', () => {
+    expect(account.readBackup('ghost')).toBeNull();
+    expect(
+      fs.existsSync(path.join(String(process.env.POLYGON_AGENT_HOME), 'polymarket', 'ghost'))
+    ).toBe(false);
+  });
+
+  it('round-trips backup.json', () => {
+    const b = { omsWalletId: 'w1', address: '0xAbC', at: '2026-10-09T00:00:00.000Z' };
+    account.writeBackup('main', b);
+    expect(account.readBackup('main')).toEqual(b);
+  });
+});
