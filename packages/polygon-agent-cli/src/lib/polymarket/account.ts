@@ -229,12 +229,10 @@ export async function ensureLegacyNegRiskApprovals(client: SecureClient): Promis
   return !have.pusd || !have.ctf;
 }
 
-export async function setupAccount(
-  wallet: string
-): Promise<{ account: StoredAccount; created: boolean; approvalsSet: boolean }> {
+// Returns the trading key, generating and storing one on first use. Deploys nothing.
+// The key is a secret: callers keep it in memory only.
+export async function ensureTradingKey(wallet: string): Promise<`0x${string}`> {
   const existing = loadAccount(wallet);
-  const { generatePrivateKey, privateKeyToAccount } = await import('viem/accounts');
-
   let key = readSecret(wallet, 'key.json');
   if (!key && existing) {
     throw new CliError({
@@ -244,10 +242,36 @@ export async function setupAccount(
     });
   }
   if (!key) {
+    const { generatePrivateKey } = await import('viem/accounts');
     key = generatePrivateKey();
     writeSecret(wallet, 'key.json', key);
   }
-  const signer = privateKeyToAccount(key as `0x${string}`).address;
+  return key as `0x${string}`;
+}
+
+export function hasLocalKey(wallet: string): boolean {
+  return fs.existsSync(accountFile(wallet, 'key.json'));
+}
+
+// Records which OMS wallet holds the imported copy of the trading key. No secret.
+export type BackupRecord = { omsWalletId: string; address: string; at: string };
+
+export function readBackup(wallet: string): BackupRecord | null {
+  return (readJsonFile(accountFile(wallet, 'backup.json')) as BackupRecord | undefined) ?? null;
+}
+
+export function writeBackup(wallet: string, b: BackupRecord): void {
+  writeJsonFile({ file: path.join(accountDir(wallet), 'backup.json'), data: b });
+}
+
+export async function setupAccount(
+  wallet: string
+): Promise<{ account: StoredAccount; created: boolean; approvalsSet: boolean }> {
+  const existing = loadAccount(wallet);
+  const { privateKeyToAccount } = await import('viem/accounts');
+
+  const key = await ensureTradingKey(wallet);
+  const signer = privateKeyToAccount(key).address;
 
   if (!readSecret(wallet, 'builder.json')) await mintBuilderKey(wallet, key, signer);
 

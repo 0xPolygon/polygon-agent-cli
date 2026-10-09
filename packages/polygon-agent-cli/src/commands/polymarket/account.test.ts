@@ -19,7 +19,11 @@ const m = vi.hoisted(() => ({
   listPositions: vi.fn(),
   getPositions: vi.fn(),
   loadPolymarketKey: vi.fn(),
-  importLegacyKey: vi.fn()
+  importLegacyKey: vi.fn(),
+  ensureTradingKey: vi.fn(),
+  backupTradingKey: vi.fn(),
+  ensureMainWallet: vi.fn(),
+  omsWallet: { walletAddress: '0xC2F4cAfe89AE7e1bcB86dd3f141C0a3adCEB6C17' as string | undefined }
 }));
 
 // A Paginated stand-in: an async iterable of pages.
@@ -72,9 +76,22 @@ vi.mock('../../lib/polymarket/account.ts', async (o) => {
     pusdBalance: m.pusdBalance,
     legacyNegRiskApproved: m.legacyApproved,
     importLegacyKey: m.importLegacyKey,
+    ensureTradingKey: m.ensureTradingKey,
     getTradingClient: async () => client
   };
 });
+vi.mock('../../lib/polymarket/oms-key.ts', async (o) => ({
+  ...(await o<Record<string, unknown>>()),
+  backupTradingKey: m.backupTradingKey
+}));
+vi.mock('../../lib/oms-client.ts', async (o) => ({
+  ...(await o<Record<string, unknown>>()),
+  getOmsClient: () => ({ wallet: m.omsWallet })
+}));
+vi.mock('../../lib/oms-tx.ts', async (o) => ({
+  ...(await o<Record<string, unknown>>()),
+  ensureMainWallet: m.ensureMainWallet
+}));
 vi.mock('../../lib/polymarket/gamma.ts', async (o) => ({
   ...(await o<Record<string, unknown>>()),
   getPositions: m.getPositions,
@@ -88,6 +105,9 @@ vi.mock('../../lib/storage.ts', async (o) => ({
 const cmds = await import('./account.ts');
 const portfolio = await import('./portfolio.ts');
 const { saveOmsWalletPointer } = await import('../../lib/storage.ts');
+const { accountFile, readBackup, writeBackup } = await import('../../lib/polymarket/account.ts');
+const TRADING_KEY = `0x${'11'.repeat(32)}`;
+const BACKUP = { omsWalletId: 'w-imported', address: '0xAbC', at: '2026-10-09T00:00:00.000Z' };
 
 async function run(argv: string[]) {
   const yargs = (await import('yargs')).default;
@@ -120,6 +140,17 @@ beforeEach(async () => {
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
   vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
   m.account = null;
+  fs.rmSync(path.join(String(process.env.POLYGON_AGENT_HOME), 'polymarket'), {
+    recursive: true,
+    force: true
+  });
+  m.omsWallet.walletAddress = '0xC2F4cAfe89AE7e1bcB86dd3f141C0a3adCEB6C17';
+  m.ensureTradingKey.mockResolvedValue(TRADING_KEY);
+  m.backupTradingKey.mockResolvedValue({
+    omsWalletId: 'w-imported',
+    address: '0xAbC',
+    imported: true
+  });
   m.planSetup.mockImplementation(() => ({ exists: !!m.account, account: m.account }));
   m.setupAccount.mockResolvedValue({ account: ACCOUNT, created: true, approvalsSet: true });
   m.pusdBalance.mockResolvedValue(2_500_000n);
@@ -139,7 +170,8 @@ describe('setup', () => {
   it('dry run lists four steps and does not set up', async () => {
     const out = await run(['setup', '--dry-run']);
     expect(out).toMatchObject({ ok: true, dryRun: true, exists: false });
-    expect(out.steps).toHaveLength(5);
+    expect(out.steps).toHaveLength(6);
+    expect(out.steps.at(-1)).toBe('back up the trading key to OMS');
     expect(m.setupAccount).not.toHaveBeenCalled();
   });
 
@@ -147,12 +179,18 @@ describe('setup', () => {
     m.account = ACCOUNT;
     const out = await run(['setup', '--dry-run']);
     expect(out).toMatchObject({ exists: true, account: ACCOUNT });
-    expect(out.steps).toEqual(['set trading approvals (gasless)']);
+    expect(out.steps).toEqual([
+      'set trading approvals (gasless)',
+      'back up the trading key to OMS'
+    ]);
+    writeBackup('main', BACKUP);
+    expect((await run(['setup', '--dry-run'])).steps).toEqual(['set trading approvals (gasless)']);
   });
 
   it('dry run for an existing account lists the legacy step only when it is missing', async () => {
     m.account = ACCOUNT;
     m.legacyApproved.mockResolvedValue(false);
+    writeBackup('main', BACKUP);
     const out = await run(['setup', '--dry-run']);
     expect(out.steps).toEqual([
       'set trading approvals (gasless)',
@@ -171,6 +209,54 @@ describe('setup', () => {
       account: { kind: 'deposit-wallet', wallet: WALLET },
       next: 'agent polymarket deposit <usd> --broadcast'
     });
+  });
+
+  it('owner mode backs up once, writes backup.json and restores the main wallet', async () => {
+    const out = await run(['setup', '--broadcast']);
+    expect(m.backupTradingKey).toHaveBeenCalledTimes(1);
+    expect(m.backupTradingKey).toHaveBeenCalledWith(m.omsWallet, TRADING_KEY);
+    expect(out.backup).toEqual({ omsWalletId: 'w-imported', imported: true });
+    expect(readBackup('main')).toMatchObject({ omsWalletId: 'w-imported', address: '0xAbC' });
+    expect(m.ensureMainWallet).toHaveBeenCalledWith('main');
+    expect(fs.readFileSync(accountFile('main', 'backup.json'), 'utf8')).not.toContain(TRADING_KEY);
+    expect(JSON.stringify(out)).not.toContain(TRADING_KEY);
+  });
+
+  it('a rerun makes no import', async () => {
+    await run(['setup', '--broadcast']);
+    m.backupTradingKey.mockResolvedValue({
+      omsWalletId: 'w-imported',
+      address: '0xAbC',
+      imported: false
+    });
+    const out = await run(['setup', '--broadcast']);
+    expect(out.backup).toEqual({ omsWalletId: 'w-imported', imported: false });
+    expect(readBackup('main')?.omsWalletId).toBe('w-imported');
+  });
+
+  it('still succeeds without a live owner session', async () => {
+    m.omsWallet.walletAddress = undefined;
+    const out = await run(['setup', '--broadcast']);
+    expect(out).toMatchObject({
+      ok: true,
+      created: true,
+      backup: { backedUp: false, hint: 'agent wallet login' }
+    });
+    expect(m.backupTradingKey).not.toHaveBeenCalled();
+    expect(readBackup('main')).toBeNull();
+  });
+
+  it('session mode does not try OMS and reports the recorded backup', async () => {
+    await saveOmsWalletPointer('main', {
+      walletAddress: '0xC2F4cAfe89AE7e1bcB86dd3f141C0a3adCEB6C17',
+      loginMethod: 'google',
+      createdAt: 'x',
+      access: 'session'
+    } as never);
+    writeBackup('main', BACKUP);
+    const out = await run(['setup', '--broadcast']);
+    expect(m.backupTradingKey).not.toHaveBeenCalled();
+    expect(out.backup).toEqual({ backedUp: true, omsWalletId: 'w-imported' });
   });
 });
 
@@ -196,6 +282,15 @@ describe('status', () => {
       redeemable: { count: 1, valueUsd: '1.2' }
     });
     expect(out.pendingDeposit).toBeUndefined();
+    expect(out.backup).toEqual({ backedUp: false });
+    expect(out.signer).toBe('oms');
+  });
+
+  it('shows the recorded backup', async () => {
+    m.account = ACCOUNT;
+    writeBackup('main', BACKUP);
+    const out = await run(['status']);
+    expect(out.backup).toEqual({ backedUp: true, omsWalletId: 'w-imported' });
   });
 
   it('degrades to approvals false when the legacy check is unavailable', async () => {
