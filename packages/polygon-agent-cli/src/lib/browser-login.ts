@@ -39,6 +39,8 @@ export interface BrowserLoginDeps {
       walletSelection: 'automatic';
     }): Promise<{ walletAddress: string }>;
   };
+  // After sign-in, make the user's main (non-imported) wallet the active one and return it.
+  selectMainWallet(): Promise<{ address: string }>;
   // The SDK's opaque Google provider value (OmsRelayOidcProviders.google), injected
   // so this file stays SDK-agnostic and unit tests can fake it with a sentinel.
   oidcProviderGoogle: unknown;
@@ -105,12 +107,13 @@ export async function runBrowserLogin(
       }
 
       if (action.type === 'oidc-callback') {
-        const result = await wallet.completeOidcRedirectAuth({
+        await wallet.completeOidcRedirectAuth({
           callbackUrl: action.callbackUrl,
           walletSelection: 'automatic'
         });
-        await relay.setStatus(session, { status: 'done', walletAddress: result.walletAddress });
-        return { walletAddress: result.walletAddress, loginMethod: 'google' };
+        const main = await deps.selectMainWallet();
+        await relay.setStatus(session, { status: 'done', walletAddress: main.address });
+        return { walletAddress: main.address, loginMethod: 'google' };
       }
 
       if (action.type === 'email') {
@@ -122,12 +125,7 @@ export async function runBrowserLogin(
 
       // action.type === 'otp'
       try {
-        const result = await wallet.completeEmailAuth({
-          code: action.code,
-          walletSelection: 'automatic'
-        });
-        await relay.setStatus(session, { status: 'done', walletAddress: result.walletAddress });
-        return { walletAddress: result.walletAddress, loginMethod: 'email' };
+        await wallet.completeEmailAuth({ code: action.code, walletSelection: 'automatic' });
       } catch {
         otpFailures += 1;
         if (otpFailures >= MAX_OTP_ATTEMPTS) {
@@ -137,7 +135,11 @@ export async function runBrowserLogin(
           status: 'otp-invalid',
           attemptsLeft: MAX_OTP_ATTEMPTS - otpFailures
         });
+        continue;
       }
+      const main = await deps.selectMainWallet();
+      await relay.setStatus(session, { status: 'done', walletAddress: main.address });
+      return { walletAddress: main.address, loginMethod: 'email' };
     }
 
     throw new Error('Timed out waiting for browser login. Re-run, or use `wallet login --local`.');

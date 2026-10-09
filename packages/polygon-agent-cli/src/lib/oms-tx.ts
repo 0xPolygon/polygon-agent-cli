@@ -11,6 +11,7 @@ import { findNetworkById, isOMSWalletError, TransactionMode } from '@polygonlabs
 
 import { CliError } from './errors.ts';
 import { getOmsClient } from './oms-client.ts';
+import { loadOmsWalletPointer } from './storage.ts';
 
 export interface OmsTxTransaction {
   to: `0x${string}` | string;
@@ -76,10 +77,31 @@ export function makeFeeSelector(preferNativeFee: boolean) {
   };
 }
 
+// A persisted session can be left on an imported wallet (the Polymarket trading key), for
+// example by a crashed process. Before sending, put it back on the wallet the pointer names.
+export async function ensureMainWallet(walletName: string): Promise<void> {
+  const pointer = await loadOmsWalletPointer(walletName);
+  if (!pointer || pointer.access === 'session') return;
+  const w = getOmsClient(walletName).wallet;
+  if (w.walletAddress?.toLowerCase() === pointer.walletAddress.toLowerCase()) return;
+  const target = (await w.listWallets()).find(
+    (x) => x.address.toLowerCase() === pointer.walletAddress.toLowerCase()
+  );
+  if (!target) {
+    throw new CliError({
+      code: 'not_connected',
+      message: `The main wallet ${pointer.walletAddress} is not on this OMS account`,
+      hint: 'Sign in again with: wallet login'
+    });
+  }
+  await w.useWallet({ walletId: target.id });
+}
+
 export async function runOmsTx(params: OmsTxParams): Promise<OmsTxResult> {
   const { walletName, chainId, transactions, broadcast, preferNativeFee = false } = params;
 
   const oms = getOmsClient(walletName);
+  if (oms.wallet.walletAddress) await ensureMainWallet(walletName);
   const walletAddress = oms.wallet.walletAddress;
   if (!walletAddress) {
     throw new Error(`No active session for wallet '${walletName}'. Run: agent wallet login`);
