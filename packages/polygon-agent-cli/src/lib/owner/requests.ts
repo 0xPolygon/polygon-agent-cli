@@ -172,9 +172,24 @@ export async function confirmOwnerRequest<T extends Record<string, unknown>>(par
     );
     // Automatic selection may land on an imported wallet (the Polymarket key). Always act
     // on the user's main wallet.
-    const main = await selectMainWallet(owner.wallet, {
-      expectedAddress: (await loadOmsWalletPointer(params.wallet))?.walletAddress
-    });
+    const pointer = await loadOmsWalletPointer(params.wallet);
+    let main: { address: string };
+    try {
+      main = await selectMainWallet(owner.wallet, { expectedAddress: pointer?.walletAddress });
+    } catch (error) {
+      if (pointer && error instanceof CliError && error.code === 'not_connected') {
+        const signedIn =
+          (await owner.wallet.listWallets().catch(() => []))?.find(
+            (w) => w.keyOrigin !== 'imported'
+          )?.address ?? auth.walletAddress;
+        throw new CliError({
+          code: 'invalid_input',
+          message: `That code signed in to ${signedIn}, not this install's wallet ${pointer.walletAddress}. Use the email the wallet was created with.`,
+          cause: error
+        });
+      }
+      throw error;
+    }
     outcome = {
       ok: true,
       result: await params.run({ owner, walletAddress: main.address, request })

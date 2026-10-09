@@ -11,6 +11,7 @@ import { findNetworkById, isOMSWalletError, TransactionMode } from '@polygonlabs
 
 import { CliError } from './errors.ts';
 import { getOmsClient } from './oms-client.ts';
+import { selectMainWallet } from './polymarket/oms-key.ts';
 import { loadOmsWalletPointer } from './storage.ts';
 
 export interface OmsTxTransaction {
@@ -84,17 +85,7 @@ export async function ensureMainWallet(walletName: string): Promise<void> {
   if (!pointer || pointer.access === 'session') return;
   const w = getOmsClient(walletName).wallet;
   if (w.walletAddress?.toLowerCase() === pointer.walletAddress.toLowerCase()) return;
-  const target = (await w.listWallets()).find(
-    (x) => x.address.toLowerCase() === pointer.walletAddress.toLowerCase()
-  );
-  if (!target) {
-    throw new CliError({
-      code: 'not_connected',
-      message: `The main wallet ${pointer.walletAddress} is not on this OMS account`,
-      hint: 'Sign in again with: wallet login'
-    });
-  }
-  await w.useWallet({ walletId: target.id });
+  await selectMainWallet(w, { expectedAddress: pointer.walletAddress });
 }
 
 export async function runOmsTx(params: OmsTxParams): Promise<OmsTxResult> {

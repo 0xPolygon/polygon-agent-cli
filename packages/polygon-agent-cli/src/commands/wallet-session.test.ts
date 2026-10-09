@@ -647,8 +647,14 @@ describe('owner-request safety', () => {
     world.walletAddress = '0x1111111111111111111111111111111111111111';
     world.calls.length = 0;
     const out = await confirm(request);
-    // The account has no wallet at the connected address, so selection refuses it.
-    expect(out).toMatchObject({ ok: false, code: 'not_connected', ownerSignInRevoked: true });
+    expect(out).toMatchObject({
+      ok: false,
+      code: 'invalid_input',
+      error: expect.stringContaining(
+        "That code signed in to 0x1111111111111111111111111111111111111111, not this install's wallet 0xd384ea24ca0B3a5e4BB35935C611E3dCB68Fd08e. Use the email the wallet was created with."
+      ),
+      ownerSignInRevoked: true
+    });
     expect(world.calls).toContain('revokeAccess:owner');
     expect(world.calls.some((c) => c.startsWith('authorize'))).toBe(false);
     expect(readApprovedPlan(wallet)?.plan.allowanceUsd).toBe(500);

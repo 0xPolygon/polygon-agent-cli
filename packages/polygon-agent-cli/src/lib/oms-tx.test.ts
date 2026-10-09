@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { FeeOptionWithBalance } from '@polygonlabs/oms-wallet';
 
@@ -99,6 +99,13 @@ describe('makeFeeSelector', () => {
 });
 
 describe('runOmsTx wallet guard', () => {
+  afterEach(() => {
+    oms.state.walletAddress = MAIN;
+    oms.sendTransaction.mockReset();
+    oms.listWallets.mockReset();
+    oms.useWallet.mockReset();
+  });
+
   it('switches a session left on the imported wallet back to main before sending', async () => {
     oms.state.walletAddress = IMPORTED;
     oms.listWallets.mockResolvedValue([
@@ -137,7 +144,23 @@ describe('runOmsTx wallet guard', () => {
       })
     ).rejects.toMatchObject({ code: 'not_connected' });
     expect(oms.sendTransaction).not.toHaveBeenCalled();
-    oms.state.walletAddress = MAIN;
+  });
+
+  it('refuses a pointer that names an imported wallet', async () => {
+    oms.state.walletAddress = IMPORTED;
+    oms.listWallets.mockResolvedValue([
+      { id: 'w-imp', address: MAIN, keyOrigin: 'imported' },
+      { id: 'w-other', address: IMPORTED, keyOrigin: 'imported' }
+    ]);
+    await expect(
+      runOmsTx({
+        walletName: 'main',
+        chainId: 137,
+        transactions: [{ to: USDC, data: '0x' }],
+        broadcast: true
+      })
+    ).rejects.toMatchObject({ code: 'not_connected' });
+    expect(oms.useWallet).not.toHaveBeenCalled();
   });
 });
 

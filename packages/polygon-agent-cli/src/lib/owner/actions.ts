@@ -25,7 +25,7 @@ import { invalidateSessions } from '../session/sessions.ts';
 import { readApprovedPlan, writeApprovedPlan } from '../session/state.ts';
 import { chainLabel, findSupportedToken } from '../session/tokens.ts';
 import { probeSponsorship } from '../session/transfer.ts';
-import { loadOmsWalletPointer, saveOmsWalletPointer } from '../storage.ts';
+import { saveOmsWalletPointer } from '../storage.ts';
 import { formatUnits, getExplorerUrl, resolveNetwork } from '../utils.ts';
 
 interface ApprovedChain {
@@ -238,19 +238,8 @@ function worstCase(plan: Plan): string {
   );
 }
 
-async function requireSameWallet(params: { wallet: string; walletAddress: string }): Promise<void> {
-  const pointer = await loadOmsWalletPointer(params.wallet);
-  if (pointer && pointer.walletAddress.toLowerCase() !== params.walletAddress.toLowerCase()) {
-    throw new CliError({
-      code: 'invalid_input',
-      message: `That code signed in to ${params.walletAddress}, not this install's wallet ${pointer.walletAddress}. Use the email the wallet was created with.`
-    });
-  }
-}
-
 async function connect(params: { context: OwnerContext; wallet: string; plan: Plan; now: Date }) {
   const { owner, walletAddress, request } = params.context;
-  await requireSameWallet({ wallet: params.wallet, walletAddress });
   const rac = readRacRecord({ wallet: params.wallet, slot: 'rac' });
   if (!rac) {
     throw new CliError({
@@ -313,7 +302,6 @@ async function allowanceSet(params: {
   now: Date;
 }) {
   const { owner, walletAddress } = params.context;
-  await requireSameWallet({ wallet: params.wallet, walletAddress });
   const rac = readRacRecord({ wallet: params.wallet, slot: 'rac' });
   if (!rac)
     throw new CliError({ code: 'not_connected', message: 'This install is not connected.' });
@@ -366,7 +354,6 @@ async function allowanceSet(params: {
 
 async function renew(params: { context: OwnerContext; wallet: string; plan: Plan; now: Date }) {
   const { owner, walletAddress } = params.context;
-  await requireSameWallet({ wallet: params.wallet, walletAddress });
   const next = readRacRecord({ wallet: params.wallet, slot: 'rac-next' });
   if (!next) {
     throw new CliError({
@@ -439,8 +426,7 @@ async function withdraw(params: {
   wallet: string;
   action: Extract<OwnerContext['request']['action'], { kind: 'withdraw' }>;
 }) {
-  const { owner, walletAddress } = params.context;
-  await requireSameWallet({ wallet: params.wallet, walletAddress });
+  const { owner } = params.context;
   const { action } = params;
   const network = findNetworkById(action.chainId);
   if (!network)
@@ -566,8 +552,7 @@ async function access(params: {
   wallet: string;
   revoke?: { credentialId: string; sessionId?: string };
 }) {
-  const { owner, walletAddress } = params.context;
-  await requireSameWallet({ wallet: params.wallet, walletAddress });
+  const { owner } = params.context;
   const installCredentialId = readRacRecord({ wallet: params.wallet, slot: 'rac' })?.credentialId;
   let revoked: Record<string, unknown> | undefined;
   if (params.revoke) {
