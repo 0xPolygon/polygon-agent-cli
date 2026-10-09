@@ -6,6 +6,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 process.env.POLYGON_AGENT_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-owner-step-'));
 
+const recoverAccount = vi.hoisted(() => vi.fn());
+vi.mock('./account.ts', async (o) => ({
+  ...(await o<Record<string, unknown>>()),
+  recoverAccount
+}));
+
 const { privateKeyToAccount } = await import('viem/accounts');
 const { accountDir, accountFile, readBackup, hasLocalKey } = await import('./account.ts');
 const { polymarketOwnerStep } = await import('./owner-step.ts');
@@ -40,6 +46,8 @@ let n = 0;
 let wallet: string;
 beforeEach(() => {
   wallet = `w${n++}`;
+  recoverAccount.mockReset();
+  recoverAccount.mockResolvedValue({ backedUp: true, omsWalletId: 'w-new', recovered: {} });
 });
 
 describe('polymarketOwnerStep', () => {
@@ -87,10 +95,10 @@ describe('polymarketOwnerStep', () => {
     expect(owner.walletAddress).toBe(MAIN);
   });
 
-  it('does not recover or overwrite when the account exists but the key is missing', async () => {
+  it('changes nothing when the account exists, its key is missing and OMS has no copy', async () => {
     fs.writeFileSync(
       path.join(accountDir(wallet), 'account.json'),
-      JSON.stringify({ wallet: '0x1' })
+      JSON.stringify({ wallet: '0x1', signer: '0x0000000000000000000000000000000000000002' })
     );
     const owner = fakeOwner();
     const out = await polymarketOwnerStep({ wallet, owner: owner as never, mainAddress: MAIN });
@@ -98,6 +106,36 @@ describe('polymarketOwnerStep', () => {
     expect(out.error).toMatch(/missing/);
     expect(hasLocalKey(wallet)).toBe(false);
     expect(owner.importWallet).not.toHaveBeenCalled();
+    expect(recoverAccount).not.toHaveBeenCalled();
+  });
+
+  it('recovers the recorded key when the account exists, its key is missing and OMS holds it', async () => {
+    const signer = '0x00000000000000000000000000000000000000A1';
+    fs.writeFileSync(
+      path.join(accountDir(wallet), 'account.json'),
+      JSON.stringify({ wallet: '0x1', signer })
+    );
+    const owner = fakeOwner();
+    (await owner.listWallets()).push(
+      {
+        id: 'w-other',
+        address: '0xOTHER',
+        keyOrigin: 'imported',
+        reference: 'polymarket-trading-key'
+      },
+      { id: 'w-old', address: signer, keyOrigin: 'imported', reference: 'polymarket-trading-key' }
+    );
+    owner.walletAddress = '0xdead';
+    const out = await polymarketOwnerStep({ wallet, owner: owner as never, mainAddress: MAIN });
+    expect(recoverAccount).toHaveBeenCalledWith({
+      wallet,
+      owner,
+      mainAddress: MAIN,
+      target: { id: 'w-old', address: signer }
+    });
+    expect(out).toEqual({ backedUp: true, omsWalletId: 'w-new', recovered: {} });
+    expect(owner.importWallet).not.toHaveBeenCalled();
+    expect(owner.walletAddress).toBe(MAIN);
   });
 
   it('selects the main wallet afterwards even when it was left elsewhere', async () => {
@@ -141,12 +179,36 @@ describe('polymarketOwnerStep', () => {
       keyOrigin: 'imported',
       reference: 'polymarket-trading-key'
     });
+    recoverAccount.mockResolvedValue({
+      backedUp: false,
+      omsWalletId: 'w-old',
+      error: 'relayer down'
+    });
     const out = await polymarketOwnerStep({ wallet, owner: owner as never, mainAddress: MAIN });
-    expect(out.backedUp).toBe(false);
-    expect(out.omsWalletId).toBe('w-old');
-    expect(out.error).toMatch(/0xOLD/);
+    expect(recoverAccount).toHaveBeenCalledWith({
+      wallet,
+      owner,
+      mainAddress: MAIN,
+      target: { id: 'w-old', address: '0xOLD' }
+    });
+    expect(out).toEqual({ backedUp: false, omsWalletId: 'w-old', error: 'relayer down' });
     expect(owner.importWallet).not.toHaveBeenCalled();
     expect(hasLocalKey(wallet)).toBe(false);
+  });
+
+  it('reports a recovery that throws as backedUp false and still selects main', async () => {
+    const owner = fakeOwner();
+    (await owner.listWallets()).push({
+      id: 'w-old',
+      address: '0xOLD',
+      keyOrigin: 'imported',
+      reference: 'polymarket-trading-key'
+    });
+    recoverAccount.mockRejectedValue(new Error('boom'));
+    owner.walletAddress = '0xOLD';
+    const out = await polymarketOwnerStep({ wallet, owner: owner as never, mainAddress: MAIN });
+    expect(out).toEqual({ backedUp: false, error: 'boom' });
+    expect(owner.walletAddress).toBe(MAIN);
   });
 
   it('re-backs up when backup.json records a different address than the local key', async () => {

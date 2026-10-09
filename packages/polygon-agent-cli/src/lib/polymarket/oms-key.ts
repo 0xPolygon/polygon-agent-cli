@@ -107,7 +107,9 @@ export async function findTradingKeyWallet(
     const byAddress = imported.find((x) => sameAddress(x.address, address));
     if (byAddress) return { id: byAddress.id, address: byAddress.address };
   }
-  const byRef = imported.find(
+  // listWallets is oldest first. After a recovery OMS holds the swept old key and the new
+  // one under the same reference; the newest is the current trading key.
+  const byRef = imported.findLast(
     (x) => x.reference === TRADING_KEY_REFERENCE && (!address || sameAddress(x.address, address))
   );
   return byRef ? { id: byRef.id, address: byRef.address } : null;
