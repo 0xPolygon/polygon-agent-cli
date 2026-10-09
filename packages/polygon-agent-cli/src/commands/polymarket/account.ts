@@ -13,9 +13,11 @@ import {
   importLegacyKey,
   legacyNegRiskApproved,
   loadAccount,
+  localTradingKeyAddresses,
   planSetup,
   pusdBalance,
   readBackup,
+  recoverOtherKey,
   restoreFromOms,
   setupAccount,
   writeBackup
@@ -25,7 +27,8 @@ import { loadPending } from '../../lib/polymarket/deposits.ts';
 import {
   backupTradingKey,
   findTradingKeyWallet,
-  installTradingKeyReference
+  installTradingKeyReference,
+  TRADING_KEY_REFERENCE
 } from '../../lib/polymarket/oms-key.ts';
 import { assertCanTrade, checkRegion } from '../../lib/polymarket/region.ts';
 import { mapSdkError } from '../../lib/polymarket/sdk.ts';
@@ -183,11 +186,45 @@ async function handleSetup(argv: SetupArgs): Promise<void> {
   }
 }
 
+// Imported Polymarket trading keys in the OMS account that this install doesn't track: other
+// installs' keys, or one from before a reinstall. Read-only (listWallets, no switching), and
+// it never fails status: any error, or no owner session, gives an empty list.
+async function otherTradingKeys(
+  wallet: string
+): Promise<Array<{ address: string; reference: string }>> {
+  try {
+    if (!(await isOwnerMode(wallet))) return [];
+    const w = getOmsClient(wallet).wallet;
+    if (!w.walletAddress) return [];
+    const mine = localTradingKeyAddresses();
+    return (await w.listWallets())
+      .filter(
+        (x) =>
+          x.keyOrigin === 'imported' &&
+          typeof x.reference === 'string' &&
+          x.reference.startsWith(TRADING_KEY_REFERENCE) &&
+          !mine.has(x.address.toLowerCase())
+      )
+      .map((x) => ({ address: x.address, reference: x.reference as string }));
+  } catch {
+    return [];
+  }
+}
+
+async function otherKeysField(wallet: string): Promise<Record<string, unknown>> {
+  const keys = await otherTradingKeys(wallet);
+  return keys.length > 0 ? { otherTradingKeys: keys } : {};
+}
+
 async function handleStatus(argv: { wallet: string }): Promise<void> {
   try {
     const account = loadAccount(argv.wallet);
     if (!account) {
-      ok({ setUp: false, next: 'agent polymarket setup --broadcast' });
+      ok({
+        setUp: false,
+        ...(await otherKeysField(argv.wallet)),
+        next: 'agent polymarket setup --broadcast'
+      });
       return;
     }
     const client = await getTradingClient(argv.wallet);
@@ -208,6 +245,7 @@ async function handleStatus(argv: { wallet: string }): Promise<void> {
         account: { kind: account.kind, wallet: account.wallet },
         signer: hasLocalKey(argv.wallet) ? 'local' : 'oms',
         backup: backupSummary(argv.wallet),
+        ...(await otherKeysField(argv.wallet)),
         pusd: formatUnits6(pusd),
         approvals: approvals.isFullyApproved && legacyApproved === true,
         ...(legacyApproved === null ? { approvalsCheck: 'unavailable' } : {}),
@@ -231,6 +269,76 @@ async function handleStatus(argv: { wallet: string }): Promise<void> {
     } catch (err) {
       throw mapSdkError(err);
     }
+  } catch (err) {
+    fail(err, { stack: true });
+  }
+}
+
+type RecoverArgs = { address: string; wallet: string; broadcast?: boolean; dryRun?: boolean };
+
+// Owner mode only: the explicit escape hatch for a funded trading key this install can't claim
+// automatically. Moves that account's pUSD to the main OMS wallet; touches no local records.
+async function handleRecover(argv: RecoverArgs): Promise<void> {
+  try {
+    const broadcast = resolveBroadcast(argv);
+    const pointer = await loadOmsWalletPointer(argv.wallet);
+    if (pointer?.access === 'session') {
+      throw new CliError({
+        code: 'owner_required',
+        message: 'Recovering another Polymarket key needs an owner sign-in.',
+        hint: 'Run this from an owner install (agent wallet login)'
+      });
+    }
+    const w = pointer ? getOmsClient(argv.wallet).wallet : null;
+    if (!pointer || !w?.walletAddress) {
+      throw new CliError({
+        code: 'not_set_up',
+        message: 'No owner session is live for this wallet.',
+        hint: 'agent wallet login'
+      });
+    }
+    let result: Record<string, unknown>;
+    try {
+      const target = await findTradingKeyWallet(w, { address: argv.address });
+      if (!target) {
+        throw new CliError({
+          code: 'invalid_input',
+          message: 'No Polymarket trading key with that address in your OMS account.'
+        });
+      }
+      if (localTradingKeyAddresses().has(target.address.toLowerCase())) {
+        throw new CliError({
+          code: 'invalid_input',
+          message: "That is this install's own trading key.",
+          hint: 'Use agent polymarket withdraw instead.'
+        });
+      }
+      if (broadcast) assertCanTrade(await checkRegion());
+      const res = await recoverOtherKey({
+        owner: w,
+        target,
+        mainAddress: pointer.walletAddress,
+        broadcast
+      });
+      const { positionsLeft, ...rest } = res;
+      result = broadcast
+        ? { ...rest, positionsLeft, to: pointer.walletAddress }
+        : { dryRun: true, ...rest, to: pointer.walletAddress, positions: positionsLeft };
+    } catch (error) {
+      // Never masks the original error.
+      try {
+        await ensureMainWallet(argv.wallet);
+      } catch {
+        // The original error is the one worth reporting.
+      }
+      throw error;
+    }
+    try {
+      await ensureMainWallet(argv.wallet);
+    } catch (error) {
+      result.mainWalletError = error instanceof Error ? error.message : String(error);
+    }
+    ok(result);
   } catch (err) {
     fail(err, { stack: true });
   }
@@ -277,4 +385,18 @@ export const importKeyCommand: CommandModule = {
     }),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   handler: (argv) => handleImportKey(argv as any)
+};
+
+export const recoverCommand: CommandModule = {
+  command: 'recover <address>',
+  describe:
+    "Move the cash of a Polymarket trading key this install doesn't track back to your OMS wallet (owner mode)",
+  builder: (y) =>
+    withWriteFlags(walletOption(y)).positional('address', {
+      type: 'string',
+      demandOption: true,
+      describe: 'Trading key address, from status.otherTradingKeys'
+    }),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  handler: (argv) => handleRecover(argv as any)
 };

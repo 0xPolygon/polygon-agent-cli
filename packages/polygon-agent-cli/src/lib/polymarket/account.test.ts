@@ -967,3 +967,76 @@ describe('sweepOldKey', () => {
     expect(sdk.withdrawAddress).toHaveBeenCalledWith({ wallet: DEPOSIT_WALLET, recipient: MAIN });
   });
 });
+
+describe('recoverOtherKey', () => {
+  const other = privateKeyToAccount(`0x${'d4'.repeat(32)}`).address;
+  const target = { id: 'w-old', address: other };
+  const run = (broadcast: boolean) =>
+    account.recoverOtherKey({
+      owner: fakeOwner(other) as never,
+      target,
+      mainAddress: MAIN,
+      broadcast
+    });
+
+  it('dry run reads the account and positions without a builder key or a send', async () => {
+    sdk.positions = [
+      { title: 'Q', outcome: 'Yes', conditionId: '0xc', currentSize: '1', currentValue: '2' }
+    ];
+    const out = await run(false);
+    expect(out).toMatchObject({
+      address: other,
+      account: DEPOSIT_WALLET,
+      pusd: '2.5',
+      positionsLeft: [{ title: 'Q', valueUsd: '2' }]
+    });
+    expect(out.withdrawnUsd).toBeUndefined();
+    expect(await signerOf(sdk.created[0])).toBe(other);
+    expect(sdk.created).toHaveLength(1);
+    expect(sdk.createBuilderApiKey).not.toHaveBeenCalled();
+    expect(sdk.clients[0].transferErc20).not.toHaveBeenCalled();
+    expect(account.localTradingKeyAddresses().has(other.toLowerCase())).toBe(false);
+  });
+
+  it('broadcast sweeps to the main wallet only and writes no local records', async () => {
+    const before = snapshot(String(process.env.POLYGON_AGENT_HOME));
+    const out = await run(true);
+    expect(out).toMatchObject({ account: DEPOSIT_WALLET, withdrawnUsd: '2.5', txHash: '0xSWEEP' });
+    expect(sdk.withdrawAddress).toHaveBeenCalledWith({ wallet: DEPOSIT_WALLET, recipient: MAIN });
+    const sweeper = sdk.clients.at(-1)!;
+    expect(sweeper.transferErc20).toHaveBeenCalledTimes(1);
+    expect(sweeper.transferErc20).toHaveBeenCalledWith(
+      expect.objectContaining({ recipientAddress: '0xB2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2' })
+    );
+    expect(snapshot(String(process.env.POLYGON_AGENT_HOME))).toEqual(before);
+  });
+
+  it('sends nothing for a zero balance', async () => {
+    sdk.updateBalanceAllowance.mockResolvedValue({ balance: '0', allowances: {} });
+    const out = await run(true);
+    expect(out).toMatchObject({ pusd: '0', withdrawnUsd: '0' });
+    expect(sdk.createBuilderApiKey).not.toHaveBeenCalled();
+    expect(sdk.withdrawAddress).not.toHaveBeenCalled();
+    expect(sdk.clients.every((c) => c.transferErc20.mock.calls.length === 0)).toBe(true);
+    sdk.updateBalanceAllowance.mockResolvedValue({ balance: '2500000', allowances: {} });
+  });
+
+  it('reports a funded legacy proxy and leaves it alone', async () => {
+    const proxy = await (await import('./gamma.ts')).getPolymarketProxyWalletAddress(other);
+    sdk.chain.balances = { [PUSD_TOKEN.toLowerCase()]: 7_000_000n };
+    const out = await run(false);
+    expect(out.legacyProxy).toEqual({
+      address: proxy,
+      balances: { pusd: '7', usdcE: '0' }
+    });
+    expect(sdk.created.every((c) => c.wallet !== proxy)).toBe(true);
+  });
+
+  it('reports no account when the Deposit Wallet was never deployed', async () => {
+    sdk.createSecureClient.mockRejectedValueOnce(
+      new Error('Deposit Wallet deployment requires a Relayer API Key or Builder API Key.')
+    );
+    expect(await run(true)).toMatchObject({ account: null, pusd: '0', positionsLeft: [] });
+    expect(sdk.withdrawAddress).not.toHaveBeenCalled();
+  });
+});
