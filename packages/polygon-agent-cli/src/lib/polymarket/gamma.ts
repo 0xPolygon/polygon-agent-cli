@@ -33,6 +33,8 @@ export const DATA_URL = process.env.POLYMARKET_DATA_URL || 'https://data-api.pol
 export const USDC_E = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174'; // USDC.e — 6 decimals
 export const PUSD = '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB'; // pUSD — Polymarket USD, 6 decimals
 export const CTF = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045'; // Conditional Token Framework
+// The CLOB still checks this legacy NegRiskAdapter for neg-risk markets; the SDK's approval list omits it.
+export const LEGACY_NEG_RISK_ADAPTER = '0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296';
 export const CTF_EXCHANGE = '0xE111180000d2663C0091e4f400237545B87B996B'; // CLOB V2 exchange
 export const NEG_RISK_CTF_EXCHANGE = '0xe2222d279d744050d28e00520010520000310F59'; // V2 neg-risk exchange
 // Polymarket V2 markets: positions live in PositionManager and trade on ExchangeV3.

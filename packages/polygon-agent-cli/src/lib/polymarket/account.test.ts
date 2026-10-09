@@ -9,18 +9,30 @@ import type * as SdkModule from './sdk.ts';
 process.env.POLYGON_AGENT_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-pm-account-'));
 
 const sdk = vi.hoisted(() => {
+  const clientApprovals = { isFullyApproved: false };
   const created: Array<Record<string, unknown>> = [];
   const client = (wallet: string) => ({
     account: { signer: '0x1111111111111111111111111111111111111111', wallet, walletType: 3 },
     credentials: { key: 'clob-key', secret: 'clob-secret', passphrase: 'clob-pass' },
-    fetchTradingApprovalsState: vi.fn(async () => ({ isFullyApproved: false, missing: {} })),
-    setupTradingApprovals: vi.fn(async () => undefined)
+    fetchTradingApprovalsState: vi.fn(async () => ({
+      isFullyApproved: sdk.clientApprovals.isFullyApproved,
+      missing: {}
+    })),
+    setupTradingApprovals: vi.fn(async () => undefined),
+    approveErc20: vi.fn(async () => ({ wait: async () => ({ transactionHash: '0xa' }) })),
+    approveErc1155ForAll: vi.fn(async () => ({ wait: async () => ({ transactionHash: '0xb' }) }))
   });
+  const chain = { allowance: 0n, approved: false };
   return {
     created,
+    chain,
+    clientApprovals,
+    clients: [] as Array<ReturnType<typeof client>>,
     createSecureClient: vi.fn(async (opts: Record<string, unknown>) => {
       created.push(opts);
-      return client((opts.wallet as string) ?? '0xD0000000000000000000000000000000000000D0');
+      const c = client((opts.wallet as string) ?? '0xD0000000000000000000000000000000000000D0');
+      sdk.clients.push(c);
+      return c;
     }),
     createBuilderApiKey: vi.fn(async () => ({
       key: 'b-key',
@@ -30,6 +42,14 @@ const sdk = vi.hoisted(() => {
     updateBalanceAllowance: vi.fn(async () => ({ balance: '2500000', allowances: {} }))
   };
 });
+
+vi.mock('viem', async (orig) => ({
+  ...(await orig<Record<string, unknown>>()),
+  createPublicClient: () => ({
+    readContract: async ({ functionName }: { functionName: string }) =>
+      functionName === 'allowance' ? sdk.chain.allowance : sdk.chain.approved
+  })
+}));
 
 vi.mock('./sdk.ts', async (orig) => ({
   ...(await orig<typeof SdkModule>()),
@@ -48,6 +68,10 @@ const account = await import('./account.ts');
 
 beforeEach(() => {
   sdk.created.length = 0;
+  sdk.clients.length = 0;
+  sdk.chain.allowance = 0n;
+  sdk.chain.approved = false;
+  sdk.clientApprovals.isFullyApproved = false;
   vi.clearAllMocks();
   fs.rmSync(path.join(String(process.env.POLYGON_AGENT_HOME), 'polymarket'), {
     recursive: true,
@@ -90,6 +114,62 @@ describe('setupAccount', () => {
       expect(text).not.toMatch(/b-secret|clob-secret/);
       expect(text).not.toMatch(/"0x[0-9a-f]{64}"/i);
     }
+  });
+});
+
+describe('legacy NegRiskAdapter approvals', () => {
+  const ADAPTER = '0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296';
+  const MAX = 2n ** 256n - 1n;
+
+  it('sets both on a fresh account and refreshes the CLOB cache', async () => {
+    const res = await account.setupAccount('main');
+    const c = sdk.clients.at(-1)!;
+    expect(res.approvalsSet).toBe(true);
+    expect(c.approveErc20).toHaveBeenCalledWith({
+      amount: 'max',
+      spenderAddress: ADAPTER,
+      tokenAddress: '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB'
+    });
+    expect(c.approveErc1155ForAll).toHaveBeenCalledWith({
+      operatorAddress: ADAPTER,
+      tokenAddress: '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045'
+    });
+    expect(sdk.updateBalanceAllowance).toHaveBeenCalledWith(c, { assetType: 'COLLATERAL' });
+  });
+
+  it('sets nothing on a rerun when both are present', async () => {
+    await account.setupAccount('main');
+    sdk.chain.allowance = MAX;
+    sdk.chain.approved = true;
+    sdk.updateBalanceAllowance.mockClear();
+    sdk.clientApprovals.isFullyApproved = true;
+    const res = await account.setupAccount('main');
+    const c = sdk.clients.at(-1)!;
+    expect(c.approveErc20).not.toHaveBeenCalled();
+    expect(c.approveErc1155ForAll).not.toHaveBeenCalled();
+    expect(res.approvalsSet).toBe(false);
+    expect(sdk.updateBalanceAllowance).not.toHaveBeenCalled();
+  });
+
+  it('sets only what is missing', async () => {
+    await account.setupAccount('main');
+    sdk.chain.allowance = MAX;
+    sdk.chain.approved = false;
+    const c = sdk.clients.at(-1)!;
+    c.approveErc20.mockClear();
+    c.approveErc1155ForAll.mockClear();
+    expect(await account.ensureLegacyNegRiskApprovals(c)).toBe(true);
+    expect(c.approveErc20).not.toHaveBeenCalled();
+    expect(c.approveErc1155ForAll).toHaveBeenCalledTimes(1);
+  });
+
+  it('legacyNegRiskApproved needs both', async () => {
+    await account.setupAccount('main');
+    const c = sdk.clients.at(-1)!;
+    sdk.chain.allowance = MAX;
+    expect(await account.legacyNegRiskApproved(c)).toBe(false);
+    sdk.chain.approved = true;
+    expect(await account.legacyNegRiskApproved(c)).toBe(true);
   });
 });
 

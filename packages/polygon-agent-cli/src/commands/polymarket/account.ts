@@ -6,6 +6,7 @@ import { resolveBroadcast, withWriteFlags } from '../../lib/mode.ts';
 import {
   getTradingClient,
   importLegacyKey,
+  legacyNegRiskApproved,
   loadAccount,
   planSetup,
   pusdBalance,
@@ -23,6 +24,7 @@ const SETUP_STEPS = [
   'deploy Deposit Wallet (gasless)',
   'set trading approvals (gasless)'
 ];
+const LEGACY_STEP = 'approve the legacy NegRiskAdapter for neg-risk markets (gasless)';
 
 type SetupArgs = { wallet: string; broadcast?: boolean; dryRun?: boolean };
 
@@ -33,12 +35,19 @@ async function handleSetup(argv: SetupArgs): Promise<void> {
     assertCanTrade(await checkRegion());
     if (!broadcast) {
       const { exists, account } = planSetup(argv.wallet);
+      // The legacy approvals are only listed when an existing account lacks them.
+      const legacyMissing = exists
+        ? !(await legacyNegRiskApproved(await getTradingClient(argv.wallet)))
+        : true;
       ok({
         dryRun: true,
         exists,
         ...(account ? { account } : {}),
         // Approvals are re-checked on every run; everything before them is done once.
-        steps: exists ? SETUP_STEPS.slice(3) : SETUP_STEPS
+        steps: [
+          ...(exists ? SETUP_STEPS.slice(3) : SETUP_STEPS),
+          ...(legacyMissing ? [LEGACY_STEP] : [])
+        ]
       });
       return;
     }
@@ -63,9 +72,10 @@ async function handleStatus(argv: { wallet: string }): Promise<void> {
     }
     const client = await getTradingClient(argv.wallet);
     try {
-      const [pusd, approvals, region, orders, redeemable] = await Promise.all([
+      const [pusd, approvals, legacyApproved, region, orders, redeemable] = await Promise.all([
         pusdBalance(argv.wallet),
         client.fetchTradingApprovalsState(),
+        legacyNegRiskApproved(client),
         checkRegion(client),
         client.listOpenOrders().firstPage(),
         collectRedeemable(client)
@@ -77,7 +87,7 @@ async function handleStatus(argv: { wallet: string }): Promise<void> {
         setUp: true,
         account: { kind: account.kind, wallet: account.wallet },
         pusd: formatUnits6(pusd),
-        approvals: approvals.isFullyApproved,
+        approvals: approvals.isFullyApproved && legacyApproved,
         region: { country: region.country, blocked: region.blocked, closeOnly: region.closeOnly },
         openOrders: orders.items.length,
         redeemable: {

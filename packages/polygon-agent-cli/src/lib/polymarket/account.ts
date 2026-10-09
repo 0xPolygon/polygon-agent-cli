@@ -11,6 +11,7 @@ import type { CipherData } from '../storage.ts';
 import { CliError } from '../errors.ts';
 import { readJsonFile, writeJsonFile } from '../session/state.ts';
 import { decrypt, encrypt, STORAGE_ROOT } from '../storage.ts';
+import { CTF, LEGACY_NEG_RISK_ADAPTER, PUSD } from './gamma.ts';
 import { loadSdk, mapSdkError } from './sdk.ts';
 
 export type AccountKind = 'deposit-wallet' | 'legacy-proxy';
@@ -114,6 +115,94 @@ async function mintBuilderKey(wallet: string, key: string, signer: string): Prom
   }
 }
 
+// Anything at or above this counts as the "max" approval the SDK grants.
+const MAX_ALLOWANCE_FLOOR = 2n ** 128n;
+
+const ERC20_ALLOWANCE_ABI = [
+  {
+    type: 'function',
+    name: 'allowance',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'owner', type: 'address' },
+      { name: 'spender', type: 'address' }
+    ],
+    outputs: [{ name: '', type: 'uint256' }]
+  }
+] as const;
+const ERC1155_APPROVED_ABI = [
+  {
+    type: 'function',
+    name: 'isApprovedForAll',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'account', type: 'address' },
+      { name: 'operator', type: 'address' }
+    ],
+    outputs: [{ name: '', type: 'bool' }]
+  }
+] as const;
+
+async function readLegacyNegRiskApprovals(
+  client: SecureClient
+): Promise<{ pusd: boolean; ctf: boolean }> {
+  const { createPublicClient, http } = await import('viem');
+  const { polygon } = await import('viem/chains');
+  const chain = createPublicClient({ chain: polygon, transport: http() });
+  const owner = client.account.wallet as `0x${string}`;
+  try {
+    const [allowance, ctf] = await Promise.all([
+      chain.readContract({
+        address: PUSD,
+        abi: ERC20_ALLOWANCE_ABI,
+        functionName: 'allowance',
+        args: [owner, LEGACY_NEG_RISK_ADAPTER]
+      }),
+      chain.readContract({
+        address: CTF,
+        abi: ERC1155_APPROVED_ABI,
+        functionName: 'isApprovedForAll',
+        args: [owner, LEGACY_NEG_RISK_ADAPTER]
+      })
+    ]);
+    return { pusd: allowance >= MAX_ALLOWANCE_FLOOR, ctf };
+  } catch (err) {
+    throw mapSdkError(err);
+  }
+}
+
+// The SDK's approval list omits the legacy NegRiskAdapter, which the CLOB still
+// checks for neg-risk markets. True when both of its approvals are in place.
+export async function legacyNegRiskApproved(client: SecureClient): Promise<boolean> {
+  const have = await readLegacyNegRiskApprovals(client);
+  return have.pusd && have.ctf;
+}
+
+// Sets only the legacy approvals that are missing. Returns whether it set anything.
+export async function ensureLegacyNegRiskApprovals(client: SecureClient): Promise<boolean> {
+  const have = await readLegacyNegRiskApprovals(client);
+  try {
+    if (!have.pusd) {
+      const handle = await client.approveErc20({
+        amount: 'max',
+        spenderAddress: LEGACY_NEG_RISK_ADAPTER,
+        tokenAddress: PUSD
+      });
+      await handle.wait();
+    }
+    if (!have.ctf) {
+      const handle = await client.approveErc1155ForAll({
+        operatorAddress: LEGACY_NEG_RISK_ADAPTER,
+        tokenAddress: CTF
+      });
+      await handle.wait();
+    }
+  } catch (err) {
+    throw mapSdkError(err);
+  }
+  return !have.pusd || !have.ctf;
+}
+
 export async function setupAccount(
   wallet: string
 ): Promise<{ account: StoredAccount; created: boolean; approvalsSet: boolean }> {
@@ -156,6 +245,18 @@ export async function setupAccount(
     }
   } catch (err) {
     throw mapSdkError(err);
+  }
+  if (await ensureLegacyNegRiskApprovals(client)) approvalsSet = true;
+  if (approvalsSet) {
+    // The CLOB caches allowances; ask it to re-read them.
+    const { root, actions } = await loadSdk();
+    try {
+      await actions.updateBalanceAllowance(client, {
+        assetType: root.AssetType.COLLATERAL
+      } as never);
+    } catch (err) {
+      throw mapSdkError(err);
+    }
   }
   return { account, created: !existing, approvalsSet };
 }
