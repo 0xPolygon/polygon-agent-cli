@@ -10,7 +10,7 @@ description: >-
 
 **For the assistant.** Follow these steps in order. Each one is safe to re-run. Tell the user what you're doing in plain words as you go, and never paste raw JSON to them.
 
-**What this sets up (tell the user in a sentence or two):** a Polygon OMS wallet that you, their assistant, can use within an allowance they approve by email code. You can check prices, watch them, buy, sell, swap and bridge tokens, and pay for x402 services. Anything beyond the allowance needs a new code from them. The wallet stays theirs. Each code signs the CLI in as them for a moment, just long enough to make that one change (approving an allowance, a withdrawal…), then signs out again. Only that limited key is kept, never their sign-in.
+**What this sets up (tell the user in a sentence or two):** a Polygon OMS wallet that you, their assistant, can use within an allowance they approve by email code. You can check prices, watch them, buy, sell, swap and bridge tokens, bet on Polymarket prediction markets, and pay for x402 services. Anything beyond the allowance needs a new code from them. The wallet stays theirs. Each code signs the CLI in as them for a moment, just long enough to make that one change (approving an allowance, a withdrawal…), then signs out again. Only that limited key is kept, never their sign-in.
 
 ## 1. Find the workspace
 
@@ -160,6 +160,7 @@ Tell the user what they can ask for now, in plain words. For example:
 - "What's ETH at?" or "Tell me if BTC drops below $90k."
 - "Buy $50 of ETH", or "Sell half my ETH if it goes over $4,000."
 - "Move 20 USDC to Base."
+- "What are the odds on <event>?" or "Put $5 on <something> on Polymarket."
 - "Search the web with a paid service" (x402).
 
 Re-run this file any time: if the wrapper is missing (the workspace was reset), it installs again; otherwise it refreshes the skill, checks the connection and moves on.

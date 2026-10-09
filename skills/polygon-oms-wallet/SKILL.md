@@ -129,7 +129,11 @@ Some features need the owner's full sign-in, which this install never keeps, so 
 
 ### Polymarket
 
-Polymarket works in session mode. `agent polymarket setup` and `deposit` run with the allowance: a deposit is a plain USDC transfer, so it counts against the allowance. The Polymarket wallet is controlled by this install's own trading key, so trades and withdrawals back to the OMS wallet are not limited by the allowance. See the Polymarket skill.
+When the user asks about Polymarket (prices, a bet, positions, winnings), first run `"$POLYGON_AGENT" skills show polygon-polymarket` and follow it. That command prints the skill already pointed at this install's CLI.
+
+Polymarket works in session mode. `agent polymarket setup` and `deposit` run with the allowance: a deposit is a plain USDC transfer, so it counts against the allowance. The Polymarket wallet is controlled by this install's own trading key, so trades and withdrawals back to the OMS wallet are not limited by the allowance.
+
+First time: `polymarket status`, then `setup --broadcast` (no code needed, no POL), then `deposit <usd> --broadcast` (min $2, counts against the allowance), then trade.
 
 ## Rules
 

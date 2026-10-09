@@ -258,7 +258,7 @@ const {
 const { loadPending, savePending } = await import('../lib/owner/pending.ts');
 const { readApprovedPlan } = await import('../lib/session/state.ts');
 const { parkedRacSlots, readRacRecord } = await import('../lib/session/rac.ts');
-const { loadOmsWalletPointer } = await import('../lib/storage.ts');
+const { loadOmsWalletPointer, STORAGE_ROOT } = await import('../lib/storage.ts');
 
 let wallet: string;
 let counter = 0;
@@ -446,6 +446,36 @@ describe('connect', () => {
       handleEmailLogin({ name: wallet, email: 'owner@example.com', chains: 'polygon' })
     ).rejects.toThrow('CLI exited');
     expect(lastJson('error')).toMatchObject({ code: 'already_connected' });
+  });
+});
+
+describe('status and Polymarket', () => {
+  it('shows the Polymarket account of a connected wallet, without secrets', async () => {
+    await confirm(await connectStep1());
+    const dir = path.join(STORAGE_ROOT, 'polymarket', wallet);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'account.json'),
+      JSON.stringify({
+        kind: 'deposit-wallet',
+        signer: '0x1111111111111111111111111111111111111111',
+        wallet: '0x2222222222222222222222222222222222222222',
+        createdAt: '2026-10-01T00:00:00.000Z'
+      })
+    );
+    const report = await sessionReport({ wallet, withVersion: false });
+    expect(report.polymarket).toEqual({
+      wallet: '0x2222222222222222222222222222222222222222',
+      kind: 'deposit-wallet',
+      note: 'Money moved to Polymarket is controlled by this install, not by the allowance. Check it with: polymarket status'
+    });
+    expect(JSON.stringify(report)).not.toContain('0x1111111111111111111111111111111111111111');
+  });
+
+  it('omits the field when there is no Polymarket account', async () => {
+    await confirm(await connectStep1());
+    const report = await sessionReport({ wallet, withVersion: false });
+    expect(report).not.toHaveProperty('polymarket');
   });
 });
 
