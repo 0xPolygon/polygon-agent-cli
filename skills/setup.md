@@ -89,7 +89,7 @@ If it fails, stop and tell the user why. From here on, run `npm` and `node` with
 ```
 
 - `--skills-dir` is the skills folder from step 1. Leave it out if your platform has none.
-- `--name` is what the wallet owner sees in their list of installs with access, like "OpenClaw on laptop". It defaults to the host name.
+- `--name` is what the wallet owner sees in their list of installs with access, like "OpenClaw on laptop". It defaults to the host name. Reuse the same name when you reinstall, because the Polymarket key backup is labelled with it, and recovery finds the key by that label.
 - `workspace init` writes the wrapper `$ROOT/bin/polygon-agent` (the only command you'll use from now on), the state folder and a `.gitignore`, so workspace backups never pick it up. It also installs the `polygon-oms-wallet` skill, already pointed at the wrapper.
 
 Go on to step 5.

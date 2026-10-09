@@ -135,6 +135,8 @@ Polymarket works in session mode. `agent polymarket setup` and `deposit` run wit
 
 First time: `polymarket status`, then `setup --broadcast` (no code needed, no POL), then `deposit <usd> --broadcast` (min $2, counts against the allowance), then trade.
 
+Connecting backs up the Polymarket trading key to the user's OMS account as one extra wallet labelled `polymarket-trading-key:<install name>`. The user will see it in their account list. That is expected. If this machine is wiped, nothing is lost: connecting again with the same install `--name` recovers it. Run `polymarket status` to see `backup` and `signer`. The polygon-polymarket skill has the details.
+
 ## Rules
 
 - Ask for the user's email; never guess it.
