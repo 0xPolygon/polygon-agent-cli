@@ -51,21 +51,35 @@ function backupSummary(wallet: string): Record<string, unknown> {
 }
 
 // Runs after the account exists, so a failure here is safe to retry: backup is idempotent.
+// A failed backup never fails setup, and a failed main-wallet restore never hides the
+// backup outcome: both are reported in the result.
 async function backUpInOwnerMode(wallet: string): Promise<Record<string, unknown>> {
   const w = getOmsClient(wallet).wallet;
   if (!w.walletAddress) return NOT_SIGNED_IN;
-  const key = await ensureTradingKey(wallet);
+  const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+  let result: Record<string, unknown>;
   try {
+    const key = await ensureTradingKey(wallet);
     const res = await backupTradingKey(w, key);
     writeBackup(wallet, {
       omsWalletId: res.omsWalletId,
       address: res.address,
       at: new Date().toISOString()
     });
-    return { omsWalletId: res.omsWalletId, imported: res.imported };
-  } finally {
-    await ensureMainWallet(wallet);
+    result = { omsWalletId: res.omsWalletId, imported: res.imported };
+  } catch (error) {
+    result = {
+      backedUp: false,
+      error: errorText(error),
+      hint: 'Run polymarket setup --broadcast again to retry the backup.'
+    };
   }
+  try {
+    await ensureMainWallet(wallet);
+  } catch (error) {
+    result = { ...result, mainWalletError: errorText(error) };
+  }
+  return result;
 }
 
 async function handleSetup(argv: SetupArgs): Promise<void> {

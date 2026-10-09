@@ -17,6 +17,7 @@ import type { OwnerContext } from './requests.ts';
 
 import { CliError, mapOmsError } from '../errors.ts';
 import { makeFeeSelector } from '../oms-tx.ts';
+import { polymarketOwnerStep } from '../polymarket/owner-step.ts';
 import { resetLedger } from '../session/ledger.ts';
 import { planSummary, toGrants } from '../session/plan.ts';
 import { racClient, readRacRecord, retireParkedRacs, retireRac } from '../session/rac.ts';
@@ -607,5 +608,18 @@ export async function runOwnerAction(params: {
   }).catch((error: unknown) => [
     `retry failed: ${error instanceof Error ? error.message : String(error)}`
   ]);
-  return pending.length > 0 ? { ...result, keysPendingRevocation: pending } : result;
+  // Same sign-in, no extra code: back up the Polymarket trading key. Never throws.
+  const polymarket = await polymarketOwnerStep({
+    wallet: params.wallet,
+    owner: params.context.owner.wallet,
+    mainAddress: params.context.walletAddress
+  }).catch((error: unknown) => ({
+    backedUp: false,
+    error: error instanceof Error ? error.message : String(error)
+  }));
+  return {
+    ...result,
+    ...(pending.length > 0 ? { keysPendingRevocation: pending } : {}),
+    polymarket
+  };
 }

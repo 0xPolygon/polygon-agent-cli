@@ -234,6 +234,44 @@ describe('setup', () => {
     expect(readBackup('main')?.omsWalletId).toBe('w-imported');
   });
 
+  it('a failed backup does not fail setup and says how to retry', async () => {
+    m.backupTradingKey.mockRejectedValue(new Error('oms down'));
+    const out = await run(['setup', '--broadcast']);
+    expect(out).toMatchObject({
+      ok: true,
+      created: true,
+      backup: {
+        backedUp: false,
+        error: 'oms down',
+        hint: 'Run polymarket setup --broadcast again to retry the backup.'
+      }
+    });
+    expect(readBackup('main')).toBeNull();
+    expect(m.ensureMainWallet).toHaveBeenCalledWith('main');
+  });
+
+  it('a failing main-wallet restore does not mask the backup error', async () => {
+    m.backupTradingKey.mockRejectedValue(new Error('oms down'));
+    m.ensureMainWallet.mockRejectedValue(new Error('no main wallet'));
+    const out = await run(['setup', '--broadcast']);
+    expect(out.ok).toBe(true);
+    expect(out.backup).toMatchObject({
+      backedUp: false,
+      error: 'oms down',
+      mainWalletError: 'no main wallet'
+    });
+  });
+
+  it('a failing main-wallet restore after a good backup is reported alongside it', async () => {
+    m.ensureMainWallet.mockRejectedValue(new Error('no main wallet'));
+    const out = await run(['setup', '--broadcast']);
+    expect(out.backup).toEqual({
+      omsWalletId: 'w-imported',
+      imported: true,
+      mainWalletError: 'no main wallet'
+    });
+  });
+
   it('still succeeds without a live owner session', async () => {
     m.omsWallet.walletAddress = undefined;
     const out = await run(['setup', '--broadcast']);
