@@ -30,6 +30,8 @@ Region rules come from Polymarket at run time: its geoblock endpoint decides whe
 
 `status` also shows `approvals`, `openOrders`, and `redeemable.valueUsd`. If `redeemable.truncated` is `true`, more than 2000 rows were redeemable. Redeem, then run `status` again.
 
+If `status.otherTradingKeys` is non-empty, those are other installs' keys or an old key from before a reinstall. `polymarket recover <address> --broadcast` (owner mode only) moves that account's cash back to the OMS wallet. Run it without `--broadcast` first to see the balance and open positions.
+
 `setup` needs no key import and no POL. It creates a trading key, deploys the Polymarket wallet, and sets approvals through Polymarket's relayer. It is safe to rerun: it only redoes the approvals check once the account exists.
 
 ## How money moves

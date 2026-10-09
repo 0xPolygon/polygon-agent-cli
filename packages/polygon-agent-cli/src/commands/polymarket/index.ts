@@ -1,6 +1,6 @@
 import type { CommandModule } from 'yargs';
 
-import { importKeyCommand, setupCommand, statusCommand } from './account.ts';
+import { importKeyCommand, recoverCommand, setupCommand, statusCommand } from './account.ts';
 import {
   bookCommand,
   eventCommand,
@@ -31,6 +31,7 @@ const visibleCommands: CommandModule[] = [
   setupCommand,
   statusCommand,
   importKeyCommand,
+  recoverCommand,
   depositCommand,
   withdrawCommand,
   marketsCommand,

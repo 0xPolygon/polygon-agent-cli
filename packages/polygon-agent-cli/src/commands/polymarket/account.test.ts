@@ -25,8 +25,13 @@ const m = vi.hoisted(() => ({
   ensureMainWallet: vi.fn(),
   findTradingKeyWallet: vi.fn(),
   restoreFromOms: vi.fn(),
+  recoverOtherKey: vi.fn(),
+  checkRegion: vi.fn(),
   localKey: false,
-  omsWallet: { walletAddress: '0xC2F4cAfe89AE7e1bcB86dd3f141C0a3adCEB6C17' as string | undefined }
+  omsWallet: {
+    walletAddress: '0xC2F4cAfe89AE7e1bcB86dd3f141C0a3adCEB6C17' as string | undefined,
+    listWallets: vi.fn()
+  }
 }));
 
 // A Paginated stand-in: an async iterable of pages.
@@ -63,7 +68,7 @@ const client = {
 
 vi.mock('../../lib/polymarket/region.ts', async (o) => ({
   ...(await o<Record<string, unknown>>()),
-  checkRegion: async () => ({ blocked: false, closeOnly: false, country: 'PT', region: null })
+  checkRegion: m.checkRegion
 }));
 vi.mock('../../lib/polymarket/account.ts', async (o) => {
   const { CliError } = await import('../../lib/errors.ts');
@@ -82,6 +87,7 @@ vi.mock('../../lib/polymarket/account.ts', async (o) => {
     ensureTradingKey: m.ensureTradingKey,
     hasLocalKey: () => m.localKey,
     restoreFromOms: m.restoreFromOms,
+    recoverOtherKey: m.recoverOtherKey,
     getTradingClient: async () => client
   };
 });
@@ -122,6 +128,7 @@ async function run(argv: string[]) {
     .command(cmds.setupCommand)
     .command(cmds.statusCommand)
     .command(cmds.importKeyCommand)
+    .command(cmds.recoverCommand)
     .command(portfolio.positionsCommand)
     .command(portfolio.redeemCommand)
     .command(portfolio.activityCommand)
@@ -149,6 +156,13 @@ beforeEach(async () => {
   m.account = null;
   m.localKey = false;
   m.findTradingKeyWallet.mockResolvedValue(null);
+  m.checkRegion.mockResolvedValue({
+    blocked: false,
+    closeOnly: false,
+    country: 'PT',
+    region: null
+  });
+  m.omsWallet.listWallets.mockResolvedValue([]);
   fs.rmSync(path.join(String(process.env.POLYGON_AGENT_HOME), 'polymarket'), {
     recursive: true,
     force: true
@@ -643,5 +657,173 @@ describe('activity and pnl', () => {
       unrealized: '4'
     });
     expect(out.points).toHaveLength(2);
+  });
+});
+
+const THIS_KEY = '0x00000000000000000000000000000000000000A1';
+const OTHER_KEY = '0x00000000000000000000000000000000000000B2';
+const sessionPointer = () =>
+  saveOmsWalletPointer('main', {
+    walletAddress: '0xC2F4cAfe89AE7e1bcB86dd3f141C0a3adCEB6C17',
+    loginMethod: 'google',
+    createdAt: 'x',
+    access: 'session'
+  } as never);
+
+describe('status otherTradingKeys', () => {
+  const imported = (address: string, reference: string) => ({
+    id: `id-${address}`,
+    address,
+    keyOrigin: 'imported',
+    reference
+  });
+
+  it("lists another install's key and omits this install's", async () => {
+    m.account = ACCOUNT;
+    writeBackup('main', { ...BACKUP, address: THIS_KEY });
+    m.omsWallet.listWallets.mockResolvedValue([
+      { id: 'main', address: WALLET, keyOrigin: 'enclave' },
+      imported(THIS_KEY.toLowerCase(), 'polymarket-trading-key:laptop'),
+      imported(OTHER_KEY, 'polymarket-trading-key:vm'),
+      imported('0x00000000000000000000000000000000000000C3', 'something-else')
+    ]);
+    const out = await run(['status']);
+    expect(out.otherTradingKeys).toEqual([
+      { address: OTHER_KEY, reference: 'polymarket-trading-key:vm' }
+    ]);
+  });
+
+  it('also lists keys when no account exists locally', async () => {
+    m.omsWallet.listWallets.mockResolvedValue([imported(OTHER_KEY, 'polymarket-trading-key:vm')]);
+    const out = await run(['status']);
+    expect(out).toMatchObject({ setUp: false, otherTradingKeys: [{ address: OTHER_KEY }] });
+  });
+
+  it('omits the field when empty, in session mode, and when listing fails', async () => {
+    m.account = ACCOUNT;
+    expect((await run(['status'])).otherTradingKeys).toBeUndefined();
+    m.omsWallet.listWallets.mockRejectedValue(new Error('oms down'));
+    const failed = await run(['status']);
+    expect(failed).toMatchObject({ ok: true, setUp: true });
+    expect(failed.otherTradingKeys).toBeUndefined();
+    m.omsWallet.listWallets.mockResolvedValue([imported(OTHER_KEY, 'polymarket-trading-key:vm')]);
+    await sessionPointer();
+    m.omsWallet.listWallets.mockClear();
+    expect((await run(['status'])).otherTradingKeys).toBeUndefined();
+    expect(m.omsWallet.listWallets).not.toHaveBeenCalled();
+  });
+});
+
+describe('recover', () => {
+  const MAIN_ADDR = '0xC2F4cAfe89AE7e1bcB86dd3f141C0a3adCEB6C17';
+  const found = { id: 'w-other', address: OTHER_KEY };
+
+  beforeEach(() => {
+    m.findTradingKeyWallet.mockResolvedValue(found);
+    m.recoverOtherKey.mockResolvedValue({
+      address: OTHER_KEY,
+      account: '0xD1',
+      pusd: '3',
+      positionsLeft: [{ title: 'Q' }]
+    });
+  });
+
+  it('refuses session mode', async () => {
+    await sessionPointer();
+    const out = await run(['recover', OTHER_KEY]);
+    expect(out).toMatchObject({ ok: false, code: 'owner_required' });
+    expect(JSON.stringify(out)).toContain('owner install');
+    expect(m.recoverOtherKey).not.toHaveBeenCalled();
+  });
+
+  it('needs a live owner session', async () => {
+    m.omsWallet.walletAddress = undefined;
+    const out = await run(['recover', OTHER_KEY]);
+    expect(out).toMatchObject({ ok: false, code: 'not_set_up' });
+    expect(JSON.stringify(out)).toContain('agent wallet login');
+    expect(m.recoverOtherKey).not.toHaveBeenCalled();
+  });
+
+  it('rejects an address OMS does not hold as a trading key', async () => {
+    m.findTradingKeyWallet.mockResolvedValue(null);
+    const out = await run(['recover', OTHER_KEY, '--broadcast']);
+    expect(out).toMatchObject({ ok: false, code: 'invalid_input' });
+    expect(JSON.stringify(out)).toContain('No Polymarket trading key with that address');
+    expect(m.recoverOtherKey).not.toHaveBeenCalled();
+    expect(m.ensureMainWallet).toHaveBeenCalledWith('main');
+  });
+
+  it("refuses this install's current key", async () => {
+    m.findTradingKeyWallet.mockResolvedValue({ id: 'w-this', address: THIS_KEY });
+    writeBackup('main', { ...BACKUP, address: THIS_KEY.toLowerCase() });
+    const out = await run(['recover', THIS_KEY, '--broadcast']);
+    expect(out).toMatchObject({ ok: false, code: 'invalid_input' });
+    expect(JSON.stringify(out)).toContain('withdraw');
+    expect(m.recoverOtherKey).not.toHaveBeenCalled();
+  });
+
+  it('dry run shows the plan and sends nothing', async () => {
+    const out = await run(['recover', OTHER_KEY]);
+    expect(out).toEqual({
+      ok: true,
+      dryRun: true,
+      address: OTHER_KEY,
+      account: '0xD1',
+      pusd: '3',
+      to: MAIN_ADDR,
+      positions: [{ title: 'Q' }]
+    });
+    expect(m.recoverOtherKey).toHaveBeenCalledWith(
+      expect.objectContaining({ broadcast: false, mainAddress: MAIN_ADDR, target: found })
+    );
+    expect(m.checkRegion).not.toHaveBeenCalled();
+    expect(m.ensureMainWallet).toHaveBeenCalledWith('main');
+  });
+
+  it('broadcast sweeps to the main wallet only, checks the region, and ends on main', async () => {
+    m.recoverOtherKey.mockResolvedValue({
+      address: OTHER_KEY,
+      account: '0xD1',
+      pusd: '3',
+      withdrawnUsd: '3',
+      txHash: '0xT',
+      positionsLeft: []
+    });
+    const out = await run(['recover', OTHER_KEY, '--broadcast']);
+    expect(out).toMatchObject({
+      ok: true,
+      address: OTHER_KEY,
+      account: '0xD1',
+      withdrawnUsd: '3',
+      txHash: '0xT',
+      positionsLeft: []
+    });
+    expect(m.checkRegion).toHaveBeenCalled();
+    expect(m.recoverOtherKey).toHaveBeenCalledWith(
+      expect.objectContaining({ broadcast: true, mainAddress: MAIN_ADDR })
+    );
+    expect(m.ensureMainWallet).toHaveBeenCalledWith('main');
+  });
+
+  it('does not send from a blocked region', async () => {
+    m.checkRegion.mockResolvedValue({
+      blocked: true,
+      closeOnly: true,
+      country: 'US',
+      region: null
+    });
+    const out = await run(['recover', OTHER_KEY, '--broadcast']);
+    expect(out).toMatchObject({ ok: false });
+    expect(m.recoverOtherKey).not.toHaveBeenCalled();
+    expect(m.ensureMainWallet).toHaveBeenCalledWith('main');
+  });
+
+  it('ends on main without masking the original error', async () => {
+    m.recoverOtherKey.mockRejectedValue(new Error('relayer down'));
+    m.ensureMainWallet.mockRejectedValue(new Error('no main wallet'));
+    const out = await run(['recover', OTHER_KEY, '--broadcast']);
+    expect(out).toMatchObject({ ok: false });
+    expect(JSON.stringify(out)).toContain('relayer down');
+    expect(m.ensureMainWallet).toHaveBeenCalledWith('main');
   });
 });

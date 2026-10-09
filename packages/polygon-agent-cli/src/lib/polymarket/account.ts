@@ -701,6 +701,96 @@ export async function sweepOldKey(p: {
   return { withdrawnUsd: formatUnits6(res.amount), txHash: res.txHash ?? null };
 }
 
+// The first page of OPEN positions, summarized. A failed read is reported, never thrown:
+// callers run this after money has moved or in a read-only plan.
+async function openPositions(client: SecureClient): Promise<Record<string, unknown>> {
+  try {
+    const page = await client.listPositions({ status: 'OPEN' }).firstPage();
+    return {
+      positionsLeft: (page.items as Array<Record<string, unknown>>).map((x) => ({
+        title: x.title,
+        outcome: x.outcome,
+        conditionId: x.conditionId,
+        shares: x.currentSize,
+        valueUsd: x.currentValue
+      })),
+      ...(page.hasMore ? { positionsTruncated: true } : {})
+    };
+  } catch (error) {
+    return { positionsLeft: null, positionsError: errorText(mapSdkError(error)) };
+  }
+}
+
+export type OtherKeyRecovery = {
+  address: string;
+  account: string | null;
+  pusd: string;
+  legacyProxy?: { address: string; balances: { pusd: string; usdcE: string } };
+  positionsLeft: unknown;
+  positionsTruncated?: true;
+  positionsError?: string;
+  withdrawnUsd?: string;
+  txHash?: string | null;
+};
+
+// Explicit owner-mode recovery of a Polymarket trading key this install doesn't track
+// (another install's, or one from before a reinstall). Reads its Deposit Wallet through OMS;
+// with `broadcast` it also sweeps the pUSD to `mainAddress`. Writes nothing to disk, never
+// imports or deletes a key, and never touches a legacy proxy (it is only reported). A builder
+// key is minted only when there is something to send.
+export async function recoverOtherKey(p: {
+  owner: OmsWalletLike;
+  target: { id: string; address: string };
+  mainAddress: string;
+  broadcast: boolean;
+}): Promise<OtherKeyRecovery> {
+  const { target } = p;
+  const signer = omsSigner(p.owner, { walletId: target.id, address: target.address });
+  const acct: KeyAccount = { kind: 'deposit-wallet' };
+  const legacy = await legacyProxyBalances(target.address);
+  const base = {
+    address: target.address,
+    ...(legacy.funded
+      ? { legacyProxy: { address: legacy.address, balances: legacy.balances } }
+      : {})
+  };
+  let probe: SecureClient;
+  try {
+    probe = await createClient({ signer, acct, builder: null, clob: null });
+  } catch (err) {
+    if (!NOT_DEPLOYED.test(errorText(err))) throw err;
+    return { ...base, account: null, pusd: '0', positionsLeft: [] };
+  }
+  const balance = await pusdBalanceOf(probe);
+  const plan = { ...base, account: probe.account.wallet as string, pusd: formatUnits6(balance) };
+  if (!p.broadcast || balance === 0n) {
+    return {
+      ...plan,
+      ...(await openPositions(probe)),
+      ...(p.broadcast ? { withdrawnUsd: '0' } : {})
+    } as OtherKeyRecovery;
+  }
+  const builder = await mintBuilderCreds(signer, target.address);
+  const client = await createClient({
+    signer,
+    acct,
+    builder,
+    clob: (probe.credentials as Creds | undefined) ?? null
+  });
+  const res = await withdrawAll({
+    client,
+    account: plan.account,
+    recipient: p.mainAddress,
+    broadcast: true
+  });
+  return {
+    ...plan,
+    withdrawnUsd: formatUnits6(res.amount),
+    txHash: res.txHash ?? null,
+    ...(await openPositions(client))
+  } as OtherKeyRecovery;
+}
+
 // An earlier deposit to the old account that the bridge hasn't finished. Entries beyond
 // the recorded baseline belong to it; COMPLETED or FAILED means it is over.
 async function unsettledDeposit(wallet: string): Promise<PendingDeposit | null> {
@@ -778,20 +868,7 @@ export async function recoverAccount(p: {
   const previousAccount = client.account.wallet as string;
   const recovered: Record<string, unknown> = { withdrawnUsd, txHash, previousAccount };
   // The money has moved; from here a failure is reported alongside what was recovered.
-  try {
-    const page = await client.listPositions({ status: 'OPEN' }).firstPage();
-    recovered.positionsLeft = (page.items as Array<Record<string, unknown>>).map((x) => ({
-      title: x.title,
-      outcome: x.outcome,
-      conditionId: x.conditionId,
-      shares: x.currentSize,
-      valueUsd: x.currentValue
-    }));
-    if (page.hasMore) recovered.positionsTruncated = true;
-  } catch (error) {
-    recovered.positionsLeft = null;
-    recovered.positionsError = errorText(mapSdkError(error));
-  }
+  Object.assign(recovered, await openPositions(client));
 
   try {
     const pending = await unsettledDeposit(wallet);
