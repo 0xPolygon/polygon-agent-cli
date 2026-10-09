@@ -181,6 +181,8 @@ agent polymarket pnl [--interval 1d|1w|1m|max]            # valueUsd, realized, 
 | `market_not_accepting_orders` | The market is closed or paused. Pick another market. |
 | `offset_removed` | `--offset` no longer exists. Use `--cursor` with the previous `nextCursor`. |
 
+An order rejected with "allowance ... spender 0xd91E..." (a neg-risk market) means the legacy NegRiskAdapter approval is missing. Run `agent polymarket setup --wallet <name> --broadcast` again.
+
 General codes you will also see: `invalid_input` (bad amount or flags, including more than 6 decimals), `insufficient_balance` (OMS wallet short of USDC, or of a fee token for the relayer), `wallet_busy` (another deposit for this wallet is still running), `upstream_error`, `upstream_unavailable`, `rate_limited`, and the session codes (`allowance_exhausted`, `session_expired`, `not_connected`). Rate limits and upstream outages are safe to retry after a short wait, except for `deposit` (see the rules).
 
 ## Rules for agents

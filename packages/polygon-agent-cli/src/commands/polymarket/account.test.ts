@@ -14,6 +14,7 @@ const m = vi.hoisted(() => ({
   planSetup: vi.fn(),
   setupAccount: vi.fn(),
   pusdBalance: vi.fn(),
+  legacyApproved: vi.fn(),
   redeemPositions: vi.fn(),
   listPositions: vi.fn(),
   getPositions: vi.fn(),
@@ -69,6 +70,7 @@ vi.mock('../../lib/polymarket/account.ts', async (o) => {
       return m.account;
     },
     pusdBalance: m.pusdBalance,
+    legacyNegRiskApproved: m.legacyApproved,
     importLegacyKey: m.importLegacyKey,
     getTradingClient: async () => client
   };
@@ -121,6 +123,7 @@ beforeEach(async () => {
   m.planSetup.mockImplementation(() => ({ exists: !!m.account, account: m.account }));
   m.setupAccount.mockResolvedValue({ account: ACCOUNT, created: true, approvalsSet: true });
   m.pusdBalance.mockResolvedValue(2_500_000n);
+  m.legacyApproved.mockResolvedValue(true);
   m.loadPolymarketKey.mockRejectedValue(new Error('none'));
   m.getPositions.mockResolvedValue({ positions: [{ a: 1 }], nextCursor: 'p2' });
   m.listPositions.mockReturnValue(pages([{ conditionId: COND, title: 'Q', currentValue: '1.2' }]));
@@ -136,7 +139,7 @@ describe('setup', () => {
   it('dry run lists four steps and does not set up', async () => {
     const out = await run(['setup', '--dry-run']);
     expect(out).toMatchObject({ ok: true, dryRun: true, exists: false });
-    expect(out.steps).toHaveLength(4);
+    expect(out.steps).toHaveLength(5);
     expect(m.setupAccount).not.toHaveBeenCalled();
   });
 
@@ -145,6 +148,16 @@ describe('setup', () => {
     const out = await run(['setup', '--dry-run']);
     expect(out).toMatchObject({ exists: true, account: ACCOUNT });
     expect(out.steps).toEqual(['set trading approvals (gasless)']);
+  });
+
+  it('dry run for an existing account lists the legacy step only when it is missing', async () => {
+    m.account = ACCOUNT;
+    m.legacyApproved.mockResolvedValue(false);
+    const out = await run(['setup', '--dry-run']);
+    expect(out.steps).toEqual([
+      'set trading approvals (gasless)',
+      'approve the legacy NegRiskAdapter for neg-risk markets (gasless)'
+    ]);
   });
 
   it('broadcast sets up once', async () => {
@@ -183,6 +196,12 @@ describe('status', () => {
       redeemable: { count: 1, valueUsd: '1.2' }
     });
     expect(out.pendingDeposit).toBeUndefined();
+  });
+
+  it('reports approvals false when a legacy approval is missing', async () => {
+    m.account = ACCOUNT;
+    m.legacyApproved.mockResolvedValue(false);
+    expect((await run(['status'])).approvals).toBe(false);
   });
 });
 
