@@ -83,12 +83,12 @@ function serialized<T>(w: OmsWalletLike, fn: () => Promise<T>): Promise<T> {
 }
 
 // Put the session back on the wallet it was on, or on the main wallet when that wallet
-// cannot be resolved. A session is never left on an imported key.
+// cannot be resolved or was itself an imported key. A session is never left on an imported key.
 async function restoreWallet(
   w: OmsWalletLike,
-  previous: { id: string; address: string } | undefined
+  previous: { id: string; address: string; keyOrigin?: string } | undefined
 ): Promise<void> {
-  if (!previous) {
+  if (!previous || previous.keyOrigin === 'imported') {
     await selectMainWallet(w, {});
     return;
   }
