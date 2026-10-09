@@ -151,6 +151,12 @@ describe('findTradingKeyWallet', () => {
     expect(await findTradingKeyWallet(f.w)).toEqual({ id: 'imp-tk', address: TK.address });
   });
 
+  it('picks the newest trading key by reference when OMS holds several', async () => {
+    const NEWER = mkAccount('imp-tk2', 'imported', TRADING_KEY_REFERENCE);
+    const f = fakeOms([MAIN, TK, IMPORTED, NEWER], 'main');
+    expect(await findTradingKeyWallet(f.w)).toEqual({ id: 'imp-tk2', address: NEWER.address });
+  });
+
   it('does not match by reference when the address differs', async () => {
     const f = fakeOms([MAIN, TK], 'main');
     expect(await findTradingKeyWallet(f.w, IMPORTED.address)).toBeNull();
