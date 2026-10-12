@@ -84,6 +84,17 @@ export function makeFeeSelector(
 }
 
 // A persisted session can be left on an imported wallet (the Polymarket trading key), for
+// `--owner` only for an owner-mode wallet whose session expired; anything else
+// (no wallet, session mode, missing session) reconnects with plain `wallet login`.
+export async function sessionLoginMessage(walletName: string, code: string): Promise<string> {
+  const pointer = await loadOmsWalletPointer(walletName).catch(() => undefined);
+  const owner = !!pointer && pointer.access !== 'session' && code === 'OMS_SESSION_EXPIRED';
+  return (
+    `Session expired or missing for wallet '${walletName}'. ` +
+    `Run: agent wallet login${owner ? ' --owner' : ''}`
+  );
+}
+
 // example by a crashed process. Before sending, put it back on the wallet the pointer names.
 export async function ensureMainWallet(walletName: string): Promise<void> {
   const pointer = await loadOmsWalletPointer(walletName);
@@ -177,10 +188,7 @@ export async function runOmsTx(params: OmsTxParams): Promise<OmsTxResult> {
         isOMSWalletError(e) &&
         (e.code === 'OMS_SESSION_EXPIRED' || e.code === 'OMS_SESSION_MISSING')
       ) {
-        throw new Error(
-          `Session expired or missing for wallet '${walletName}'. ` +
-            `Run: agent wallet login --owner`
-        );
+        throw new Error(await sessionLoginMessage(walletName, e.code));
       }
       throw e;
     }
