@@ -1,0 +1,195 @@
+/* OMS design system: the tokens, buttons, and badges the dashboard uses.
+   Ported from the OMS Design System 1.1 (colors_and_type.css, buttons.css, badges.css). */
+
+:root {
+  --purple-50: #f6f3fb;
+  --purple-100: #eae4f5;
+  --purple-200: #d5c4f2;
+  --purple-300: #b78eef;
+  --purple-500: #670de5;
+  --purple-600: #500ab2;
+  --purple-700: #400a8e;
+
+  --slate-50: #f6f6fc;
+  --slate-100: #eef0f9;
+  --slate-200: #dfe3f0;
+  --slate-300: #c8cfe1;
+  --slate-400: #929eba;
+  --slate-500: #64708f;
+  --slate-600: #48526f;
+  --slate-700: #363e5c;
+  --slate-800: #222744;
+  --slate-900: #141635;
+  --slate-950: #090624;
+
+  --emerald-50: #ecfdf5;
+  --emerald-200: #a7f3d0;
+  --emerald-400: #34d399;
+  --emerald-500: #10b981;
+  --emerald-700: #047857;
+  --orange-50: #fff7ed;
+  --orange-200: #fed7aa;
+  --amber-700: #b45309;
+  --red-50: #fef2f2;
+  --red-100: #fee2e2;
+  --red-200: #fecaca;
+  --red-400: #f87171;
+  --red-600: #dc2626;
+  --red-700: #b91c1c;
+  --red-800: #991b1b;
+
+  --font-display: 'Fustat', 'Inter', system-ui, sans-serif;
+  --font-mono-oms: 'Geist Mono', 'JetBrains Mono', ui-monospace, monospace;
+
+  --radius-button: 8px;
+  --radius-button-lg: 12px;
+
+  --shadow-popover: 0px 4px 6px -4px rgba(0, 0, 0, 0.1), 0px 10px 15px -3px rgba(0, 0, 0, 0.1);
+  --shadow-modal: 0px 8px 10px -6px rgba(16, 24, 40, 0.1), 0px 20px 25px -5px rgba(16, 24, 40, 0.1);
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 120ms;
+}
+
+/* ── Buttons ── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: transparent;
+  user-select: none;
+  text-decoration: none;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    opacity var(--dur-fast) var(--ease-out);
+}
+.btn:focus {
+  outline: none;
+}
+.btn:focus-visible {
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 4px var(--purple-300);
+}
+.btn-lg {
+  height: 40px;
+  padding: 8px 14px;
+  border-radius: var(--radius-button-lg);
+  font-size: 16px;
+}
+.btn-md {
+  height: 32px;
+  padding: 8px 12px;
+  border-radius: var(--radius-button);
+  font-size: 14px;
+}
+.btn-primary {
+  background-color: var(--slate-950);
+  color: #fff;
+}
+.btn-primary:hover {
+  background-color: var(--slate-800);
+}
+.btn-primary:active {
+  background-color: var(--purple-700);
+}
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: var(--slate-950);
+}
+.btn-secondary {
+  background-color: #fff;
+  border-color: var(--slate-500);
+  color: var(--slate-950);
+}
+.btn-secondary:hover {
+  border-color: var(--slate-950);
+}
+.btn-secondary:active {
+  background-color: var(--purple-100);
+  border-color: var(--purple-200);
+}
+.btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-ghost {
+  color: var(--slate-950);
+}
+.btn-ghost:hover {
+  background-color: var(--purple-50);
+}
+.btn-ghost:active {
+  background-color: var(--purple-100);
+}
+.btn-danger-secondary {
+  background-color: #fff;
+  border-color: var(--red-600);
+  color: var(--slate-950);
+}
+.btn-danger-secondary:hover {
+  border-color: var(--red-800);
+}
+.btn-danger-secondary:active {
+  background-color: var(--red-100);
+  border-color: var(--red-400);
+}
+
+/* ── Badges ── */
+.oms-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 16px;
+  border: 0.5px solid transparent;
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.oms-badge--sm {
+  font-size: 12px;
+}
+.oms-badge--info {
+  background: var(--purple-50);
+  border-color: var(--purple-200);
+  color: var(--purple-600);
+}
+.oms-badge--neutral {
+  background: var(--slate-50);
+  border-color: var(--slate-300);
+  color: var(--slate-900);
+}
+.oms-badge--success {
+  background: var(--emerald-50);
+  border-color: var(--emerald-200);
+  color: var(--emerald-700);
+}
+.oms-badge--warning {
+  background: var(--orange-50);
+  border-color: var(--orange-200);
+  color: var(--amber-700);
+}
+.oms-badge--danger {
+  background: var(--red-50);
+  border-color: var(--red-200);
+  color: var(--red-700);
+}
+
+.oms-mono {
+  font-family: var(--font-mono-oms);
+}
