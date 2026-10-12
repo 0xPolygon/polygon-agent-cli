@@ -41,17 +41,22 @@ export function fundingInfo(params: {
 // status`: the fund view while the wallet is empty, the dashboard after.
 // `polymarketAddress` is the Polymarket deposit (trading) account, where
 // positions live; the dashboard reads it as `pm`.
+// `credentialsToken` is the agent's signed access token; it rides in the URL
+// fragment (never sent to a server) so the page can read and save credentials.
 export function dashboardInfo(params: {
   walletAddress: string;
   funded: boolean;
   polymarketAddress?: string | null;
+  credentialsToken?: string | null;
 }): {
   url: string;
 } {
-  const url = fundingUrl({
+  let url = fundingUrl({
     walletAddress: params.walletAddress,
     chainId: 137,
     view: params.funded ? 'dashboard' : 'fund'
   });
-  return { url: params.polymarketAddress ? `${url}&pm=${params.polymarketAddress}` : url };
+  if (params.polymarketAddress) url += `&pm=${params.polymarketAddress}`;
+  if (params.credentialsToken) url += `#t=${params.credentialsToken}`;
+  return { url };
 }

@@ -32,7 +32,9 @@ export type OwnerAction =
       to: `0x${string}`;
       amount: bigint;
     }
-  | { kind: 'access'; revoke?: { credentialId: string; sessionId?: string } };
+  | { kind: 'access'; revoke?: { credentialId: string; sessionId?: string } }
+  // Sign in only so the agent can link its credentials key (done for every owner action).
+  | { kind: 'link-credentials' };
 
 // What the login page is told about the request, so it can say what the
 // sign-in approves. Optional on both sides: an older page or relay ignores it.
@@ -78,7 +80,8 @@ const OwnerActionSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('access'),
     revoke: z.object({ credentialId: z.string(), sessionId: z.string().optional() }).optional()
-  })
+  }),
+  z.object({ kind: z.literal('link-credentials') })
 ]);
 
 const PendingBaseSchema = z.object({
@@ -121,6 +124,7 @@ function actionToJson(action: OwnerAction): unknown {
     case 'withdraw':
       return { ...action, amount: action.amount.toString() };
     case 'access':
+    case 'link-credentials':
       return action;
   }
 }

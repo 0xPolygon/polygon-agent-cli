@@ -5,12 +5,20 @@ preview_urls = false
 send_metrics = false
 placement = { mode = "smart" }
 
-main = "worker.mjs"
+main = "worker/index.ts"
 
 [assets]
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+# The credentials API is handled by the worker, never the SPA fallback.
+run_worker_first = ["/api/*"]
+
+# Credentials API. Secrets are set per environment with `wrangler secret put`:
+#   AGENT_CERT_SECRET  random 32+ bytes; signs agent certificates
+#   OMS_API_KEY        OMS secret API key (sk_...)
+#   OMS_API_SECRET     its matching apiSecret
+# Without OMS_API_URL and both OMS secrets the address endpoints answer 503.
 
 # Drop the old SessionRelay Durable Object carried over from connector-ui.
 [[migrations]]
@@ -19,6 +27,7 @@ deleted_classes = ["SessionRelay"]
 
 [env.staging]
 name = "agentconnect-staging"
+vars = { OMS_API_URL = "https://sandbox-api.polygon.technology/v0.13" }
 # Explicitly empty: without this, the top-level SessionRelay migration applies.
 migrations = []
 

@@ -7,6 +7,8 @@ import { isOMSWalletError } from '@polygonlabs/oms-wallet';
 
 export type CliErrorCode =
   | 'not_connected'
+  | 'credentials_not_linked'
+  | 'credentials_unavailable'
   | 'invalid_code'
   | 'request_expired'
   | 'request_cancelled'

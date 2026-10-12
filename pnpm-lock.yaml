@@ -79,6 +79,9 @@ importers:
       tailwindcss:
         specifier: ^4
         version: 4.3.2
+      viem:
+        specifier: ^2.57.3
+        version: 2.57.3(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
     devDependencies:
       '@cloudflare/workers-types':
         specifier: ^4

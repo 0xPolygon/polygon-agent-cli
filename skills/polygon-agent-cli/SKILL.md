@@ -58,10 +58,11 @@ agent wallet confirm --request <request> --code <code>
 - **What it covers:** a USD total over a period (30 days by default) in USDC, USDT, USDG, ETH/WETH, POL/WPOL and BTC (WBTC or cbBTC) on the chosen chains (default Polygon, Base, and chains already holding those tokens). Each token also has an on-chain limit worth the allowance.
 - **What works:** `balances`, `send`/`send-token` (ERC-20s), `swap` (including bridges), `x402-pay`, `price`, `watch`, `alerts`. Native coins (ETH, POL, BNB, AVAX) can't be spent; buys of ETH or POL deliver WETH or WPOL.
 - **What doesn't:** `send-native`, `deposit`, `withdraw` (yield), `call` and ERC-8004 writes fail with `owner_required`: they need the wallet owner (owner mode, `wallet login --owner`). Sign-in errors are listed under **Errors** below.
-- **Owner requests** need a new sign-in each time, with the same picker and `--email`: `wallet allowance set`, `wallet allowance renew`, `wallet withdraw`, `wallet access`. A browser request returns `waiting` and a `--wait` next (`wallet confirm --request <id> --wait` also waits); a chat code ends in `wallet confirm --request <id> --code <code>`.
+- **Owner requests** need a new sign-in each time, with the same picker and `--email`: `wallet allowance set`, `wallet allowance renew`, `wallet withdraw`, `wallet access`, `wallet link-credentials`. A browser request returns `waiting` and a `--wait` next (`wallet confirm --request <id> --wait` also waits); a chat code ends in `wallet confirm --request <id> --code <code>`.
 - **Dashboard:** every connect (`wallet confirm --code`, the browser `--wait` result, `wallet login --owner`) and `wallet status` carry `dashboard: { url }`, the wallet's agentconnect page (the fund view while the wallet is empty). Send it: "You can see your wallet and add funds here: <dashboard.url>". Nothing opens on its own.
 - **Funding:** an output may carry `funding: { url, reason?, amountUsd? }` (an empty wallet on connect, `insufficient_balance`, a Polymarket deposit shortfall). Send `funding.url`.
 - **Polymarket key:** every owner sign-in backs up the Polymarket trading key; the result shows it as `polymarket`.
+- **Saved details:** every owner sign-in also links this install for the owner's saved shipping address (`credentials` in the result). The dashboard link then opens with access to it for an hour. See **Saved details** below.
 - **`agent wallet status`** is the place to start: connection, a pending sign-in (`pendingRequest` with `method` and, for the browser, `url`), allowance used and left, holdings (and whether the allowance covers them), alerts, watches and the CLI version.
 - **Errors** in session mode carry `code`, `hint` and `command` (the next command to run), e.g. `not_connected`, `not_covered`, `allowance_exhausted`, `session_expired`, `owner_required`, `email_required`, `browser_signin_failed`, `request_cancelled` (the user cancelled on the page), `request_in_progress` (a sign-in for this wallet is finishing: run its `--wait` command).
 
@@ -202,6 +203,22 @@ agent withdraw --position <addr> --amount <num|max> [--chain <chain>] [--broadca
 agent fund [--wallet <n>]
 agent x402-pay --url <url> --wallet <n> [--chain <chain>] [--method GET] [--body <str>] [--header Key:Value] [--max-usd <usd>] [--yes] [--broadcast] [--dry-run]
 ```
+
+### Saved details (shipping address)
+
+When buying something for the user, use their saved address rather than asking for it again.
+
+```bash
+agent credentials address            # → { address } or address: null
+agent credentials address --name "Alex Rivera" --line1 "214 Bergen St" --city Brooklyn --state NY --zip 11217 --country US
+agent credentials address --city Queens   # change one field, keep the rest
+agent credentials address --clear
+agent credentials status             # linked? until when
+```
+
+- `credentials_not_linked`: run its `command` (`wallet link-credentials`). In session mode it is an owner request (one sign-in, same picker); in owner mode it links straight away.
+- No address saved: ask the user for it, or send `dashboard.url` so they can fill it in on the Credentials page.
+- Only share the address with the store at checkout. Never repeat it in other chats or files.
 
 ### Polymarket
 ```bash
