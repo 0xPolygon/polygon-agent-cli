@@ -19,6 +19,8 @@ deleted_classes = ["SessionRelay"]
 
 [env.staging]
 name = "agentconnect-staging"
+# Explicitly empty: without this, the top-level SessionRelay migration applies.
+migrations = []
 
 routes = [
   { pattern = "agentconnect.staging.polygon.technology", custom_domain = true }
