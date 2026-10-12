@@ -254,10 +254,6 @@ export function toGrants(chain: PlanChain): SmartSessionGrant[] {
 // What the assistant shows the owner before asking for a code.
 export function planSummary(plan: Plan): Record<string, unknown> {
   const usd = plan.allowanceUsd.toLocaleString('en-US');
-  const perChain = plan.chains.map(
-    (chain) =>
-      `${chain.grants.map((grant) => grant.symbol).join(', ')} on ${chainLabel(chain.chainId)}`
-  );
   return {
     allowanceUsd: plan.allowanceUsd,
     days: plan.days,
@@ -273,8 +269,6 @@ export function planSummary(plan: Plan): Record<string, unknown> {
         priceUsd: grant.priceUsd
       }))
     })),
-    summary:
-      `Spend up to $${usd} in total until ${plan.expiresAt.slice(0, 10)}: ${perChain.join('; ')}. ` +
-      `On-chain, the agent can't move more than $${usd} worth of any one token on any one chain.`
+    summary: `Spend up to $${usd} until ${plan.expiresAt.slice(0, 10)}.`
   };
 }

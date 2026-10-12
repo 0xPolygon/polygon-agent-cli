@@ -1004,7 +1004,7 @@ interface AllowanceSetArgs {
 
 const allowanceSetCommand: CommandModule<object, AllowanceSetArgs> = {
   command: 'set',
-  describe: 'Change the allowance (amount, tokens, chains); the owner approves it',
+  describe: 'Change the allowance; the owner approves it',
   builder: (y) =>
     y
       .option('name', { type: 'string', default: 'main', describe: 'Wallet name' })

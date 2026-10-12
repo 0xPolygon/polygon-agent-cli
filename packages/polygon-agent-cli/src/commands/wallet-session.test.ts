@@ -467,7 +467,7 @@ describe('connect', () => {
     expect(out.next).toBe(
       `polygon-agent wallet confirm --request ${request} --code <code> --name ${wallet}`
     );
-    expect(JSON.stringify(out.plan)).toContain('Spend up to $500 in total');
+    expect(JSON.stringify(out.plan)).toContain('Spend up to $500 until');
     expect(world.calls).toEqual(['registerCredential', 'startEmailAuth:600']);
     expect(readRacRecord({ wallet, slot: 'rac' })?.installName).toBeTruthy();
     expect(loadPending(wallet)?.id).toBe(request);

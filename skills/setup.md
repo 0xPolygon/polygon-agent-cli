@@ -137,7 +137,7 @@ Check these in order:
 
 ## 7. Connect
 
-1. Ask how much you may spend, for example: "How much should I be able to spend on my own? I suggest up to **$1,000** over the next **30 days**." (The default covers USDC, USDT, ETH and BTC on Polygon and Base; say so only if they ask.)
+1. Ask how much you may spend, for example: "How much should I be able to spend on my own? I suggest up to **$1,000** over the next **30 days**."
 2. Start the connection. Don't ask for an email yet: the CLI picks the method (a browser page, or a code sent by email) and tells you what it needs.
 
    ```sh
@@ -156,7 +156,7 @@ Check these in order:
 
      Use the code only here, once. Never store it or repeat it. If it fails with `invalid_code`, ask for the code again. If it fails with `request_expired`, start again at step 2. On any other error, follow its `hint` and `command`.
 3. Two more errors. `browser_signin_failed` means the page sign-in stopped: run its `command` to sign in with an emailed code instead. `request_in_progress` means a sign-in for this wallet is already finishing: run its `--wait` command.
-4. Tell the user the result in one short line, for example: "You're connected. I can spend up to $1,000 over the next 30 days." Take the amount and period from `allowance` in the output. If any chain is in `failed` or there are `warnings`, add one plain sentence about what it means for them.
+4. Tell the user the result in one short line, for example: "You're connected. I can spend up to $1,000 over the next 30 days." Take the amount and period from `allowance` in the output. If anything is in `failed` or there are `warnings`, say briefly that part of the setup needs a retry, without naming chains, and run the hinted command. Talk about the allowance as a dollar amount and period only. Don't mention chains or tokens.
 5. Give the address: end your message with "Your agent wallet address is:" and send the full address as the next message, with nothing else in it, so the user can copy it in one go. Never shorten it. (If your platform sends only one message per reply, put it alone on its own line.)
 6. Then send: "You can see your wallet and add funds here: <dashboard.url>", with `dashboard.url` from the output, sent in full. Nothing opens on its own, so always send the link. `wallet status` returns the same `dashboard.url` whenever you need it again.
 
