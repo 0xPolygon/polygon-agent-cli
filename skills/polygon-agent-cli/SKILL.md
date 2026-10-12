@@ -118,10 +118,11 @@ agent mode auto      # or: agent mode dry-run
 #   Never enable auto mode without the user's explicit answer.
 
 # Step 2: Fund wallet
+# → send the user `dashboard.url` from the login output or `agent wallet status`
+#   (the fund view while the wallet is empty). Never construct the URL or hardcode an address.
 agent fund
-# → reads walletAddress from session, builds Trails widget URL with toAddress=<walletAddress>
-# → ALWAYS run this command to get the URL — never construct it manually or hardcode any address
-# → send the returned `url` to the user; `walletAddress` in the output confirms the recipient
+# → only when the user wants the page opened in a browser on this machine: it opens it
+#   and returns the same link as `url`, with `walletAddress` confirming the recipient
 
 # Step 3: Verify balances
 agent balances
@@ -257,7 +258,7 @@ agent feedback --agent-id <id> --value <score> [--tag1 <t>] [--tag2 <t>] [--endp
 - **Smart defaults** — `--wallet main`, `--chain polygon`
 - **`balances --chains`** — comma-separated chains (max 20); two or more return JSON with `multiChain: true` and a `chains` array (same wallet address on each)
 - **Fee preference** — auto-selects USDC over native POL when both available; the relayer pays gas in whichever fee token the wallet can afford
-- **`fund`** — returns the agentconnect dashboard funding URL (wallet and chain prefilled) as `url`, and opens it in a browser on this machine (the only command that opens it). Always run `agent fund` to get the URL and wallet address — never hardcode or construct manually.
+- **`fund`** — opens the wallet's agentconnect page in a browser on this machine (the only command that opens it) and returns it as `url`, with the wallet and chain prefilled. Use it when the user wants the page opened here; otherwise send `dashboard.url` from `wallet status` (or `funding.url` when an output has one). Never hardcode or construct the URL.
 - **`deposit`** — picks highest-TVL pool via Trails `getEarnPools` and deposits directly. Full deposit reference: https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/polygon-defi/SKILL.md
 - **Gas reserve** — when using `deposit` or any command that spends tokens, always reserve at least 0.1 USDC or 0.1 POL in the wallet for gas. Never attempt to spend the full balance. The `deposit` command enforces a 0.1 reserve automatically, but the agent must apply the same rule when constructing amounts for `send`, `swap`, or direct contract calls.
 - **`withdraw`** — `--position` = aToken or ERC-4626 vault; `--amount` = `max` or underlying units (Aave / vault). Dry-run JSON includes `poolAddress` / `vault`.
@@ -300,7 +301,7 @@ CLI commands output JSON (non-TTY). After running a command, always render the r
 | `Wallet not found` / no wallet yet | `wallet list`, then `agent wallet login` |
 | Owner-mode session expired (`OMS_SESSION_EXPIRED`) | Run `agent wallet login --owner` (~1-week lifetime) |
 | `Fee option errors` | Set `POLYGON_AGENT_DEBUG_FEE=1`, ensure wallet has POL or a fee token. For native-only wallets, add `--prefer-native-fee` on `call` |
-| Wrong recipient in Trails widget | Run `agent fund` (do not construct the URL manually) |
+| Wrong recipient in Trails widget | Send `dashboard.url` from `agent wallet status`, or run `agent fund` if the user wants it opened on this machine (do not construct the URL manually) |
 | `x402-pay`: no 402 response | Endpoint doesn't require x402 payment, or URL is wrong |
 | `x402-pay`: payment token mismatch | Chain/token in the 402 response differs from wallet — check `--wallet` points to the right chain |
 | `x402-pay`: EOA funding failed | Wallet lacks sufficient balance to cover the payment amount — run `balances` and fund if needed |
