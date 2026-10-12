@@ -183,6 +183,24 @@ describe('initWorkspace', () => {
     expect(initWorkspace({ root, version: '1.0.0', sourceDir: null }).name).toBe('Old');
   });
 
+  it('reads an install.json whose platform this version does not know', () => {
+    const root = path.join(tmpDir('pa-ws-'), '.polygon-agent');
+    const { state } = initWorkspace({ root, version: '1.0.0', name: 'New', sourceDir: null });
+    fs.writeFileSync(
+      path.join(state, 'install.json'),
+      JSON.stringify({
+        root,
+        name: 'New',
+        version: '9.0.0',
+        platform: 'some-future-agent',
+        installedAt: 'then'
+      })
+    );
+    const record = readInstallRecord(state);
+    expect(record).toMatchObject({ name: 'New', installedAt: 'then' });
+    expect(record?.platform).toBeUndefined();
+  });
+
   it('refuses a root whose name could rewrite the skill text', () => {
     for (const name of ['a`b', 'a\nb', 'a\u0007b']) {
       const root = path.join(tmpDir('pa-ws-'), name, '.polygon-agent');

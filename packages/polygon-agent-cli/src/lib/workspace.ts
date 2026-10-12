@@ -48,7 +48,8 @@ const InstallRecord = z.object({
   version: z.string(),
   skillsDir: z.string().nullable().default(null),
   skillPath: z.string().nullable().default(null),
-  platform: z.enum(PLATFORMS).optional(),
+  // An unknown platform (a newer CLI's) reads as none, never as no record.
+  platform: z.enum(PLATFORMS).optional().catch(undefined),
   installedAt: z.string(),
   updatedAt: z.string().optional()
 });

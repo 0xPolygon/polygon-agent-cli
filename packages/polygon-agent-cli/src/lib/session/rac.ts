@@ -48,6 +48,12 @@ function keysDir(wallet: string): string {
   return path.join(sessionDir(wallet), 'keys');
 }
 
+// The reconnect command for a wallet. Plain `wallet login`: the CLI picks the
+// sign-in method (browser or chat code) itself.
+export function loginCommand(wallet: string): string {
+  return `polygon-agent wallet login${wallet === 'main' ? '' : ` --name ${wallet}`}`;
+}
+
 function slotDir(params: { wallet: string; slot: RacSlot }): string {
   return path.join(keysDir(params.wallet), params.slot);
 }
@@ -89,8 +95,8 @@ export function loadOrCreateRacKey(params: { wallet: string; slot: RacSlot }): U
   throw new CliError({
     code: 'not_connected',
     message: `This install's session key (${params.slot}) is unreadable.`,
-    hint: 'Connect again with a new email code.',
-    command: 'polygon-agent wallet login --email <email>'
+    hint: 'Connect again.',
+    command: loginCommand(params.wallet)
   });
 }
 
@@ -103,8 +109,8 @@ function loadRacKey(params: { wallet: string; slot: RacSlot }): Uint8Array {
     throw new CliError({
       code: 'not_connected',
       message: `This install's session key (${params.slot}) is missing.`,
-      hint: 'Connect again with a new email code.',
-      command: 'polygon-agent wallet login --email <email>'
+      hint: 'Connect again.',
+      command: loginCommand(params.wallet)
     });
   }
   return Buffer.from(decrypt(cipher.data), 'hex');

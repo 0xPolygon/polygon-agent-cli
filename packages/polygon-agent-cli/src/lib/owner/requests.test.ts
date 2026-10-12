@@ -414,6 +414,95 @@ describe('confirmOwnerRequest (browser)', () => {
     expect(result).toEqual({ ran: true, ownerSignInRevoked: true });
   });
 
+  it('keeps polling through relay hiccups and signs in', async () => {
+    const request = await startBrowser();
+    const { deps, statuses } = fakeDeps([...GOOGLE_DONE]);
+    let failures = 0;
+    const flaky = {
+      ...deps,
+      relay: {
+        ...deps.relay,
+        nextAction: async (session: string) => {
+          if (failures < 29) {
+            failures += 1;
+            throw new Error('Relay poll failed (502)');
+          }
+          return deps.relay.nextAction(session);
+        }
+      }
+    };
+    const result = await confirmOwnerRequest({
+      wallet,
+      requestId: request.id,
+      now: NOW,
+      browser: { deps: flaky, timeoutMs: 10 * 60_000 },
+      run: async (context) => ({ walletAddress: context.walletAddress })
+    });
+    expect(result).toMatchObject({ walletAddress: MAIN, ownerSignInRevoked: true });
+    expect(statuses).toContainEqual({ status: 'done', walletAddress: MAIN });
+  });
+
+  it('gives up after 30 failed polls in a row', async () => {
+    const request = await startBrowser();
+    const { deps } = fakeDeps([]);
+    let polls = 0;
+    const down = {
+      ...deps,
+      relay: {
+        ...deps.relay,
+        nextAction: async () => {
+          polls += 1;
+          throw new Error('Relay poll failed (502)');
+        }
+      }
+    };
+    const run = vi.fn(async () => ({}));
+    await expect(
+      confirmOwnerRequest({
+        wallet,
+        requestId: request.id,
+        now: NOW,
+        browser: { deps: down, timeoutMs: 10 * 60_000 },
+        run
+      })
+    ).rejects.toMatchObject({ code: 'upstream_unavailable' });
+    expect(polls).toBe(30);
+    expect(run).not.toHaveBeenCalled();
+    expect(loadPending(wallet)).toBeNull();
+  });
+
+  it('the timeout message on the page does not point at owner mode', async () => {
+    const request = await startBrowser();
+    const { deps, statuses } = fakeDeps([]);
+    await expect(
+      confirmOwnerRequest({
+        wallet,
+        requestId: request.id,
+        now: NOW,
+        browser: { deps, timeoutMs: 10_000 },
+        run: async () => ({})
+      })
+    ).rejects.toMatchObject({ code: 'request_expired' });
+    expect(statuses).toContainEqual({
+      status: 'error',
+      message: 'Nobody signed in on the login page in time.'
+    });
+  });
+
+  it('a browser request that expired before sign-in says to start again, not a new code', async () => {
+    const request = await startBrowser();
+    const { deps } = fakeDeps([]);
+    await expect(
+      confirmOwnerRequest({
+        wallet,
+        requestId: request.id,
+        now: new Date(Date.parse(request.expiresAt) + 1000),
+        browser: { deps, timeoutMs: 10_000 },
+        run: async () => ({})
+      })
+    ).rejects.toMatchObject({ code: 'request_expired', hint: 'Start the request again.' });
+  });
+
   it('refuses a code for a browser request, keeping it', async () => {
     const request = await startBrowser();
     await expect(

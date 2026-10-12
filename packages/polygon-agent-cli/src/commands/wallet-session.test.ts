@@ -302,6 +302,7 @@ vi.mock('../lib/owner/waiter.ts', async (importOriginal) => ({
   }
 }));
 vi.mock('../lib/login-relay-client.ts', () => ({
+  LoginSessionExpiredError: class extends Error {},
   makeLoginRelay: () => ({
     registerSession: async (session: string, context: unknown) => {
       browser.registered.push({ session, context });
@@ -339,7 +340,7 @@ const {
 } = await import('./wallet-session.ts');
 const { handleLoginWait, waitSettings } = await import('./wallet-session.ts');
 const { loadPending, savePending } = await import('../lib/owner/pending.ts');
-const { latestWaiterRequest, pidFile, readResult, writePid, writeResult } =
+const { latestWaiterRequest, liveWaiters, pidFile, readResult, writePid, writeResult } =
   await import('../lib/owner/waiter.ts');
 const { readApprovedPlan } = await import('../lib/session/state.ts');
 const { parkedRacSlots, readRacRecord } = await import('../lib/session/rac.ts');
@@ -1495,6 +1496,18 @@ describe('browser sign-in', () => {
         ok: false,
         code: 'browser_signin_failed',
         command: emailCommand
+      });
+    });
+
+    it("keeps the allowance email command after the dead waiter's pid file is cleaned up", async () => {
+      const request = String((await browserAllowanceSet()).request);
+      writePid({ wallet, id: request, pid: deadPid() });
+      // A status check (or anything listing waiters) removes the dead pid file.
+      expect(liveWaiters(wallet)).toEqual([]);
+      expect(await confirmArgs({ request, wait: true })).toMatchObject({
+        ok: false,
+        code: 'browser_signin_failed',
+        command: `POLYGON_AGENT_SIGNIN=email polygon-agent wallet allowance set --amount 800 --name ${wallet}`
       });
     });
   });

@@ -10,7 +10,7 @@ import type { RemoteAccessClient } from '@polygonlabs/oms-wallet';
 import { findNetworkById } from '@polygonlabs/oms-wallet';
 
 import { CliError, httpStatus, mapOmsError } from '../errors.ts';
-import { readRacRecord } from './rac.ts';
+import { loginCommand, readRacRecord } from './rac.ts';
 
 export interface LiveGrant {
   token: Address;
@@ -56,8 +56,8 @@ export function mapRacError(params: { error: unknown; wallet: string }): unknown
     return new CliError({
       code: 'session_revoked',
       message: "This install's access was revoked.",
-      hint: 'Connect again with a new email code.',
-      command: 'polygon-agent wallet login --email <email>',
+      hint: 'Connect again.',
+      command: loginCommand(params.wallet),
       cause: params.error
     });
   }

@@ -61,6 +61,9 @@ export interface BrowserLoginOpts {
   // registers it when it starts). Given, it is used as is and not registered
   // again; otherwise a new one comes from deps.randomSessionId.
   session?: string;
+  // The error when nobody signs in before timeoutMs. Defaults to the owner
+  // mode text (re-run, or the loopback flow).
+  timeoutMessage?: string;
 }
 
 const MAX_OTP_ATTEMPTS = 3;
@@ -149,7 +152,8 @@ export async function runBrowserLogin(
     }
 
     throw new Error(
-      'Timed out waiting for browser login. Re-run, or use `wallet login --owner --local`.'
+      opts.timeoutMessage ??
+        'Timed out waiting for browser login. Re-run, or use `wallet login --owner --local`.'
     );
   };
 

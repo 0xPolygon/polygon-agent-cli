@@ -6,6 +6,8 @@
 // Files, next to the pending request (pending/<wallet>/):
 //   waiter-<id>.pid    {pid, emailCommand}: present while the waiter runs
 //   result-<id>.json   the result, encrypted like the pending file
+//   fallback-<id>.json {emailCommand}: written at the start, kept when a dead
+//                      waiter's pid file is cleaned up
 
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -46,6 +48,10 @@ export function pidFile(wallet: string, id: string): string {
   return path.join(waiterDir(wallet), `waiter-${requestId(id)}.pid`);
 }
 
+function fallbackFile(wallet: string, id: string): string {
+  return path.join(waiterDir(wallet), `fallback-${requestId(id)}.json`);
+}
+
 const CipherSchema = z.object({ iv: z.string(), encrypted: z.string(), authTag: z.string() });
 
 // The command that does the same request with an emailed code instead, for
@@ -80,6 +86,14 @@ export function readResult(wallet: string, id: string): Record<string, unknown> 
 
 export function deleteResult(wallet: string, id: string): void {
   fs.rmSync(resultFile(wallet, id), { force: true });
+  fs.rmSync(fallbackFile(wallet, id), { force: true });
+}
+
+// Saves the email-code variant of a browser request when it starts. Unlike
+// the pid file, it survives a dead waiter's cleanup.
+export function writeEmailFallback(wallet: string, id: string, emailCommand: string): void {
+  ensureWaiterDir(wallet);
+  writeJsonFile({ file: fallbackFile(wallet, id), data: { emailCommand } });
 }
 
 function readPid(wallet: string, id: string): z.infer<typeof PidSchema> | null {
@@ -107,9 +121,12 @@ export function removePid(wallet: string, id: string): void {
   fs.rmSync(pidFile(wallet, id), { force: true });
 }
 
-// The email-code variant saved when the waiter was started, if any.
+const FallbackSchema = z.object({ emailCommand: z.string() });
+
+// The email-code variant saved when the request started, if any.
 export function waiterEmailCommand(wallet: string, id: string): string | undefined {
-  return readPid(wallet, id)?.emailCommand;
+  const saved = FallbackSchema.safeParse(readJsonFile(fallbackFile(wallet, id)));
+  return readPid(wallet, id)?.emailCommand ?? (saved.success ? saved.data.emailCommand : undefined);
 }
 
 function processAlive(pid: number): boolean {
@@ -196,7 +213,7 @@ export function spawnWaiter(params: { wallet: string; id: string; emailCommand?:
       params.id,
       '--browser-waiter'
     ],
-    { detached: true, stdio: 'ignore', env: process.env }
+    { detached: true, stdio: 'ignore', env: process.env, windowsHide: true }
   );
   child.unref();
   if (child.pid !== undefined) {

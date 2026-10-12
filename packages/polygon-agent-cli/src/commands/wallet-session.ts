@@ -41,6 +41,7 @@ import {
   stopWaiter,
   waitForResult,
   waiterEmailCommand,
+  writeEmailFallback,
   writePid,
   writeResult
 } from '../lib/owner/waiter.ts';
@@ -170,7 +171,7 @@ async function requireSessionWallet(wallet: string) {
     throw new CliError({
       code: 'not_connected',
       message: `Wallet '${wallet}' isn't connected to this install.`,
-      command: `polygon-agent wallet login --email <email>${nameFlag(wallet)}`
+      command: `polygon-agent wallet login${nameFlag(wallet)}`
     });
   }
   return pointer;
@@ -333,6 +334,7 @@ async function startRequest(params: {
     now: new Date()
   });
   if (request.method !== 'browser') throw new Error('unreachable');
+  writeEmailFallback(wallet, request.id, params.emailCommand);
   spawnWaiter({ wallet, id: request.id, emailCommand: params.emailCommand });
   const url = loginPageUrl(request.relaySession);
   await openPage(url);
@@ -863,7 +865,7 @@ export async function sessionReport(params: {
             next: pendingInfo.next,
             hint: pendingHint(pendingInfo)
           }
-        : { next: `polygon-agent wallet login --email <email>${nameFlag(wallet)}` }),
+        : { next: `polygon-agent wallet login${nameFlag(wallet)}` }),
       // Alert watches work without a connection.
       watches: watchStatus(new Date()),
       ...version

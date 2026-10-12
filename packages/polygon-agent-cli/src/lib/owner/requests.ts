@@ -22,13 +22,13 @@ import {
   isOMSWalletError
 } from '@polygonlabs/oms-wallet';
 
-import type { BrowserLoginDeps, LoginStatus } from '../browser-login.ts';
+import type { BrowserLoginDeps, LoginAction, LoginStatus } from '../browser-login.ts';
 import type { OmsWalletPointer } from '../storage.ts';
 import type { LoginContext, OwnerAction, PendingRequest } from './pending.ts';
 
 import { runBrowserLogin } from '../browser-login.ts';
 import { CliError, mapOmsError, upstreamErrorName } from '../errors.ts';
-import { makeLoginRelay } from '../login-relay-client.ts';
+import { LoginSessionExpiredError, makeLoginRelay } from '../login-relay-client.ts';
 import { loginUiBaseUrl, oidcRelayBaseUrl } from '../oms-client.ts';
 import { selectMainWallet } from '../polymarket/oms-key.ts';
 import { loadOmsConfig, loadOmsWalletPointer } from '../storage.ts';
@@ -39,6 +39,9 @@ import { deletePending, discardPendingNow, loadPending, savePending } from './pe
 // revoke failed dies on its own soon after.
 export const OWNER_LOGIN_SECONDS = 600;
 export const REQUEST_LIFETIME_MS = 10 * 60 * 1000;
+// Consecutive failed relay polls (2s apart, so about a minute) before a
+// browser sign-in gives up.
+const MAX_POLL_FAILURES = 30;
 
 // A completed owner sign-in, by either method.
 type OwnerAuth = CompleteEmailAuthResult | CompleteOidcRedirectAuthResult;
@@ -234,12 +237,30 @@ async function signInWithBrowser(params: {
   const now = params.browser.deps?.now ?? (() => Date.now());
   let auth: OwnerAuth | undefined;
   let wasCancelled = false;
+  let pollFailures = 0;
 
   const deps: BrowserLoginDeps = {
     relay: {
       registerSession: (session, context) => relay.registerSession(session, context),
+      // A failed poll (a relay or network hiccup) is retried until the
+      // deadline, unless the relay keeps failing (about a minute) or says the
+      // session is over.
       nextAction: async (session) => {
-        const action = await relay.nextAction(session);
+        let action: LoginAction | null;
+        try {
+          action = await relay.nextAction(session);
+        } catch (error) {
+          if (error instanceof LoginSessionExpiredError) throw error;
+          pollFailures += 1;
+          if (pollFailures < MAX_POLL_FAILURES) return null;
+          throw new CliError({
+            code: 'upstream_unavailable',
+            message: `The login page relay stopped answering (${error instanceof Error ? error.message : String(error)}).`,
+            hint: 'Start the request again shortly.',
+            cause: error
+          });
+        }
+        pollFailures = 0;
         if (action?.type === 'cancel') wasCancelled = true;
         return action;
       },
@@ -291,7 +312,8 @@ async function signInWithBrowser(params: {
       relayBase,
       uiBase: loginUiBaseUrl(),
       timeoutMs,
-      session: request.relaySession
+      session: request.relaySession,
+      timeoutMessage: 'Nobody signed in on the login page in time.'
     });
   } catch (error) {
     if (auth) return { auth, failure: { error }, report };
@@ -361,7 +383,10 @@ export async function confirmOwnerRequest<T extends Record<string, unknown>>(
   }
   if (Date.parse(request.expiresAt) <= params.now.getTime()) {
     await deletePending({ wallet: params.wallet, id: request.id });
-    throw requestExpired('The request has expired (requests last 10 minutes).');
+    throw requestExpired(
+      'The request has expired (requests last 10 minutes).',
+      request.method === 'browser' ? 'Start the request again.' : undefined
+    );
   }
   const input: OwnerSignInInput =
     'code' in params ? { code: params.code } : { browser: params.browser };

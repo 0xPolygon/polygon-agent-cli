@@ -6,6 +6,9 @@
 import type { BrowserLoginDeps, LoginAction, LoginStatus } from './browser-login.ts';
 import type { LoginContext } from './owner/pending.ts';
 
+// The relay says the pairing session is over: polling again can't help.
+export class LoginSessionExpiredError extends Error {}
+
 export function makeLoginRelay(relayBase: string): BrowserLoginDeps['relay'] {
   return {
     // `context` tells the page what the sign-in approves; a relay that
@@ -30,7 +33,9 @@ export function makeLoginRelay(relayBase: string): BrowserLoginDeps['relay'] {
       if (!res.ok) throw new Error(`Relay poll failed (${res.status})`);
       const data = (await res.json()) as { state: string; action?: LoginAction };
       if (data.state === 'expired') {
-        throw new Error('Login session expired before completion. Run the command again.');
+        throw new LoginSessionExpiredError(
+          'Login session expired before completion. Run the command again.'
+        );
       }
       return data.state === 'action' && data.action ? data.action : null;
     },
