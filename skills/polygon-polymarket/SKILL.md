@@ -7,6 +7,10 @@ description: Trade Polymarket prediction markets with the Polygon Agent CLI. Set
 
 Every command is `agent polymarket <command>`. Output is JSON on stdout, and failures are JSON on stderr with a `code`, a `hint`, and sometimes a `command` to run next. Write commands (`setup`, `deposit`, `withdraw`, `buy`, `sell`, `cancel`, `redeem`) preview by default. Add `--broadcast` to execute. The account, money, trading and portfolio commands take `--wallet <name>` (default `main`), the agent wallet that owns the Polymarket account. The discovery commands (`markets`, `event`, `market`, `book`, `history`) don't take it.
 
+## Talking to the user
+
+Keep Polymarket replies short and outcome first, for example "Done. You bought 5.2 Yes shares at 48¢." or "You have $12.40 on Polymarket and two open bets." Don't mention the trading key, its backup, or the extra wallet it adds to their account unless they ask or something needs their action (a failed backup they must fix, a recovery that moved money). Don't explain setup, approvals or the bridge unless asked; just say when it's ready.
+
 ## Start here
 
 Run this before anything else:
@@ -36,7 +40,7 @@ If `status.otherTradingKeys` is non-empty, those are other installs' keys or an 
 
 ### Key backup and recovery
 
-The trading key lives on this machine, and only it can move funds out of the Polymarket wallet. So the CLI backs it up to the user's OMS account as one extra imported wallet, labelled `polymarket-trading-key:<install name>`. Each install has its own. The local copy stays, because trading signs with it. An extra wallet in the user's OMS account list is expected.
+The trading key lives on this machine, and only it can move funds out of the Polymarket wallet. So the CLI backs it up to the user's OMS account as one extra imported wallet, labelled `polymarket-trading-key:<install name>`. Each install has its own. The local copy stays, because trading signs with it. An extra wallet in the user's OMS account list is expected. All of this happens under the hood: it's documented here for you, not for the user (see Talking to the user).
 
 When the backup happens:
 
@@ -217,7 +221,7 @@ agent polymarket pnl [--interval 1d|1w|1m|max]            # valueUsd, realized, 
 
 An order rejected with "allowance ... spender 0xd91E..." (a neg-risk market) means the legacy NegRiskAdapter approval is missing. Run `agent polymarket setup --wallet <name> --broadcast` again.
 
-General codes you will also see: `invalid_input` (bad amount or flags, including more than 6 decimals), `insufficient_balance` (agent wallet short of USDC, or of a fee token for the relayer), `wallet_busy` (another deposit for this wallet is still running), `upstream_error`, `upstream_unavailable`, `rate_limited`, and the session codes (`allowance_exhausted`, `session_expired`, `not_connected`). An `insufficient_balance` error may carry `funding: { url, amountUsd }`: send or open `funding.url` so the user can add the missing amount. Rate limits and upstream outages are safe to retry after a short wait, except for `deposit` (see the rules).
+General codes you will also see: `invalid_input` (bad amount or flags, including more than 6 decimals), `insufficient_balance` (agent wallet short of USDC, or of a fee token for the relayer), `wallet_busy` (another deposit for this wallet is still running), `upstream_error`, `upstream_unavailable`, `rate_limited`, and the session codes (`allowance_exhausted`, `session_expired`, `not_connected`). An `insufficient_balance` error may carry `funding: { url, amountUsd }`: send `funding.url` so the user can add the missing amount. Rate limits and upstream outages are safe to retry after a short wait, except for `deposit` (see the rules).
 
 ## Rules for agents
 

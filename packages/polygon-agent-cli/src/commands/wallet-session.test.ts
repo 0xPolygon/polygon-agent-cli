@@ -58,7 +58,10 @@ const world = vi.hoisted(() => ({
     | undefined
     | Array<{ id: string; address: string; keyOrigin: 'generated' | 'imported' }>,
   // Where automatic selection lands at sign-in; undefined means walletAddress.
-  autoSelectAddress: undefined as string | undefined
+  autoSelectAddress: undefined as string | undefined,
+  // What the indexer returns; balancesError makes it fail.
+  balances: { nativeBalances: [] as unknown[], balances: [] as unknown[] },
+  balancesError: undefined as unknown
 }));
 
 const httpError = (status: number, name?: string) =>
@@ -206,7 +209,12 @@ vi.mock('@polygonlabs/oms-wallet', async (importOriginal) => {
 
   class FakeOMSWallet {
     wallet = new FakeOwnerWallet();
-    indexer = { getBalances: async () => ({ status: 200, nativeBalances: [], balances: [] }) };
+    indexer = {
+      getBalances: async () => {
+        if (world.balancesError) throw world.balancesError;
+        return { status: 200, ...world.balances };
+      }
+    };
   }
 
   class FakeRemoteAccessClient {
@@ -281,7 +289,7 @@ const browser = vi.hoisted(() => ({
 vi.mock('../lib/signin-method.ts', () => ({
   currentSignInMethod: () => ({
     method: browser.method,
-    reason: browser.method === 'browser' ? 'desktop' : 'ci'
+    reason: browser.method === 'browser' ? 'terminal' : 'ci'
   })
 }));
 vi.mock('open', () => ({
@@ -339,6 +347,7 @@ const {
   withdrawCommandModule
 } = await import('./wallet-session.ts');
 const { handleLoginWait, waitSettings } = await import('./wallet-session.ts');
+const { fundingUiBase } = await import('../lib/funding.ts');
 const { loadPending, savePending } = await import('../lib/owner/pending.ts');
 const {
   latestWaiterRequest,
@@ -464,7 +473,7 @@ describe('connect', () => {
     expect(loadPending(wallet)?.id).toBe(request);
   });
 
-  it('step 2 adds a funding link when the wallet is empty', async () => {
+  it('step 2 adds a funding link and a fund-view dashboard link when the wallet is empty', async () => {
     funding.funded = false;
     try {
       const empty = await confirm(await connectStep1());
@@ -472,14 +481,19 @@ describe('connect', () => {
         url: expect.stringMatching(/\/\?wallet=0x[0-9a-fA-F]+&chain=137&view=fund$/),
         reason: 'empty'
       });
+      expect(empty.dashboard).toEqual({ url: (empty.funding as { url: string }).url });
     } finally {
       funding.funded = true;
     }
   });
 
-  it('step 2 adds no funding link when the wallet holds something', async () => {
+  it('step 2 adds only the dashboard link when the wallet holds something', async () => {
     const funded = await confirm(await connectStep1());
     expect(funded.funding).toBeUndefined();
+    expect(funded.dashboard).toEqual({
+      url: expect.stringMatching(/\/\?wallet=0x[0-9a-fA-F]+&chain=137&view=dashboard$/)
+    });
+    expect(browser.opened).toEqual([]);
   });
 
   it('step 2 approves each chain, verifies, probes gas, saves, and revokes the sign-in', async () => {
@@ -628,6 +642,47 @@ describe('status and Polymarket', () => {
       note: 'Money moved to Polymarket is controlled by this install, not by the allowance. Check it with: polymarket status'
     });
     expect(JSON.stringify(report)).not.toContain('0x1111111111111111111111111111111111111111');
+  });
+
+  // The view comes from the balances status already read, not a second check.
+  it('links the wallet dashboard when the wallet holds something on Polygon', async () => {
+    await confirm(await connectStep1());
+    funding.funded = false;
+    world.balances = {
+      nativeBalances: [{ chainId: 137, balance: '1000000000000000000', symbol: 'POL' }],
+      balances: []
+    };
+    try {
+      const report = await sessionReport({ wallet, withVersion: false });
+      expect(report.dashboard).toEqual({
+        url: `${fundingUiBase()}/?wallet=${String(report.walletAddress)}&chain=137&view=dashboard`
+      });
+    } finally {
+      funding.funded = true;
+      world.balances = { nativeBalances: [], balances: [] };
+    }
+  });
+
+  it('links the fund view while the wallet is empty', async () => {
+    await confirm(await connectStep1());
+    const report = await sessionReport({ wallet, withVersion: false });
+    expect(report.dashboard).toEqual({ url: expect.stringContaining('view=fund') });
+  });
+
+  it('links the dashboard view when balances could not be read', async () => {
+    await confirm(await connectStep1());
+    world.balancesError = new Error('indexer down');
+    try {
+      const report = await sessionReport({ wallet, withVersion: false });
+      expect(report.dashboard).toEqual({ url: expect.stringContaining('view=dashboard') });
+    } finally {
+      world.balancesError = undefined;
+    }
+  });
+
+  it('has no dashboard link before a wallet is connected', async () => {
+    const report = await sessionReport({ wallet, withVersion: false });
+    expect(report).not.toHaveProperty('dashboard');
   });
 
   it('omits the field when there is no Polymarket account', async () => {
@@ -1239,7 +1294,7 @@ describe('browser sign-in', () => {
       ok: true,
       status: 'waiting',
       method: 'browser',
-      methodReason: 'desktop',
+      methodReason: 'terminal',
       request: pending.id,
       url: expect.stringMatching(new RegExp(`/login#${pending.relaySession}$`)),
       expiresAt: pending.expiresAt,
@@ -1405,7 +1460,7 @@ describe('browser sign-in', () => {
     expect(readResult(wallet, request)).toBeNull();
   });
 
-  it('the waiter opens the funding page and the --wait result carries it for an empty wallet', async () => {
+  it('the waiter opens nothing and the --wait result carries the links for an empty wallet', async () => {
     funding.funded = false;
     try {
       const request = String((await browserConnect()).request);
@@ -1420,16 +1475,18 @@ describe('browser sign-in', () => {
         connected: true,
         funding: { url: expect.stringContaining('view=fund'), reason: 'empty' }
       });
-      expect(browser.opened).toEqual([(result?.funding as { url: string }).url]);
+      expect(result?.dashboard).toEqual({ url: expect.stringContaining('view=fund') });
+      expect(browser.opened).toEqual([]);
       expect(await confirmArgs({ request, wait: true })).toMatchObject({
-        funding: { reason: 'empty' }
+        funding: { reason: 'empty' },
+        dashboard: { url: expect.stringContaining('view=fund') }
       });
     } finally {
       funding.funded = true;
     }
   });
 
-  it('the waiter opens no funding page for a funded wallet', async () => {
+  it('the waiter opens nothing for a funded wallet and links the dashboard', async () => {
     const request = String((await browserConnect()).request);
     browser.opened.length = 0;
     browser.actions.push(
@@ -1438,6 +1495,9 @@ describe('browser sign-in', () => {
     );
     await confirmArgs({ request, browserWaiter: true });
     expect(readResult(wallet, request)?.funding).toBeUndefined();
+    expect(readResult(wallet, request)?.dashboard).toEqual({
+      url: expect.stringContaining('view=dashboard')
+    });
     expect(browser.opened).toEqual([]);
   });
 

@@ -24,6 +24,18 @@ const fake = vi.hoisted(() => ({
   signedIn: false
 }));
 
+const funds = vi.hoisted(() => ({ funded: false, opened: [] as string[], checks: 0 }));
+vi.mock('../lib/indexer.ts', () => ({
+  isWalletFunded: async () => {
+    funds.checks += 1;
+    return funds.funded;
+  }
+}));
+vi.mock('open', () => ({
+  default: async (url: string) => {
+    funds.opened.push(url);
+  }
+}));
 vi.mock('../lib/polymarket/owner-step.ts', () => ({ polymarketOwnerStep: step.fn }));
 vi.mock('../lib/oms-client.ts', () => ({
   getOmsClient: () => ({
@@ -92,6 +104,9 @@ beforeEach(() => {
   fake.active = undefined;
   fake.auto = IMPORTED;
   fake.calls.length = 0;
+  funds.funded = false;
+  funds.opened.length = 0;
+  funds.checks = 0;
   step.fn.mockReset();
   step.fn.mockResolvedValue({ backedUp: true, omsWalletId: 'w-key' });
   vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -228,5 +243,41 @@ describe('wallet login --owner polymarket backup', () => {
       ok: true,
       polymarket: { backedUp: false, error: 'boom' }
     });
+  });
+});
+
+describe('wallet login --owner dashboard link', () => {
+  it('a fresh login of an empty wallet links the fund view', async () => {
+    await ownerLogin();
+    expect(jsonLines('log')[0]).toMatchObject({
+      ok: true,
+      dashboard: { url: `https://ui.test/?wallet=${MAIN}&chain=137&view=fund` }
+    });
+  });
+
+  it('a funded wallet links the dashboard view, on the already-logged-in path too', async () => {
+    funds.funded = true;
+    await saveOmsWalletPointer(name, { walletAddress: MAIN, loginMethod: 'google', createdAt: '' });
+    fake.active = MAIN;
+    await ownerLogin();
+    expect(jsonLines('log')[0]).toMatchObject({
+      alreadyLoggedIn: true,
+      dashboard: { url: `https://ui.test/?wallet=${MAIN}&chain=137&view=dashboard` }
+    });
+  });
+
+  it('the funding step after login opens nothing and shares the one funded check', async () => {
+    await login('--owner');
+    const [result, panel] = jsonLines('log');
+    expect(result).toMatchObject({
+      ok: true,
+      dashboard: { url: expect.stringContaining('view=fund') }
+    });
+    expect(panel).toMatchObject({
+      funded: false,
+      url: result?.dashboard && (result.dashboard as { url: string }).url
+    });
+    expect(funds.opened).toEqual([]);
+    expect(funds.checks).toBe(1);
   });
 });

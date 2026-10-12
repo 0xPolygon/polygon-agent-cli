@@ -12,12 +12,16 @@ export function fundingUiBase(): string {
   return v ? v.replace(/\/+$/, '') : loginUiBaseUrl();
 }
 
+export type FundingView = 'fund' | 'dashboard';
+
 export function fundingUrl(params: {
   walletAddress: string;
   chainId: number;
   amountUsd?: number | string;
+  view?: FundingView;
 }): string {
-  const url = `${fundingUiBase()}/?wallet=${params.walletAddress}&chain=${params.chainId}&view=fund`;
+  const view = params.view ?? 'fund';
+  const url = `${fundingUiBase()}/?wallet=${params.walletAddress}&chain=${params.chainId}&view=${view}`;
   return params.amountUsd === undefined ? url : `${url}&amount=${params.amountUsd}`;
 }
 
@@ -30,5 +34,19 @@ export function fundingInfo(params: {
   return {
     url: fundingUrl(params),
     ...(params.amountUsd === undefined ? {} : { amountUsd: params.amountUsd })
+  };
+}
+
+// The wallet's page on agentconnect, sent after every connect and by `wallet
+// status`: the fund view while the wallet is empty, the dashboard after.
+export function dashboardInfo(params: { walletAddress: string; funded: boolean }): {
+  url: string;
+} {
+  return {
+    url: fundingUrl({
+      walletAddress: params.walletAddress,
+      chainId: 137,
+      view: params.funded ? 'dashboard' : 'fund'
+    })
   };
 }
