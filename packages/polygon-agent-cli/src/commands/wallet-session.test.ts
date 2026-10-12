@@ -281,7 +281,7 @@ const browser = vi.hoisted(() => ({
 vi.mock('../lib/signin-method.ts', () => ({
   currentSignInMethod: () => ({
     method: browser.method,
-    reason: browser.method === 'browser' ? 'desktop' : 'ci'
+    reason: browser.method === 'browser' ? 'terminal' : 'ci'
   })
 }));
 vi.mock('open', () => ({
@@ -1239,7 +1239,7 @@ describe('browser sign-in', () => {
       ok: true,
       status: 'waiting',
       method: 'browser',
-      methodReason: 'desktop',
+      methodReason: 'terminal',
       request: pending.id,
       url: expect.stringMatching(new RegExp(`/login#${pending.relaySession}$`)),
       expiresAt: pending.expiresAt,
