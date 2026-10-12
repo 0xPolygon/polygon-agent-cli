@@ -4,6 +4,7 @@ import type { ElementType } from 'react';
 
 import {
   ArrowLeftRight,
+  Check,
   Copy,
   Cpu,
   Database,
@@ -168,9 +169,9 @@ const SECTIONS: { name: string; skillUrl: string; items: UseCase[] }[] = [
 // Shared logo header used on every screen.
 export function LogoBadge() {
   return (
-    <div className="flex items-center gap-2.5">
-      <img src="/polygon-logo-full.webp" alt="Polygon" className="h-7 w-auto" />
-      <span className="font-mono text-xs bg-[#141635] text-white px-2 py-0.5 rounded-md tracking-tight">
+    <div className="flex items-center gap-2.5 flex-shrink-0">
+      <img src="/polygon-logo-full.webp" alt="Polygon" className="h-6 sm:h-7 w-auto" />
+      <span className="font-mono text-xs bg-[#141635] text-white px-2 py-0.5 rounded-md tracking-tight whitespace-nowrap">
         &gt;_ agent
       </span>
     </div>
@@ -216,21 +217,23 @@ function Dashboard({
 
   const shortAddr = `${walletAddress.slice(0, 6)}..${walletAddress.slice(-4)}`;
 
+  const copyAddress = () => {
+    void navigator.clipboard.writeText(walletAddress).then(() => {
+      setAddrCopied(true);
+      setTimeout(() => setAddrCopied(false), 1500);
+    });
+  };
+
   return (
     <div className="min-h-screen bg-[#f5f6fb]">
       {/* Nav */}
-      <nav className="bg-white border-b border-[#c8cfe1] px-6 py-3.5 flex items-center justify-between">
+      <nav className="bg-white border-b border-[#c8cfe1] px-4 sm:px-6 py-3 sm:py-3.5 flex items-center justify-between gap-3">
         <LogoBadge />
         <button
           type="button"
           title="Copy address"
-          onClick={() => {
-            void navigator.clipboard.writeText(walletAddress).then(() => {
-              setAddrCopied(true);
-              setTimeout(() => setAddrCopied(false), 1500);
-            });
-          }}
-          className="flex items-center gap-2 bg-[#f5f6fb] hover:bg-[#eef0f8] border border-[#c8cfe1] rounded-full px-3 py-1.5 transition-colors cursor-pointer"
+          onClick={copyAddress}
+          className="hidden sm:flex items-center gap-2 flex-shrink-0 bg-[#f5f6fb] hover:bg-[#eef0f8] border border-[#c8cfe1] rounded-full px-3 py-1.5 transition-colors cursor-pointer"
         >
           <div className="w-5 h-5 rounded-full bg-gradient-to-br from-[#7c3aed] to-[#a78bfa] flex-shrink-0" />
           <span className="font-mono text-sm text-[#141635]">
@@ -239,11 +242,11 @@ function Dashboard({
         </button>
       </nav>
 
-      <main className="max-w-4xl mx-auto px-6 py-8">
+      <main className="max-w-4xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
         {/* Balance row */}
-        <div className="flex items-start justify-between mb-8">
-          <div>
-            <div className="text-5xl font-bold text-[#141635] mb-2 leading-none">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-8">
+          <div className="min-w-0">
+            <div className="text-4xl sm:text-5xl font-bold text-[#141635] mb-2 leading-none break-all">
               {totalUsd === null ? (
                 <span className="text-[#c8cfe1]">$0.00</span>
               ) : (
@@ -253,14 +256,25 @@ function Dashboard({
                 })}`
               )}
             </div>
-            <div className="flex items-center gap-2 mt-2">
-              <div className="w-2 h-2 rounded-full bg-[#7c3aed]" />
-              <span className="font-mono text-xs text-[#64708f]">{walletAddress}</span>
+            <div className="flex items-center gap-2 mt-2 min-w-0">
+              <div className="w-2 h-2 rounded-full bg-[#7c3aed] flex-shrink-0" />
+              <span className="font-mono text-sm sm:text-xs text-[#64708f] break-all min-w-0">
+                {walletAddress}
+              </span>
+              <button
+                type="button"
+                title="Copy address"
+                aria-label="Copy address"
+                onClick={copyAddress}
+                className="flex items-center justify-center flex-shrink-0 w-11 h-11 sm:w-7 sm:h-7 -my-2 sm:my-0 rounded-lg text-[#929eba] hover:text-[#141635] hover:bg-[#eef0f8] transition-colors cursor-pointer border-0 bg-transparent"
+              >
+                {addrCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+              </button>
             </div>
           </div>
           <button
             onClick={() => setFundOpen(true)}
-            className="btn-press flex items-center gap-2 bg-[#141635] hover:bg-[#1e2155] text-white font-bold px-5 py-2.5 rounded-xl transition-colors cursor-pointer border-0 text-sm"
+            className="btn-press flex items-center justify-center gap-2 w-full sm:w-auto min-h-11 flex-shrink-0 bg-[#141635] hover:bg-[#1e2155] text-white font-bold px-5 py-2.5 rounded-xl transition-colors cursor-pointer border-0 text-sm"
           >
             <Plus className="w-4 h-4" />
             Add funds
@@ -273,7 +287,7 @@ function Dashboard({
         </div>
 
         {/* Section nav bar */}
-        <div className="flex items-center gap-1.5 mb-4">
+        <div className="flex flex-wrap items-center gap-1.5 mb-4">
           {SECTIONS.map((section, i) => (
             <button
               key={section.name}
@@ -281,7 +295,7 @@ function Dashboard({
                 setSelectedSection(i);
                 setSelectedUseCase(0);
               }}
-              className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer border ${
+              className={`min-h-11 sm:min-h-0 px-4 sm:px-3.5 py-1.5 rounded-full text-sm sm:text-xs font-bold transition-all cursor-pointer border ${
                 i === selectedSection
                   ? 'bg-[#141635] text-white border-transparent'
                   : 'bg-white text-[#64708f] border-[#c8cfe1] hover:border-[#929eba]'
@@ -293,9 +307,9 @@ function Dashboard({
         </div>
 
         {/* Use cases + terminal */}
-        <div className="grid grid-cols-2 gap-0 bg-white rounded-3xl border border-[#c8cfe1] overflow-hidden mb-4">
-          {/* Left: use cases */}
-          <div className="p-5 border-r border-[#c8cfe1]">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-0 bg-white rounded-3xl border border-[#c8cfe1] overflow-hidden mb-4">
+          {/* Left: use cases (stacked above the terminal on small screens) */}
+          <div className="p-3 sm:p-5 border-b md:border-b-0 md:border-r border-[#c8cfe1] min-w-0">
             <div className="space-y-1">
               {items.map((uc, i) => {
                 const Icon = uc.icon;
@@ -303,7 +317,7 @@ function Dashboard({
                   <button
                     key={uc.label}
                     onClick={() => setSelectedUseCase(i)}
-                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-left cursor-pointer transition-colors ${
+                    className={`w-full min-h-11 flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-left cursor-pointer transition-colors ${
                       i === selectedUseCase
                         ? 'bg-[#f5f6fb] text-[#141635] font-bold'
                         : 'text-[#64708f] hover:bg-[#f9f9fd] font-medium'
@@ -318,8 +332,8 @@ function Dashboard({
           </div>
 
           {/* Right: terminal */}
-          <div className="p-5 flex flex-col">
-            <pre className="text-xs leading-relaxed flex-1 text-[#64708f] whitespace-pre-wrap font-mono">
+          <div className="p-4 sm:p-5 flex flex-col min-w-0">
+            <pre className="text-sm sm:text-xs leading-relaxed flex-1 text-[#64708f] whitespace-pre-wrap break-words font-mono">
               <span
                 className="font-semibold"
                 style={{ color: AGENTS.find((a) => a.id === selectedAgent)?.color }}
@@ -331,13 +345,13 @@ function Dashboard({
             </pre>
             <div className="mt-3 pt-3 border-t border-[#c8cfe1]">
               {/* Agent selector chips */}
-              <div className="flex items-center gap-1.5 mb-3">
-                <span className="text-xs text-[#64708f] mr-0.5">Run with</span>
+              <div className="flex flex-wrap items-center gap-1.5 mb-3">
+                <span className="text-sm sm:text-xs text-[#64708f] mr-0.5">Run with</span>
                 {AGENTS.map((agent) => (
                   <button
                     key={agent.id}
                     onClick={() => setSelectedAgent(agent.id)}
-                    className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold transition-all cursor-pointer border ${
+                    className={`flex items-center gap-1 min-h-11 sm:min-h-0 px-3 sm:px-2.5 py-1 rounded-full text-sm sm:text-xs font-bold transition-all cursor-pointer border ${
                       selectedAgent === agent.id
                         ? 'text-white border-transparent'
                         : 'bg-white text-[#64708f] border-[#c8cfe1] hover:border-[#929eba]'
@@ -374,7 +388,7 @@ function Dashboard({
                       setTimeout(() => setCopied(false), 2000);
                     });
                 }}
-                className="w-full flex items-center justify-center gap-2 border border-[#c8cfe1] rounded-xl py-2.5 text-sm text-[#141635] font-bold hover:bg-[#f5f6fb] hover:border-[#929eba] transition-all cursor-pointer bg-white"
+                className="w-full min-h-11 flex items-center justify-center gap-2 border border-[#c8cfe1] rounded-xl py-2.5 text-sm text-[#141635] font-bold hover:bg-[#f5f6fb] hover:border-[#929eba] transition-all cursor-pointer bg-white"
               >
                 <Copy className="w-4 h-4" />
                 {copied ? 'Copied!' : 'Copy to your terminal'}
@@ -385,7 +399,7 @@ function Dashboard({
 
         {/* Learn more */}
         <h3 className="text-base font-bold text-[#141635] mb-3 mt-8">Learn more</h3>
-        <div className="grid grid-cols-3 gap-3 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-6">
           {[
             {
               title: 'Github',
@@ -408,7 +422,7 @@ function Dashboard({
               href={card.href}
               target="_blank"
               rel="noopener noreferrer"
-              className="bg-white rounded-3xl border border-[#c8cfe1] p-6 no-underline block hover:border-[#929eba] transition-all group"
+              className="bg-white rounded-3xl border border-[#c8cfe1] p-5 sm:p-6 no-underline block min-w-0 hover:border-[#929eba] transition-all group"
               style={{ boxShadow: '0 1px 4px rgba(20,22,53,0.04)' }}
             >
               <div className="flex items-start justify-between mb-3">
@@ -434,17 +448,17 @@ function Dashboard({
           ))}
         </div>
 
-        <div className="text-center py-4 text-xs text-[#929eba] font-medium">
+        <div className="text-center py-4 text-sm sm:text-xs text-[#929eba] font-medium">
           Powered by Polygon
         </div>
       </main>
 
       {fundOpen && (
         <div
-          className="fixed inset-0 z-[100000] flex items-center justify-center px-4 bg-[#141635]/40 backdrop-blur-sm"
+          className="fixed inset-0 z-[100000] flex justify-center overflow-y-auto overflow-x-hidden px-4 py-6 bg-[#141635]/40 backdrop-blur-sm"
           onClick={() => setFundOpen(false)}
         >
-          <div onClick={(e) => e.stopPropagation()}>
+          <div className="w-full max-w-sm my-auto" onClick={(e) => e.stopPropagation()}>
             <FundingScreen
               walletAddress={walletAddress}
               chainId={chainId}
@@ -463,7 +477,7 @@ function CopyRow({ label, command }: { label: string; command: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div>
-      <div className="text-xs font-bold text-[#141635] mb-1.5">{label}</div>
+      <div className="text-sm sm:text-xs font-bold text-[#141635] mb-1.5">{label}</div>
       <button
         type="button"
         onClick={() => {
@@ -472,10 +486,12 @@ function CopyRow({ label, command }: { label: string; command: string }) {
             setTimeout(() => setCopied(false), 2000);
           });
         }}
-        className="w-full flex items-center gap-2 bg-[#f5f6fb] hover:bg-[#eef0f8] border border-[#c8cfe1] hover:border-[#929eba] rounded-xl px-3 py-2.5 transition-all cursor-pointer text-left group"
+        className="w-full min-h-11 flex items-center gap-2 bg-[#f5f6fb] hover:bg-[#eef0f8] border border-[#c8cfe1] hover:border-[#929eba] rounded-xl px-3 py-2.5 transition-all cursor-pointer text-left group"
       >
-        <code className="flex-1 font-mono text-xs text-[#141635] break-all">{command}</code>
-        <span className="flex items-center gap-1 text-xs font-bold text-[#64708f] group-hover:text-[#141635] flex-shrink-0">
+        <code className="flex-1 min-w-0 font-mono text-sm sm:text-xs text-[#141635] break-all">
+          {command}
+        </code>
+        <span className="flex items-center gap-1 text-sm sm:text-xs font-bold text-[#64708f] group-hover:text-[#141635] flex-shrink-0">
           <Copy className="w-3.5 h-3.5" />
           {copied ? 'Copied' : 'Copy'}
         </span>
@@ -489,12 +505,13 @@ function CopyRow({ label, command }: { label: string; command: string }) {
 // from the CLI). Points them at installing the skill and prompting their agent.
 function GetStartedNotice() {
   return (
-    <div className="min-h-screen bg-[#f5f6fb] flex flex-col items-center justify-center px-4">
-      <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[99999]">
+    <div className="min-h-screen bg-[#f5f6fb] flex flex-col items-center justify-center px-4 py-6">
+      {/* In the page flow on phones so it never covers the card; pinned on larger screens. */}
+      <div className="mb-6 sm:mb-0 sm:fixed sm:top-6 sm:left-1/2 sm:-translate-x-1/2 z-[99999]">
         <LogoBadge />
       </div>
       <div
-        className="w-full max-w-md bg-white rounded-3xl border border-[#c8cfe1] px-8 py-8 flex flex-col gap-5"
+        className="w-full max-w-md bg-white rounded-3xl border border-[#c8cfe1] px-5 py-6 sm:px-8 sm:py-8 flex flex-col gap-5"
         style={{ boxShadow: '0 2px 8px rgba(20,22,53,0.06), 0 16px 48px rgba(20,22,53,0.08)' }}
       >
         <div className="flex flex-col items-center gap-2 text-center">
@@ -511,7 +528,7 @@ function GetStartedNotice() {
           command="npx skills add https://github.com/0xPolygon/polygon-agent-cli"
         />
         <CopyRow label="2. Prompt your agent" command="set up a Polygon Agent for me" />
-        <p className="text-xs text-[#929eba] leading-relaxed font-medium text-center">
+        <p className="text-sm sm:text-xs text-[#929eba] leading-relaxed font-medium text-center">
           Works with Claude Code, Codex, Openclaw, and any skills-compatible agent.
         </p>
       </div>

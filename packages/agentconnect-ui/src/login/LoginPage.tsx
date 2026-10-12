@@ -188,11 +188,12 @@ export function LoginPage() {
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-[#f5f6fb] flex flex-col items-center justify-center px-4">
-      <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[99999]">
+    <div className="min-h-screen bg-[#f5f6fb] flex flex-col items-center justify-center px-4 py-6">
+      {/* In the page flow on phones so it never covers the card; pinned on larger screens. */}
+      <div className="mb-6 sm:mb-0 sm:fixed sm:top-6 sm:left-1/2 sm:-translate-x-1/2 z-[99999]">
         <LogoBadge />
       </div>
-      <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-[0_2px_8px_rgba(20,22,53,0.06)] border border-[#e3e7f2]">
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 sm:p-8 shadow-[0_2px_8px_rgba(20,22,53,0.06)] border border-[#e3e7f2]">
         {children}
       </div>
     </div>
@@ -223,7 +224,7 @@ function renderState(state: MachineState, session: string, dispatch: (e: Machine
           {state.url && (
             <a
               href={state.url}
-              className="mt-6 inline-block text-sm text-[#64708f] hover:text-[#141635] underline"
+              className="mt-3 inline-block py-3 text-sm text-[#64708f] hover:text-[#141635] underline"
             >
               Not redirected? Continue with Google
             </a>
@@ -278,7 +279,7 @@ function renderState(state: MachineState, session: string, dispatch: (e: Machine
           <br />
           <a
             href={dashboardUrl(state.walletAddress)}
-            className="mt-6 inline-block text-sm text-[#64708f] hover:text-[#141635] underline"
+            className="mt-3 inline-block py-3 text-sm text-[#64708f] hover:text-[#141635] underline"
           >
             {state.funding ? 'Open your dashboard' : 'Not redirected? Open your dashboard'}
           </a>
@@ -388,7 +389,7 @@ function EmailForm({
         value={email}
         onChange={(e) => setEmail(e.target.value)}
         placeholder="you@example.com"
-        className="mt-6 w-full rounded-xl border border-[#c8cfe1] px-4 py-3 text-sm text-[#141635] outline-none focus:border-[#141635]"
+        className="mt-6 w-full rounded-xl border border-[#c8cfe1] px-4 py-3 text-base sm:text-sm text-[#141635] outline-none focus:border-[#141635]"
       />
       <button
         type="submit"
@@ -399,7 +400,7 @@ function EmailForm({
       <button
         type="button"
         onClick={onBack}
-        className="mt-3 w-full text-sm text-[#64708f] hover:text-[#141635]"
+        className="mt-3 w-full min-h-11 text-sm text-[#64708f] hover:text-[#141635]"
       >
         Back
       </button>
