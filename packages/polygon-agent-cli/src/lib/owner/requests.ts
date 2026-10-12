@@ -58,6 +58,9 @@ export function ownerWallet(ownerKey: Uint8Array): OMSWallet {
   return new OMSWallet({
     publishableKey: loadOmsConfig().publishableKey,
     storage: new MemoryStorageManager(),
+    // Google sign-in through the page needs somewhere to keep the redirect
+    // state. Start and completion both happen in the one waiter process.
+    redirectAuthStorage: new MemoryStorageManager(),
     credentialSigner: new EthereumPrivateKeyCredentialSigner(ownerKey)
   });
 }
