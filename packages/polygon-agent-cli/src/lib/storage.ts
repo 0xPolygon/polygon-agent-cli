@@ -42,7 +42,7 @@ export interface OmsConfig {
 export type OmsLoginMethod = 'google' | 'email';
 
 /**
- * Pointer record for an OMS wallet (the SDK persists the real session in its
+ * Pointer record for an agent wallet (the SDK persists the real session in its
  * StorageManager). `access: 'session'` marks a wallet this install spends from
  * through smart sessions (lib/session/); absent means owner mode.
  */
@@ -368,7 +368,7 @@ export function bootstrapOmsConfig(): void {
 
   // Also bootstrap the OMS project access key (used by Trails swap/bridge
   // and the indexer) from builder.json into the env, if present — env always
-  // wins. This is separate from the OMS wallet credentials above.
+  // wins. This is separate from the agent wallet credentials above.
   if (!process.env.SEQUENCE_PROJECT_ACCESS_KEY) {
     const configPath = path.join(STORAGE_DIR, 'builder.json');
     if (fs.existsSync(configPath)) {
@@ -404,7 +404,7 @@ export async function loadOmsWalletPointer(name: string): Promise<OmsWalletPoint
   return null;
 }
 
-/** Remove an OMS wallet's pointer + the SDK's per-wallet state dir. */
+/** Remove an agent wallet's pointer + the SDK's per-wallet state dir. */
 export async function deleteOmsWallet(name: string): Promise<void> {
   const walletPath = path.join(STORAGE_DIR, 'wallets', `${walletName(name)}.json`);
   if (fs.existsSync(walletPath)) fs.unlinkSync(walletPath);

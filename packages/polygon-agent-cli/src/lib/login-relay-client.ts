@@ -30,7 +30,7 @@ export function makeLoginRelay(relayBase: string): BrowserLoginDeps['relay'] {
       if (!res.ok) throw new Error(`Relay poll failed (${res.status})`);
       const data = (await res.json()) as { state: string; action?: LoginAction };
       if (data.state === 'expired') {
-        throw new Error('Login session expired before completion. Re-run `wallet login`.');
+        throw new Error('Login session expired before completion. Run the command again.');
       }
       return data.state === 'action' && data.action ? data.action : null;
     },

@@ -6,7 +6,7 @@ import { bigintReplacer, CliError, errorJson, failureJson } from '../../lib/erro
 import { loadOmsWalletPointer } from '../../lib/storage.ts';
 
 export function walletOption<T>(y: Argv<T>) {
-  return y.option('wallet', { type: 'string', default: 'main', describe: 'OMS wallet name' });
+  return y.option('wallet', { type: 'string', default: 'main', describe: 'agent wallet name' });
 }
 
 export function ok(data: Record<string, unknown>): void {

@@ -1,4 +1,4 @@
-// deposit / withdraw: move money between the OMS wallet and the Polymarket
+// deposit / withdraw: move money between the agent wallet and the Polymarket
 // Deposit Wallet through Polymarket's bridge. The OMS side is a plain USDC
 // transfer, so session-mode allowances cover deposits.
 
@@ -287,7 +287,7 @@ async function handleWithdraw(argv: WithdrawArgs): Promise<void> {
       txHash,
       amountUsd: formatUnits6(amount),
       to: recipient,
-      note: "txHash is the pUSD transfer to Polymarket's bridge. The USDC arrives in the OMS wallet shortly after."
+      note: "txHash is the pUSD transfer to Polymarket's bridge. The USDC arrives in the agent wallet shortly after."
     });
   } catch (err) {
     fail(err, { stack: true });
@@ -296,7 +296,7 @@ async function handleWithdraw(argv: WithdrawArgs): Promise<void> {
 
 export const depositCommand: CommandModule = {
   command: 'deposit <amount>',
-  describe: 'Move USDC from the OMS wallet into the Polymarket account (min $2)',
+  describe: 'Move USDC from the agent wallet into the Polymarket account (min $2)',
   builder: (y) =>
     withWriteFlags(
       walletOption(y)
@@ -318,7 +318,7 @@ export const depositCommand: CommandModule = {
 
 export const withdrawCommand: CommandModule = {
   command: 'withdraw <amount>',
-  describe: 'Move pUSD from the Polymarket account back to the OMS wallet as USDC',
+  describe: 'Move pUSD from the Polymarket account back to the agent wallet as USDC',
   builder: (y) =>
     withWriteFlags(
       walletOption(y).positional('amount', {

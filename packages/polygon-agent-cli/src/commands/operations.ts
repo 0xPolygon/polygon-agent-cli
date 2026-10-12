@@ -179,7 +179,7 @@ export const balancesCommand: CommandModule = {
       try {
         const pointer = await loadOmsWalletPointer(walletName);
         if (!pointer) {
-          throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login`);
+          throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login --owner`);
         }
         const walletAddress = pointer.walletAddress;
 
@@ -229,7 +229,7 @@ export const balancesCommand: CommandModule = {
       try {
         const pointer = await loadOmsWalletPointer(walletName);
         if (!pointer) {
-          throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login`);
+          throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login --owner`);
         }
 
         const chainSpec = (argv.chain as string) || 'polygon';
@@ -349,7 +349,7 @@ export const fundCommand: CommandModule = {
     try {
       const session = await loadOmsWalletPointer(walletName);
       if (!session) {
-        throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login`);
+        throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login --owner`);
       }
 
       await showFunding(walletName, session.walletAddress, 137, { openBrowser: true });
@@ -455,7 +455,8 @@ async function handleSendNative(argv: {
     walletAddress?: string;
   }> {
     const session = await loadOmsWalletPointer(walletName);
-    if (!session) throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login`);
+    if (!session)
+      throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login --owner`);
 
     const network = resolveNetwork((argv.chain as string) || 'polygon');
     const decimals = network.nativeToken?.decimals ?? 18;
@@ -491,7 +492,8 @@ async function handleSendNative(argv: {
     // Non-TTY: original JSON output
     try {
       const session = await loadOmsWalletPointer(walletName);
-      if (!session) throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login`);
+      if (!session)
+        throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login --owner`);
 
       const network = resolveNetwork((argv.chain as string) || 'polygon');
       const decimals = network.nativeToken?.decimals ?? 18;
@@ -632,7 +634,8 @@ async function handleSendToken(argv: {
     network: ReturnType<typeof resolveNetwork>;
   }> {
     const session = await loadOmsWalletPointer(walletName);
-    if (!session) throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login`);
+    if (!session)
+      throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login --owner`);
 
     const network = resolveNetwork((argv.chain as string) || 'polygon');
     let token = tokenAddress;
@@ -769,7 +772,7 @@ async function handleCall(argv: {
   }
 
   const session = await loadOmsWalletPointer(walletName);
-  if (!session) throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login`);
+  if (!session) throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login --owner`);
 
   const network = resolveNetwork(argv.chain || 'polygon');
   const decimals = network.nativeToken?.decimals ?? 18;
@@ -1110,7 +1113,8 @@ export const depositCommand: CommandModule = {
 
     try {
       const session = await loadOmsWalletPointer(walletName);
-      if (!session) throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login`);
+      if (!session)
+        throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login --owner`);
 
       const network = resolveNetwork((argv.chain as string) || 'polygon');
       const { chainId } = network;
@@ -1534,7 +1538,8 @@ export const withdrawCommand: CommandModule = {
 
     try {
       const session = await loadOmsWalletPointer(walletName);
-      if (!session) throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login`);
+      if (!session)
+        throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login --owner`);
 
       const network = resolveNetwork((argv.chain as string) || 'polygon');
       const { chainId } = network;
@@ -1948,7 +1953,8 @@ export const x402PayCommand: CommandModule = {
 
     try {
       const session = await loadOmsWalletPointer(walletName);
-      if (!session) throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login`);
+      if (!session)
+        throw new Error(`Wallet not found: ${walletName}. Run: agent wallet login --owner`);
       // The x402 signer EOA comes with this install's Builder setup.
       await ensureBuilderAccess(session.walletAddress);
       const builderConfig = await loadBuilderConfig();

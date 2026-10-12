@@ -30,11 +30,11 @@ agent wallet status      # is a wallet connected? (session mode: allowance left)
 agent wallet list        # owner mode: is a wallet configured?
 ```
 
-Installed for a personal assistant (session mode, see https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/setup.md)? Payments come out of the allowance; connect with `wallet login --email` instead of the browser login below.
+Installed for a personal assistant (session mode, see https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/setup.md)? Payments come out of the allowance; connect with bare `wallet login` (it picks a browser page or an emailed code) instead of the owner login below.
 
 If no wallet is listed, set one up:
 
-1. `agent wallet login`: opens the agentconnect login page in the browser; sign in with Google or email (works on headless hosts too, no extra flags needed). No setup step is needed first: keys are defaulted, and login auto-provisions Builder credentials.
+1. `agent wallet login --owner`: opens the agentconnect login page in the browser; sign in with Google or email (works on headless hosts too, no extra flags needed). No setup step is needed first: keys are defaulted, and login auto-provisions Builder credentials.
 2. `agent wallet address`: get the address, then fund it (`agent fund`)
 3. `agent balances`: confirm USDC is available on Polygon (chain 137) before calling any x402 endpoint
 

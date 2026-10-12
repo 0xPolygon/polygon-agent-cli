@@ -1,4 +1,4 @@
-// setup / status / import-key: the Polymarket trading account for an OMS wallet.
+// setup / status / import-key: the Polymarket trading account for an agent wallet.
 
 import type { CommandModule } from 'yargs';
 
@@ -47,7 +47,7 @@ const LEGACY_STEP = 'approve the legacy NegRiskAdapter for neg-risk markets (gas
 
 type SetupArgs = { wallet: string; broadcast?: boolean; dryRun?: boolean };
 
-const NOT_SIGNED_IN = { backedUp: false, hint: 'agent wallet login' };
+const NOT_SIGNED_IN = { backedUp: false, hint: 'agent wallet login --owner' };
 
 // Owner mode: the pointer isn't a session-only grant. Session mode backs up via owner requests.
 async function isOwnerMode(wallet: string): Promise<boolean> {
@@ -103,7 +103,7 @@ async function restoreInOwnerMode(wallet: string): Promise<Record<string, unknow
       code: 'not_set_up',
       message:
         "The Polymarket key is not on this machine, and OMS can't be checked for a backup while signed out.",
-      hint: 'Sign in with agent wallet login, then run setup again.'
+      hint: 'Sign in with agent wallet login --owner, then run setup again.'
     });
   }
   let restored: Awaited<ReturnType<typeof restoreFromOms>> | null = null;
@@ -319,7 +319,7 @@ async function handleStatus(argv: { wallet: string }): Promise<void> {
 type RecoverArgs = { address: string; wallet: string; broadcast?: boolean; dryRun?: boolean };
 
 // Owner mode only: the explicit escape hatch for a funded trading key this install can't claim
-// automatically. Moves that account's pUSD to the main OMS wallet; touches no local records.
+// automatically. Moves that account's pUSD to the main agent wallet; touches no local records.
 async function handleRecover(argv: RecoverArgs): Promise<void> {
   try {
     const broadcast = resolveBroadcast(argv);
@@ -328,7 +328,7 @@ async function handleRecover(argv: RecoverArgs): Promise<void> {
       throw new CliError({
         code: 'owner_required',
         message: 'Recovering another Polymarket key needs an owner sign-in.',
-        hint: 'Run this from an owner install (agent wallet login)'
+        hint: 'Run this from an owner install (agent wallet login --owner)'
       });
     }
     const w = pointer ? getOmsClient(argv.wallet).wallet : null;
@@ -336,7 +336,7 @@ async function handleRecover(argv: RecoverArgs): Promise<void> {
       throw new CliError({
         code: 'not_set_up',
         message: 'No owner session is live for this wallet.',
-        hint: 'agent wallet login'
+        hint: 'agent wallet login --owner'
       });
     }
     let result: Record<string, unknown>;
@@ -432,7 +432,7 @@ export const importKeyCommand: CommandModule = {
 export const recoverCommand: CommandModule = {
   command: 'recover <address>',
   describe:
-    "Move the cash of a Polymarket trading key this install doesn't track back to your OMS wallet (owner mode)",
+    "Move the cash of a Polymarket trading key this install doesn't track back to your agent wallet (owner mode)",
   builder: (y) =>
     withWriteFlags(walletOption(y)).positional('address', {
       type: 'string',

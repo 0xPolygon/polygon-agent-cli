@@ -10,10 +10,10 @@ description: Swap, bridge, and deposit on Polygon using the Polygon Agent CLI. C
 **Before any DeFi operation, the wallet must be logged in.** The embedded wallet can call any contract and spend any amount it holds — there is no contract whitelist and no per-token spend limit, so no special setup is needed for deposits, swaps, or withdrawals. If the user is not logged in, log in now:
 
 ```bash
-agent wallet login
+agent wallet login --owner
 ```
 
-This opens the agentconnect login page in the browser; choose Google or email, and once you sign in the embedded wallet is created or unlocked. This works whether the browser is local or remote, so no extra flags are needed on headless hosts. The wallet address is the same across all chains. Sessions last about a week; if calls start failing with an expired-session error, just re-run `wallet login`.
+This opens the agentconnect login page in the browser; choose Google or email, and once you sign in the embedded wallet is created or unlocked. This works whether the browser is local or remote, so no extra flags are needed on headless hosts. The wallet address is the same across all chains. Sessions last about a week; if calls start failing with an expired-session error, just re-run `wallet login --owner`.
 
 ---
 
@@ -231,8 +231,8 @@ agent call --to 0x... --data 0x... --prefer-native-fee --broadcast
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `Not logged in` / no wallet found | No active wallet session | Run `agent wallet login` |
-| Session expired | Sessions last about a week | Run `agent wallet login` |
+| `Not logged in` / no wallet found | No active wallet session | Run `agent wallet login --owner` |
+| Session expired | Sessions last about a week | Run `agent wallet login --owner` |
 | `Insufficient <token>: wallet has X` | Balance too low for the requested deposit amount | Run `agent balances` and adjust `--amount` |
 | `Unable to pay gas` / `Wallet has no POL for gas` | Wallet can't cover the relayer fee in USDC or POL | Fund the wallet with a little POL or USDC; for a native-only wallet, pass `--prefer-native-fee` on `call` |
 | `Protocol X not yet supported` | Trails returned a protocol other than aave/morpho | Use `agent swap` to obtain the yield-bearing token manually |

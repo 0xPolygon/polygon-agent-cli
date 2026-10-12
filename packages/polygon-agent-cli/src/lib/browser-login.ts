@@ -148,7 +148,9 @@ export async function runBrowserLogin(
       return { walletAddress: main.address, loginMethod: 'email' };
     }
 
-    throw new Error('Timed out waiting for browser login. Re-run, or use `wallet login --local`.');
+    throw new Error(
+      'Timed out waiting for browser login. Re-run, or use `wallet login --owner --local`.'
+    );
   };
 
   try {
