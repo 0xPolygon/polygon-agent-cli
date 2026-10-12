@@ -122,20 +122,29 @@ function processAlive(pid: number): boolean {
   }
 }
 
-// A pid file can outlive its waiter, and the pid can be reused: the process
-// counts as this request's waiter only if its command line says so. A command
-// line that can't be read counts as not ours.
-function isWaiterProcess(pid: number, id: string): boolean {
-  if (!processAlive(pid)) return false;
-  try {
-    const command = execFileSync('ps', ['-ww', '-p', String(pid), '-o', 'command='], {
+// How a process's command line is read; tests replace it.
+export const processInfo = {
+  platform: process.platform as NodeJS.Platform,
+  readCommand: (pid: number): string =>
+    execFileSync('ps', ['-ww', '-p', String(pid), '-o', 'command='], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore']
-    });
-    const words = command.trim().split(/\s+/);
+    })
+};
+
+// A pid file can outlive its waiter, and the pid can be reused: the process
+// counts as this request's waiter only if its command line says so. A command
+// line that can't be read counts as not ours. Without `ps` (Windows, or not
+// installed) only liveness is checked, accepting the pid-reuse risk: the
+// picker chooses the browser there, so waiters must not look dead.
+function isWaiterProcess(pid: number, id: string): boolean {
+  if (!processAlive(pid)) return false;
+  if (processInfo.platform === 'win32') return true;
+  try {
+    const words = processInfo.readCommand(pid).trim().split(/\s+/);
     return words.includes('--browser-waiter') && words.includes(id);
-  } catch {
-    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT';
   }
 }
 

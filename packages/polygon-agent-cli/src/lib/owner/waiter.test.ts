@@ -16,6 +16,7 @@ const {
   clearWaiterFiles,
   deleteResult,
   liveWaiters,
+  processInfo,
   latestWaiterRequest,
   pidFile,
   readResult,
@@ -119,6 +120,38 @@ describe('waiterAlive', () => {
     writePid({ wallet, id: 'r1', pid });
     await stopWaiter(wallet, 'r1');
     expect(() => process.kill(pid, 0)).toThrow();
+  });
+});
+
+describe('without ps', () => {
+  const real = { ...processInfo };
+  afterEach(() => Object.assign(processInfo, real));
+
+  it('on Windows a live pid counts as the waiter (no command line check)', () => {
+    processInfo.platform = 'win32';
+    processInfo.readCommand = () => {
+      throw new Error('ps must not run on Windows');
+    };
+    writePid({ wallet, id: 'r1', pid: process.pid });
+    expect(waiterAlive(wallet, 'r1')).toBe(true);
+    writePid({ wallet, id: 'r1', pid: deadPid() });
+    expect(waiterAlive(wallet, 'r1')).toBe(false);
+  });
+
+  it('when ps is not installed (ENOENT) a live pid counts as the waiter', () => {
+    processInfo.readCommand = () => {
+      throw Object.assign(new Error('spawnSync ps ENOENT'), { code: 'ENOENT' });
+    };
+    writePid({ wallet, id: 'r1', pid: process.pid });
+    expect(waiterAlive(wallet, 'r1')).toBe(true);
+  });
+
+  it('any other ps failure counts as not ours', () => {
+    processInfo.readCommand = () => {
+      throw Object.assign(new Error('ps failed'), { status: 1 });
+    };
+    writePid({ wallet, id: 'r1', pid: process.pid });
+    expect(waiterAlive(wallet, 'r1')).toBe(false);
   });
 });
 
