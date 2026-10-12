@@ -21,7 +21,7 @@ import {
   jsonFail,
   jsonOut
 } from '../lib/errors.ts';
-import { fundingUrl } from '../lib/funding.ts';
+import { dashboardInfo, fundingUrl } from '../lib/funding.ts';
 import { isWalletFunded } from '../lib/indexer.ts';
 import { runOwnerAction } from '../lib/owner/actions.ts';
 import { deletePending, loadPending } from '../lib/owner/pending.ts';
@@ -532,7 +532,8 @@ async function confirmedJson(
     );
     result = { ...result, builderAccess: provision.provisioned || provision.reason === 'existing' };
     // An empty wallet can't do anything yet: hand the assistant the funding link.
-    if (!(await isWalletFunded(wallet, address, 137))) {
+    const funded = await isWalletFunded(wallet, address, 137);
+    if (!funded) {
       result = {
         ...result,
         funding: {
@@ -541,21 +542,10 @@ async function confirmedJson(
         }
       };
     }
+    // The wallet's page, for the assistant to send. Nothing opens on its own.
+    result = { ...result, dashboard: dashboardInfo({ walletAddress: address, funded }) };
   }
   return { ok: !failedOutright, walletName: wallet, ...result };
-}
-
-// The waiter runs on the user's machine (the browser method), so show the
-// funding page there too. Best effort: the URL is in the output anyway.
-async function openFundingPage(json: Record<string, unknown>): Promise<void> {
-  const funding = json.funding as { url?: string } | undefined;
-  if (!funding?.url) return;
-  try {
-    const { default: open } = await import('open');
-    await open(funding.url);
-  } catch {
-    // No browser here: the assistant sends the link.
-  }
 }
 
 // After an emailed-code request on a wallet whose owner email wasn't known
@@ -608,7 +598,6 @@ async function runBrowserWaiter(params: { wallet: string; id: string }): Promise
               : { ownerSignInRevokeError: confirmed.ownerSignInRevokeError })
           }
         : await confirmedJson(wallet, confirmed);
-      await openFundingPage(json);
     } catch (error) {
       json = errorJson(error);
     }
@@ -845,6 +834,11 @@ function polymarketStatus(wallet: string): Record<string, unknown> {
   };
 }
 
+// The wallet's agentconnect page: the fund view while it's empty.
+async function walletDashboard(wallet: string, walletAddress: string): Promise<{ url: string }> {
+  return dashboardInfo({ walletAddress, funded: await isWalletFunded(wallet, walletAddress, 137) });
+}
+
 export async function sessionReport(params: {
   wallet: string;
   withVersion: boolean;
@@ -878,6 +872,7 @@ export async function sessionReport(params: {
       connected: true,
       mode: 'owner',
       walletAddress: pointer.walletAddress,
+      dashboard: await walletDashboard(wallet, pointer.walletAddress),
       ...polymarketStatus(wallet),
       watches: watchStatus(new Date()),
       ...version
@@ -946,6 +941,7 @@ export async function sessionReport(params: {
     connected: !accessError && sessions.some((s) => !s.expired),
     mode: 'session',
     walletAddress: pointer.walletAddress,
+    dashboard: await walletDashboard(wallet, pointer.walletAddress),
     email: pointer.email,
     installName: pointer.installName,
     ...(accessError ? { access: accessError } : {}),

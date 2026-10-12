@@ -339,6 +339,7 @@ const {
   withdrawCommandModule
 } = await import('./wallet-session.ts');
 const { handleLoginWait, waitSettings } = await import('./wallet-session.ts');
+const { fundingUiBase } = await import('../lib/funding.ts');
 const { loadPending, savePending } = await import('../lib/owner/pending.ts');
 const {
   latestWaiterRequest,
@@ -464,7 +465,7 @@ describe('connect', () => {
     expect(loadPending(wallet)?.id).toBe(request);
   });
 
-  it('step 2 adds a funding link when the wallet is empty', async () => {
+  it('step 2 adds a funding link and a fund-view dashboard link when the wallet is empty', async () => {
     funding.funded = false;
     try {
       const empty = await confirm(await connectStep1());
@@ -472,14 +473,19 @@ describe('connect', () => {
         url: expect.stringMatching(/\/\?wallet=0x[0-9a-fA-F]+&chain=137&view=fund$/),
         reason: 'empty'
       });
+      expect(empty.dashboard).toEqual({ url: (empty.funding as { url: string }).url });
     } finally {
       funding.funded = true;
     }
   });
 
-  it('step 2 adds no funding link when the wallet holds something', async () => {
+  it('step 2 adds only the dashboard link when the wallet holds something', async () => {
     const funded = await confirm(await connectStep1());
     expect(funded.funding).toBeUndefined();
+    expect(funded.dashboard).toEqual({
+      url: expect.stringMatching(/\/\?wallet=0x[0-9a-fA-F]+&chain=137&view=dashboard$/)
+    });
+    expect(browser.opened).toEqual([]);
   });
 
   it('step 2 approves each chain, verifies, probes gas, saves, and revokes the sign-in', async () => {
@@ -628,6 +634,30 @@ describe('status and Polymarket', () => {
       note: 'Money moved to Polymarket is controlled by this install, not by the allowance. Check it with: polymarket status'
     });
     expect(JSON.stringify(report)).not.toContain('0x1111111111111111111111111111111111111111');
+  });
+
+  it('links the wallet dashboard', async () => {
+    await confirm(await connectStep1());
+    const report = await sessionReport({ wallet, withVersion: false });
+    expect(report.dashboard).toEqual({
+      url: `${fundingUiBase()}/?wallet=${String(report.walletAddress)}&chain=137&view=dashboard`
+    });
+  });
+
+  it('links the fund view while the wallet is empty', async () => {
+    await confirm(await connectStep1());
+    funding.funded = false;
+    try {
+      const report = await sessionReport({ wallet, withVersion: false });
+      expect(report.dashboard).toEqual({ url: expect.stringContaining('view=fund') });
+    } finally {
+      funding.funded = true;
+    }
+  });
+
+  it('has no dashboard link before a wallet is connected', async () => {
+    const report = await sessionReport({ wallet, withVersion: false });
+    expect(report).not.toHaveProperty('dashboard');
   });
 
   it('omits the field when there is no Polymarket account', async () => {
@@ -1405,7 +1435,7 @@ describe('browser sign-in', () => {
     expect(readResult(wallet, request)).toBeNull();
   });
 
-  it('the waiter opens the funding page and the --wait result carries it for an empty wallet', async () => {
+  it('the waiter opens nothing and the --wait result carries the links for an empty wallet', async () => {
     funding.funded = false;
     try {
       const request = String((await browserConnect()).request);
@@ -1420,16 +1450,18 @@ describe('browser sign-in', () => {
         connected: true,
         funding: { url: expect.stringContaining('view=fund'), reason: 'empty' }
       });
-      expect(browser.opened).toEqual([(result?.funding as { url: string }).url]);
+      expect(result?.dashboard).toEqual({ url: expect.stringContaining('view=fund') });
+      expect(browser.opened).toEqual([]);
       expect(await confirmArgs({ request, wait: true })).toMatchObject({
-        funding: { reason: 'empty' }
+        funding: { reason: 'empty' },
+        dashboard: { url: expect.stringContaining('view=fund') }
       });
     } finally {
       funding.funded = true;
     }
   });
 
-  it('the waiter opens no funding page for a funded wallet', async () => {
+  it('the waiter opens nothing for a funded wallet and links the dashboard', async () => {
     const request = String((await browserConnect()).request);
     browser.opened.length = 0;
     browser.actions.push(
@@ -1438,6 +1470,9 @@ describe('browser sign-in', () => {
     );
     await confirmArgs({ request, browserWaiter: true });
     expect(readResult(wallet, request)?.funding).toBeUndefined();
+    expect(readResult(wallet, request)?.dashboard).toEqual({
+      url: expect.stringContaining('view=dashboard')
+    });
     expect(browser.opened).toEqual([]);
   });
 

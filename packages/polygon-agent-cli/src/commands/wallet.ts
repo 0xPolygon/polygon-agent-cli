@@ -14,6 +14,8 @@ import type { OmsLoginMethod } from '../lib/storage.ts';
 import { runBrowserLogin } from '../lib/browser-login.ts';
 import { provisionBuilderOnce } from '../lib/builder-provision.ts';
 import { CliError, jsonFail } from '../lib/errors.ts';
+import { dashboardInfo } from '../lib/funding.ts';
+import { isWalletFunded } from '../lib/indexer.ts';
 import { makeLoginRelay } from '../lib/login-relay-client.ts';
 import { isTxModeSet, loadTxMode, saveTxMode } from '../lib/mode.ts';
 import { startOidcCallbackServer } from '../lib/oidc-callback-server.ts';
@@ -169,6 +171,13 @@ async function handleOwnerLogin(argv: LoginArgs): Promise<void> {
       return ok;
     }
 
+    // The wallet's agentconnect page, for the assistant to send after login.
+    const ownerDashboard = async (walletAddress: string) =>
+      dashboardInfo({
+        walletAddress,
+        funded: await isWalletFunded(argv.name, walletAddress, 137)
+      });
+
     // The owner is signed in: back up the Polymarket trading key too. Never throws.
     const backUpPolymarket = (mainAddress: string) =>
       polymarketOwnerStep({ wallet: argv.name, owner: oms.wallet, mainAddress }).catch(
@@ -196,6 +205,7 @@ async function handleOwnerLogin(argv: LoginArgs): Promise<void> {
         alreadyLoggedIn: true,
         builderProvisioned,
         polymarket,
+        dashboard: await ownerDashboard(oms.wallet.walletAddress),
         txMode: txMode ?? loadTxMode(),
         ...(txMode === null ? { modePrompt: MODE_PROMPT } : {})
       });
@@ -284,14 +294,15 @@ async function handleOwnerLogin(argv: LoginArgs): Promise<void> {
       loginMethod,
       builderProvisioned,
       polymarket,
+      dashboard: await ownerDashboard(walletAddress),
       txMode: txMode ?? loadTxMode(),
       ...(txMode === null ? { modePrompt: MODE_PROMPT } : {})
     });
 
-    // Funding: the login page's success screen already directs the user onward,
-    // so the browser flow only prints the panel; --local keeps opening the page.
+    // Funding: print the panel only. Nothing opens on its own: the login page's
+    // success screen has an "Add funds" button, and the assistant sends the link.
     if (argv.fund !== false) {
-      await showFunding(argv.name, walletAddress, 137, { openBrowser: argv.local });
+      await showFunding(argv.name, walletAddress, 137);
     }
   } catch (error) {
     jsonFail(error);
