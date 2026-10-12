@@ -23,10 +23,17 @@ const EMAIL_PLATFORMS: readonly Platform[] = ['muse', 'openclaw', 'hermes'];
 // Local coding agents: they run on the user's desktop, next to a browser.
 const DESKTOP_PLATFORMS: readonly Platform[] = ['claude-code', 'cursor', 'codex'];
 
+// A platform that marks its own environment, for an install with none recorded.
+// Only markers known to be set: Claude Code sets CLAUDECODE=1.
+function platformFromEnv(env: NodeJS.ProcessEnv): Platform | undefined {
+  return env.CLAUDECODE === '1' ? 'claude-code' : undefined;
+}
+
 // Email is the default: the browser is picked only on positive evidence of a
 // person at a desktop. First match wins. Pure: every input is passed in.
 export function pickSignInMethod(input: PickInput): { method: SignInMethod; reason: string } {
-  const { env, platform } = input;
+  const { env } = input;
+  const platform = input.platform ?? platformFromEnv(env);
   const override = env.POLYGON_AGENT_SIGNIN;
   if (override === 'browser' || override === 'email') {
     return { method: override, reason: 'POLYGON_AGENT_SIGNIN' };

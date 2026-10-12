@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { PickInput } from './signin-method.ts';
 
@@ -88,7 +88,39 @@ describe('pickSignInMethod', () => {
       'email',
       'container'
     ],
-    ['win32, no platform', { os: 'win32' }, 'email', 'default']
+    ['win32, no platform', { os: 'win32' }, 'email', 'default'],
+    // No recorded platform: Claude Code is recognised by the CLAUDECODE it sets.
+    [
+      'CLAUDECODE on darwin, no platform',
+      { env: { CLAUDECODE: '1' } },
+      'browser',
+      'platform claude-code'
+    ],
+    [
+      'CLAUDECODE over ssh',
+      { env: { CLAUDECODE: '1', SSH_CONNECTION: 'a b c d' } },
+      'email',
+      'ssh session'
+    ],
+    [
+      'CLAUDECODE in a container',
+      { env: { CLAUDECODE: '1' }, container: true },
+      'email',
+      'container'
+    ],
+    [
+      'CLAUDECODE on linux with no display',
+      { env: { CLAUDECODE: '1' }, os: 'linux' },
+      'email',
+      'no display'
+    ],
+    [
+      'a recorded platform beats CLAUDECODE',
+      { env: { CLAUDECODE: '1' }, platform: 'other' },
+      'email',
+      'default'
+    ],
+    ['CLAUDECODE other than 1 is ignored', { env: { CLAUDECODE: '0' } }, 'email', 'default']
   ];
   it.each(cases)('%s', (_name, input, method, reason) => {
     expect(pickSignInMethod({ ...base, ...input })).toEqual({ method, reason });
@@ -137,9 +169,50 @@ describe('currentSignInMethod', () => {
     delete process.env.CI;
     delete process.env.SSH_CONNECTION;
     delete process.env.SSH_TTY;
+    delete process.env.CLAUDECODE;
+    delete process.env.KUBERNETES_SERVICE_HOST;
+    // A desktop-looking host whatever machine runs the tests.
+    process.env.DISPLAY = ':0';
   });
   afterEach(() => {
     process.env = { ...saved };
+    vi.restoreAllMocks();
+    Object.defineProperty(process.stdin, 'isTTY', { value: savedTTY, configurable: true });
+  });
+  const savedTTY = process.stdin.isTTY;
+
+  // No container markers, whatever machine runs the tests.
+  function noContainer(extra: (p: string) => boolean = () => false): void {
+    const exists = fs.existsSync;
+    const read = fs.readFileSync;
+    vi.spyOn(fs, 'existsSync').mockImplementation((p) =>
+      p === '/.dockerenv' || p === '/run/.containerenv' ? extra(String(p)) : exists(p)
+    );
+    vi.spyOn(fs, 'readFileSync').mockImplementation(((p: fs.PathOrFileDescriptor, o?: unknown) => {
+      if (p === '/proc/1/cgroup') throw new Error('ENOENT');
+      return read(p, o as never);
+    }) as typeof fs.readFileSync);
+  }
+
+  it('passes the real stdin TTY into the picker', () => {
+    noContainer();
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+    expect(currentSignInMethod()).toEqual({ method: 'browser', reason: 'terminal' });
+    Object.defineProperty(process.stdin, 'isTTY', { value: undefined, configurable: true });
+    expect(currentSignInMethod()).toEqual({ method: 'email', reason: 'default' });
+  });
+
+  it('passes the real container check into the picker', () => {
+    noContainer((p) => p === '/.dockerenv');
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+    expect(currentSignInMethod()).toEqual({ method: 'email', reason: 'container' });
+  });
+
+  it('reads CLAUDECODE from the real environment', () => {
+    noContainer();
+    Object.defineProperty(process.stdin, 'isTTY', { value: undefined, configurable: true });
+    process.env.CLAUDECODE = '1';
+    expect(currentSignInMethod()).toEqual({ method: 'browser', reason: 'platform claude-code' });
   });
 
   it('returns email in a workspace initialised with --platform muse', () => {
