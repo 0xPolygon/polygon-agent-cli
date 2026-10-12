@@ -69,6 +69,8 @@ const httpError = (status: number, name?: string) =>
     upstreamError: { service: 'waas', status, ...(name ? { name } : {}) }
   });
 
+const funding = vi.hoisted(() => ({ funded: true }));
+vi.mock('../lib/indexer.ts', () => ({ isWalletFunded: async () => funding.funded }));
 vi.mock('../lib/builder-provision.ts', () => ({
   ensureBuilderAccess: async () => undefined,
   ensureBuilderAccessKey: async () => ({ provisioned: false, reason: 'existing' }),
@@ -436,6 +438,24 @@ describe('connect', () => {
     expect(world.calls).toEqual(['registerCredential', 'startEmailAuth:600']);
     expect(readRacRecord({ wallet, slot: 'rac' })?.installName).toBeTruthy();
     expect(loadPending(wallet)?.id).toBe(request);
+  });
+
+  it('step 2 adds a funding link when the wallet is empty', async () => {
+    funding.funded = false;
+    try {
+      const empty = await confirm(await connectStep1());
+      expect(empty.funding).toMatchObject({
+        url: expect.stringMatching(/\/\?wallet=0x[0-9a-fA-F]+&chain=137&view=fund$/),
+        reason: 'empty'
+      });
+    } finally {
+      funding.funded = true;
+    }
+  });
+
+  it('step 2 adds no funding link when the wallet holds something', async () => {
+    const funded = await confirm(await connectStep1());
+    expect(funded.funding).toBeUndefined();
   });
 
   it('step 2 approves each chain, verifies, probes gas, saves, and revokes the sign-in', async () => {
@@ -1358,6 +1378,42 @@ describe('browser sign-in', () => {
     await handleLoginWait({ name: wallet });
     expect(lastJson('log')).toEqual(result);
     expect(readResult(wallet, request)).toBeNull();
+  });
+
+  it('the waiter opens the funding page and the --wait result carries it for an empty wallet', async () => {
+    funding.funded = false;
+    try {
+      const request = String((await browserConnect()).request);
+      browser.opened.length = 0;
+      browser.actions.push(
+        { type: 'email', email: 'owner@example.com' },
+        { type: 'otp', code: world.code }
+      );
+      await confirmArgs({ request, browserWaiter: true });
+      const result = readResult(wallet, request);
+      expect(result).toMatchObject({
+        connected: true,
+        funding: { url: expect.stringContaining('view=fund'), reason: 'empty' }
+      });
+      expect(browser.opened).toEqual([(result?.funding as { url: string }).url]);
+      expect(await confirmArgs({ request, wait: true })).toMatchObject({
+        funding: { reason: 'empty' }
+      });
+    } finally {
+      funding.funded = true;
+    }
+  });
+
+  it('the waiter opens no funding page for a funded wallet', async () => {
+    const request = String((await browserConnect()).request);
+    browser.opened.length = 0;
+    browser.actions.push(
+      { type: 'email', email: 'owner@example.com' },
+      { type: 'otp', code: world.code }
+    );
+    await confirmArgs({ request, browserWaiter: true });
+    expect(readResult(wallet, request)?.funding).toBeUndefined();
+    expect(browser.opened).toEqual([]);
   });
 
   it('the waiter leaves a cancel on the page as a failure', async () => {

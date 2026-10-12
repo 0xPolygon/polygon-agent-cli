@@ -21,6 +21,8 @@ import {
   jsonFail,
   jsonOut
 } from '../lib/errors.ts';
+import { fundingUrl } from '../lib/funding.ts';
+import { isWalletFunded } from '../lib/indexer.ts';
 import { runOwnerAction } from '../lib/owner/actions.ts';
 import { deletePending, loadPending } from '../lib/owner/pending.ts';
 import {
@@ -521,12 +523,36 @@ async function confirmedJson(
   const failedOutright =
     result.connected === false || result.renewed === false || result.updated === false;
   if (result.connected === true && typeof result.walletAddress === 'string') {
-    const provision = await provisionBuilderOnce({ walletAddress: result.walletAddress }).catch(
+    const address = result.walletAddress;
+    const provision = await provisionBuilderOnce({ walletAddress: address }).catch(
       (error: unknown) => ({ provisioned: false, reason: String(error) })
     );
     result = { ...result, builderAccess: provision.provisioned || provision.reason === 'existing' };
+    // An empty wallet can't do anything yet: hand the assistant the funding link.
+    if (!(await isWalletFunded(wallet, address, 137))) {
+      result = {
+        ...result,
+        funding: {
+          url: fundingUrl({ walletAddress: address, chainId: 137 }),
+          reason: 'empty'
+        }
+      };
+    }
   }
   return { ok: !failedOutright, walletName: wallet, ...result };
+}
+
+// The waiter runs on the user's machine (the browser method), so show the
+// funding page there too. Best effort: the URL is in the output anyway.
+async function openFundingPage(json: Record<string, unknown>): Promise<void> {
+  const funding = json.funding as { url?: string } | undefined;
+  if (!funding?.url) return;
+  try {
+    const { default: open } = await import('open');
+    await open(funding.url);
+  } catch {
+    // No browser here: the assistant sends the link.
+  }
 }
 
 // After an emailed-code request on a wallet whose owner email wasn't known
@@ -564,6 +590,7 @@ async function runBrowserWaiter(params: { wallet: string; id: string }): Promise
           })
       });
       json = await confirmedJson(wallet, confirmed);
+      await openFundingPage(json);
     } catch (error) {
       json = errorJson(error);
     }

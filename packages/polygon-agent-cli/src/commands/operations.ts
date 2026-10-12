@@ -12,9 +12,10 @@ import type { TradeRecord } from '../lib/trade/state.ts';
 
 import { ensureBuilderAccess } from '../lib/builder-provision.ts';
 import { bigintReplacer, CliError, failureJson } from '../lib/errors.ts';
+import { fundingUiBase, fundingUrl } from '../lib/funding.ts';
 import { isWalletFunded } from '../lib/indexer.ts';
 import { resolveBroadcast, withWriteFlags } from '../lib/mode.ts';
-import { getOmsClient, loginUiBaseUrl } from '../lib/oms-client.ts';
+import { getOmsClient } from '../lib/oms-client.ts';
 import { checkSessionSpend } from '../lib/session/run-tx.ts';
 import { tokenLabel } from '../lib/session/status.ts';
 import { findSupportedToken } from '../lib/session/tokens.ts';
@@ -270,14 +271,7 @@ export const balancesCommand: CommandModule = {
   }
 };
 
-// The wallet funding page (Trails on-ramp + swap). Single source of truth so
-// the `fund` command and the post-login step show the same thing: the
-// agentconnect dashboard (same host as the login page), which reads
-// ?wallet&chain&view. POLYGON_AGENT_FUNDING_UI overrides per environment.
-function fundingUiBase(): string {
-  const v = process.env.POLYGON_AGENT_FUNDING_UI;
-  return v ? v.replace(/\/+$/, '') : loginUiBaseUrl();
-}
+export { fundingUrl } from '../lib/funding.ts';
 
 /**
  * Post-login funding step, balance-aware. Checks the wallet's USD balance via the
@@ -290,13 +284,14 @@ export async function showFunding(
   walletName: string,
   walletAddress: string,
   chainId = 137,
-  opts?: { openBrowser?: boolean; remote?: boolean }
+  opts?: { openBrowser?: boolean; remote?: boolean; amountUsd?: number | string }
 ): Promise<void> {
   const funded = await isWalletFunded(walletName, walletAddress, chainId);
   const view = funded ? 'dashboard' : 'fund';
 
-  const base = fundingUiBase();
-  const url = `${base}/?wallet=${walletAddress}&chain=${chainId}&view=${view}`;
+  const url = funded
+    ? `${fundingUiBase()}/?wallet=${walletAddress}&chain=${chainId}&view=dashboard`
+    : fundingUrl({ walletAddress, chainId, amountUsd: opts?.amountUsd });
 
   // Human path (local, incl. under Claude Code / a harness where stdout is piped
   // so there is no TTY): open the page. Headless or --remote (browser elsewhere):

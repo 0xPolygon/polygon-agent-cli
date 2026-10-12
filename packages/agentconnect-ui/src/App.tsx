@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
-import { FundingScreen } from './components/FundingScreen.js';
+import { FundingScreen, parseFundAmount } from './components/FundingScreen.js';
 import { fetchTotalUsdBalance } from './indexer';
 import { LoginPage } from './login/LoginPage.js';
 
@@ -181,11 +181,13 @@ export function LogoBadge() {
 function Dashboard({
   walletAddress,
   chainId,
-  initialFundOpen
+  initialFundOpen,
+  fundAmount
 }: {
   walletAddress: string;
   chainId: number;
   initialFundOpen: boolean;
+  fundAmount?: string;
 }) {
   const [totalUsd, setTotalUsd] = useState<number | null>(null);
   const [selectedSection, setSelectedSection] = useState(0);
@@ -446,6 +448,7 @@ function Dashboard({
             <FundingScreen
               walletAddress={walletAddress}
               chainId={chainId}
+              amount={fundAmount}
               onSkip={() => setFundOpen(false)}
             />
           </div>
@@ -537,6 +540,7 @@ function App() {
       walletAddress={walletAddress}
       chainId={chainId}
       initialFundOpen={params.get('view') === 'fund'}
+      fundAmount={parseFundAmount(params.get('amount'))}
     />
   );
 }

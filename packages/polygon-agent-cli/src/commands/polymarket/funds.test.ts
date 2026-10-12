@@ -348,6 +348,21 @@ describe('deposit', () => {
     expect(out).toMatchObject({ ok: false, code: 'insufficient_balance' });
     expect(String(out.hint)).toMatch(/agent swap/);
   });
+
+  it('asks for the shortfall, but at least the bridge minimum, as funding', async () => {
+    m.tokenBalance.mockResolvedValue(1_000_000n);
+    const out = await run(['deposit', '5', '--dry-run']);
+    expect(out.funding).toMatchObject({
+      url: expect.stringMatching(/view=fund&amount=4$/),
+      amountUsd: '4'
+    });
+    m.tokenBalance.mockResolvedValue(4_500_000n);
+    const small = await run(['deposit', '5', '--dry-run']);
+    expect(small.funding).toMatchObject({
+      url: expect.stringMatching(/&amount=2$/),
+      amountUsd: '2'
+    });
+  });
 });
 
 describe('withdraw', () => {

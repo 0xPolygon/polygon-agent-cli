@@ -5,6 +5,8 @@ import { trailsApiKey } from '../config';
 interface FundingScreenProps {
   walletAddress: string;
   chainId: number;
+  // Target amount in USDC on Polygon, from the `amount` link parameter.
+  amount?: string;
   onSkip: () => void;
 }
 
@@ -64,7 +66,13 @@ const trailsTheme: Record<string, string> = {
   '--trails-list-hover-bg': '#f5f6fb'
 };
 
-export function FundingScreen({ walletAddress, chainId, onSkip }: FundingScreenProps) {
+// The `amount` link parameter as a positive decimal string, or undefined.
+export function parseFundAmount(raw: string | null | undefined): string | undefined {
+  if (!raw || !/^\d+(\.\d+)?$/.test(raw)) return undefined;
+  return Number(raw) > 0 ? raw : undefined;
+}
+
+export function FundingScreen({ walletAddress, chainId, amount, onSkip }: FundingScreenProps) {
   return (
     <div className="w-full max-w-sm animate-scale-in">
       {/* Card */}
@@ -92,6 +100,9 @@ export function FundingScreen({ walletAddress, chainId, onSkip }: FundingScreenP
               token: USDC_POLYGON,
               chain: chainId
             }}
+            // The widget's destination amount (toAmount) is not in the Fund prop types, but
+            // Fund passes unknown props through to it.
+            {...(amount ? { toAmount: amount } : {})}
             buttonText="Add Funds to Agent"
             hideSwap={true}
             onramp={{

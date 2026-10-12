@@ -10,6 +10,7 @@ import type { FeeOptionSelection, FeeOptionWithBalance } from '@polygonlabs/oms-
 import { findNetworkById, isOMSWalletError, TransactionMode } from '@polygonlabs/oms-wallet';
 
 import { CliError } from './errors.ts';
+import { fundingInfo } from './funding.ts';
 import { getOmsClient } from './oms-client.ts';
 import { selectMainWallet } from './polymarket/oms-key.ts';
 import { loadOmsWalletPointer } from './storage.ts';
@@ -43,7 +44,10 @@ const USDC_POLYGON = '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359';
 // prefer native gas if requested, else prefer USDC, always gated on affordability.
 // Sponsored transactions call it with an empty list (oms-wallet >= 0.3); returning
 // undefined lets them proceed with no fee.
-export function makeFeeSelector(preferNativeFee: boolean) {
+export function makeFeeSelector(
+  preferNativeFee: boolean,
+  funding?: { walletAddress: string; chainId: number }
+) {
   return (opts: FeeOptionWithBalance[]): FeeOptionSelection | undefined => {
     if (opts.length === 0) return undefined;
     const usable = opts.filter(
@@ -69,7 +73,8 @@ export function makeFeeSelector(preferNativeFee: boolean) {
       throw new CliError({
         code: 'insufficient_balance',
         message: 'Unable to pay gas: wallet has no native token and no usable fee token.',
-        hint: 'Fund with POL (agent fund), or hold USDC for fees.'
+        hint: 'Fund with POL (agent fund), or hold USDC for fees.',
+        ...(funding ? { details: { funding: fundingInfo(funding) } } : {})
       });
     }
     // The SDK's selection carries the option's index, so two options with the
@@ -129,7 +134,7 @@ export async function runOmsTx(params: OmsTxParams): Promise<OmsTxResult> {
 
   // The SDK calls the fee selector after preparing and right before executing
   // (sponsored or not), so a deadline checked there is checked last.
-  const feeSelector = makeFeeSelector(preferNativeFee);
+  const feeSelector = makeFeeSelector(preferNativeFee, { walletAddress, chainId });
   let expired = false;
   const selectFeeOption: typeof feeSelector = (options) => {
     if (params.notAfter !== undefined && Date.now() > params.notAfter) {

@@ -15,6 +15,7 @@ const oms = vi.hoisted(() => {
   };
 });
 vi.mock('./oms-client.ts', () => ({
+  loginUiBaseUrl: () => 'https://login.example',
   getOmsClient: () => ({
     wallet: {
       get walletAddress() {
@@ -95,6 +96,28 @@ describe('makeFeeSelector', () => {
         hint: expect.stringMatching(/agent fund/)
       })
     );
+  });
+});
+
+describe('insufficient_balance funding', () => {
+  it('carries the funding link for the wallet', () => {
+    vi.stubEnv('POLYGON_AGENT_FUNDING_UI', 'https://fund.example');
+    try {
+      expect(() =>
+        makeFeeSelector(false, { walletAddress: MAIN, chainId: 137 })([
+          option({ symbol: 'USDC', contractAddress: USDC, value: '5', availableRaw: '1', index: 0 })
+        ])
+      ).toThrow(
+        expect.objectContaining({
+          code: 'insufficient_balance',
+          details: {
+            funding: { url: `https://fund.example/?wallet=${MAIN}&chain=137&view=fund` }
+          }
+        })
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 
