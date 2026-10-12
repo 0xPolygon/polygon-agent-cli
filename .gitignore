@@ -16,3 +16,7 @@ dist/
 # Superpowers scratch (plans/specs live in docs/superpowers, not here)
 .superpowers/
 .entire/
+
+# Cloudflare Wrangler local secrets
+.dev.vars
+.dev.vars.*
