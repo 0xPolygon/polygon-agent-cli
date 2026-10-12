@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as Version from '../lib/version.ts';
 
 import { initWorkspace, readInstallRecord } from '../lib/workspace.ts';
-import { skillsCommand, updateCommand } from './workspace.ts';
+import { skillsCommand, updateCommand, workspaceCommand } from './workspace.ts';
 
 const mocks = vi.hoisted(() => ({
   spawnSync: vi.fn(),
@@ -271,5 +271,20 @@ describe('skills install', () => {
     expect(fs.readFileSync(file, 'utf8')).toContain(
       `\`${path.join(root, 'bin', 'polygon-agent')}\``
     );
+  });
+});
+
+describe('workspace init --platform', () => {
+  it('records the platform, and re-running without it keeps it', async () => {
+    const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pa-platform-')), '.polygon-agent');
+    const { default: yargs } = await import('yargs');
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await yargs(['workspace', 'init', '--root', dir, '--platform', 'muse'])
+      .command(workspaceCommand)
+      .parseAsync();
+    expect(readInstallRecord(path.join(dir, 'state'))?.platform).toBe('muse');
+    await yargs(['workspace', 'init', '--root', dir]).command(workspaceCommand).parseAsync();
+    expect(readInstallRecord(path.join(dir, 'state'))?.platform).toBe('muse');
+    log.mockRestore();
   });
 });

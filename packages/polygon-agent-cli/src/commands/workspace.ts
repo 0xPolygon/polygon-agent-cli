@@ -6,6 +6,8 @@ import path from 'node:path';
 
 import { z } from 'zod';
 
+import type { Platform } from '../lib/workspace.ts';
+
 import { withLock } from '../lib/lock.ts';
 import { STORAGE_ROOT } from '../lib/storage.ts';
 import { cliVersion, getLatestVersion, isNewerVersion, PACKAGE_NAME } from '../lib/version.ts';
@@ -15,6 +17,7 @@ import {
   initWorkspace,
   installSkill,
   listSkills,
+  PLATFORMS,
   readInstallRecord,
   readSkill,
   renderSkill,
@@ -44,6 +47,7 @@ interface InitArgs {
   root: string;
   'skills-dir'?: string;
   name?: string;
+  platform?: Platform;
 }
 
 const initCommand: CommandModule<object, InitArgs> = {
@@ -63,6 +67,11 @@ const initCommand: CommandModule<object, InitArgs> = {
       .option('name', {
         type: 'string',
         describe: 'Install name shown to the wallet owner (default: the host name)'
+      })
+      .option('platform', {
+        type: 'string',
+        choices: PLATFORMS,
+        describe: 'Assistant platform, used to pick the owner sign-in method'
       }),
   handler: (argv) => {
     try {
@@ -70,6 +79,7 @@ const initCommand: CommandModule<object, InitArgs> = {
         root: argv.root,
         skillsDir: argv['skills-dir'],
         name: argv.name,
+        platform: argv.platform,
         version: cliVersion()
       });
       jsonOut({ ok: true, ...result });
