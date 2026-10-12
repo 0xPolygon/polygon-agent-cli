@@ -20,6 +20,7 @@ import { startOidcCallbackServer } from '../lib/oidc-callback-server.ts';
 import { getOmsClient, loginUiBaseUrl, oidcRelayBaseUrl } from '../lib/oms-client.ts';
 import { ensureMainWallet } from '../lib/oms-tx.ts';
 import { selectMainWallet } from '../lib/polymarket/oms-key.ts';
+import { polymarketOwnerStep } from '../lib/polymarket/owner-step.ts';
 import {
   listWallets,
   deleteWallet,
@@ -168,6 +169,15 @@ async function handleOwnerLogin(argv: LoginArgs): Promise<void> {
       return ok;
     }
 
+    // The owner is signed in: back up the Polymarket trading key too. Never throws.
+    const backUpPolymarket = (mainAddress: string) =>
+      polymarketOwnerStep({ wallet: argv.name, owner: oms.wallet, mainAddress }).catch(
+        (error: unknown) => ({
+          backedUp: false,
+          error: error instanceof Error ? error.message : String(error)
+        })
+      );
+
     // Short-circuit if already logged in (the SDK restores the session from
     // storage on construction). Starting a new auth would clearSession(), so
     // re-login is opt-in via --force. Builder provisioning still runs here:
@@ -177,6 +187,7 @@ async function handleOwnerLogin(argv: LoginArgs): Promise<void> {
       // A crashed process may have left the session on an imported wallet.
       await ensureMainWallet(argv.name);
       const builderProvisioned = await provisionBuilder(oms.wallet.walletAddress);
+      const polymarket = await backUpPolymarket(oms.wallet.walletAddress);
       const txMode = await maybeAskTxMode();
       jsonOut({
         ok: true,
@@ -184,6 +195,7 @@ async function handleOwnerLogin(argv: LoginArgs): Promise<void> {
         walletAddress: oms.wallet.walletAddress,
         alreadyLoggedIn: true,
         builderProvisioned,
+        polymarket,
         txMode: txMode ?? loadTxMode(),
         ...(txMode === null ? { modePrompt: MODE_PROMPT } : {})
       });
@@ -263,6 +275,7 @@ async function handleOwnerLogin(argv: LoginArgs): Promise<void> {
 
     const builderProvisioned = await provisionBuilder(walletAddress);
 
+    const polymarket = await backUpPolymarket(walletAddress);
     const txMode = await maybeAskTxMode();
     jsonOut({
       ok: true,
@@ -270,6 +283,7 @@ async function handleOwnerLogin(argv: LoginArgs): Promise<void> {
       walletAddress,
       loginMethod,
       builderProvisioned,
+      polymarket,
       txMode: txMode ?? loadTxMode(),
       ...(txMode === null ? { modePrompt: MODE_PROMPT } : {})
     });

@@ -14,6 +14,7 @@ const IMPORTED = '0x2222222222222222222222222222222222222222';
 const OTHER = '0x3333333333333333333333333333333333333333';
 
 type W = { id: string; address: string; keyOrigin: 'generated' | 'imported' };
+const step = vi.hoisted(() => ({ fn: vi.fn() }));
 const fake = vi.hoisted(() => ({
   wallets: [] as W[],
   active: undefined as string | undefined,
@@ -23,6 +24,7 @@ const fake = vi.hoisted(() => ({
   signedIn: false
 }));
 
+vi.mock('../lib/polymarket/owner-step.ts', () => ({ polymarketOwnerStep: step.fn }));
 vi.mock('../lib/oms-client.ts', () => ({
   getOmsClient: () => ({
     wallet: {
@@ -90,6 +92,8 @@ beforeEach(() => {
   fake.active = undefined;
   fake.auto = IMPORTED;
   fake.calls.length = 0;
+  step.fn.mockReset();
+  step.fn.mockResolvedValue({ backedUp: true, omsWalletId: 'w-key' });
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
   vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
@@ -190,5 +194,39 @@ describe('wallet login --owner selection', () => {
     await ownerLogin();
     expect(fake.calls).toContain('useWallet:w-main');
     expect(jsonLines('log')[0]).toMatchObject({ alreadyLoggedIn: true, walletAddress: MAIN });
+  });
+});
+
+describe('wallet login --owner polymarket backup', () => {
+  const ownerArg = expect.objectContaining({ listWallets: expect.any(Function) });
+
+  it('a fresh login backs up the key with the owner client and main address', async () => {
+    await ownerLogin();
+    expect(step.fn).toHaveBeenCalledWith({ wallet: name, owner: ownerArg, mainAddress: MAIN });
+    expect(jsonLines('log')[0]).toMatchObject({
+      ok: true,
+      walletAddress: MAIN,
+      polymarket: { backedUp: true, omsWalletId: 'w-key' }
+    });
+  });
+
+  it('the already-logged-in path backs up the key too', async () => {
+    await saveOmsWalletPointer(name, { walletAddress: MAIN, loginMethod: 'google', createdAt: '' });
+    fake.active = MAIN;
+    await ownerLogin();
+    expect(step.fn).toHaveBeenCalledWith({ wallet: name, owner: ownerArg, mainAddress: MAIN });
+    expect(jsonLines('log')[0]).toMatchObject({
+      alreadyLoggedIn: true,
+      polymarket: { backedUp: true }
+    });
+  });
+
+  it('a rejecting step never fails the login', async () => {
+    step.fn.mockRejectedValue(new Error('boom'));
+    await ownerLogin();
+    expect(jsonLines('log')[0]).toMatchObject({
+      ok: true,
+      polymarket: { backedUp: false, error: 'boom' }
+    });
   });
 });
