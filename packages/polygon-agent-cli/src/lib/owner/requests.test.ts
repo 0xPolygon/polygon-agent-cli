@@ -14,6 +14,8 @@ import type { LoginAction, LoginStatus } from '../browser-login.ts';
 process.env.POLYGON_AGENT_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-owner-requests-'));
 
 const world = vi.hoisted(() => ({
+  // Runs when the main wallet is looked up after sign-in.
+  onListWallets: undefined as undefined | (() => void),
   calls: [] as string[],
   // The signed-in account's wallets.
   wallets: [] as Array<{ id: string; address: string; keyOrigin: 'generated' | 'imported' }>
@@ -51,6 +53,8 @@ vi.mock('@polygonlabs/oms-wallet', async (importOriginal) => {
       };
     }
     async listWallets() {
+      world.calls.push('listWallets');
+      world.onListWallets?.();
       return world.wallets;
     }
     async useWallet(p: { walletId: string }) {
@@ -87,6 +91,7 @@ beforeEach(() => {
   wallet = `w${++counter}`;
   world.calls = [];
   world.wallets = [{ id: 'w-main', address: MAIN, keyOrigin: 'generated' }];
+  world.onListWallets = undefined;
   registered = [];
   vi.stubGlobal(
     'fetch',
@@ -190,6 +195,7 @@ describe('confirmOwnerRequest (browser)', () => {
     expect(world.calls).toEqual([
       'startOidc:600:true',
       'completeOidc:600',
+      'listWallets',
       'revoke:owner-cred',
       'signOut'
     ]);
@@ -292,13 +298,83 @@ describe('confirmOwnerRequest (browser)', () => {
     }).catch((e: unknown) => e);
     expect(error).toMatchObject({
       code: 'invalid_input',
-      message: `That code signed in to ${MAIN}, not this install's wallet ${OTHER}. Use the email the wallet was created with.`,
+      message: `That sign-in went to ${MAIN}, not this install's wallet ${OTHER}. Sign in with the account the wallet was created with.`,
       details: { ownerSignInRevoked: true }
     });
     expect(run).not.toHaveBeenCalled();
     expect(loadPending(wallet)).toBeNull();
     expect(world.calls).toContain('revoke:owner-cred');
     expect(statuses.at(-1)).toMatchObject({ status: 'error' });
+  });
+
+  it('looks up the main wallet only after the sign-in key is off disk, then tells the page', async () => {
+    const request = await startBrowser();
+    const { deps, statuses } = fakeDeps([...GOOGLE_DONE]);
+    const seen: unknown[] = [];
+    world.onListWallets = () =>
+      seen.push({ pending: loadPending(wallet), statuses: statuses.length });
+    await confirmOwnerRequest({
+      wallet,
+      requestId: request.id,
+      now: NOW,
+      browser: { deps, timeoutMs: 60_000 },
+      run: async () => ({})
+    });
+    // Nothing but the OIDC calls ran inside the login: no lookup, and the page
+    // had only the auth url (from before the sign-in) when the lookup ran.
+    expect(seen).toEqual([{ pending: null, statuses: 1 }]);
+    expect(statuses).toEqual([
+      { status: 'auth-url', url: 'https://accounts.google.com/auth' },
+      { status: 'done', walletAddress: MAIN }
+    ]);
+  });
+
+  it('a signal after the browser sign-in revokes before exiting', async () => {
+    const request = await startBrowser();
+    const { deps } = fakeDeps([...GOOGLE_DONE]);
+    const exit = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      world.calls.push(`exit:${code}`);
+    }) as never);
+    world.onListWallets = () => {
+      world.onListWallets = undefined;
+      process.emit('SIGTERM', 'SIGTERM');
+    };
+    try {
+      await confirmOwnerRequest({
+        wallet,
+        requestId: request.id,
+        now: NOW,
+        browser: { deps, timeoutMs: 60_000 },
+        run: async () => ({})
+      });
+      await new Promise((r) => setTimeout(r, 0));
+    } finally {
+      exit.mockRestore();
+    }
+    const exitAt = world.calls.indexOf('exit:143');
+    expect(exitAt).toBeGreaterThan(-1);
+    expect(world.calls.slice(0, exitAt)).toContain('revoke:owner-cred');
+    expect(loadPending(wallet)).toBeNull();
+  });
+
+  it('a failing page status after sign-in does not stop the action', async () => {
+    const request = await startBrowser();
+    const { deps } = fakeDeps([...GOOGLE_DONE]);
+    const relay = {
+      ...deps.relay,
+      setStatus: async (_session: string, status: LoginStatus) => {
+        if (status.status === 'done') throw new Error('relay down');
+      }
+    };
+    const run = vi.fn(async () => ({ ran: true }));
+    const result = await confirmOwnerRequest({
+      wallet,
+      requestId: request.id,
+      now: NOW,
+      browser: { deps: { ...deps, relay }, timeoutMs: 60_000 },
+      run
+    });
+    expect(result).toEqual({ ran: true, ownerSignInRevoked: true });
   });
 
   it('refuses a code for a browser request, keeping it', async () => {

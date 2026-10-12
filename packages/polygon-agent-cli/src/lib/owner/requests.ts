@@ -22,7 +22,7 @@ import {
   isOMSWalletError
 } from '@polygonlabs/oms-wallet';
 
-import type { BrowserLoginDeps } from '../browser-login.ts';
+import type { BrowserLoginDeps, LoginStatus } from '../browser-login.ts';
 import type { OmsWalletPointer } from '../storage.ts';
 import type { LoginContext, OwnerAction, PendingRequest } from './pending.ts';
 
@@ -168,6 +168,7 @@ async function selectOwnerMain(params: {
   owner: OMSWallet;
   auth: OwnerAuth;
   pointer: OmsWalletPointer | null;
+  method: PendingRequest['method'];
 }): Promise<{ address: string }> {
   const { owner, pointer } = params;
   try {
@@ -179,7 +180,10 @@ async function selectOwnerMain(params: {
           ?.address ?? params.auth.walletAddress;
       throw new CliError({
         code: 'invalid_input',
-        message: `That code signed in to ${signedIn}, not this install's wallet ${pointer.walletAddress}. Use the email the wallet was created with.`,
+        message:
+          params.method === 'email'
+            ? `That code signed in to ${signedIn}, not this install's wallet ${pointer.walletAddress}. Use the email the wallet was created with.`
+            : `That sign-in went to ${signedIn}, not this install's wallet ${pointer.walletAddress}. Sign in with the account the wallet was created with.`,
         cause: error
       });
     }
@@ -197,11 +201,13 @@ export interface BrowserSignIn {
 
 export type OwnerSignInInput = { code: string } | { browser: BrowserSignIn };
 
-// A completed sign-in. `main` selects the main wallet; it runs after the
-// pending file is gone, so a failure there still ends in the revoke.
+// A completed sign-in. `failure` is an error that came after it (the caller
+// raises it once the revoke is sure to run). `report` tells the login page how
+// it ended; best effort, it never throws.
 interface OwnerSignIn {
   auth: OwnerAuth;
-  main: () => Promise<{ address: string }>;
+  failure?: { error: unknown };
+  report?: (status: LoginStatus) => Promise<void>;
 }
 
 function cancelled(): CliError {
@@ -212,15 +218,13 @@ function cancelled(): CliError {
   });
 }
 
-// Signs in on the login page, driving its pairing session from here. The page
-// shows the main-wallet check's outcome, so that check runs inside the login;
-// its result (or error) is handed on. Fails before the sign-in: the request is
-// over and its file goes. Fails after it: the sign-in is returned, so the
-// caller revokes it.
+// Signs in on the login page, driving its pairing session from here. Once
+// signed in it returns at once, with no further network calls: the main-wallet
+// check and the page's final status come after, under the revoking signal
+// handler. Fails before the sign-in: the request is over and its file goes.
 async function signInWithBrowser(params: {
   request: Extract<PendingRequest, { method: 'browser' }>;
   owner: OMSWallet;
-  pointer: OmsWalletPointer | null;
   browser: BrowserSignIn;
 }): Promise<OwnerSignIn> {
   const { request, owner } = params;
@@ -230,7 +234,6 @@ async function signInWithBrowser(params: {
   const now = params.browser.deps?.now ?? (() => Date.now());
   let auth: OwnerAuth | undefined;
   let wasCancelled = false;
-  let main: { ok: true; value: { address: string } } | { ok: false; error: unknown } | undefined;
 
   const deps: BrowserLoginDeps = {
     relay: {
@@ -240,7 +243,10 @@ async function signInWithBrowser(params: {
         if (action?.type === 'cancel') wasCancelled = true;
         return action;
       },
-      setStatus: (session, status) => relay.setStatus(session, status)
+      // Once signed in, the page hears the outcome from `report` instead.
+      setStatus: async (session, status) => {
+        if (!auth) await relay.setStatus(session, status);
+      }
     },
     wallet: {
       startOidcRedirectAuth: (p) =>
@@ -262,22 +268,19 @@ async function signInWithBrowser(params: {
         return { walletAddress: auth.walletAddress };
       }
     },
+    // No network here: the real selection runs after the pending file is gone.
     selectMainWallet: async () => {
       if (!auth) throw new Error('Not signed in.');
-      try {
-        const value = await selectOwnerMain({ owner, auth, pointer: params.pointer });
-        main = { ok: true, value };
-        return value;
-      } catch (error) {
-        main = { ok: false, error };
-        throw error;
-      }
+      return { address: auth.walletAddress };
     },
     oidcProviderGoogle: OmsRelayOidcProviders.google,
     announce: async () => undefined,
     sleep: params.browser.deps?.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms))),
     now,
     randomSessionId: () => request.relaySession
+  };
+  const report = async (status: LoginStatus) => {
+    await relay.setStatus(request.relaySession, status).catch(() => undefined);
   };
 
   // The request's own expiry caps the wait.
@@ -291,11 +294,7 @@ async function signInWithBrowser(params: {
       session: request.relaySession
     });
   } catch (error) {
-    if (auth) {
-      const signedIn = auth;
-      const failure = main && !main.ok ? main.error : error;
-      return { auth: signedIn, main: () => Promise.reject(failure) };
-    }
+    if (auth) return { auth, failure: { error }, report };
     await deletePending({ wallet: request.wallet, id: request.id });
     if (wasCancelled) throw cancelled();
     if (now() >= deadline) {
@@ -307,14 +306,7 @@ async function signInWithBrowser(params: {
     throw mapOmsError(error);
   }
   if (!auth) throw new Error('The sign-in did not complete.');
-  const selected = main;
-  return {
-    auth,
-    main: async () => {
-      if (selected?.ok) return selected.value;
-      throw selected?.error ?? new Error('The main wallet was not selected.');
-    }
-  };
+  return { auth, report };
 }
 
 export interface OwnerContext {
@@ -327,10 +319,9 @@ export interface OwnerContext {
 async function signInOwner(params: {
   request: PendingRequest;
   owner: OMSWallet;
-  pointer: OmsWalletPointer | null;
   input: OwnerSignInInput;
 }): Promise<OwnerSignIn> {
-  const { request, owner, pointer, input } = params;
+  const { request, owner, input } = params;
   if (request.method === 'email') {
     if (!('code' in input)) {
       throw new CliError({
@@ -339,8 +330,7 @@ async function signInOwner(params: {
         hint: 'Confirm it with the code from that email.'
       });
     }
-    const auth = await signInWithCode({ request, owner, code: input.code });
-    return { auth, main: () => selectOwnerMain({ owner, auth, pointer }) };
+    return { auth: await signInWithCode({ request, owner, code: input.code }) };
   }
   if (!('browser' in input)) {
     throw new CliError({
@@ -349,7 +339,7 @@ async function signInOwner(params: {
       hint: `Open ${loginPageUrl(request.relaySession)} to sign in.`
     });
   }
-  return signInWithBrowser({ request, owner, pointer, browser: input.browser });
+  return signInWithBrowser({ request, owner, browser: input.browser });
 }
 
 export async function confirmOwnerRequest<T extends Record<string, unknown>>(
@@ -368,7 +358,6 @@ export async function confirmOwnerRequest<T extends Record<string, unknown>>(
     await deletePending({ wallet: params.wallet, id: request.id });
     throw requestExpired('The request has expired (requests last 10 minutes).');
   }
-  const pointer = await loadOmsWalletPointer(params.wallet);
   const input: OwnerSignInInput =
     'code' in params ? { code: params.code } : { browser: params.browser };
 
@@ -387,7 +376,7 @@ export async function confirmOwnerRequest<T extends Record<string, unknown>>(
   process.on('SIGTERM', onSignalSigningIn);
   let signedIn: OwnerSignIn;
   try {
-    signedIn = await signInOwner({ request, owner, pointer, input });
+    signedIn = await signInOwner({ request, owner, input });
   } finally {
     process.removeListener('SIGINT', onSignalSigningIn);
     process.removeListener('SIGTERM', onSignalSigningIn);
@@ -422,8 +411,21 @@ export async function confirmOwnerRequest<T extends Record<string, unknown>>(
     await deletePending({ wallet: params.wallet, id: request.id }).catch(() =>
       discardPendingNow(params.wallet)
     );
-    // Always act on the user's main wallet.
-    const main = await signedIn.main();
+    // Automatic selection may land on an imported wallet (the Polymarket key). Always act
+    // on the user's main wallet.
+    const pointer = await loadOmsWalletPointer(params.wallet);
+    let main: { address: string };
+    try {
+      if (signedIn.failure) throw signedIn.failure.error;
+      main = await selectOwnerMain({ owner, auth: signedIn.auth, pointer, method: request.method });
+    } catch (error) {
+      await signedIn.report?.({
+        status: 'error',
+        message: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
+    }
+    await signedIn.report?.({ status: 'done', walletAddress: main.address });
     outcome = {
       ok: true,
       result: await params.run({ owner, walletAddress: main.address, request })
