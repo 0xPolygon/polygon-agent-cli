@@ -22,6 +22,7 @@ import { LogoBadge } from '../App.js';
 import { FundingScreen } from '../components/FundingScreen.js';
 import { fetchActivity, fetchHoldings } from '../indexer';
 import { SKILL_URL } from './agents.js';
+import { CardsPanel } from './CardsPanel.js';
 import { accountEmail, takeLinkToken } from './credentials-api.js';
 import { CredentialsTab } from './Credentials.js';
 import { fetchPolygonRates, fetchVaultBalances, fetchVaults } from './earn.js';
@@ -240,6 +241,9 @@ export function Dashboard({
                 holdings={holdings}
                 onAdd={openAdd}
                 onWithdraw={openWithdraw}
+                cards={
+                  <CardsPanel token={linkToken} onFresh={() => go('credentials')} onSaved={flash} />
+                }
               />
             )}
             {tab === 'markets' && (

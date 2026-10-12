@@ -62,7 +62,7 @@ agent wallet confirm --request <request> --code <code>
 - **Dashboard:** every connect (`wallet confirm --code`, the browser `--wait` result, `wallet login --owner`) and `wallet status` carry `dashboard: { url }`, the wallet's agentconnect page (the fund view while the wallet is empty). Send it: "You can see your wallet and add funds here: <dashboard.url>". Nothing opens on its own.
 - **Funding:** an output may carry `funding: { url, reason?, amountUsd? }` (an empty wallet on connect, `insufficient_balance`, a Polymarket deposit shortfall). Send `funding.url`.
 - **Polymarket key:** every owner sign-in backs up the Polymarket trading key; the result shows it as `polymarket`.
-- **Saved details:** every owner sign-in also links this install for the owner's saved shipping address (`credentials` in the result). The dashboard link then opens with access to it for an hour. See **Saved details** below.
+- **Saved details:** every owner sign-in also links this install for the owner's saved shipping address and cards (`credentials` in the result). The dashboard link then opens with access to it for an hour. See **Saved details** below.
 - **`agent wallet status`** is the place to start: connection, a pending sign-in (`pendingRequest` with `method` and, for the browser, `url`), allowance used and left, holdings (and whether the allowance covers them), alerts, watches and the CLI version.
 - **Errors** in session mode carry `code`, `hint` and `command` (the next command to run), e.g. `not_connected`, `not_covered`, `allowance_exhausted`, `session_expired`, `owner_required`, `email_required`, `browser_signin_failed`, `request_cancelled` (the user cancelled on the page), `request_in_progress` (a sign-in for this wallet is finishing: run its `--wait` command).
 
@@ -204,7 +204,7 @@ agent fund [--wallet <n>]
 agent x402-pay --url <url> --wallet <n> [--chain <chain>] [--method GET] [--body <str>] [--header Key:Value] [--max-usd <usd>] [--yes] [--broadcast] [--dry-run]
 ```
 
-### Saved details (shipping address)
+### Saved details (shipping address, cards)
 
 When buying something for the user, use their saved address rather than asking for it again.
 
@@ -214,11 +214,17 @@ agent credentials address --name "Alex Rivera" --line1 "214 Bergen St" --city Br
 agent credentials address --city Queens   # change one field, keep the rest
 agent credentials address --clear
 agent credentials status             # linked? until when
+agent credentials cards              # → cards: [{ brand, last4, expMonth, expYear, label }]
+agent credentials cards add          # → { url, next }: a one-time AgentCard link for the user
+agent credentials cards wait --session <id>   # waits until the card is saved, then lists cards
 ```
+
+- **Cards** are saved on AgentCard's secure page behind the user's passkey. Agents only ever get the brand, last four digits, and expiry; never the number. Send `cards add`'s `url` exactly as given, alone on its own line (anything appended breaks it), then run its `next`. If `wait` returns `status: waiting`, run `next` again once the user says they're done.
 
 - `credentials_not_linked`: run its `command` (`wallet link-credentials`). In session mode it is an owner request (one sign-in, same picker); in owner mode it links straight away.
 - No address saved: ask the user for it, or send `dashboard.url` so they can fill it in on the Credentials page.
 - Only share the address with the store at checkout. Never repeat it in other chats or files.
+- Paying with a saved card (checkout with the user's passkey approval) is not in the CLI yet. Tell the user to check out themselves, or send them the dashboard link.
 
 ### Polymarket
 ```bash

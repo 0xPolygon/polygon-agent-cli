@@ -91,8 +91,13 @@ export class CredentialsError extends Error {
   }
 }
 
-async function call<T>(token: string, method: string, body?: unknown): Promise<T> {
-  const res = await fetch('/api/credentials/address', {
+async function call<T>(
+  token: string,
+  method: string,
+  body?: unknown,
+  path = '/api/credentials/address'
+): Promise<T> {
+  const res = await fetch(path, {
     method,
     headers: {
       Authorization: `Agent ${token}`,
@@ -111,3 +116,32 @@ export const getAddress = (token: string) =>
 
 export const saveAddress = (token: string, address: ShippingAddress) =>
   call<{ address: ShippingAddress }>(token, 'PUT', address).then((r) => r.address);
+
+// ── Cards (AgentCard vault): display fields only, never the number ──
+
+export interface Card {
+  id: string;
+  brand: string;
+  last4: string;
+  expMonth: number;
+  expYear: number;
+}
+
+export const listCards = (token: string) =>
+  call<{ cards: Card[] }>(token, 'GET', undefined, '/api/credentials/cards').then((r) => r.cards);
+
+export const startCardSession = (token: string) =>
+  call<{ sessionId: string; url: string; pollInterval: number; returning: boolean }>(
+    token,
+    'POST',
+    undefined,
+    '/api/credentials/cards/session'
+  );
+
+export const cardSessionStatus = (token: string, id: string) =>
+  call<{ status: 'pending' | 'linked' | 'expired'; cardSaved: boolean; pollInterval: number }>(
+    token,
+    'GET',
+    undefined,
+    `/api/credentials/cards/session?id=${encodeURIComponent(id)}`
+  );

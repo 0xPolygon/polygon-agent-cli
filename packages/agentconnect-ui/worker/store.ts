@@ -8,6 +8,11 @@ import { b64urlDecode, b64urlEncode } from './agent-auth.ts';
 
 export interface WalletRecord {
   address?: ShippingAddress | null;
+  // AgentCard vault users this wallet has linked (a returning user may come
+  // back as a new one), and the add-a-card session in flight (so a wallet can
+  // only finish its own session).
+  agentcardUsers?: string[];
+  agentcardSession?: string;
 }
 
 const VERSION = 'v1';

@@ -1,11 +1,12 @@
 // agentconnect worker: the SPA (with SPA fallback) plus the credentials API
-// that agents and the dashboard use to save and read a shipping address.
+// that agents and the dashboard use for the owner's shipping address and cards.
 // Saved details live in Workers KV (OMS customers need full KYC and don't
 // accept metadata yet).
 
 import type { AgentIdentity, OmsIdTokenConfig } from './agent-auth.ts';
 
 import { AuthError, issueCertificate, verifyAccessToken, verifyEnrollToken } from './agent-auth.ts';
+import { AgentCard, AgentCardError } from './agentcard.ts';
 import { parseAddress, ValidationError } from './shipping.ts';
 import { CredentialStore } from './store.ts';
 
@@ -19,6 +20,8 @@ export interface Env {
   // Secrets (wrangler secret put)
   AGENT_CERT_SECRET?: string;
   CREDENTIALS_KEY?: string;
+  AGENTCARD_CLIENT_ID?: string;
+  AGENTCARD_CLIENT_SECRET?: string;
 }
 
 const DEFAULT_ISSUER = 'https://api.polygon.technology';
@@ -52,6 +55,28 @@ function store(env: Env): CredentialStore | null {
   if (!env.CREDENTIALS || !env.CREDENTIALS_KEY) return null;
   return new CredentialStore(env.CREDENTIALS, env.CREDENTIALS_KEY);
 }
+
+function agentCard(env: Env): AgentCard | null {
+  if (!env.AGENTCARD_CLIENT_ID || !env.AGENTCARD_CLIENT_SECRET) return null;
+  return new AgentCard({
+    clientId: env.AGENTCARD_CLIENT_ID,
+    clientSecret: env.AGENTCARD_CLIENT_SECRET
+  });
+}
+
+const cardView = (c: {
+  id: string;
+  brand: string;
+  last4: string;
+  expiry_month: number;
+  expiry_year: number;
+}) => ({
+  id: c.id,
+  brand: c.brand,
+  last4: c.last4,
+  expMonth: c.expiry_month,
+  expYear: c.expiry_year
+});
 
 async function authenticate(req: Request, env: Env): Promise<AgentIdentity> {
   const header = req.headers.get('Authorization') ?? '';
@@ -107,12 +132,86 @@ export async function handleApi(req: Request, env: Env, path: string): Promise<R
       return fail(405, 'method_not_allowed', 'Use GET, PUT, or DELETE');
     }
 
+    if (path.startsWith('/api/credentials/cards')) {
+      const who = await authenticate(req, env);
+      const db = store(env);
+      const cards = agentCard(env);
+      if (!db || !cards) return fail(503, 'credentials_unavailable', 'Cards are not configured');
+
+      // GET /api/credentials/cards: the saved cards' display fields, across every
+      // vault user this wallet has linked.
+      if (path === '/api/credentials/cards' && req.method === 'GET') {
+        const users = (await db.get(who.wallet)).agentcardUsers ?? [];
+        const lists = await Promise.all(users.map((u) => cards.listCards(u)));
+        const seen = new Set<string>();
+        const all = lists.flat().filter((c) => !seen.has(c.id) && seen.add(c.id));
+        return json({ cards: all.map(cardView) });
+      }
+
+      // POST /api/credentials/cards/session: a single-use add-a-card link.
+      if (path === '/api/credentials/cards/session' && req.method === 'POST') {
+        const latest = (await db.get(who.wallet)).agentcardUsers?.at(-1) ?? null;
+        let session;
+        let returning = !!latest;
+        try {
+          session = await cards.createVaultSession(latest);
+        } catch (err) {
+          // A passkey-only vault user has no phone or email for the sign-in code.
+          // An open session still lets them pick "Unlock with your passkey".
+          if (!(latest && err instanceof AgentCardError && err.code === 'contact_missing'))
+            throw err;
+          session = await cards.createVaultSession(null);
+          returning = false;
+        }
+        await db.update(who.wallet, (r) => ({ ...r, agentcardSession: session.id }));
+        return json({
+          sessionId: session.id,
+          url: session.url,
+          expiresAt: session.expires_at,
+          pollInterval: session.poll_interval ?? 3,
+          // A returning user gets a code by email or text before the card form.
+          returning
+        });
+      }
+
+      // GET /api/credentials/cards/session?id=vs_...: poll until the card is saved.
+      // `linked` comes when the passkey user exists; the card lands after that.
+      if (path === '/api/credentials/cards/session' && req.method === 'GET') {
+        const id = new URL(req.url).searchParams.get('id') ?? '';
+        const record = await db.get(who.wallet);
+        if (!id || record.agentcardSession !== id) {
+          return fail(404, 'not_found', 'No such add-a-card session for this wallet');
+        }
+        const session = await cards.getVaultSession(id);
+        const user = session.user_id;
+        if (user && !(record.agentcardUsers ?? []).includes(user)) {
+          await db.update(who.wallet, (r) => ({
+            ...r,
+            agentcardUsers: [...(r.agentcardUsers ?? []), user]
+          }));
+        }
+        return json({
+          status: session.status ?? 'pending',
+          cardSaved: session.card === true || !!session.card_id,
+          pollInterval: session.poll_interval ?? 3
+        });
+      }
+
+      return fail(405, 'method_not_allowed', 'Unsupported cards request');
+    }
+
     return fail(404, 'not_found', 'No such endpoint');
   } catch (err) {
     if (err instanceof AuthError) {
       return fail(401, err.code, err.message);
     }
     if (err instanceof ValidationError) return fail(400, 'invalid_request', err.message);
+    if (err instanceof AgentCardError) {
+      console.error('[agentcard]', err.status, err.code, err.message);
+      if (err.status === 429)
+        return fail(429, 'rate_limited', 'Too many card requests. Try again in a minute.');
+      return fail(502, 'upstream_error', 'The card service is unavailable. Try again shortly.');
+    }
     console.error('[api]', err);
     return fail(500, 'internal_error', 'Something went wrong');
   }

@@ -1,5 +1,5 @@
 // `credentials`: details the owner saved for agents to use when buying for
-// them (shipping address now; cards next). Stored by agentconnect, read and
+// them: a shipping address, and cards in the AgentCard vault. Stored by agentconnect, read and
 // written as this wallet's linked agent key.
 
 import type { CommandModule } from 'yargs';
@@ -132,9 +132,152 @@ const addressCommand: CommandModule<object, AddressArgs> = {
   }
 };
 
+// --- cards (AgentCard vault) ---
+
+interface Card {
+  id: string;
+  brand: string;
+  last4: string;
+  expMonth: number;
+  expYear: number;
+}
+
+const describeCard = (c: Card) =>
+  `${c.brand.charAt(0).toUpperCase()}${c.brand.slice(1)} ending ${c.last4}, expires ${String(c.expMonth).padStart(2, '0')}/${String(c.expYear).slice(-2)}`;
+
+async function listCards(wallet: string): Promise<Card[]> {
+  const res = await credentialsApi<{ cards: Card[] }>(wallet, 'GET', '/api/credentials/cards');
+  return res.cards;
+}
+
+const cardsListCommand: CommandModule<object, WalletArgs> = {
+  command: '$0',
+  describe: 'List saved cards (brand, last 4, expiry; never the number)',
+  builder: (y) => y.option('wallet', walletOpt),
+  handler: async (argv) => {
+    try {
+      const cards = await listCards(argv.wallet);
+      jsonOut({
+        ok: true,
+        walletName: argv.wallet,
+        cards: cards.map((c) => ({ ...c, label: describeCard(c) })),
+        ...(cards.length === 0
+          ? { hint: 'No card saved. Run `credentials cards add` and send the user its link.' }
+          : {})
+      });
+    } catch (error) {
+      jsonFail(error);
+    }
+  }
+};
+
+const cardsAddCommand: CommandModule<object, WalletArgs> = {
+  command: 'add',
+  describe:
+    "A one-time link where the user saves a card behind their passkey (AgentCard's secure page)",
+  builder: (y) => y.option('wallet', walletOpt),
+  handler: async (argv) => {
+    try {
+      const res = await credentialsApi<{
+        sessionId: string;
+        url: string;
+        expiresAt: string;
+        returning: boolean;
+      }>(argv.wallet, 'POST', '/api/credentials/cards/session');
+      jsonOut({
+        ok: true,
+        walletName: argv.wallet,
+        url: res.url,
+        session: res.sessionId,
+        expiresAt: res.expiresAt,
+        next: `polygon-agent credentials cards wait --session ${res.sessionId}${argv.wallet === 'main' ? '' : ` --wallet ${argv.wallet}`}`,
+        hint:
+          'Send `url` to the user exactly as given, alone on its own line (anything appended breaks it). ' +
+          (res.returning
+            ? 'They get a code by email or text first, since they have saved a card before. '
+            : '') +
+          'Then run `next` to wait until the card is saved.'
+      });
+    } catch (error) {
+      jsonFail(error);
+    }
+  }
+};
+
+type WaitArgs = WalletArgs & { session: string; timeout: number };
+
+const cardsWaitCommand: CommandModule<object, WaitArgs> = {
+  command: 'wait',
+  describe: 'Wait until the user finishes saving a card from `cards add`',
+  builder: (y) =>
+    y
+      .option('wallet', walletOpt)
+      .option('session', {
+        type: 'string',
+        demandOption: true,
+        describe: 'Session id from `cards add`'
+      })
+      .option('timeout', { type: 'number', default: 600, describe: 'Seconds to wait' }),
+  handler: async (argv) => {
+    try {
+      const deadline = Date.now() + argv.timeout * 1000;
+      for (;;) {
+        const res = await credentialsApi<{
+          status: string;
+          cardSaved: boolean;
+          pollInterval: number;
+        }>(
+          argv.wallet,
+          'GET',
+          `/api/credentials/cards/session?id=${encodeURIComponent(argv.session)}`
+        );
+        // `linked` means the passkey user exists; the card is stored after that.
+        if (res.cardSaved) {
+          const cards = await listCards(argv.wallet);
+          jsonOut({
+            ok: true,
+            walletName: argv.wallet,
+            status: 'saved',
+            cards: cards.map((c) => ({ ...c, label: describeCard(c) }))
+          });
+          return;
+        }
+        if (res.status === 'expired') {
+          throw new CliError({
+            code: 'request_expired',
+            message: 'The add-a-card link expired before a card was saved.',
+            command: `polygon-agent credentials cards add${argv.wallet === 'main' ? '' : ` --wallet ${argv.wallet}`}`
+          });
+        }
+        if (Date.now() >= deadline) {
+          jsonOut({
+            ok: true,
+            walletName: argv.wallet,
+            status: 'waiting',
+            next: `polygon-agent credentials cards wait --session ${argv.session}${argv.wallet === 'main' ? '' : ` --wallet ${argv.wallet}`}`,
+            hint: 'The user has not finished yet. Run `next` again when they say they are done.'
+          });
+          return;
+        }
+        await new Promise((r) => setTimeout(r, Math.max(3, res.pollInterval) * 1000));
+      }
+    } catch (error) {
+      jsonFail(error);
+    }
+  }
+};
+
+const cardsCommand: CommandModule = {
+  command: 'cards',
+  describe: 'Saved cards: list them, or `add` one through a secure link',
+  builder: (y) => y.command(cardsListCommand).command(cardsAddCommand).command(cardsWaitCommand),
+  handler: () => {}
+};
+
 export const credentialsCommand: CommandModule = {
   command: 'credentials',
-  describe: 'Saved details agents use to buy for the owner (shipping address)',
-  builder: (y) => y.command(statusCommand).command(addressCommand).demandCommand(1),
+  describe: 'Saved details agents use to buy for the owner (shipping address, cards)',
+  builder: (y) =>
+    y.command(statusCommand).command(addressCommand).command(cardsCommand).demandCommand(1),
   handler: () => {}
 };

@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from './index.ts';
 
 import { issueCertificate, resetJwksCache } from './agent-auth.ts';
+import { resetAgentCardTokenCache } from './agentcard.ts';
 import { handleApi } from './index.ts';
+import { CredentialStore } from './store.ts';
 import {
   AGENT,
   AUDIENCE,
@@ -37,6 +39,88 @@ function fakeKv() {
 
 let kv: ReturnType<typeof fakeKv>;
 
+// A tiny AgentCard vault: sessions link when the test says the user finished.
+function fakeAgentCard() {
+  const sessions = new Map<string, { user_id: string | null; status: string; card: boolean }>();
+  // Vault users with a phone or email for the sign-in code.
+  const withContact = new Set<string>();
+  const cards = new Map<
+    string,
+    {
+      id: string;
+      brand: string;
+      last4: string;
+      expiry_month: number;
+      expiry_year: number;
+      created_at: string;
+    }[]
+  >();
+  const created: { user_id?: string }[] = [];
+  let n = 0;
+  const handler = async (url: string, init: RequestInit = {}) => {
+    const u = new URL(url);
+    const method = init.method ?? 'GET';
+    if (u.pathname === '/api/v2/oauth/token')
+      return Response.json({ access_token: 'ac', expires_in: 3600 });
+    if (method === 'POST' && u.pathname === '/api/v2/vault_sessions') {
+      const body = JSON.parse(String(init.body));
+      created.push(body);
+      if (body.user_id && !withContact.has(body.user_id)) {
+        return Response.json(
+          { error: { code: 'contact_missing', message: 'no contact' } },
+          { status: 422 }
+        );
+      }
+      const id = `vs_${++n}`;
+      sessions.set(id, { user_id: body.user_id ?? null, status: 'pending', card: false });
+      return Response.json(
+        {
+          id,
+          url: `https://vault.test/v?vs=${id}.sig`,
+          user_id: body.user_id ?? null,
+          expires_at: '2026-10-13T00:00:00Z',
+          poll_interval: 3
+        },
+        { status: 201 }
+      );
+    }
+    const sm = /^\/api\/v2\/vault_sessions\/(.+)$/.exec(u.pathname);
+    if (method === 'GET' && sm) {
+      const sess = sessions.get(sm[1]);
+      return sess
+        ? Response.json({ id: sm[1], ...sess, poll_interval: 3 })
+        : Response.json({}, { status: 404 });
+    }
+    if (method === 'GET' && u.pathname === '/api/v2/vault_cards') {
+      const list = cards.get(u.searchParams.get('user_id') ?? '');
+      return list
+        ? Response.json({ object: 'list', data: list })
+        : Response.json({ error: { code: 'connection_not_found' } }, { status: 404 });
+    }
+    return Response.json({}, { status: 404 });
+  };
+  // The passkey user exists: AgentCard says linked, but no card is stored yet.
+  const passkey = (id: string, user: string) =>
+    sessions.set(id, { user_id: user, status: 'linked', card: false });
+  const finish = (id: string, user: string, last4 = '4242') => {
+    sessions.set(id, { user_id: user, status: 'linked', card: true });
+    cards.set(user, [
+      ...(cards.get(user) ?? []),
+      {
+        id: `vc_${last4}`,
+        brand: 'visa',
+        last4,
+        expiry_month: 12,
+        expiry_year: 2029,
+        created_at: '2026-10-12T00:00:00Z'
+      }
+    ]);
+  };
+  return { handler, passkey, finish, created, withContact };
+}
+
+let agentcard: ReturnType<typeof fakeAgentCard>;
+
 const env = (over: Partial<Env> = {}): Env => ({
   ASSETS: {} as Fetcher,
   AGENT_CERT_SECRET: SECRET,
@@ -45,6 +129,8 @@ const env = (over: Partial<Env> = {}): Env => ({
   OMS_ID_TOKEN_ISSUER: ISSUER,
   OMS_ID_TOKEN_AUDIENCES: AUDIENCE,
   OMS_JWKS_URL: 'https://jwks.test',
+  AGENTCARD_CLIENT_ID: 'client',
+  AGENTCARD_CLIENT_SECRET: 'acs_secret',
   ...over
 });
 
@@ -53,11 +139,14 @@ let jwksFetch: typeof fetch;
 beforeEach(async () => {
   resetJwksCache();
   kv = fakeKv();
+  agentcard = fakeAgentCard();
+  resetAgentCardTokenCache();
   const iss = await makeIssuer();
   jwksFetch = iss.fetchImpl;
   vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url === 'https://jwks.test') return jwksFetch(url, init);
+    if (url.startsWith('https://api.agentcard.sh')) return agentcard.handler(url, init);
     return new Response('unexpected fetch', { status: 599 });
   });
   issuer = iss;
@@ -159,7 +248,6 @@ describe('/api/credentials/address', () => {
     await handleApi(req('PUT', path, { token: t, body: ADDRESS }), env(), path);
     const other = '0x00000000000000000000000000000000000000bb';
     kv.data.set(`wallet:${other}`, kv.data.get(`wallet:${WALLET}`)!);
-    const { CredentialStore } = await import('./store.ts');
     await expect(new CredentialStore(kv.kv, 'test-credentials-key').get(other)).rejects.toThrow();
   });
 
@@ -208,5 +296,98 @@ describe('global fetch binding', () => {
       '/api/agent/enroll'
     );
     expect(res.status).toBe(200);
+  });
+});
+
+describe('/api/credentials/cards', () => {
+  const call = async (method: string, path: string, t: string) =>
+    handleApi(req(method, path, { token: t }), env(), new URL(`https://x${path}`).pathname);
+  const start = async (t: string) =>
+    (await (await call('POST', '/api/credentials/cards/session', t)).json()) as {
+      sessionId: string;
+      url: string;
+      returning: boolean;
+    };
+  const poll = async (t: string, id: string) =>
+    (await (await call('GET', `/api/credentials/cards/session?id=${id}`, t)).json()) as {
+      status: string;
+      cardSaved: boolean;
+    };
+  const users = async () =>
+    (await new CredentialStore(kv.kv, 'test-credentials-key').get(WALLET)).agentcardUsers;
+
+  it('lists nothing before a card is added', async () => {
+    const res = await call('GET', '/api/credentials/cards', await token());
+    expect(await res.json()).toEqual({ cards: [] });
+  });
+
+  it('adds a card through a vault session, then lists it', async () => {
+    const t = await token();
+    const s = await start(t);
+    expect(s).toMatchObject({ sessionId: 'vs_1', returning: false });
+    expect(s.url).toContain('vs_1');
+    expect(await poll(t, s.sessionId)).toMatchObject({ status: 'pending', cardSaved: false });
+
+    agentcard.finish(s.sessionId, 'usr_1');
+    expect(await poll(t, s.sessionId)).toMatchObject({ status: 'linked', cardSaved: true });
+    expect(await users()).toEqual(['usr_1']);
+
+    const list = await call('GET', '/api/credentials/cards', t);
+    expect(await list.json()).toEqual({
+      cards: [{ id: 'vc_4242', brand: 'visa', last4: '4242', expMonth: 12, expYear: 2029 }]
+    });
+  });
+
+  it('is not saved yet when only the passkey step is done', async () => {
+    const t = await token();
+    const s = await start(t);
+    agentcard.passkey(s.sessionId, 'usr_1');
+    expect(await poll(t, s.sessionId)).toMatchObject({ status: 'linked', cardSaved: false });
+  });
+
+  it('signs a returning user with a contact in to the same vault user', async () => {
+    const t = await token();
+    const first = await start(t);
+    agentcard.finish(first.sessionId, 'usr_1');
+    await poll(t, first.sessionId);
+    agentcard.withContact.add('usr_1');
+    const again = await start(t);
+    expect(again.returning).toBe(true);
+    expect(agentcard.created.at(-1)).toEqual({ user_id: 'usr_1' });
+  });
+
+  it("falls back to an open session for a passkey-only user, and lists both users' cards", async () => {
+    const t = await token();
+    const first = await start(t);
+    agentcard.finish(first.sessionId, 'usr_1');
+    await poll(t, first.sessionId);
+
+    const again = await start(t);
+    expect(again.returning).toBe(false);
+    expect(agentcard.created.at(-1)).toEqual({});
+    agentcard.finish(again.sessionId, 'usr_2', '1881');
+    await poll(t, again.sessionId);
+
+    expect(await users()).toEqual(['usr_1', 'usr_2']);
+    const list = (await (await call('GET', '/api/credentials/cards', t)).json()) as {
+      cards: { last4: string }[];
+    };
+    expect(list.cards.map((c) => c.last4)).toEqual(['4242', '1881']);
+  });
+
+  it("won't finish another wallet's session", async () => {
+    const t = await token();
+    await start(t);
+    const res = await call('GET', '/api/credentials/cards/session?id=vs_999', t);
+    expect(res.status).toBe(404);
+  });
+
+  it('answers 503 when AgentCard is not configured', async () => {
+    const res = await handleApi(
+      req('GET', '/api/credentials/cards', { token: await token() }),
+      env({ AGENTCARD_CLIENT_SECRET: undefined }),
+      '/api/credentials/cards'
+    );
+    expect(res.status).toBe(503);
   });
 });
