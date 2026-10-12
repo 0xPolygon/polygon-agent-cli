@@ -19,7 +19,6 @@ const m = vi.hoisted(() => ({
   listPositions: vi.fn(),
   getPositions: vi.fn(),
   loadPolymarketKey: vi.fn(),
-  importLegacyKey: vi.fn(),
   ensureTradingKey: vi.fn(),
   backupTradingKey: vi.fn(),
   ensureMainWallet: vi.fn(),
@@ -83,7 +82,6 @@ vi.mock('../../lib/polymarket/account.ts', async (o) => {
     },
     pusdBalance: m.pusdBalance,
     legacyNegRiskApproved: m.legacyApproved,
-    importLegacyKey: m.importLegacyKey,
     ensureTradingKey: m.ensureTradingKey,
     hasLocalKey: () => m.localKey,
     restoreFromOms: m.restoreFromOms,
@@ -127,7 +125,6 @@ async function run(argv: string[]) {
   await yargs()
     .command(cmds.setupCommand)
     .command(cmds.statusCommand)
-    .command(cmds.importKeyCommand)
     .command(cmds.recoverCommand)
     .command(portfolio.positionsCommand)
     .command(portfolio.redeemCommand)
@@ -525,7 +522,7 @@ describe('positions', () => {
     });
   });
 
-  it('falls back to the legacy set-key proxy when no account exists', async () => {
+  it('falls back to the legacy proxy when no account exists', async () => {
     m.loadPolymarketKey.mockResolvedValue('0x' + '11'.repeat(32));
     const out = await run(['positions']);
     expect(m.getPositions).toHaveBeenCalledWith('0xLEGACYPROXY', expect.anything());
@@ -535,30 +532,6 @@ describe('positions', () => {
   it('fails not_set_up with neither account nor legacy key', async () => {
     expect(await run(['positions'])).toMatchObject({ ok: false, code: 'not_set_up' });
     expect(m.getPositions).not.toHaveBeenCalled();
-  });
-});
-
-describe('import-key', () => {
-  const LEGACY = { kind: 'legacy-proxy', signer: '0x1', wallet: '0xLEGACYPROXY', createdAt: 'x' };
-
-  it('reports the builder key and that withdraw moves only pUSD', async () => {
-    m.importLegacyKey.mockResolvedValue({ account: LEGACY, builderKey: true });
-    const out = await run(['import-key', `0x${'ab'.repeat(32)}`]);
-    expect(out).toMatchObject({ ok: true, builderKey: true, account: { kind: 'legacy-proxy' } });
-    expect(String(out.note)).toMatch(/USDC\.e/);
-    expect(out.warning).toBeUndefined();
-    expect(JSON.stringify(out)).not.toMatch(/abab/);
-  });
-
-  it('passes through the warning when the builder key could not be minted', async () => {
-    m.importLegacyKey.mockResolvedValue({
-      account: LEGACY,
-      builderKey: false,
-      warning: 'withdraw needs one: run agent polymarket setup --wallet main --broadcast'
-    });
-    const out = await run(['import-key', `0x${'ab'.repeat(32)}`]);
-    expect(out).toMatchObject({ ok: true, builderKey: false });
-    expect(String(out.warning)).toMatch(/agent polymarket setup/);
   });
 });
 

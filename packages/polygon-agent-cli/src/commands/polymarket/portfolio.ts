@@ -20,8 +20,8 @@ import { collectRedeemable, fail, ok, walletOption } from './shared.ts';
 
 type PositionsArgs = { status?: PositionStatus; limit?: number; cursor?: string; wallet: string };
 
-// The address to read positions for. Installs that predate `setup` but ran the old
-// `set-key` stay readable through the proxy wallet derived from that key. Read-only:
+// The address to read positions for. Installs that predate `setup` and hold an old
+// Polymarket key stay readable through the proxy wallet derived from that key. Read-only:
 // nothing is created here.
 async function positionsAddress(wallet: string): Promise<string> {
   if (loadAccount(wallet)) return requireAccount(wallet).wallet;

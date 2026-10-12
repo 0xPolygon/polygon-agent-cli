@@ -1,6 +1,6 @@
 import type { CommandModule } from 'yargs';
 
-import { importKeyCommand, recoverCommand, setupCommand, statusCommand } from './account.ts';
+import { recoverCommand, setupCommand, statusCommand } from './account.ts';
 import {
   bookCommand,
   eventCommand,
@@ -23,14 +23,12 @@ const hiddenAliases: CommandModule[] = [
     handler: (argv: any) => buyCommand.handler({ ...argv, usd: argv.amount })
   },
   { ...statusCommand, command: 'proxy-wallet', describe: false, aliases: [] },
-  { ...setupCommand, command: 'approve', describe: false, aliases: [] },
-  { ...importKeyCommand, command: 'set-key <privateKey>', describe: false, aliases: [] }
+  { ...setupCommand, command: 'approve', describe: false, aliases: [] }
 ];
 
 const visibleCommands: CommandModule[] = [
   setupCommand,
   statusCommand,
-  importKeyCommand,
   recoverCommand,
   depositCommand,
   withdrawCommand,

@@ -416,55 +416,6 @@ async function runApprovals(client: SecureClient): Promise<boolean> {
   return approvalsSet;
 }
 
-// Legacy: an imported Polymarket key whose funds sit in a Polymarket proxy wallet.
-// The import stands even if the builder key can't be minted; withdraw needs it,
-// and `setup` mints it later.
-export async function importLegacyKey(
-  wallet: string,
-  privateKey: string
-): Promise<{ account: StoredAccount; builderKey: boolean; warning?: string }> {
-  const dir = accountDir(wallet);
-  if (fs.existsSync(path.join(dir, 'key.json')) || fs.existsSync(path.join(dir, 'account.json'))) {
-    throw new CliError({
-      code: 'invalid_input',
-      message: `A Polymarket account already exists for '${wallet}'; importing a key would overwrite its only key.`,
-      hint: 'Withdraw first, or use a different --wallet name.'
-    });
-  }
-  const { getPolymarketProxyWalletAddress } = await import('./gamma.ts');
-  const { privateKeyToAccount } = await import('viem/accounts');
-  const pk = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
-  if (!/^0x[0-9a-fA-F]{64}$/.test(pk)) {
-    throw new CliError({
-      code: 'invalid_input',
-      message: 'The private key must be 32 bytes of hex.'
-    });
-  }
-  const signer = privateKeyToAccount(pk as `0x${string}`).address;
-  const account: StoredAccount = {
-    kind: 'legacy-proxy',
-    signer,
-    wallet: await getPolymarketProxyWalletAddress(signer),
-    createdAt: new Date().toISOString()
-  };
-  // Credentials from any earlier signer must not be paired with the imported key.
-  fs.rmSync(path.join(dir, 'builder.json'), { force: true });
-  fs.rmSync(path.join(dir, 'clob.json'), { force: true });
-  writeSecret(wallet, 'key.json', pk);
-  writeJsonFile({ file: path.join(dir, 'account.json'), data: account });
-  try {
-    await mintBuilderKey(wallet, pk, signer);
-    return { account, builderKey: true };
-  } catch (err) {
-    const reason = (err as Error)?.message ?? String(err);
-    return {
-      account,
-      builderKey: false,
-      warning: `Couldn't mint a Polymarket builder key (${reason}). withdraw needs one: run agent polymarket setup --wallet ${wallet} --broadcast to mint it before withdrawing.`
-    };
-  }
-}
-
 // Refreshes the CLOB's cached view first: a plain fetch can lag a deposit or a fill.
 export async function pusdBalance(wallet: string): Promise<bigint> {
   return pusdBalanceOf(await getTradingClient(wallet));

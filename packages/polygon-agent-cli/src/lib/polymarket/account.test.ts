@@ -299,57 +299,6 @@ describe('pusdBalance', () => {
   });
 });
 
-describe('importLegacyKey', () => {
-  const pk = `0x${'ab'.repeat(32)}`;
-
-  it('refuses to overwrite an existing account and writes nothing', async () => {
-    await account.setupAccount('main');
-    const keyFile = path.join(account.accountDir('main'), 'key.json');
-    const before = fs.readFileSync(keyFile);
-    await expect(account.importLegacyKey('main', pk)).rejects.toMatchObject({
-      code: 'invalid_input'
-    });
-    expect(fs.readFileSync(keyFile).equals(before)).toBe(true);
-  });
-
-  it('replaces stale credentials with a builder key minted as the imported EOA', async () => {
-    fs.mkdirSync(account.accountDir('legacy'), { recursive: true });
-    fs.writeFileSync(path.join(account.accountDir('legacy'), 'builder.json'), '{}');
-    fs.writeFileSync(path.join(account.accountDir('legacy'), 'clob.json'), '{}');
-    const res = await account.importLegacyKey('legacy', pk);
-    expect(res.builderKey).toBe(true);
-    expect(res.warning).toBeUndefined();
-    expect(res.account.kind).toBe('legacy-proxy');
-    // EOA mode: the signer is its own wallet, as in setup.
-    expect(sdk.created[0]).toMatchObject({ signer: { __pk: pk }, wallet: res.account.signer });
-    expect(sdk.createBuilderApiKey).toHaveBeenCalledTimes(1);
-    const files = fs.readdirSync(account.accountDir('legacy')).sort();
-    expect(files).toEqual(['account.json', 'builder.json', 'key.json']);
-    const builder = JSON.parse(
-      fs.readFileSync(path.join(account.accountDir('legacy'), 'builder.json'), 'utf8')
-    );
-    expect(JSON.stringify(builder)).not.toMatch(/b-secret/);
-    const { decrypt } = await import('../storage.ts');
-    expect(JSON.parse(decrypt(builder))).toEqual({
-      key: 'b-key',
-      secret: 'b-secret',
-      passphrase: 'b-pass'
-    });
-  });
-
-  it('still imports when minting the builder key fails, with a warning about withdraw', async () => {
-    sdk.createBuilderApiKey.mockRejectedValueOnce(new Error('relayer down'));
-    const res = await account.importLegacyKey('legacy2', pk);
-    expect(res.builderKey).toBe(false);
-    expect(res.warning).toMatch(/relayer down/);
-    expect(res.warning).toMatch(/withdraw/);
-    expect(res.warning).toMatch(/agent polymarket setup --wallet legacy2 --broadcast/);
-    expect(account.loadAccount('legacy2')).toMatchObject({ kind: 'legacy-proxy' });
-    const files = fs.readdirSync(account.accountDir('legacy2')).sort();
-    expect(files).toEqual(['account.json', 'key.json']);
-  });
-});
-
 describe('setupAccount with a missing key', () => {
   it('fails with not_set_up and does not generate a new key', async () => {
     await account.setupAccount('main');
