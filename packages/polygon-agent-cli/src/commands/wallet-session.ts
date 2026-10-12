@@ -544,7 +544,14 @@ async function confirmedJson(
       };
     }
     // The wallet's page, for the assistant to send. Nothing opens on its own.
-    result = { ...result, dashboard: dashboardInfo({ walletAddress: address, funded }) };
+    result = {
+      ...result,
+      dashboard: dashboardInfo({
+        walletAddress: address,
+        funded,
+        polymarketAddress: loadAccount(wallet)?.wallet
+      })
+    };
   }
   return { ok: !failedOutright, walletName: wallet, ...result };
 }
@@ -837,7 +844,11 @@ function polymarketStatus(wallet: string): Record<string, unknown> {
 
 // The wallet's agentconnect page: the fund view while it's empty.
 async function walletDashboard(wallet: string, walletAddress: string): Promise<{ url: string }> {
-  return dashboardInfo({ walletAddress, funded: await isWalletFunded(wallet, walletAddress, 137) });
+  return dashboardInfo({
+    walletAddress,
+    funded: await isWalletFunded(wallet, walletAddress, 137),
+    polymarketAddress: loadAccount(wallet)?.wallet
+  });
 }
 
 export async function sessionReport(params: {
@@ -945,7 +956,8 @@ export async function sessionReport(params: {
     // From the balances read above; unreadable balances keep the dashboard view.
     dashboard: dashboardInfo({
       walletAddress: pointer.walletAddress,
-      funded: balances ? holdsAnythingOn(balances, 137) : true
+      funded: balances ? holdsAnythingOn(balances, 137) : true,
+      polymarketAddress: loadAccount(wallet)?.wallet
     }),
     email: pointer.email,
     installName: pointer.installName,

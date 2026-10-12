@@ -39,14 +39,19 @@ export function fundingInfo(params: {
 
 // The wallet's page on agentconnect, sent after every connect and by `wallet
 // status`: the fund view while the wallet is empty, the dashboard after.
-export function dashboardInfo(params: { walletAddress: string; funded: boolean }): {
+// `polymarketAddress` is the Polymarket deposit (trading) account, where
+// positions live; the dashboard reads it as `pm`.
+export function dashboardInfo(params: {
+  walletAddress: string;
+  funded: boolean;
+  polymarketAddress?: string | null;
+}): {
   url: string;
 } {
-  return {
-    url: fundingUrl({
-      walletAddress: params.walletAddress,
-      chainId: 137,
-      view: params.funded ? 'dashboard' : 'fund'
-    })
-  };
+  const url = fundingUrl({
+    walletAddress: params.walletAddress,
+    chainId: 137,
+    view: params.funded ? 'dashboard' : 'fund'
+  });
+  return { url: params.polymarketAddress ? `${url}&pm=${params.polymarketAddress}` : url };
 }

@@ -21,6 +21,7 @@ import { isTxModeSet, loadTxMode, saveTxMode } from '../lib/mode.ts';
 import { startOidcCallbackServer } from '../lib/oidc-callback-server.ts';
 import { getOmsClient, loginUiBaseUrl, oidcRelayBaseUrl } from '../lib/oms-client.ts';
 import { ensureMainWallet } from '../lib/oms-tx.ts';
+import { loadAccount } from '../lib/polymarket/account.ts';
 import { selectMainWallet } from '../lib/polymarket/oms-key.ts';
 import { polymarketOwnerStep } from '../lib/polymarket/owner-step.ts';
 import {
@@ -201,7 +202,8 @@ async function handleOwnerLogin(argv: LoginArgs): Promise<void> {
         // The wallet's agentconnect page, for the assistant to send after login.
         dashboard: dashboardInfo({
           walletAddress: oms.wallet.walletAddress,
-          funded: await isWalletFunded(argv.name, oms.wallet.walletAddress, 137)
+          funded: await isWalletFunded(argv.name, oms.wallet.walletAddress, 137),
+          polymarketAddress: loadAccount(argv.name)?.wallet
         }),
         txMode: txMode ?? loadTxMode(),
         ...(txMode === null ? { modePrompt: MODE_PROMPT } : {})
@@ -293,7 +295,11 @@ async function handleOwnerLogin(argv: LoginArgs): Promise<void> {
       loginMethod,
       builderProvisioned,
       polymarket,
-      dashboard: dashboardInfo({ walletAddress, funded }),
+      dashboard: dashboardInfo({
+        walletAddress,
+        funded,
+        polymarketAddress: loadAccount(argv.name)?.wallet
+      }),
       txMode: txMode ?? loadTxMode(),
       ...(txMode === null ? { modePrompt: MODE_PROMPT } : {})
     });

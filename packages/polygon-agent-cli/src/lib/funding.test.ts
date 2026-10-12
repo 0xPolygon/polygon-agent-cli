@@ -40,3 +40,17 @@ describe('dashboardInfo', () => {
     });
   });
 });
+
+describe('dashboardInfo with a Polymarket account', () => {
+  it('adds the deposit account as pm', () => {
+    expect(
+      dashboardInfo({ walletAddress: '0xabc', funded: true, polymarketAddress: '0xdef' }).url
+    ).toMatch(/\?wallet=0xabc&chain=137&view=dashboard&pm=0xdef$/);
+  });
+
+  it('leaves pm off without one', () => {
+    expect(
+      dashboardInfo({ walletAddress: '0xabc', funded: true, polymarketAddress: null }).url
+    ).not.toContain('pm=');
+  });
+});
