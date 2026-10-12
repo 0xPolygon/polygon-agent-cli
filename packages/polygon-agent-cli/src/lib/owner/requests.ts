@@ -18,7 +18,8 @@ import {
 import type { OwnerAction, PendingRequest } from './pending.ts';
 
 import { CliError, mapOmsError, upstreamErrorName } from '../errors.ts';
-import { loadOmsConfig } from '../storage.ts';
+import { selectMainWallet } from '../polymarket/oms-key.ts';
+import { loadOmsConfig, loadOmsWalletPointer } from '../storage.ts';
 import { exportEmailAttempt, restoreEmailAttempt } from './email-attempt.ts';
 import { deletePending, discardPendingNow, loadPending, savePending } from './pending.ts';
 
@@ -192,9 +193,29 @@ export async function confirmOwnerRequest<T extends Record<string, unknown>>(par
     await deletePending({ wallet: params.wallet, id: request.id }).catch(() =>
       discardPendingNow(params.wallet)
     );
+    // Automatic selection may land on an imported wallet (the Polymarket key). Always act
+    // on the user's main wallet.
+    const pointer = await loadOmsWalletPointer(params.wallet);
+    let main: { address: string };
+    try {
+      main = await selectMainWallet(owner.wallet, { expectedAddress: pointer?.walletAddress });
+    } catch (error) {
+      if (pointer && error instanceof CliError && error.code === 'not_connected') {
+        const signedIn =
+          (await owner.wallet.listWallets().catch(() => []))?.find(
+            (w) => w.keyOrigin !== 'imported'
+          )?.address ?? auth.walletAddress;
+        throw new CliError({
+          code: 'invalid_input',
+          message: `That code signed in to ${signedIn}, not this install's wallet ${pointer.walletAddress}. Use the email the wallet was created with.`,
+          cause: error
+        });
+      }
+      throw error;
+    }
     outcome = {
       ok: true,
-      result: await params.run({ owner, walletAddress: auth.walletAddress, request })
+      result: await params.run({ owner, walletAddress: main.address, request })
     };
   } catch (error) {
     outcome = { ok: false, error };

@@ -48,7 +48,13 @@ const world = vi.hoisted(() => ({
   pendingDuringRun: [] as boolean[],
   // Runs while the code is being checked (e.g. a new step 1 in another process).
   onSignIn: undefined as undefined | (() => Promise<void>),
-  sent: [] as Array<{ to: string; data: string; network: number }>
+  sent: [] as Array<{ to: string; data: string; network: number }>,
+  // The account's wallets; undefined means one main wallet at walletAddress.
+  wallets: undefined as
+    | undefined
+    | Array<{ id: string; address: string; keyOrigin: 'generated' | 'imported' }>,
+  // Where automatic selection lands at sign-in; undefined means walletAddress.
+  autoSelectAddress: undefined as string | undefined
 }));
 
 const httpError = (status: number, name?: string) =>
@@ -76,6 +82,19 @@ vi.mock('@polygonlabs/oms-wallet', async (importOriginal) => {
       sessionLifetimeSeconds: number;
     };
     credentialId = `owner-${Math.random()}`;
+    walletAddress: string | undefined;
+
+    async listWallets() {
+      return (
+        world.wallets ?? [{ id: 'w-main', address: world.walletAddress, keyOrigin: 'generated' }]
+      );
+    }
+    async useWallet(params: { walletId: string }) {
+      world.calls.push(`useWallet:${params.walletId}`);
+      this.walletAddress = (await this.listWallets()).find(
+        (w) => w.id === params.walletId
+      )?.address;
+    }
 
     async startEmailAuth(params: { email: string; sessionLifetimeSeconds: number }) {
       world.calls.push(`startEmailAuth:${params.sessionLifetimeSeconds}`);
@@ -93,6 +112,7 @@ vi.mock('@polygonlabs/oms-wallet', async (importOriginal) => {
       if (params.code !== world.code) throw httpError(400, 'AnswerIncorrect');
       world.ownerCredentials.add(this.credentialId);
       world.calls.push('signedIn');
+      this.walletAddress = world.autoSelectAddress ?? world.walletAddress;
       return {
         walletAddress: world.walletAddress,
         credential: { credentialId: this.credentialId }
@@ -269,7 +289,7 @@ const {
 const { loadPending, savePending } = await import('../lib/owner/pending.ts');
 const { readApprovedPlan } = await import('../lib/session/state.ts');
 const { parkedRacSlots, readRacRecord } = await import('../lib/session/rac.ts');
-const { loadOmsWalletPointer } = await import('../lib/storage.ts');
+const { loadOmsWalletPointer, STORAGE_ROOT } = await import('../lib/storage.ts');
 
 let wallet: string;
 let counter = 0;
@@ -319,6 +339,8 @@ beforeEach(() => {
   world.credentialRevokeError = undefined;
   world.sessionReadError = undefined;
   world.walletAddress = '0xd384ea24ca0B3a5e4BB35935C611E3dCB68Fd08e';
+  world.wallets = undefined;
+  world.autoSelectAddress = undefined;
   world.isPending = () =>
     fs.existsSync(path.join(String(process.env.POLYGON_AGENT_HOME), 'pending', `${wallet}.json`));
   world.pendingDuringRun.length = 0;
@@ -474,6 +496,36 @@ describe('connect', () => {
   });
 });
 
+describe('status and Polymarket', () => {
+  it('shows the Polymarket account of a connected wallet, without secrets', async () => {
+    await confirm(await connectStep1());
+    const dir = path.join(STORAGE_ROOT, 'polymarket', wallet);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'account.json'),
+      JSON.stringify({
+        kind: 'deposit-wallet',
+        signer: '0x1111111111111111111111111111111111111111',
+        wallet: '0x2222222222222222222222222222222222222222',
+        createdAt: '2026-10-01T00:00:00.000Z'
+      })
+    );
+    const report = await sessionReport({ wallet, withVersion: false });
+    expect(report.polymarket).toEqual({
+      wallet: '0x2222222222222222222222222222222222222222',
+      kind: 'deposit-wallet',
+      note: 'Money moved to Polymarket is controlled by this install, not by the allowance. Check it with: polymarket status'
+    });
+    expect(JSON.stringify(report)).not.toContain('0x1111111111111111111111111111111111111111');
+  });
+
+  it('omits the field when there is no Polymarket account', async () => {
+    await confirm(await connectStep1());
+    const report = await sessionReport({ wallet, withVersion: false });
+    expect(report).not.toHaveProperty('polymarket');
+  });
+});
+
 describe('allowance set and renew', () => {
   async function run(argv: string[]) {
     const yargs = (await import('yargs')).default;
@@ -620,10 +672,31 @@ describe('owner-request safety', () => {
     world.walletAddress = '0x1111111111111111111111111111111111111111';
     world.calls.length = 0;
     const out = await confirm(request);
-    expect(out).toMatchObject({ ok: false, code: 'invalid_input', ownerSignInRevoked: true });
+    expect(out).toMatchObject({
+      ok: false,
+      code: 'invalid_input',
+      error: expect.stringContaining(
+        "That code signed in to 0x1111111111111111111111111111111111111111, not this install's wallet 0xd384ea24ca0B3a5e4BB35935C611E3dCB68Fd08e. Use the email the wallet was created with."
+      ),
+      ownerSignInRevoked: true
+    });
     expect(world.calls).toContain('revokeAccess:owner');
     expect(world.calls.some((c) => c.startsWith('authorize'))).toBe(false);
     expect(readApprovedPlan(wallet)?.plan.allowanceUsd).toBe(500);
+  });
+
+  it('acts on the main wallet when sign-in auto-selected an imported one', async () => {
+    world.wallets = [
+      { id: 'w-imp', address: '0x2222222222222222222222222222222222222222', keyOrigin: 'imported' },
+      { id: 'w-main', address: world.walletAddress, keyOrigin: 'generated' }
+    ];
+    world.autoSelectAddress = '0x2222222222222222222222222222222222222222';
+    const out = await confirm(await connectStep1({ chains: 'polygon' }));
+    expect(out).toMatchObject({ ok: true, ownerSignInRevoked: true });
+    expect(world.calls).toContain('useWallet:w-main');
+    expect(world.calls.indexOf('useWallet:w-main')).toBeLessThan(
+      world.calls.findIndex((c) => c.startsWith('authorize'))
+    );
   });
 
   it('revokes a session that differs from the plan in any way', async () => {

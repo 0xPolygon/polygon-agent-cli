@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 
 import React from 'react';
 
-import type { OmsRelayOidcProvider } from '@polygonlabs/oms-wallet';
+import type { OMSWallet, OmsRelayOidcProvider } from '@polygonlabs/oms-wallet';
 
 import { OmsRelayOidcProviders } from '@polygonlabs/oms-wallet';
 
@@ -18,6 +18,8 @@ import { makeLoginRelay } from '../lib/login-relay-client.ts';
 import { isTxModeSet, loadTxMode, saveTxMode } from '../lib/mode.ts';
 import { startOidcCallbackServer } from '../lib/oidc-callback-server.ts';
 import { getOmsClient, loginUiBaseUrl, oidcRelayBaseUrl } from '../lib/oms-client.ts';
+import { ensureMainWallet } from '../lib/oms-tx.ts';
+import { selectMainWallet } from '../lib/polymarket/oms-key.ts';
 import {
   listWallets,
   deleteWallet,
@@ -152,6 +154,8 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
     // a transient failure during the original login must be repairable by
     // re-running `wallet login` without forcing a fresh browser auth.
     if (!argv.force && oms.wallet.walletAddress) {
+      // A crashed process may have left the session on an imported wallet.
+      await ensureMainWallet(argv.name);
       const builderProvisioned = await provisionBuilder(oms.wallet.walletAddress);
       const txMode = await maybeAskTxMode();
       jsonOut({
@@ -168,6 +172,11 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
 
     let walletAddress: string;
     let loginMethod: OmsLoginMethod;
+    // Automatic wallet selection can land on an imported wallet (the Polymarket key); the
+    // pointer must always hold the user's main wallet.
+    const selectMain = async () => ({
+      address: await selectLoginWallet({ oms, name: argv.name, force: argv.force })
+    });
 
     if (argv.local) {
       if (argv.provider !== 'google') {
@@ -183,7 +192,7 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
       if (!result) {
         throw new Error('OIDC login did not complete: no wallet result returned.');
       }
-      walletAddress = result.walletAddress;
+      walletAddress = (await selectMain()).address;
       loginMethod = 'google';
     } else {
       if (argv.remote) {
@@ -209,6 +218,7 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
             startEmailAuth: (p) => oms.wallet.startEmailAuth(p),
             completeEmailAuth: (p) => oms.wallet.completeEmailAuth(p)
           },
+          selectMainWallet: selectMain,
           oidcProviderGoogle: OmsRelayOidcProviders.google,
           announce: announceAuthUrl,
           sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -264,6 +274,34 @@ async function refuseSessionWallet(params: { name: string; action: string }): Pr
       message: `Wallet '${params.name}' is connected in session mode; '${params.action}' would leave its access live.`,
       command: `polygon-agent wallet logout${params.name === 'main' ? '' : ` --name ${params.name}`}`
     });
+  }
+}
+
+// After a login: pick the main wallet of the account that signed in. Signing in to a different
+// account than this install's pointer is refused (and signed out again) unless --force.
+export async function selectLoginWallet(params: {
+  oms: Pick<OMSWallet, 'wallet'>;
+  name: string;
+  force: boolean;
+}): Promise<string> {
+  const { oms, name, force } = params;
+  const pointer = await loadOmsWalletPointer(name);
+  try {
+    const main = await selectMainWallet(oms.wallet, {
+      expectedAddress: force ? undefined : pointer?.walletAddress
+    });
+    return main.address;
+  } catch (error) {
+    if (!force && pointer && error instanceof CliError && error.code === 'not_connected') {
+      const signedIn = oms.wallet.walletAddress;
+      await oms.wallet.signOut().catch(() => undefined);
+      throw new CliError({
+        code: 'invalid_input',
+        message: `That login is for ${signedIn ?? 'a different account'}, not this install's wallet ${pointer.walletAddress}.`,
+        hint: 'Run wallet logout first, or pass --force to replace this wallet.'
+      });
+    }
+    throw error;
   }
 }
 

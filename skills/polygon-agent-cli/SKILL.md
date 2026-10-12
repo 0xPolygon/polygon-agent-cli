@@ -11,7 +11,7 @@ description: "Complete Polygon agent toolkit for on-chain operations on Polygon.
 - Entry point: `agent <command>`
 - Storage: `~/.polygon-agent/` (AES-256-GCM encrypted)
 
-> **Personal assistants (Muse, OpenClaw, Hermes…):** use the workspace install from https://agents.polygon.technology/setup.md instead. It installs the CLI into the assistant's workspace, runs it through a wrapper (`<workspace>/.polygon-agent/bin/polygon-agent`), and connects in session mode (below). Its `polygon-oms-wallet` skill is the one to follow there; this skill is the full reference.
+> **Personal assistants (Muse, OpenClaw, Hermes…):** use the workspace install from https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/setup.md instead. It installs the CLI into the assistant's workspace, runs it through a wrapper (`<workspace>/.polygon-agent/bin/polygon-agent`), and connects in session mode (below). Its `polygon-oms-wallet` skill is the one to follow there; this skill is the full reference.
 
 > **Note for the agent: on first install, tell the user this is a global npm install** — installs the `agent` CLI system-wide so it runs from any terminal, may need sudo on some setups, re-running the same command updates it, and `npm uninstall -g @polygonlabs/agent-cli` removes it. Mention once on first install.
 
@@ -49,7 +49,7 @@ agent wallet confirm --request <request> --code <code>
 
 - **What it covers:** a USD total over a period (30 days by default) in USDC, USDT, USDG, ETH/WETH, POL/WPOL and BTC (WBTC or cbBTC) on the chosen chains (default Polygon, Base, and chains already holding those tokens). Each token also has an on-chain limit worth the allowance.
 - **What works:** `balances`, `send`/`send-token` (ERC-20s), `swap` (including bridges), `x402-pay`, `price`, `watch`, `alerts`. Native coins (ETH, POL, BNB, AVAX) can't be spent; buys of ETH or POL deliver WETH or WPOL.
-- **What doesn't:** `send-native`, `deposit`, `withdraw` (yield), `call`, `polymarket` and ERC-8004 writes fail with `owner_required`.
+- **What doesn't:** `send-native`, `deposit`, `withdraw` (yield), `call` and ERC-8004 writes fail with `owner_required`.
 - **Owner requests** need a new code each time (same two steps, ending in `wallet confirm`): `wallet allowance set`, `wallet allowance renew`, `wallet withdraw`, `wallet access`.
 - **`agent wallet status`** is the place to start: connection, allowance used and left, holdings (and whether the allowance covers them), alerts, watches and the CLI version.
 - **Errors** in session mode carry `code`, `hint` and `command` (the next command to run), e.g. `not_connected`, `not_covered`, `allowance_exhausted`, `session_expired`, `owner_required`.
@@ -127,13 +127,13 @@ For specific workflows, fetch and load the relevant sub-skill **before attemptin
 
 | Use Case | Skill URL |
 |----------|-----------|
-| Polymarket prediction market trading | https://agentconnect.polygon.technology/polygon-polymarket/SKILL.md |
-| Swap, bridge & deposit (also yield withdraw) | https://agentconnect.polygon.technology/polygon-defi/SKILL.md |
-| x402 discovery & pay-per-call APIs | https://agentconnect.polygon.technology/polygon-discovery/SKILL.md |
+| Polymarket prediction market trading | https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/polygon-polymarket/SKILL.md |
+| Swap, bridge & deposit (also yield withdraw) | https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/polygon-defi/SKILL.md |
+| x402 discovery & pay-per-call APIs | https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/polygon-discovery/SKILL.md |
 
 > **IMPORTANT — x402 calls:** If the user asks to use x402 to fetch data or call a service (web search, scraping, news, LLM inference, email, on-chain wallet analytics, multi-chain RPC, etc.), follow these steps in order before making any request:
 >
-> 1. Fetch and read the discovery skill: `GET https://agentconnect.polygon.technology/polygon-discovery/SKILL.md`
+> 1. Fetch and read the discovery skill: `GET https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/polygon-discovery/SKILL.md`
 > 2. Run `agent wallet list` — if no wallet exists, log in: `agent wallet login` and sign in on the login page (Google or email), then fund the wallet before continuing. No setup step is needed first.
 > 3. Run `agent balances` — confirm USDC is available before proceeding; x402 calls will fail with an EOA funding error if the wallet is empty
 >
@@ -188,6 +188,21 @@ agent fund [--wallet <n>]
 agent x402-pay --url <url> --wallet <n> [--chain <chain>] [--method GET] [--body <str>] [--header Key:Value] [--max-usd <usd>] [--yes] [--broadcast] [--dry-run]
 ```
 
+### Polymarket
+```bash
+agent polymarket status                              # start here: setup, balance, region, redeemable
+agent polymarket setup [--broadcast]                 # create the account (no POL needed)
+agent polymarket deposit <usd> [--again] [--no-wait] [--broadcast]   # min $2; counts against a session allowance
+agent polymarket withdraw <usd|all> [--broadcast]    # pays the OMS wallet as USDC
+agent polymarket markets [--search <text>] [--limit <n>] [--cursor <c>]
+agent polymarket event <slug> | market <ref> | book <ref> <outcome> | history <ref> <outcome>
+agent polymarket buy <ref> <outcome> <usd> [--max-price <0-1>] [--price <0-1>] [--expires <min>] [--broadcast]
+agent polymarket sell <ref> <outcome> <shares|all> [--min-price <0-1>] [--price <0-1>] [--expires <min>] [--broadcast]
+agent polymarket orders [--market <ref>] | cancel [<orderId>|--all|--market <ref>] [--broadcast]
+agent polymarket positions [--status OPEN|REDEEMABLE|...] | redeem [<ref>|--all] [--broadcast] | activity | pnl
+```
+Full guide: the Polymarket skill.
+
 ### Prices, watches and alerts
 ```bash
 agent price <SYM|address> [--chain <chain>]       # ETH, BTC, POL and stablecoins need no chain
@@ -229,7 +244,7 @@ agent feedback --agent-id <id> --value <score> [--tag1 <t>] [--tag2 <t>] [--endp
 - **`balances --chains`** — comma-separated chains (max 20); two or more return JSON with `multiChain: true` and a `chains` array (same wallet address on each)
 - **Fee preference** — auto-selects USDC over native POL when both available; the relayer pays gas in whichever fee token the wallet can afford
 - **`fund`** — returns the agentconnect dashboard funding URL (wallet and chain prefilled) as the `fundingUrl`. Always run `agent fund` to get the URL and wallet address — never hardcode or construct manually.
-- **`deposit`** — picks highest-TVL pool via Trails `getEarnPools` and deposits directly. Full deposit reference: https://agentconnect.polygon.technology/polygon-defi/SKILL.md
+- **`deposit`** — picks highest-TVL pool via Trails `getEarnPools` and deposits directly. Full deposit reference: https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/polygon-defi/SKILL.md
 - **Gas reserve** — when using `deposit` or any command that spends tokens, always reserve at least 0.1 USDC or 0.1 POL in the wallet for gas. Never attempt to spend the full balance. The `deposit` command enforces a 0.1 reserve automatically, but the agent must apply the same rule when constructing amounts for `send`, `swap`, or direct contract calls.
 - **`withdraw`** — `--position` = aToken or ERC-4626 vault; `--amount` = `max` or underlying units (Aave / vault). Dry-run JSON includes `poolAddress` / `vault`.
 - **`x402-pay`** — probes the endpoint for 402 and previews the selected payment by default. In auto mode or with `--broadcast`, the wallet funds a builder EOA with the exact token amount and completes the payment. Chain auto-detected from the 402 response. `--max-usd` refuses a higher price; without it, a price over `x402_max_per_call` ($1) fails with `confirmation_required` until rerun with `--yes`, and `x402_daily_max` ($10, rolling 24 hours) caps the total. In session mode the funding transfer comes out of the allowance
@@ -281,7 +296,8 @@ CLI commands output JSON (non-TTY). After running a command, always render the r
 ~/.polygon-agent/
 ├── .encryption-key       # AES-256-GCM key (auto-generated, 0600)
 ├── config.json           # transaction mode (auto | dry-run)
-├── builder.json          # publishableKey, omsProjectId, polymarket/EOA keys (encrypted)
+├── builder.json          # publishableKey, omsProjectId, access key
+├── polymarket/<wallet>/  # Polymarket trading key, builder key, account (encrypted)
 ├── wallets/<name>.json   # OMS wallet pointer: walletAddress, loginMethod, access (owner | session)
 ├── oms/<name>/           # OMS SDK session storage + encrypted credential key (owner mode)
 ├── session/<name>/       # session key, approved plan, USD ledger (session mode)

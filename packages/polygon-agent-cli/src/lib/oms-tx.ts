@@ -11,6 +11,8 @@ import { findNetworkById, isOMSWalletError, TransactionMode } from '@polygonlabs
 
 import { CliError } from './errors.ts';
 import { getOmsClient } from './oms-client.ts';
+import { selectMainWallet } from './polymarket/oms-key.ts';
+import { loadOmsWalletPointer } from './storage.ts';
 
 export interface OmsTxTransaction {
   to: `0x${string}` | string;
@@ -62,10 +64,13 @@ export function makeFeeSelector(preferNativeFee: boolean) {
         usable[0];
     }
     if (!pick) {
-      throw new Error(
-        'Unable to pay gas: wallet has no native token and no usable fee token. ' +
-          'Fund with POL (agent fund), or hold USDC for fees.'
-      );
+      // Raised before executing, so nothing was sent (insufficient_balance is in
+      // NOTHING_SENT_CODES).
+      throw new CliError({
+        code: 'insufficient_balance',
+        message: 'Unable to pay gas: wallet has no native token and no usable fee token.',
+        hint: 'Fund with POL (agent fund), or hold USDC for fees.'
+      });
     }
     // The SDK's selection carries the option's index, so two options with the
     // same symbol can't be confused.
@@ -73,10 +78,21 @@ export function makeFeeSelector(preferNativeFee: boolean) {
   };
 }
 
+// A persisted session can be left on an imported wallet (the Polymarket trading key), for
+// example by a crashed process. Before sending, put it back on the wallet the pointer names.
+export async function ensureMainWallet(walletName: string): Promise<void> {
+  const pointer = await loadOmsWalletPointer(walletName);
+  if (!pointer || pointer.access === 'session') return;
+  const w = getOmsClient(walletName).wallet;
+  if (w.walletAddress?.toLowerCase() === pointer.walletAddress.toLowerCase()) return;
+  await selectMainWallet(w, { expectedAddress: pointer.walletAddress });
+}
+
 export async function runOmsTx(params: OmsTxParams): Promise<OmsTxResult> {
   const { walletName, chainId, transactions, broadcast, preferNativeFee = false } = params;
 
   const oms = getOmsClient(walletName);
+  if (oms.wallet.walletAddress) await ensureMainWallet(walletName);
   const walletAddress = oms.wallet.walletAddress;
   if (!walletAddress) {
     throw new Error(`No active session for wallet '${walletName}'. Run: agent wallet login`);
@@ -141,6 +157,10 @@ export async function runOmsTx(params: OmsTxParams): Promise<OmsTxResult> {
       });
       lastTxHash = res.txnHash ?? lastTxHash;
     } catch (e) {
+      // The SDK wraps whatever the fee selector throws; keep our own refusal intact.
+      if (e instanceof CliError) throw e;
+      const cause = (e as { cause?: unknown })?.cause;
+      if (cause instanceof CliError) throw cause;
       if (expired) {
         throw new CliError({
           code: 'quote_expired',

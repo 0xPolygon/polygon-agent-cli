@@ -27,7 +27,7 @@ import {
   withdrawCommand,
   x402PayCommand
 } from './commands/operations.ts';
-import { polymarketCommand } from './commands/polymarket.ts';
+import { polymarketCommand } from './commands/polymarket/index.ts';
 import { priceCommand } from './commands/price.ts';
 import { setupCommand } from './commands/setup.ts';
 import { walletCommand } from './commands/wallet.ts';

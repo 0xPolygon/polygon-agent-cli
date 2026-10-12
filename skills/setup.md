@@ -8,9 +8,11 @@ description: >-
 
 # Set up the Polygon OMS Agent Kit
 
+> **QA build (staging):** installs the `polymarket-qa` snapshot of the CLI (npm dist-tag), for testing before release. Don't run `polygon-agent update` during QA: it would compare against the released version.
+
 **For the assistant.** Follow these steps in order. Each one is safe to re-run. Tell the user what you're doing in plain words as you go, and never paste raw JSON to them.
 
-**What this sets up (tell the user in a sentence or two):** a Polygon OMS wallet that you, their assistant, can use within an allowance they approve by email code. You can check prices, watch them, buy, sell, swap and bridge tokens, and pay for x402 services. Anything beyond the allowance needs a new code from them. The wallet stays theirs. Each code signs the CLI in as them for a moment, just long enough to make that one change (approving an allowance, a withdrawal…), then signs out again. Only that limited key is kept, never their sign-in.
+**What this sets up (tell the user in a sentence or two):** a Polygon OMS wallet that you, their assistant, can use within an allowance they approve by email code. You can check prices, watch them, buy, sell, swap and bridge tokens, bet on Polymarket prediction markets, and pay for x402 services. Anything beyond the allowance needs a new code from them. The wallet stays theirs. Each code signs the CLI in as them for a moment, just long enough to make that one change (approving an allowance, a withdrawal…), then signs out again. Only that limited key is kept, never their sign-in.
 
 ## 1. Find the workspace
 
@@ -82,7 +84,7 @@ If it fails, stop and tell the user why. From here on, run `npm` and `node` with
   set -e
   case "${ROOT:?Set ROOT to the install folder first}" in /absolute/path/*) echo "Set ROOT to the real install folder"; exit 1 ;; esac
   mkdir -p "$ROOT"
-  PATH="$ROOT/node/bin:$PATH" npm install --ignore-scripts --prefix "$ROOT/cli" @polygonlabs/agent-cli@latest
+  PATH="$ROOT/node/bin:$PATH" npm install --ignore-scripts --prefix "$ROOT/cli" @polygonlabs/agent-cli@polymarket-qa
   PATH="$ROOT/node/bin:$PATH" node "$ROOT/cli/node_modules/@polygonlabs/agent-cli/dist/index.js" \
     workspace init --root "$ROOT" --skills-dir "<skills folder>" --name "<install name>"
 )
@@ -90,7 +92,7 @@ If it fails, stop and tell the user why. From here on, run `npm` and `node` with
 
 - `--ignore-scripts`: nothing the CLI needs runs an install script, and none should run beside the wallet's keys.
 - `--skills-dir` is the skills folder from step 1. Leave it out if your platform has none.
-- `--name` is what the wallet owner sees in their list of installs with access, like "OpenClaw on laptop". It defaults to the host name.
+- `--name` is what the wallet owner sees in their list of installs with access, like "OpenClaw on laptop". It defaults to the host name. Reuse the same name when you reinstall, because the Polymarket key backup is labelled with it, and recovery finds the key by that label.
 - `workspace init` writes the wrapper `$ROOT/bin/polygon-agent` (the only command you'll use from now on), the state folder and a `.gitignore`, so workspace backups never pick it up. It also installs the `polygon-oms-wallet` skill, already pointed at the wrapper.
 
 Go on to step 5.
@@ -162,6 +164,7 @@ Tell the user what they can ask for now, in plain words. For example:
 - "What's ETH at?" or "Tell me if BTC drops below $90k."
 - "Buy 10 POL", "Buy $50 of ETH", or "Sell half my ETH if it goes over $4,000."
 - "Move 20 USDC to Base."
+- "What are the odds on <event>?" or "Put $5 on <something> on Polymarket."
 - "Search the web with a paid service" (x402).
 - "Raise my limit to $2,000" (a new email code approves it).
 

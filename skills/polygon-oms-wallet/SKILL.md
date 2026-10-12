@@ -18,7 +18,7 @@ POLYGON_AGENT=<workspace>/.polygon-agent/bin/polygon-agent
 ```
 
 - Every command below is `"$POLYGON_AGENT" …`: run it by that absolute path (quoted), since nothing is on `PATH`. Commands in the CLI's own output (`next`, `command`) say `polygon-agent …`; run those by the same path.
-- If the line above still says `<workspace>`, the CLI didn't install this copy. The wrapper is at `<workspace>/.polygon-agent/bin/polygon-agent`; https://agents.polygon.technology/setup.md lists the workspace folder for each assistant. If the wrapper is missing, the workspace was reset: set it up again with setup.md.
+- If the line above still says `<workspace>`, the CLI didn't install this copy. The wrapper is at `<workspace>/.polygon-agent/bin/polygon-agent`; https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/setup.md lists the workspace folder for each assistant. If the wrapper is missing, the workspace was reset: set it up again with setup.md.
 - Output is JSON: `{"ok": true, …}`, or `{"ok": false, "error", "code", "hint", "command"}`. On an error, tell the user what `error` means in plain words and follow `hint` and `command`. Check `--help` before assuming a flag.
 
 ## Start here, every time
@@ -105,7 +105,7 @@ Read the amount the way the user said it, and sell what the wallet actually hold
 "$POLYGON_AGENT" send-token --symbol USDC --to <address> --amount 5 --chain polygon --broadcast
 ```
 
-**Paid services (x402).** The service catalog and request formats are in https://agentconnect.polygon.technology/polygon-discovery/SKILL.md; read it before the first call. Always cap the price at what the catalog lists:
+**Paid services (x402).** The service catalog and request formats are in https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/polygon-discovery/SKILL.md; read it before the first call. Always cap the price at what the catalog lists:
 
 ```sh
 "$POLYGON_AGENT" x402-pay --url <url> --method POST --body '<json>' --max-usd 0.05 --broadcast
@@ -154,7 +154,17 @@ Each prints `code_sent` and what will be approved (the plan, or the withdrawal d
 
 `"$POLYGON_AGENT" wallet logout` removes this install's access without a code. Connecting again needs a new one.
 
-Some features need the owner's full sign-in, which this install never keeps, so no code unlocks them here (`owner_required`): yield deposits and withdrawals, Polymarket, ERC-8004 identity and `call`. Sending a native coin isn't possible either (`native_not_supported`). Tell the user, and don't look for a way around it.
+Some features need the owner's full sign-in, which this install never keeps, so no code unlocks them here (`owner_required`): yield deposits and withdrawals, ERC-8004 identity and `call`. Sending a native coin isn't possible either (`native_not_supported`). Tell the user, and don't look for a way around it.
+
+### Polymarket
+
+When the user asks about Polymarket (prices, a bet, positions, winnings), first run `"$POLYGON_AGENT" skills show polygon-polymarket` and follow it. That command prints the skill already pointed at this install's CLI.
+
+Polymarket works in session mode. `agent polymarket setup` and `deposit` run with the allowance: a deposit is a plain USDC transfer, so it counts against the allowance. The Polymarket wallet is controlled by this install's own trading key, so trades and withdrawals back to the OMS wallet are not limited by the allowance.
+
+First time: `polymarket status`, then `setup --broadcast` (no code needed, no POL), then `deposit <usd> --broadcast` (min $2, counts against the allowance), then trade.
+
+Connecting backs up the Polymarket trading key to the user's OMS account as one extra wallet labelled `polymarket-trading-key:<install name>`. The user will see it in their account list. That is expected. If this machine is wiped, nothing is lost: connecting again with the same install `--name` recovers it. Run `polymarket status` to see `backup` and `signer`. The polygon-polymarket skill has the details.
 
 ## Rules
 
@@ -177,6 +187,6 @@ Some features need the owner's full sign-in, which this install never keeps, so 
 
 The reference skills cover every command and flag. They're written for the CLI's owner mode, so ignore their install and login steps.
 
-- Swaps, bridges and yield: https://agentconnect.polygon.technology/polygon-defi/SKILL.md
-- x402 services: https://agentconnect.polygon.technology/polygon-discovery/SKILL.md
-- All commands: https://agentconnect.polygon.technology/polygon-agent-cli/SKILL.md
+- Swaps, bridges and yield: https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/polygon-defi/SKILL.md
+- x402 services: https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/polygon-discovery/SKILL.md
+- All commands: https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/polygon-agent-cli/SKILL.md
