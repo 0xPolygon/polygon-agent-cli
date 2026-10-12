@@ -12,7 +12,7 @@ import type { TradeRecord } from '../lib/trade/state.ts';
 
 import { ensureBuilderAccess } from '../lib/builder-provision.ts';
 import { bigintReplacer, CliError, failureJson } from '../lib/errors.ts';
-import { fundingUiBase, fundingUrl } from '../lib/funding.ts';
+import { fundingUrl } from '../lib/funding.ts';
 import { isWalletFunded } from '../lib/indexer.ts';
 import { resolveBroadcast, withWriteFlags } from '../lib/mode.ts';
 import { getOmsClient } from '../lib/oms-client.ts';
@@ -275,10 +275,8 @@ export { fundingUrl } from '../lib/funding.ts';
 
 /**
  * Post-login funding step, balance-aware. Checks the wallet's USD balance via the
- * OMS indexer and routes: funded (>0) -> dashboard, empty -> funding. On a
- * human's machine (local, incl. under Claude Code / a harness) it opens the page;
- * headless or --remote just returns the URL + balance on the CLI. Skipped by
- * --no-fund. Falls back to wallet.polygon.technology if no hosted page is configured.
+ * OMS indexer and routes: funded (>0) -> dashboard, empty -> funding. It opens the
+ * page only when asked (`agent fund`); after login it just prints the URL + balance.
  */
 export async function showFunding(
   walletName: string,
@@ -290,13 +288,11 @@ export async function showFunding(
   const view = funded ? 'dashboard' : 'fund';
 
   const url = funded
-    ? `${fundingUiBase()}/?wallet=${walletAddress}&chain=${chainId}&view=dashboard`
+    ? fundingUrl({ walletAddress, chainId, view: 'dashboard' })
     : fundingUrl({ walletAddress, chainId, amountUsd: opts?.amountUsd });
 
-  // Human path (local, incl. under Claude Code / a harness where stdout is piped
-  // so there is no TTY): open the page. Headless or --remote (browser elsewhere):
-  // skip it and surface the URL + balance on the CLI. open() no-ops/throws on a
-  // GUI-less host, so attempting it is safe.
+  // `agent fund` asks for the page, so open it. open() no-ops/throws on a
+  // GUI-less host, so attempting it is safe; the URL is printed either way.
   if (opts?.openBrowser && !opts?.remote) {
     try {
       const { default: open } = await import('open');
