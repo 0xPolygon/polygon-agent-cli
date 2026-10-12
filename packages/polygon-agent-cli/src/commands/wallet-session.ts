@@ -1,19 +1,44 @@
-// Session-mode wallet commands: connecting this install with an email code,
-// the allowance, withdrawals and access, and status. Owner actions run in two
-// steps (lib/owner/requests.ts); everything else needs no code.
+// Session-mode wallet commands: connecting this install, the allowance,
+// withdrawals and access, and status. Owner actions run in two steps
+// (lib/owner/requests.ts): the owner signs in with an emailed code, or on the
+// login page while a background waiter (lib/owner/waiter.ts) finishes the
+// request. Everything else needs no sign-in.
 
 import type { CommandModule } from 'yargs';
 
 import { getAddress, isAddress } from 'viem';
 
-import type { OwnerAction } from '../lib/owner/pending.ts';
+import type { LoginContext, OwnerAction } from '../lib/owner/pending.ts';
 import type { Plan, PlanToken } from '../lib/session/plan.ts';
 
 import { provisionBuilderOnce } from '../lib/builder-provision.ts';
-import { CliError, errorJson, httpStatus, jsonFail, jsonOut } from '../lib/errors.ts';
+import {
+  CliError,
+  bigintReplacer,
+  errorJson,
+  httpStatus,
+  jsonFail,
+  jsonOut
+} from '../lib/errors.ts';
 import { runOwnerAction } from '../lib/owner/actions.ts';
 import { deletePending, loadPending } from '../lib/owner/pending.ts';
-import { confirmOwnerRequest, startOwnerRequest } from '../lib/owner/requests.ts';
+import {
+  REQUEST_LIFETIME_MS,
+  confirmOwnerRequest,
+  loginPageUrl,
+  startOwnerRequest
+} from '../lib/owner/requests.ts';
+import {
+  deleteResult,
+  latestWaiterRequest,
+  removePid,
+  spawnWaiter,
+  stopWaiter,
+  waitForResult,
+  waiterEmailCommand,
+  writePid,
+  writeResult
+} from '../lib/owner/waiter.ts';
 import { loadAccount } from '../lib/polymarket/account.ts';
 import { getUsdPrices } from '../lib/prices.ts';
 import { walletHoldings } from '../lib/session/live.ts';
@@ -53,6 +78,7 @@ import {
   supportedChainIds,
   supportedTokens
 } from '../lib/session/tokens.ts';
+import { currentSignInMethod } from '../lib/signin-method.ts';
 import { deleteOmsWallet, loadOmsWalletPointer } from '../lib/storage.ts';
 import { formatUnits, parseUnits } from '../lib/utils.ts';
 import { cliVersion, getLatestVersion, isNewerVersion } from '../lib/version.ts';
@@ -66,6 +92,41 @@ function nameFlag(wallet: string): string {
 
 function confirmCommand(params: { wallet: string; request: string }): string {
   return `polygon-agent wallet confirm --request ${params.request} --code <code>${nameFlag(params.wallet)}`;
+}
+
+// Waits for a browser request: `wallet login --wait` for a connect (it finds
+// the request itself), `wallet confirm --wait` for the rest.
+function waitCommand(params: { wallet: string; request: string; action: OwnerAction['kind'] }) {
+  return params.action === 'connect'
+    ? `polygon-agent wallet login --wait${nameFlag(params.wallet)}`
+    : `polygon-agent wallet confirm --request ${params.request} --wait${nameFlag(params.wallet)}`;
+}
+
+// The same command with the emailed-code sign-in, for when the browser one fails.
+function emailVariant(params: {
+  wallet: string;
+  command: string;
+  flags: Record<string, string | number | string[] | undefined>;
+}): string {
+  const flags = Object.entries(params.flags).flatMap(([flag, value]) =>
+    value === undefined ? [] : [value].flat().map((v) => ` --${flag} ${v}`)
+  );
+  return `POLYGON_AGENT_SIGNIN=email polygon-agent wallet ${params.command}${flags.join('')}${nameFlag(params.wallet)}`;
+}
+
+function loginEmailCommand(params: {
+  wallet: string;
+  email?: string;
+  allowance?: number;
+  days?: number;
+  chains?: string;
+}): string {
+  const extra = [
+    params.allowance === undefined ? '' : ` --allowance ${params.allowance}`,
+    params.days === undefined ? '' : ` --days ${params.days}`,
+    params.chains === undefined ? '' : ` --chains ${params.chains}`
+  ].join('');
+  return `polygon-agent wallet login --email ${params.email ?? '<email>'}${extra}${nameFlag(params.wallet)}`;
 }
 
 function requireEmail(value: string | undefined): string {
@@ -126,29 +187,101 @@ function parseChains(value: string | undefined): number[] | undefined {
   return [...new Set(chains)];
 }
 
-async function sendCode(params: {
+// How the owner signs in for a request: with an emailed code, or on the
+// login page (the picker's choice, with its reason).
+type RequestMethod = { method: 'email'; email: string } | { method: 'browser'; reason: string };
+
+// The picker's method for a request on a connected wallet; email uses the
+// owner's email from the connection.
+function requestMethod(ownerEmail: string | undefined): RequestMethod {
+  const picked = currentSignInMethod();
+  return picked.method === 'browser'
+    ? { method: 'browser', reason: picked.reason }
+    : { method: 'email', email: requireEmail(ownerEmail) };
+}
+
+// What the login page shows about the request.
+function loginContext(action: OwnerAction): LoginContext {
+  const purpose = action.kind === 'allowance-set' ? 'allowance' : action.kind;
+  const plan = 'plan' in action ? action.plan : undefined;
+  return {
+    purpose,
+    ...(plan ? { allowanceUsd: plan.allowanceUsd, days: plan.days } : {}),
+    polymarket: true
+  };
+}
+
+// Best effort: the URL is in the JSON for when no browser opens here.
+async function openPage(url: string): Promise<void> {
+  try {
+    const { default: open } = await import('open');
+    await open(url);
+  } catch {
+    // headless host
+  }
+}
+
+// A new request replaces the wallet's pending one, so a waiter still working
+// on that one is stopped first: it must not go on to approve it.
+async function stopPreviousWaiter(wallet: string): Promise<void> {
+  const previous = loadPending(wallet);
+  if (previous?.method === 'browser') await stopWaiter(wallet, previous.id);
+}
+
+async function startRequest(params: {
   wallet: string;
-  email: string;
+  method: RequestMethod;
   action: OwnerAction;
   shown: Record<string, unknown>;
+  // This request with an emailed code, for when the browser sign-in fails.
+  emailCommand: string;
 }) {
+  const { wallet, method, action } = params;
+  await stopPreviousWaiter(wallet);
+  if (method.method === 'email') {
+    const request = await startOwnerRequest({
+      wallet,
+      method: 'email',
+      email: method.email,
+      action,
+      now: new Date()
+    });
+    jsonOut({
+      ok: true,
+      status: 'code_sent',
+      request: request.id,
+      email: method.email,
+      expiresAt: request.expiresAt,
+      action: action.kind,
+      ...params.shown,
+      next: confirmCommand({ wallet, request: request.id }),
+      hint: 'Show the user the plan above, then run `next` with the code from their email as soon as they give it. Never reuse or store the code.'
+    });
+    return;
+  }
   const request = await startOwnerRequest({
-    wallet: params.wallet,
-    method: 'email',
-    email: params.email,
-    action: params.action,
+    wallet,
+    method: 'browser',
+    context: loginContext(action),
+    action,
     now: new Date()
   });
+  if (request.method !== 'browser') throw new Error('unreachable');
+  spawnWaiter({ wallet, id: request.id, emailCommand: params.emailCommand });
+  const url = loginPageUrl(request.relaySession);
+  await openPage(url);
   jsonOut({
     ok: true,
-    status: 'code_sent',
+    status: 'waiting',
+    method: 'browser',
+    methodReason: method.reason,
     request: request.id,
-    email: params.email,
+    url,
     expiresAt: request.expiresAt,
-    action: params.action.kind,
+    action: action.kind,
     ...params.shown,
-    next: confirmCommand({ wallet: params.wallet, request: request.id }),
-    hint: 'Show the user the plan above, then run `next` with the code from their email as soon as they give it. Never reuse or store the code.'
+    next: waitCommand({ wallet, request: request.id, action: action.kind }),
+    hint: 'The sign-in page is opening in the browser. Show the user the plan above and the url (in case no browser opened), ask them to sign in there, then run `next` to wait for it.'
   });
 }
 
@@ -184,7 +317,14 @@ async function refuseIfConnected(wallet: string): Promise<void> {
   }
 }
 
-export async function handleEmailLogin(argv: {
+// Bare `wallet login`, run by someone with an owner-mode wallet, used to sign in as the owner.
+const OWNER_LOGIN_NOTE =
+  'Note: `wallet login` now connects with an allowance; use `--owner` for the full owner session.\n';
+
+// `wallet login` without --owner: connect this install with an allowance. The
+// owner signs in with an emailed code (--email, or the picker says email) or
+// on the login page (the picker says browser).
+export async function handleSessionLogin(argv: {
   name: string;
   email?: string;
   allowance?: number;
@@ -193,18 +333,45 @@ export async function handleEmailLogin(argv: {
 }): Promise<void> {
   try {
     const wallet = argv.name;
-    const email = requireEmail(argv.email);
     const allowanceUsd = argv.allowance ?? DEFAULT_ALLOWANCE_USD;
     const days = argv.days ?? DEFAULT_DAYS;
     validateAllowance({ allowanceUsd, days });
 
     const pointer = await loadOmsWalletPointer(wallet);
     if (pointer && pointer.access !== 'session') {
+      if (argv.email === undefined) process.stderr.write(OWNER_LOGIN_NOTE);
       throw new CliError({
         code: 'invalid_input',
-        message: `Wallet '${wallet}' is signed in with the browser (owner mode). Use another --name, or run: polygon-agent wallet logout${nameFlag(wallet)}`
+        message: `Wallet '${wallet}' is signed in with --owner. Use another --name, or run: polygon-agent wallet logout${nameFlag(wallet)}`
       });
     }
+
+    const emailCommand = loginEmailCommand({
+      wallet,
+      email: pointer?.email,
+      allowance: argv.allowance,
+      days: argv.days,
+      chains: argv.chains
+    });
+    let method: RequestMethod;
+    if (argv.email !== undefined) {
+      method = { method: 'email', email: requireEmail(argv.email) };
+    } else {
+      const picked = currentSignInMethod();
+      if (picked.method === 'browser') {
+        method = { method: 'browser', reason: picked.reason };
+      } else if (pointer?.email) {
+        method = { method: 'email', email: requireEmail(pointer.email) };
+      } else {
+        throw new CliError({
+          code: 'email_required',
+          message: `This install signs in with an emailed code (${picked.reason}), and no email is known yet.`,
+          hint: 'Ask the user for their email, then run `command` with it.',
+          command: emailCommand
+        });
+      }
+    }
+
     // Fail fast if already connected (checked again before the key is replaced).
     if (pointer) await withWalletKeys({ wallet, fn: () => refuseIfConnected(wallet) });
 
@@ -241,6 +408,8 @@ export async function handleEmailLogin(argv: {
       now: new Date()
     });
 
+    // An earlier request's waiter must not go on to approve its plan for the key below.
+    await stopPreviousWaiter(wallet);
     // A fresh session key for this connection; registering it needs no owner.
     await withWalletKeys({
       wallet,
@@ -260,11 +429,12 @@ export async function handleEmailLogin(argv: {
       }
     });
 
-    await sendCode({
+    await startRequest({
       wallet,
-      email,
+      method,
       action: { kind: 'connect', plan },
-      shown: { plan: planSummary(plan) }
+      shown: { plan: planSummary(plan) },
+      emailCommand
     });
   } catch (error) {
     jsonFail(error);
@@ -273,55 +443,200 @@ export async function handleEmailLogin(argv: {
 
 // --- wallet confirm (step 2 of every owner request) ---
 
+type ConfirmedResult = Awaited<ReturnType<typeof confirmOwnerRequest<Record<string, unknown>>>>;
+
+// What `wallet confirm` prints for a confirmed request, by code or by the
+// waiter. A newly connected install gets its own Builder access key (Trails
+// quotes) and x402 signer, like a browser login. Best effort: trades and
+// payments set it up on first use if this fails.
+async function confirmedJson(
+  wallet: string,
+  confirmed: ConfirmedResult
+): Promise<Record<string, unknown>> {
+  let result: Record<string, unknown> = confirmed;
+  const failedOutright =
+    result.connected === false || result.renewed === false || result.updated === false;
+  if (result.connected === true && typeof result.walletAddress === 'string') {
+    const provision = await provisionBuilderOnce({ walletAddress: result.walletAddress }).catch(
+      (error: unknown) => ({ provisioned: false, reason: String(error) })
+    );
+    result = { ...result, builderAccess: provision.provisioned || provision.reason === 'existing' };
+  }
+  return { ok: !failedOutright, walletName: wallet, ...result };
+}
+
+// The waiter: signs in through the login page, runs the action, and leaves
+// the output for `--wait`, a failure included. The wallet lock is taken for
+// the action only, not for the minutes the sign-in may take.
+async function runBrowserWaiter(params: { wallet: string; id: string }): Promise<void> {
+  const { wallet, id } = params;
+  writePid({ wallet, id, pid: process.pid, emailCommand: waiterEmailCommand(wallet, id) });
+  try {
+    let json: Record<string, unknown>;
+    try {
+      const confirmed = await confirmOwnerRequest({
+        wallet,
+        requestId: id,
+        now: new Date(),
+        // The request's own expiry caps it.
+        browser: { timeoutMs: REQUEST_LIFETIME_MS },
+        run: (context) =>
+          withWalletKeys({
+            wallet,
+            fn: () => runOwnerAction({ context, wallet, now: new Date() })
+          })
+      });
+      json = await confirmedJson(wallet, confirmed);
+    } catch (error) {
+      json = errorJson(error);
+    }
+    await writeResult(wallet, id, json);
+  } finally {
+    removePid(wallet, id);
+  }
+}
+
+// How long `--wait` blocks; tests shorten it.
+export const waitSettings = { timeoutMs: 90_000 };
+
+// Prints `--wait` output; a result as `wallet confirm` would have printed
+// it: a failure on stderr, and exit 1 for anything not ok.
+function printConfirmed(json: Record<string, unknown>): void {
+  if (json.ok === false && typeof json.code === 'string') {
+    console.error(JSON.stringify(json, bigintReplacer));
+    process.exit(1);
+  }
+  jsonOut(json);
+  if (json.ok === false) process.exit(1);
+}
+
+// What `--wait` prints: the result, or that it's still waiting.
+async function waitForRequest(params: {
+  wallet: string;
+  id: string;
+  next: string;
+}): Promise<Record<string, unknown>> {
+  const { wallet, id } = params;
+  const outcome = await waitForResult({ wallet, id, timeoutMs: waitSettings.timeoutMs });
+  if (outcome.state === 'waiting') {
+    return {
+      ok: true,
+      status: 'waiting',
+      next: params.next,
+      hint: 'The user has not finished signing in yet. Run `next` again to keep waiting.'
+    };
+  }
+  if (outcome.state === 'gone') {
+    const command = waiterEmailCommand(wallet, id) ?? loginEmailCommand({ wallet });
+    removePid(wallet, id);
+    throw new CliError({
+      code: 'browser_signin_failed',
+      message: 'The browser sign-in stopped without finishing.',
+      hint: 'Sign in with an emailed code instead: run `command` (ask the user for their email if it shows <email>).',
+      command
+    });
+  }
+  // Printed once: the result goes as it is shown.
+  deleteResult(wallet, id);
+  return outcome.result;
+}
+
+// `wallet login --wait`: waits for the wallet's latest browser request.
+export async function handleLoginWait(argv: { name: string }): Promise<void> {
+  let json: Record<string, unknown>;
+  try {
+    const wallet = argv.name;
+    const pending = loadPending(wallet);
+    const id = pending?.method === 'browser' ? pending.id : latestWaiterRequest(wallet);
+    if (!id) {
+      throw new CliError({
+        code: 'request_expired',
+        message: `No browser sign-in is waiting for wallet '${wallet}'.`,
+        hint: 'Start one only if the user still wants to connect.',
+        command: `polygon-agent wallet login${nameFlag(wallet)}`
+      });
+    }
+    json = await waitForRequest({
+      wallet,
+      id,
+      next: `polygon-agent wallet login --wait${nameFlag(wallet)}`
+    });
+  } catch (error) {
+    jsonFail(error);
+  }
+  printConfirmed(json);
+}
+
 interface ConfirmArgs {
   name: string;
   request: string;
-  code: string;
+  code?: string;
+  wait: boolean;
+  'browser-waiter': boolean;
 }
 
 export const confirmCommandModule: CommandModule<object, ConfirmArgs> = {
   command: 'confirm',
-  describe: 'Approve a pending owner request with the code from the email',
+  describe:
+    'Approve a pending owner request with the code from the email, or wait for a browser sign-in (--wait)',
   builder: (y) =>
     y
       .option('name', { type: 'string', default: 'main', describe: 'Wallet name' })
       .option('request', { type: 'string', demandOption: true, describe: 'Request id from step 1' })
-      .option('code', { type: 'string', demandOption: true, describe: 'The code from the email' }),
+      .option('code', { type: 'string', describe: 'The code from the email' })
+      .option('wait', {
+        type: 'boolean',
+        default: false,
+        describe: 'Wait for a browser sign-in to finish (up to 90 seconds per run)'
+      })
+      .option('browser-waiter', { type: 'boolean', default: false, hidden: true }),
   handler: async (argv) => {
     const wallet = argv.name;
+    if (argv.browserWaiter) {
+      await runBrowserWaiter({ wallet, id: argv.request });
+      return;
+    }
+    if (argv.wait) {
+      let waited: Record<string, unknown>;
+      try {
+        waited = await waitForRequest({
+          wallet,
+          id: argv.request,
+          next: `polygon-agent wallet confirm --request ${argv.request} --wait${nameFlag(wallet)}`
+        });
+      } catch (error) {
+        jsonFail(error);
+      }
+      printConfirmed(waited);
+      return;
+    }
     const now = new Date();
-    let result: Awaited<ReturnType<typeof confirmOwnerRequest<Record<string, unknown>>>>;
+    let json: Record<string, unknown>;
     try {
-      result = await withWalletKeys({
+      if (argv.code === undefined) {
+        throw new CliError({
+          code: 'invalid_input',
+          message: 'Pass --code with the code from the email, or --wait for a browser sign-in.'
+        });
+      }
+      const code = String(argv.code);
+      const confirmed = await withWalletKeys({
         wallet,
         fn: () =>
           confirmOwnerRequest({
             wallet,
             requestId: argv.request,
-            code: String(argv.code),
+            code,
             now,
             run: (context) => runOwnerAction({ context, wallet, now })
           })
       });
+      json = await confirmedJson(wallet, confirmed);
     } catch (error) {
       jsonFail(error);
     }
-    const failedOutright =
-      result.connected === false || result.renewed === false || result.updated === false;
-    // A newly connected install gets its own Builder access key (Trails quotes)
-    // and x402 signer, like a browser login. Best effort: trades and payments
-    // set it up on first use if this fails.
-    if (result.connected === true && typeof result.walletAddress === 'string') {
-      const provision = await provisionBuilderOnce({ walletAddress: result.walletAddress }).catch(
-        (error: unknown) => ({ provisioned: false, reason: String(error) })
-      );
-      result = {
-        ...result,
-        builderAccess: provision.provisioned || provision.reason === 'existing'
-      };
-    }
-    jsonOut({ ok: !failedOutright, walletName: wallet, ...result });
-    if (failedOutright) process.exit(1);
+    jsonOut(json);
+    if (json.ok === false) process.exit(1);
   }
 };
 
@@ -345,28 +660,50 @@ function pendingApproves(action: OwnerAction): string {
 
 interface PendingRequestInfo {
   request: string;
+  method: 'email' | 'browser';
   action: OwnerAction['kind'];
   email?: string;
+  // Browser: the login page the owner signs in on.
+  url?: string;
   expiresAt: string;
   approves: string;
   next: string;
 }
 
 // A pending owner request, for `wallet status`: enough to resume it when the
-// conversation has lost track of it (who has the code, what it approves),
-// never the sign-in state it holds.
+// conversation has lost track of it (who has the code or the page, what it
+// approves), never the sign-in state it holds.
 function pendingRequestInfo(wallet: string): PendingRequestInfo | undefined {
   const pending = loadPending(wallet);
   // An unreadable expiry counts as expired.
   if (!pending || !(Date.parse(pending.expiresAt) > Date.now())) return undefined;
-  return {
+  const common = {
     request: pending.id,
     action: pending.action.kind,
-    email: pending.email,
     expiresAt: pending.expiresAt,
-    approves: pendingApproves(pending.action),
+    approves: pendingApproves(pending.action)
+  };
+  if (pending.method === 'browser') {
+    return {
+      ...common,
+      method: 'browser',
+      url: loginPageUrl(pending.relaySession),
+      next: waitCommand({ wallet, request: pending.id, action: pending.action.kind })
+    };
+  }
+  return {
+    ...common,
+    method: 'email',
+    email: pending.email,
     next: confirmCommand({ wallet, request: pending.id })
   };
+}
+
+// What to tell the agent about a pending first connect.
+function pendingHint(info: PendingRequestInfo): string {
+  return info.method === 'browser'
+    ? `A sign-in page is already open at ${info.url}. Ask the user to finish signing in there, then run \`next\`; start a new request only if it expires.`
+    : `A code was already sent to ${info.email}. Ask the user for it; start a new request only if they can't find it or it expires.`;
 }
 
 // The Polymarket account is controlled by this install, not by the allowance, so
@@ -401,7 +738,7 @@ export async function sessionReport(params: {
         ? {
             pendingRequest: pendingInfo,
             next: pendingInfo.next,
-            hint: `A code was already sent to ${pendingInfo.email}. Ask the user for it; start a new request only if they can't find it or it expires.`
+            hint: pendingHint(pendingInfo)
           }
         : { next: `polygon-agent wallet login --email <email>${nameFlag(wallet)}` }),
       // Alert watches work without a connection.
@@ -540,7 +877,7 @@ interface AllowanceSetArgs {
 
 const allowanceSetCommand: CommandModule<object, AllowanceSetArgs> = {
   command: 'set',
-  describe: 'Change the allowance (amount, tokens, chains); sends a code to the owner',
+  describe: 'Change the allowance (amount, tokens, chains); the owner approves it',
   builder: (y) =>
     y
       .option('name', { type: 'string', default: 'main', describe: 'Wallet name' })
@@ -604,11 +941,16 @@ const allowanceSetCommand: CommandModule<object, AllowanceSetArgs> = {
         now: new Date(),
         current
       });
-      await sendCode({
+      await startRequest({
         wallet,
-        email: requireEmail(pointer.email),
+        method: requestMethod(pointer.email),
         action: { kind: 'allowance-set', plan },
-        shown: { plan: planSummary(plan), previousAllowanceUsd: current.allowanceUsd }
+        shown: { plan: planSummary(plan), previousAllowanceUsd: current.allowanceUsd },
+        emailCommand: emailVariant({
+          wallet,
+          command: 'allowance set',
+          flags: { amount: argv.amount, add: argv.add, chains: argv.chains }
+        })
       });
     } catch (error) {
       jsonFail(error);
@@ -623,8 +965,7 @@ interface RenewArgs {
 
 const allowanceRenewCommand: CommandModule<object, RenewArgs> = {
   command: 'renew',
-  describe:
-    'Renew the allowance for another period with a new session key; sends a code to the owner',
+  describe: 'Renew the allowance for another period with a new session key; the owner approves it',
   builder: (y) =>
     y.option('name', { type: 'string', default: 'main', describe: 'Wallet name' }).option('days', {
       type: 'number',
@@ -657,6 +998,8 @@ const allowanceRenewCommand: CommandModule<object, RenewArgs> = {
         prices: await pricesFor(tokens),
         now: new Date()
       });
+      // An earlier request's waiter must not go on to approve its plan for the key below.
+      await stopPreviousWaiter(wallet);
       await withWalletKeys({
         wallet,
         fn: async () => {
@@ -671,11 +1014,16 @@ const allowanceRenewCommand: CommandModule<object, RenewArgs> = {
           });
         }
       });
-      await sendCode({
+      await startRequest({
         wallet,
-        email: requireEmail(pointer.email),
+        method: requestMethod(pointer.email),
         action: { kind: 'renew', plan },
-        shown: { plan: planSummary(plan) }
+        shown: { plan: planSummary(plan) },
+        emailCommand: emailVariant({
+          wallet,
+          command: 'allowance renew',
+          flags: { days: argv.days }
+        })
       });
     } catch (error) {
       jsonFail(error);
@@ -713,7 +1061,7 @@ interface WithdrawArgs {
 export const withdrawCommandModule: CommandModule<object, WithdrawArgs> = {
   command: 'withdraw',
   describe:
-    'Send tokens out of the wallet as the owner (not from the allowance); sends a code to the owner',
+    'Send tokens out of the wallet as the owner (not from the allowance); the owner approves it',
   builder: (y) =>
     y
       .option('name', { type: 'string', default: 'main', describe: 'Wallet name' })
@@ -748,9 +1096,14 @@ export const withdrawCommandModule: CommandModule<object, WithdrawArgs> = {
         });
       }
       const display = `${formatUnits(amount, token.decimals)} ${token.symbol}`;
-      await sendCode({
+      await startRequest({
         wallet,
-        email: requireEmail(pointer.email),
+        method: requestMethod(pointer.email),
+        emailCommand: emailVariant({
+          wallet,
+          command: 'withdraw',
+          flags: { to, token: argv.token, amount: argv.amount, chain: argv.chain }
+        }),
         action: {
           kind: 'withdraw',
           chainId,
@@ -788,7 +1141,7 @@ interface AccessArgs {
 export const accessCommandModule: CommandModule<object, AccessArgs> = {
   command: 'access',
   describe:
-    'List (or revoke) every install and sign-in with access to the wallet; sends a code to the owner',
+    'List (or revoke) every install and sign-in with access to the wallet; the owner approves it',
   builder: (y) =>
     y
       .option('name', { type: 'string', default: 'main', describe: 'Wallet name' })
@@ -807,9 +1160,14 @@ export const accessCommandModule: CommandModule<object, AccessArgs> = {
       const revoke = argv.revoke
         ? { credentialId: argv.revoke, ...(argv.session ? { sessionId: argv.session } : {}) }
         : undefined;
-      await sendCode({
+      await startRequest({
         wallet,
-        email: requireEmail(pointer.email),
+        method: requestMethod(pointer.email),
+        emailCommand: emailVariant({
+          wallet,
+          command: 'access',
+          flags: { revoke: argv.revoke, session: argv.session }
+        }),
         action: { kind: 'access', revoke },
         shown: {
           summary: revoke
@@ -870,6 +1228,7 @@ export async function logoutSessionWallet(wallet: string): Promise<Record<string
       }
       // Still under the wallet lock, so no spend or owner request interleaves.
       removeSessionState(wallet);
+      await stopPreviousWaiter(wallet);
       await deletePending({ wallet });
       await deleteOmsWallet(wallet);
     }

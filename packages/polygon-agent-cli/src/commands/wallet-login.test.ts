@@ -1,5 +1,5 @@
-// `wallet login` wallet selection: the pointer always holds the main wallet, and a login to a
-// different account is refused unless --force.
+// `wallet login --owner` wallet selection: the pointer always holds the main wallet, and a login
+// to a different account is refused unless --force. Bare `wallet login` is session mode.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -62,11 +62,15 @@ const { loadOmsWalletPointer, saveOmsWalletPointer } = await import('../lib/stor
 let name = '';
 let counter = 0;
 
+async function ownerLogin(...flags: string[]): Promise<void> {
+  return login('--owner', '--no-fund', ...flags);
+}
+
 async function login(...flags: string[]): Promise<void> {
   const yargs = (await import('yargs')).default;
   await yargs()
     .command(walletCommand)
-    .parseAsync(['wallet', 'login', '--name', name, '--no-fund', ...flags]);
+    .parseAsync(['wallet', 'login', '--name', name, ...flags]);
 }
 
 function jsonLines(spy: 'log' | 'error'): Array<Record<string, unknown>> {
@@ -98,9 +102,22 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('wallet login selection', () => {
+describe('wallet login routing', () => {
+  it('bare login refuses an owner-mode wallet and points owners at --owner', async () => {
+    await saveOmsWalletPointer(name, { walletAddress: MAIN, loginMethod: 'google', createdAt: '' });
+    await login().catch(() => undefined);
+    expect(jsonLines('error')[0]).toMatchObject({ code: 'invalid_input' });
+    expect(String(jsonLines('error')[0].error)).toContain('signed in with --owner');
+    expect(vi.mocked(process.stderr.write).mock.calls.map((c) => String(c[0]))).toContain(
+      'Note: `wallet login` now connects with an allowance; use `--owner` for the full owner session.\n'
+    );
+    expect(fake.calls).toEqual([]);
+  });
+});
+
+describe('wallet login --owner selection', () => {
   it('saves the main wallet when sign-in auto-selected the imported one', async () => {
-    await login();
+    await ownerLogin();
     expect((await loadOmsWalletPointer(name))?.walletAddress).toBe(MAIN);
     expect(fake.calls).toContain('useWallet:w-main');
   });
@@ -111,7 +128,7 @@ describe('wallet login selection', () => {
       loginMethod: 'google',
       createdAt: ''
     });
-    await login().catch(() => undefined);
+    await ownerLogin().catch(() => undefined);
     const err = jsonLines('error')[0];
     expect(err).toMatchObject({
       code: 'invalid_input',
@@ -128,7 +145,7 @@ describe('wallet login selection', () => {
       loginMethod: 'google',
       createdAt: ''
     });
-    await login('--force');
+    await ownerLogin('--force');
     expect((await loadOmsWalletPointer(name))?.walletAddress).toBe(MAIN);
     expect(fake.calls).not.toContain('signOut');
   });
@@ -140,7 +157,7 @@ describe('wallet login selection', () => {
       createdAt: ''
     });
     fake.active = IMPORTED;
-    await login();
+    await ownerLogin();
     expect(fake.calls).toContain('useWallet:w-main');
     expect(jsonLines('log')[0]).toMatchObject({ alreadyLoggedIn: true, walletAddress: MAIN });
   });

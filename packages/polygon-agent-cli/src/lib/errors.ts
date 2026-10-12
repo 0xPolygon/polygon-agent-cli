@@ -10,6 +10,8 @@ export type CliErrorCode =
   | 'invalid_code'
   | 'request_expired'
   | 'request_cancelled'
+  | 'email_required'
+  | 'browser_signin_failed'
   | 'already_connected'
   | 'session_expired'
   | 'session_revoked'
