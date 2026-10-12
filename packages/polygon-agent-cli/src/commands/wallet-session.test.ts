@@ -340,8 +340,31 @@ const {
 } = await import('./wallet-session.ts');
 const { handleLoginWait, waitSettings } = await import('./wallet-session.ts');
 const { loadPending, savePending } = await import('../lib/owner/pending.ts');
-const { latestWaiterRequest, liveWaiters, pidFile, readResult, writePid, writeResult } =
-  await import('../lib/owner/waiter.ts');
+const {
+  latestWaiterRequest,
+  liveWaiters,
+  pidFile,
+  processInfo,
+  readResult,
+  writePid,
+  writeResult
+} = await import('../lib/owner/waiter.ts');
+const realReadCommand = processInfo.readCommand;
+
+// Resolves once `ps` shows the child's waiter command line: right after spawn
+// it can still read as the parent's, which would make the waiter look dead.
+async function untilWaiterVisible(pid: number, id: string): Promise<void> {
+  for (let waited = 0; waited < 5_000; waited += 20) {
+    try {
+      const words = realReadCommand(pid).trim().split(/\s+/);
+      if (words.includes('--browser-waiter') && words.includes(id)) return;
+    } catch {
+      // Not readable yet; retry.
+    }
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  throw new Error(`waiter ${id} (pid ${pid}) never showed its command line`);
+}
 const { readApprovedPlan } = await import('../lib/session/state.ts');
 const { parkedRacSlots, readRacRecord } = await import('../lib/session/rac.ts');
 const { loadOmsWalletPointer, STORAGE_ROOT } = await import('../lib/storage.ts');
@@ -1155,7 +1178,7 @@ describe('browser sign-in', () => {
   });
 
   // A running process whose command line is the waiter's for `id`, with its pid file.
-  function fakeWaiter(id: string): void {
+  async function fakeWaiter(id: string): Promise<void> {
     const child = spawn(
       process.execPath,
       [
@@ -1172,6 +1195,7 @@ describe('browser sign-in', () => {
     );
     children.push(child);
     if (child.pid === undefined) throw new Error('no pid');
+    await untilWaiterVisible(child.pid, id);
     writePid({ wallet, id, pid: child.pid });
   }
 
@@ -1261,7 +1285,7 @@ describe('browser sign-in', () => {
 
   it('a new request stops the waiter of the one it replaces', async () => {
     const first = await browserConnect();
-    fakeWaiter(String(first.request));
+    await fakeWaiter(String(first.request));
     await browserConnect();
     expect(browser.stopped).toEqual([[wallet, first.request]]);
     expect(browser.spawned).toHaveLength(2);
@@ -1270,7 +1294,7 @@ describe('browser sign-in', () => {
   it('a waiter whose owner already signed in makes a new request wait for it', async () => {
     const first = await browserConnect();
     const firstId = String(first.request);
-    fakeWaiter(firstId);
+    await fakeWaiter(firstId);
     // Signed in: the pending file is gone while the waiter runs the action.
     const { deletePending } = await import('../lib/owner/pending.ts');
     await deletePending({ wallet });
@@ -1471,7 +1495,7 @@ describe('browser sign-in', () => {
 
     it('says waiting while the waiter is still running', async () => {
       const request = String((await browserAllowanceSet()).request);
-      fakeWaiter(request);
+      await fakeWaiter(request);
       const saved = waitSettings.timeoutMs;
       waitSettings.timeoutMs = 0;
       try {

@@ -29,6 +29,24 @@ const {
   writeResult
 } = await import('./waiter.ts');
 
+// Captured before any test replaces it.
+const realReadCommand = processInfo.readCommand;
+
+// Resolves once `ps` shows the child's waiter command line: right after spawn
+// it can still read as the parent's, which would make the waiter look dead.
+async function untilWaiterVisible(pid: number, id: string): Promise<void> {
+  for (let waited = 0; waited < 5_000; waited += 20) {
+    try {
+      const words = realReadCommand(pid).trim().split(/\s+/);
+      if (words.includes('--browser-waiter') && words.includes(id)) return;
+    } catch {
+      // Not readable yet; retry.
+    }
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  throw new Error(`waiter ${id} (pid ${pid}) never showed its command line`);
+}
+
 let wallet: string;
 let counter = 0;
 
@@ -43,7 +61,7 @@ afterEach(() => {
 });
 
 // A running process whose command line is a waiter's for `id`.
-function fakeWaiter(id: string): number {
+async function fakeWaiter(id: string): Promise<number> {
   const child = spawn(
     process.execPath,
     [
@@ -60,6 +78,7 @@ function fakeWaiter(id: string): number {
   );
   children.push(child);
   if (child.pid === undefined) throw new Error('no pid');
+  await untilWaiterVisible(child.pid, id);
   return child.pid;
 }
 
@@ -88,9 +107,9 @@ describe('result file', () => {
 });
 
 describe('waiterAlive', () => {
-  it('is true for a running waiter and false for a dead one or none', () => {
+  it('is true for a running waiter and false for a dead one or none', async () => {
     expect(waiterAlive(wallet, 'r1')).toBe(false);
-    writePid({ wallet, id: 'r1', pid: fakeWaiter('r1'), emailCommand: 'retry' });
+    writePid({ wallet, id: 'r1', pid: await fakeWaiter('r1'), emailCommand: 'retry' });
     expect(waiterAlive(wallet, 'r1')).toBe(true);
     expect(waiterEmailCommand(wallet, 'r1')).toBe('retry');
     writePid({ wallet, id: 'r1', pid: deadPid() });
@@ -98,17 +117,17 @@ describe('waiterAlive', () => {
     expect(fs.existsSync(pidFile(wallet, 'r1'))).toBe(false);
   });
 
-  it('a reused pid (a live process that is not this waiter) is not the waiter, and its file goes', () => {
+  it('a reused pid (a live process that is not this waiter) is not the waiter, and its file goes', async () => {
     writePid({ wallet, id: 'r1', pid: process.pid });
     expect(waiterAlive(wallet, 'r1')).toBe(false);
     expect(fs.existsSync(pidFile(wallet, 'r1'))).toBe(false);
     // Another request's waiter is not this one's either.
-    writePid({ wallet, id: 'r1', pid: fakeWaiter('r2') });
+    writePid({ wallet, id: 'r1', pid: await fakeWaiter('r2') });
     expect(waiterAlive(wallet, 'r1')).toBe(false);
   });
 
   it('stopWaiter leaves a process that is not the waiter alone', async () => {
-    const pid = fakeWaiter('other');
+    const pid = await fakeWaiter('other');
     writePid({ wallet, id: 'r1', pid });
     await stopWaiter(wallet, 'r1', async () => undefined);
     expect(() => process.kill(pid, 0)).not.toThrow();
@@ -116,7 +135,7 @@ describe('waiterAlive', () => {
   });
 
   it('stopWaiter ends a running waiter', async () => {
-    const pid = fakeWaiter('r1');
+    const pid = await fakeWaiter('r1');
     writePid({ wallet, id: 'r1', pid });
     await stopWaiter(wallet, 'r1');
     expect(() => process.kill(pid, 0)).toThrow();
@@ -157,7 +176,7 @@ describe('without ps', () => {
 
 describe('liveWaiters and clearWaiterFiles', () => {
   it('lists running waiters from the pid files, and clears every file', async () => {
-    writePid({ wallet, id: 'a1', pid: fakeWaiter('a1') });
+    writePid({ wallet, id: 'a1', pid: await fakeWaiter('a1') });
     writePid({ wallet, id: 'b2', pid: deadPid() });
     await writeResult(wallet, 'c3', { ok: true });
     expect(liveWaiters(wallet)).toEqual(['a1']);
@@ -170,7 +189,7 @@ describe('liveWaiters and clearWaiterFiles', () => {
 
 describe('waitForResult', () => {
   it('returns the result once written', async () => {
-    writePid({ wallet, id: 'r1', pid: fakeWaiter('r1') });
+    writePid({ wallet, id: 'r1', pid: await fakeWaiter('r1') });
     let polls = 0;
     const out = await waitForResult({
       wallet,
@@ -184,7 +203,7 @@ describe('waitForResult', () => {
   });
 
   it('is still waiting at the timeout while the waiter runs', async () => {
-    writePid({ wallet, id: 'r1', pid: fakeWaiter('r1') });
+    writePid({ wallet, id: 'r1', pid: await fakeWaiter('r1') });
     let polls = 0;
     const out = await waitForResult({
       wallet,
