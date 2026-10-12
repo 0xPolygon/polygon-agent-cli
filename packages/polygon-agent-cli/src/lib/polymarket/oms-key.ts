@@ -1,5 +1,5 @@
 // Backs up the Polymarket trading key inside the user's OMS account, and signs with it
-// through OMS when the local copy is gone. Every switch of the active OMS wallet is undone
+// through OMS when the local copy is gone. Every switch of the active agent wallet is undone
 // in a finally block so a session is never left on the imported key.
 
 import type { Signer } from '@polymarket/client';
@@ -57,9 +57,9 @@ export async function selectMainWallet(
     throw new CliError({
       code: 'not_connected',
       message: opts.expectedAddress
-        ? `No main OMS wallet with address ${opts.expectedAddress} on this account`
-        : 'No main OMS wallet found on this account',
-      hint: 'Sign in again with: wallet login'
+        ? `No main agent wallet with address ${opts.expectedAddress} on this account`
+        : 'No main agent wallet found on this account',
+      hint: 'Sign in again with: wallet login --owner'
     });
   }
   if (!sameAddress(w.walletAddress, main.address)) {

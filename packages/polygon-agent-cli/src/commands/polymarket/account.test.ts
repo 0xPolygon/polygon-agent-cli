@@ -337,7 +337,7 @@ describe('setup', () => {
     expect(out).toMatchObject({
       ok: true,
       created: true,
-      backup: { backedUp: false, hint: 'agent wallet login' }
+      backup: { backedUp: false, hint: 'agent wallet login --owner' }
     });
     expect(m.backupTradingKey).not.toHaveBeenCalled();
     expect(readBackup('main')).toBeNull();

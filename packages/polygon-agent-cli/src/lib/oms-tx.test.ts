@@ -11,10 +11,16 @@ const oms = vi.hoisted(() => {
     sendTransaction: vi.fn(),
     sentFrom: [] as string[],
     listWallets: vi.fn(),
-    useWallet: vi.fn()
+    useWallet: vi.fn(),
+    pointer: {
+      walletAddress: '0xC2F4cAfe89AE7e1bcB86dd3f141C0a3adCEB6C17',
+      loginMethod: 'email',
+      createdAt: ''
+    } as Record<string, unknown> | null
   };
 });
 vi.mock('./oms-client.ts', () => ({
+  loginUiBaseUrl: () => 'https://login.example',
   getOmsClient: () => ({
     wallet: {
       get walletAddress() {
@@ -27,14 +33,10 @@ vi.mock('./oms-client.ts', () => ({
   })
 }));
 vi.mock('./storage.ts', () => ({
-  loadOmsWalletPointer: async () => ({
-    walletAddress: '0xC2F4cAfe89AE7e1bcB86dd3f141C0a3adCEB6C17',
-    loginMethod: 'email',
-    createdAt: ''
-  })
+  loadOmsWalletPointer: async () => oms.pointer
 }));
 
-const { makeFeeSelector, runOmsTx } = await import('./oms-tx.ts');
+const { makeFeeSelector, runOmsTx, sessionLoginMessage } = await import('./oms-tx.ts');
 
 function option(params: {
   symbol: string;
@@ -95,6 +97,28 @@ describe('makeFeeSelector', () => {
         hint: expect.stringMatching(/agent fund/)
       })
     );
+  });
+});
+
+describe('insufficient_balance funding', () => {
+  it('carries the funding link for the wallet', () => {
+    vi.stubEnv('POLYGON_AGENT_FUNDING_UI', 'https://fund.example');
+    try {
+      expect(() =>
+        makeFeeSelector(false, { walletAddress: MAIN, chainId: 137 })([
+          option({ symbol: 'USDC', contractAddress: USDC, value: '5', availableRaw: '1', index: 0 })
+        ])
+      ).toThrow(
+        expect.objectContaining({
+          code: 'insufficient_balance',
+          details: {
+            funding: { url: `https://fund.example/?wallet=${MAIN}&chain=137&view=fund` }
+          }
+        })
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 
@@ -193,5 +217,26 @@ describe('runOmsTx', () => {
         broadcast: true
       })
     ).rejects.toMatchObject({ code: 'insufficient_balance' });
+  });
+});
+
+describe('sessionLoginMessage', () => {
+  const base = { walletAddress: MAIN, loginMethod: 'email', createdAt: '' };
+  afterEach(() => {
+    oms.pointer = base;
+  });
+
+  it('says --owner only for an owner-mode wallet whose session expired', async () => {
+    oms.pointer = base;
+    expect(await sessionLoginMessage('main', 'OMS_SESSION_EXPIRED')).toMatch(/login --owner$/);
+  });
+
+  it('says plain wallet login otherwise', async () => {
+    oms.pointer = base;
+    expect(await sessionLoginMessage('main', 'OMS_SESSION_MISSING')).toMatch(/login$/);
+    oms.pointer = { ...base, access: 'session' };
+    expect(await sessionLoginMessage('main', 'OMS_SESSION_EXPIRED')).toMatch(/login$/);
+    oms.pointer = null;
+    expect(await sessionLoginMessage('main', 'OMS_SESSION_EXPIRED')).toMatch(/login$/);
   });
 });

@@ -12,7 +12,7 @@ import type { TransferDeps } from './transfer.ts';
 import { CliError } from '../errors.ts';
 import { getOmsClient } from '../oms-client.ts';
 import { getUsdPrices, priceKey } from '../prices.ts';
-import { racClient, readRacRecord } from './rac.ts';
+import { loginCommand, racClient, readRacRecord } from './rac.ts';
 
 export async function tokenBalance(params: {
   wallet: string;
@@ -55,7 +55,7 @@ export function liveTransferDeps(wallet: string): TransferDeps {
     throw new CliError({
       code: 'not_connected',
       message: `Wallet '${wallet}' has no session key on this install.`,
-      command: 'polygon-agent wallet login --email <email>'
+      command: loginCommand(wallet)
     });
   }
   return {

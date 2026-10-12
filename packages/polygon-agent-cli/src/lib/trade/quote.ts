@@ -15,7 +15,7 @@ import { readConfig } from '../config.ts';
 import { CliError } from '../errors.ts';
 import { getUsdPrices, priceKey, trailsClient } from '../prices.ts';
 import { tokenBalance, walletHoldings } from '../session/live.ts';
-import { racClient } from '../session/rac.ts';
+import { loginCommand, racClient } from '../session/rac.ts';
 import { withWalletKeys } from '../session/renewal.ts';
 import { getSessions, sessionForToken } from '../session/sessions.ts';
 import { readApprovedPlan } from '../session/state.ts';
@@ -672,7 +672,7 @@ export async function quoteSwap(params: QuoteSwapParams): Promise<QuotedSwap> {
     throw new CliError({
       code: 'not_connected',
       message: `Wallet '${params.walletName}' isn't connected.`,
-      command: 'polygon-agent wallet login --email <email>'
+      command: loginCommand(params.walletName)
     });
   }
   const session = pointer.access === 'session';

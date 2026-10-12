@@ -1,8 +1,10 @@
 // Owner requests end to end through the command handlers, against a fake OMS
 // that keeps sessions per credential like the real service.
 
+import type { ChildProcess } from 'node:child_process';
 import type { CommandModule } from 'yargs';
 
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,6 +15,8 @@ import type * as OmsWallet from '@polygonlabs/oms-wallet';
 
 import { OMSWalletRequestError } from '@polygonlabs/oms-wallet';
 
+import type { LoginAction } from '../lib/browser-login.ts';
+import type * as Waiter from '../lib/owner/waiter.ts';
 import type * as Prices from '../lib/prices.ts';
 
 process.env.POLYGON_AGENT_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-owner-flow-'));
@@ -65,6 +69,8 @@ const httpError = (status: number, name?: string) =>
     upstreamError: { service: 'waas', status, ...(name ? { name } : {}) }
   });
 
+const funding = vi.hoisted(() => ({ funded: true }));
+vi.mock('../lib/indexer.ts', () => ({ isWalletFunded: async () => funding.funded }));
 vi.mock('../lib/builder-provision.ts', () => ({
   ensureBuilderAccess: async () => undefined,
   ensureBuilderAccessKey: async () => ({ provisioned: false, reason: 'existing' }),
@@ -260,6 +266,52 @@ vi.mock('@polygonlabs/oms-wallet', async (importOriginal) => {
   return { ...real, OMSWallet: FakeOMSWallet, RemoteAccessClient: FakeRemoteAccessClient };
 });
 
+// The sign-in picker's answer, the background waiter's process and the login
+// page, all under the test's control.
+const browser = vi.hoisted(() => ({
+  method: 'email' as 'email' | 'browser',
+  spawned: [] as Array<{ wallet: string; id: string; emailCommand?: string }>,
+  stopped: [] as Array<[string, string]>,
+  opened: [] as string[],
+  registered: [] as Array<{ session: string; context: unknown }>,
+  // What the login page sends, in order.
+  actions: [] as LoginAction[]
+}));
+
+vi.mock('../lib/signin-method.ts', () => ({
+  currentSignInMethod: () => ({
+    method: browser.method,
+    reason: browser.method === 'browser' ? 'desktop' : 'ci'
+  })
+}));
+vi.mock('open', () => ({
+  default: async (url: string) => {
+    browser.opened.push(url);
+  }
+}));
+vi.mock('../lib/owner/waiter.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof Waiter>()),
+  spawnWaiter: (params: { wallet: string; id: string; emailCommand?: string }) => {
+    browser.spawned.push(params);
+  },
+  // Like the real waiter's SIGTERM handling: the request's key leaves the disk.
+  stopWaiter: async (wallet: string, id: string) => {
+    browser.stopped.push([wallet, id]);
+    const { discardPendingNow } = await import('../lib/owner/pending.ts');
+    discardPendingNow(wallet);
+  }
+}));
+vi.mock('../lib/login-relay-client.ts', () => ({
+  LoginSessionExpiredError: class extends Error {},
+  makeLoginRelay: () => ({
+    registerSession: async (session: string, context: unknown) => {
+      browser.registered.push({ session, context });
+    },
+    nextAction: async () => browser.actions.shift() ?? null,
+    setStatus: async () => undefined
+  })
+}));
+
 vi.mock('../lib/prices.ts', async (importOriginal) => {
   const { findSupportedToken } = await import('../lib/session/tokens.ts');
   return {
@@ -281,12 +333,38 @@ const {
   accessCommandModule,
   allowanceCommandModule,
   confirmCommandModule,
-  handleEmailLogin,
+  handleSessionLogin,
   logoutSessionWallet,
   sessionReport,
   withdrawCommandModule
 } = await import('./wallet-session.ts');
+const { handleLoginWait, waitSettings } = await import('./wallet-session.ts');
 const { loadPending, savePending } = await import('../lib/owner/pending.ts');
+const {
+  latestWaiterRequest,
+  liveWaiters,
+  pidFile,
+  processInfo,
+  readResult,
+  writePid,
+  writeResult
+} = await import('../lib/owner/waiter.ts');
+const realReadCommand = processInfo.readCommand;
+
+// Resolves once `ps` shows the child's waiter command line: right after spawn
+// it can still read as the parent's, which would make the waiter look dead.
+async function untilWaiterVisible(pid: number, id: string): Promise<void> {
+  for (let waited = 0; waited < 5_000; waited += 20) {
+    try {
+      const words = realReadCommand(pid).trim().split(/\s+/);
+      if (words.includes('--browser-waiter') && words.includes(id)) return;
+    } catch {
+      // Not readable yet; retry.
+    }
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  throw new Error(`waiter ${id} (pid ${pid}) never showed its command line`);
+}
 const { readApprovedPlan } = await import('../lib/session/state.ts');
 const { parkedRacSlots, readRacRecord } = await import('../lib/session/rac.ts');
 const { loadOmsWalletPointer, STORAGE_ROOT } = await import('../lib/storage.ts');
@@ -300,7 +378,7 @@ function lastJson(spy: 'log' | 'error'): Record<string, unknown> {
 }
 
 async function connectStep1(args: { chains?: string } = {}): Promise<string> {
-  await handleEmailLogin({
+  await handleSessionLogin({
     name: wallet,
     email: 'owner@example.com',
     allowance: 500,
@@ -317,7 +395,16 @@ async function confirm(request: string, code = world.code): Promise<Record<strin
   vi.mocked(console.log).mockClear();
   vi.mocked(console.error).mockClear();
   try {
-    await confirmCommandModule.handler({ _: [], $0: 'polygon-agent', name: wallet, request, code });
+    await confirmCommandModule.handler({
+      _: [],
+      $0: 'polygon-agent',
+      name: wallet,
+      request,
+      code,
+      wait: false,
+      'browser-waiter': false,
+      browserWaiter: false
+    });
     return lastJson('log');
   } catch {
     // Failures print to stderr; a result with ok: false prints to stdout, then exits.
@@ -346,6 +433,12 @@ beforeEach(() => {
   world.pendingDuringRun.length = 0;
   world.onSignIn = undefined;
   world.sent.length = 0;
+  browser.method = 'email';
+  browser.spawned.length = 0;
+  browser.stopped.length = 0;
+  browser.opened.length = 0;
+  browser.registered.length = 0;
+  browser.actions.length = 0;
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
   vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
@@ -369,6 +462,24 @@ describe('connect', () => {
     expect(world.calls).toEqual(['registerCredential', 'startEmailAuth:600']);
     expect(readRacRecord({ wallet, slot: 'rac' })?.installName).toBeTruthy();
     expect(loadPending(wallet)?.id).toBe(request);
+  });
+
+  it('step 2 adds a funding link when the wallet is empty', async () => {
+    funding.funded = false;
+    try {
+      const empty = await confirm(await connectStep1());
+      expect(empty.funding).toMatchObject({
+        url: expect.stringMatching(/\/\?wallet=0x[0-9a-fA-F]+&chain=137&view=fund$/),
+        reason: 'empty'
+      });
+    } finally {
+      funding.funded = true;
+    }
+  });
+
+  it('step 2 adds no funding link when the wallet holds something', async () => {
+    const funded = await confirm(await connectStep1());
+    expect(funded.funding).toBeUndefined();
   });
 
   it('step 2 approves each chain, verifies, probes gas, saves, and revokes the sign-in', async () => {
@@ -490,7 +601,7 @@ describe('connect', () => {
   it('refuses a second connect while sessions are live', async () => {
     await confirm(await connectStep1());
     await expect(
-      handleEmailLogin({ name: wallet, email: 'owner@example.com', chains: 'polygon' })
+      handleSessionLogin({ name: wallet, email: 'owner@example.com', chains: 'polygon' })
     ).rejects.toThrow('CLI exited');
     expect(lastJson('error')).toMatchObject({ code: 'already_connected' });
   });
@@ -727,7 +838,7 @@ describe('owner-request safety', () => {
     world.listSessionsError = httpError(503);
     world.calls.length = 0;
     await expect(
-      handleEmailLogin({ name: wallet, email: 'owner@example.com', chains: 'polygon' })
+      handleSessionLogin({ name: wallet, email: 'owner@example.com', chains: 'polygon' })
     ).rejects.toThrow('CLI exited');
     expect(lastJson('error')).toMatchObject({ code: 'upstream_unavailable' });
     expect(world.calls).not.toContain('revokeCredential');
@@ -959,7 +1070,7 @@ describe('replaced session keys', () => {
     // The live key is parked mid-renewal; reconnecting must not replace the
     // renewed one that recovery restores.
     await expect(
-      handleEmailLogin({ name: wallet, email: 'owner@example.com', chains: 'polygon' })
+      handleSessionLogin({ name: wallet, email: 'owner@example.com', chains: 'polygon' })
     ).rejects.toThrow('CLI exited');
     expect(lastJson('error')).toMatchObject({ code: 'already_connected' });
     expect(readRacRecord({ wallet, slot: 'rac' })?.credentialId).toBe(newKey);
@@ -1052,5 +1163,442 @@ describe('logout and removal of a session wallet', () => {
       .filter((line) => line.startsWith('{'));
     expect(JSON.parse(errors[0])).toMatchObject({ code: 'invalid_input' });
     expect(await loadOmsWalletPointer(wallet)).not.toBeNull();
+  });
+});
+
+describe('browser sign-in', () => {
+  // A pid that certainly belonged to a process that has exited.
+  function deadPid(): number {
+    return spawnSync(process.execPath, ['-e', '']).pid;
+  }
+
+  const children: ChildProcess[] = [];
+  afterEach(() => {
+    for (const child of children.splice(0)) child.kill('SIGKILL');
+  });
+
+  // A running process whose command line is the waiter's for `id`, with its pid file.
+  async function fakeWaiter(id: string): Promise<void> {
+    const child = spawn(
+      process.execPath,
+      [
+        '-e',
+        'setInterval(() => {}, 1000)',
+        '--',
+        'wallet',
+        'confirm',
+        '--request',
+        id,
+        '--browser-waiter'
+      ],
+      { stdio: 'ignore' }
+    );
+    children.push(child);
+    if (child.pid === undefined) throw new Error('no pid');
+    await untilWaiterVisible(child.pid, id);
+    writePid({ wallet, id, pid: child.pid });
+  }
+
+  async function browserConnect(): Promise<Record<string, unknown>> {
+    browser.method = 'browser';
+    await handleSessionLogin({ name: wallet, allowance: 500, days: 7, chains: 'polygon,base' });
+    return lastJson('log');
+  }
+
+  async function confirmArgs(args: {
+    request: string;
+    wait?: boolean;
+    browserWaiter?: boolean;
+  }): Promise<Record<string, unknown>> {
+    if (typeof confirmCommandModule.handler !== 'function') throw new Error('no handler');
+    vi.mocked(console.log).mockClear();
+    vi.mocked(console.error).mockClear();
+    try {
+      await confirmCommandModule.handler({
+        _: [],
+        $0: 'polygon-agent',
+        name: wallet,
+        request: args.request,
+        wait: args.wait ?? false,
+        'browser-waiter': args.browserWaiter ?? false,
+        browserWaiter: args.browserWaiter ?? false
+      });
+    } catch {
+      // exits after printing a failure
+    }
+    if (vi.mocked(console.error).mock.calls.length > 0) return lastJson('error');
+    // The waiter prints nothing: its output goes to the result file.
+    return vi.mocked(console.log).mock.calls.length > 0 ? lastJson('log') : {};
+  }
+
+  it('bare login on a desktop opens the page, starts the waiter and returns at once', async () => {
+    const out = await browserConnect();
+    const pending = loadPending(wallet);
+    if (pending?.method !== 'browser') throw new Error('expected a browser request');
+    expect(out).toMatchObject({
+      ok: true,
+      status: 'waiting',
+      method: 'browser',
+      methodReason: 'desktop',
+      request: pending.id,
+      url: expect.stringMatching(new RegExp(`/login#${pending.relaySession}$`)),
+      expiresAt: pending.expiresAt,
+      action: 'connect',
+      plan: expect.objectContaining({ summary: expect.stringContaining('Spend up to $500') }),
+      next: `polygon-agent wallet login --wait --name ${wallet}`
+    });
+    expect(browser.spawned).toEqual([
+      {
+        wallet,
+        id: pending.id,
+        emailCommand: `polygon-agent wallet login --email <email> --allowance 500 --days 7 --chains polygon,base --name ${wallet}`
+      }
+    ]);
+    expect(browser.opened).toEqual([out.url]);
+    expect(browser.registered).toEqual([
+      {
+        session: pending.relaySession,
+        context: { purpose: 'connect', allowanceUsd: 500, days: 7, polymarket: true }
+      }
+    ]);
+    expect(world.calls).toEqual(['registerCredential']);
+  });
+
+  it('with the picker on email and no email known, asks for one before doing anything', async () => {
+    browser.method = 'email';
+    await expect(handleSessionLogin({ name: wallet })).rejects.toThrow('CLI exited');
+    expect(lastJson('error')).toMatchObject({
+      code: 'email_required',
+      hint: 'Ask the user for their email, then run `command` with it.',
+      command: `polygon-agent wallet login --email <email> --name ${wallet}`
+    });
+    expect(world.calls).toEqual([]);
+    expect(loadPending(wallet)).toBeNull();
+  });
+
+  it('--email always sends a code, whatever the picker says', async () => {
+    browser.method = 'browser';
+    await connectStep1();
+    expect(browser.spawned).toEqual([]);
+    expect(loadPending(wallet)?.method).toBe('email');
+  });
+
+  it('a new request stops the waiter of the one it replaces', async () => {
+    const first = await browserConnect();
+    await fakeWaiter(String(first.request));
+    await browserConnect();
+    expect(browser.stopped).toEqual([[wallet, first.request]]);
+    expect(browser.spawned).toHaveLength(2);
+  });
+
+  it('a waiter whose owner already signed in makes a new request wait for it', async () => {
+    const first = await browserConnect();
+    const firstId = String(first.request);
+    await fakeWaiter(firstId);
+    // Signed in: the pending file is gone while the waiter runs the action.
+    const { deletePending } = await import('../lib/owner/pending.ts');
+    await deletePending({ wallet });
+    const racBefore = readRacRecord({ wallet, slot: 'rac' })?.credentialId;
+    world.calls.length = 0;
+    browser.method = 'browser';
+    await expect(
+      handleSessionLogin({ name: wallet, allowance: 500, days: 7, chains: 'polygon,base' })
+    ).rejects.toThrow('CLI exited');
+    expect(lastJson('error')).toMatchObject({
+      code: 'request_in_progress',
+      error: 'A sign-in for this wallet is finishing.',
+      command: `polygon-agent wallet confirm --request ${firstId} --wait --name ${wallet}`
+    });
+    // Nothing replaced: not the key, not the waiter.
+    expect(world.calls).toEqual([]);
+    expect(readRacRecord({ wallet, slot: 'rac' })?.credentialId).toBe(racBefore);
+    expect(browser.stopped).toEqual([]);
+    expect(browser.spawned).toHaveLength(1);
+  });
+
+  it('quotes command values that a shell would split', async () => {
+    browser.method = 'browser';
+    await handleSessionLogin({ name: wallet, chains: 'polygon, base' });
+    expect(browser.spawned[0]?.emailCommand).toBe(
+      `polygon-agent wallet login --email <email> --chains 'polygon, base' --name ${wallet}`
+    );
+  });
+
+  it('the waiter gives up at the request expiry, leaving a failure and no files', async () => {
+    const out = await browserConnect();
+    const request = String(out.request);
+    const pending = loadPending(wallet);
+    if (!pending) throw new Error('no pending request');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'Date'] });
+    try {
+      await savePending({ ...pending, expiresAt: new Date(Date.now() + 5_000).toISOString() });
+      const running = confirmArgs({ request, browserWaiter: true });
+      await vi.advanceTimersByTimeAsync(10_000);
+      await running;
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(readResult(wallet, request)).toMatchObject({ ok: false, code: 'request_expired' });
+    expect(loadPending(wallet)).toBeNull();
+    expect(fs.existsSync(pidFile(wallet, request))).toBe(false);
+  });
+
+  it('refuses an owner-mode wallet, with a note for anyone used to the old login', async () => {
+    const { saveOmsWalletPointer } = await import('../lib/storage.ts');
+    await saveOmsWalletPointer(wallet, {
+      walletAddress: world.walletAddress,
+      loginMethod: 'google',
+      createdAt: ''
+    });
+    await expect(handleSessionLogin({ name: wallet })).rejects.toThrow('CLI exited');
+    expect(lastJson('error')).toMatchObject({ code: 'invalid_input' });
+    expect(String(lastJson('error').error)).toContain('signed in with --owner');
+    expect(vi.mocked(process.stderr.write).mock.calls.map((c) => String(c[0]))).toContain(
+      'Note: `wallet login` now connects with an allowance; use `--owner` for the full owner session.\n'
+    );
+  });
+
+  it('wallet status shows the pending browser request with its page', async () => {
+    const out = await browserConnect();
+    const report = await sessionReport({ wallet, withVersion: false });
+    expect(report).toMatchObject({
+      connected: false,
+      next: `polygon-agent wallet login --wait --name ${wallet}`,
+      pendingRequest: {
+        request: out.request,
+        method: 'browser',
+        url: out.url,
+        action: 'connect',
+        expiresAt: out.expiresAt,
+        approves: expect.stringContaining('Spend up to $500')
+      }
+    });
+    expect(String(report.hint)).toContain(String(out.url));
+  });
+
+  it('the waiter signs in on the page, connects, and leaves the confirm output', async () => {
+    const out = await browserConnect();
+    const request = String(out.request);
+    browser.actions.push(
+      { type: 'email', email: 'owner@example.com' },
+      { type: 'otp', code: world.code }
+    );
+    expect(await confirmArgs({ request, browserWaiter: true })).toEqual({});
+    const result = readResult(wallet, request);
+    expect(result).toMatchObject({
+      ok: true,
+      walletName: wallet,
+      action: 'connect',
+      connected: true,
+      builderAccess: true,
+      ownerSignInRevoked: true
+    });
+    expect(world.calls).toContain('revokeAccess:owner');
+    expect(loadPending(wallet)).toBeNull();
+    expect(fs.existsSync(pidFile(wallet, request))).toBe(false);
+    expect(await loadOmsWalletPointer(wallet)).toMatchObject({ access: 'session' });
+
+    // `wallet login --wait` then prints it once.
+    vi.mocked(console.log).mockClear();
+    await handleLoginWait({ name: wallet });
+    expect(lastJson('log')).toEqual(result);
+    expect(readResult(wallet, request)).toBeNull();
+  });
+
+  it('the waiter opens the funding page and the --wait result carries it for an empty wallet', async () => {
+    funding.funded = false;
+    try {
+      const request = String((await browserConnect()).request);
+      browser.opened.length = 0;
+      browser.actions.push(
+        { type: 'email', email: 'owner@example.com' },
+        { type: 'otp', code: world.code }
+      );
+      await confirmArgs({ request, browserWaiter: true });
+      const result = readResult(wallet, request);
+      expect(result).toMatchObject({
+        connected: true,
+        funding: { url: expect.stringContaining('view=fund'), reason: 'empty' }
+      });
+      expect(browser.opened).toEqual([(result?.funding as { url: string }).url]);
+      expect(await confirmArgs({ request, wait: true })).toMatchObject({
+        funding: { reason: 'empty' }
+      });
+    } finally {
+      funding.funded = true;
+    }
+  });
+
+  it('the waiter opens no funding page for a funded wallet', async () => {
+    const request = String((await browserConnect()).request);
+    browser.opened.length = 0;
+    browser.actions.push(
+      { type: 'email', email: 'owner@example.com' },
+      { type: 'otp', code: world.code }
+    );
+    await confirmArgs({ request, browserWaiter: true });
+    expect(readResult(wallet, request)?.funding).toBeUndefined();
+    expect(browser.opened).toEqual([]);
+  });
+
+  it('the waiter leaves a cancel on the page as a failure', async () => {
+    const out = await browserConnect();
+    const request = String(out.request);
+    browser.actions.push({ type: 'cancel' });
+    await confirmArgs({ request, browserWaiter: true });
+    expect(readResult(wallet, request)).toMatchObject({ ok: false, code: 'request_cancelled' });
+    expect(await confirmArgs({ request, wait: true })).toMatchObject({
+      ok: false,
+      code: 'request_cancelled'
+    });
+  });
+
+  describe('confirm --wait', () => {
+    async function browserAllowanceSet(): Promise<Record<string, unknown>> {
+      await confirm(await connectStep1({ chains: 'polygon' }));
+      browser.method = 'browser';
+      const yargs = (await import('yargs')).default;
+      vi.mocked(console.log).mockClear();
+      await yargs()
+        .command(allowanceCommandModule)
+        .parseAsync(['allowance', 'set', '--amount', '800', '--name', wallet]);
+      return lastJson('log');
+    }
+
+    it('allowance set on browser returns waiting with a --wait next', async () => {
+      const out = await browserAllowanceSet();
+      expect(out).toMatchObject({
+        status: 'waiting',
+        method: 'browser',
+        action: 'allowance-set',
+        previousAllowanceUsd: 500,
+        next: `polygon-agent wallet confirm --request ${String(out.request)} --wait --name ${wallet}`
+      });
+      expect(browser.registered.at(-1)?.context).toEqual({
+        purpose: 'allowance',
+        allowanceUsd: 800,
+        days: 7,
+        polymarket: true
+      });
+    });
+
+    it('prints a finished result once', async () => {
+      const request = String((await browserAllowanceSet()).request);
+      await writeResult(wallet, request, { ok: true, walletName: wallet, updated: true });
+      expect(await confirmArgs({ request, wait: true })).toEqual({
+        ok: true,
+        walletName: wallet,
+        updated: true
+      });
+      expect(readResult(wallet, request)).toBeNull();
+    });
+
+    it('says waiting while the waiter is still running', async () => {
+      const request = String((await browserAllowanceSet()).request);
+      await fakeWaiter(request);
+      const saved = waitSettings.timeoutMs;
+      waitSettings.timeoutMs = 0;
+      try {
+        expect(await confirmArgs({ request, wait: true })).toMatchObject({
+          ok: true,
+          status: 'waiting',
+          next: `polygon-agent wallet confirm --request ${request} --wait --name ${wallet}`
+        });
+      } finally {
+        waitSettings.timeoutMs = saved;
+      }
+    });
+
+    it('fails toward the emailed code when the waiter is gone without a result', async () => {
+      const request = String((await browserAllowanceSet()).request);
+      const emailCommand = browser.spawned.at(-1)?.emailCommand;
+      expect(emailCommand).toBe(
+        `POLYGON_AGENT_SIGNIN=email polygon-agent wallet allowance set --amount 800 --name ${wallet}`
+      );
+      writePid({ wallet, id: request, pid: deadPid(), emailCommand });
+      expect(await confirmArgs({ request, wait: true })).toMatchObject({
+        ok: false,
+        code: 'browser_signin_failed',
+        command: emailCommand
+      });
+    });
+
+    it("keeps the allowance email command after the dead waiter's pid file is cleaned up", async () => {
+      const request = String((await browserAllowanceSet()).request);
+      writePid({ wallet, id: request, pid: deadPid() });
+      // A status check (or anything listing waiters) removes the dead pid file.
+      expect(liveWaiters(wallet)).toEqual([]);
+      expect(await confirmArgs({ request, wait: true })).toMatchObject({
+        ok: false,
+        code: 'browser_signin_failed',
+        command: `POLYGON_AGENT_SIGNIN=email polygon-agent wallet allowance set --amount 800 --name ${wallet}`
+      });
+    });
+  });
+});
+
+describe('browser sign-in on a connected wallet', () => {
+  async function connectThroughPage(): Promise<void> {
+    browser.method = 'browser';
+    await handleSessionLogin({ name: wallet, allowance: 500, days: 7, chains: 'polygon' });
+    const request = String(lastJson('log').request);
+    browser.actions.push(
+      { type: 'email', email: 'owner@example.com' },
+      { type: 'otp', code: world.code }
+    );
+    if (typeof confirmCommandModule.handler !== 'function') throw new Error('no handler');
+    await confirmCommandModule.handler({
+      _: [],
+      $0: 'polygon-agent',
+      name: wallet,
+      request,
+      wait: false,
+      'browser-waiter': true,
+      browserWaiter: true
+    });
+    expect(readResult(wallet, request)).toMatchObject({ ok: true, connected: true });
+  }
+
+  async function allowanceSet(...extra: string[]): Promise<void> {
+    const yargs = (await import('yargs')).default;
+    vi.mocked(console.log).mockClear();
+    vi.mocked(console.error).mockClear();
+    await yargs()
+      .command(allowanceCommandModule)
+      .parseAsync(['allowance', 'set', '--amount', '800', '--name', wallet, ...extra])
+      .catch(() => undefined);
+  }
+
+  it('asks for an email when the picker says email and none is known, and keeps it once used', async () => {
+    await connectThroughPage();
+    expect((await loadOmsWalletPointer(wallet))?.email).toBeUndefined();
+    browser.method = 'email';
+
+    await allowanceSet();
+    const errors = vi
+      .mocked(console.error)
+      .mock.calls.map((call) => String(call[0]))
+      .filter((line) => line.startsWith('{'));
+    expect(JSON.parse(String(errors.at(-1)))).toMatchObject({
+      code: 'email_required',
+      command: `polygon-agent wallet allowance set --amount 800 --email <email> --name ${wallet}`
+    });
+
+    await allowanceSet('--email', 'owner@example.com');
+    const step1 = lastJson('log');
+    expect(step1).toMatchObject({ status: 'code_sent', email: 'owner@example.com' });
+    expect(await confirm(String(step1.request))).toMatchObject({ ok: true, updated: true });
+    expect((await loadOmsWalletPointer(wallet))?.email).toBe('owner@example.com');
+  });
+
+  it('logout stops the waiters and removes their results and pid files', async () => {
+    await connectThroughPage();
+    const request = latestWaiterRequest(wallet);
+    expect(request).not.toBeNull();
+    writePid({ wallet, id: 'other1', pid: process.pid });
+    await logoutSessionWallet(wallet);
+    expect(latestWaiterRequest(wallet)).toBeNull();
+    expect(readResult(wallet, String(request))).toBeNull();
+    expect(fs.existsSync(pidFile(wallet, 'other1'))).toBe(false);
   });
 });

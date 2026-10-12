@@ -19,6 +19,7 @@ import type { Watch } from '../lib/watch/store.ts';
 import { CliError, errorJson, jsonFail, jsonOut } from '../lib/errors.ts';
 import { chainIdFor, resolvePriceTarget } from '../lib/price-target.ts';
 import { getPriceReadings, priceKey } from '../lib/prices.ts';
+import { loginCommand } from '../lib/session/rac.ts';
 import { chainLabel, findSupportedToken, resolveSupportedSymbol } from '../lib/session/tokens.ts';
 import { loadOmsWalletPointer } from '../lib/storage.ts';
 import { executeSwap } from '../lib/trade/execute.ts';
@@ -330,7 +331,7 @@ const createCommand: CommandModule<object, CreateArgs> = {
         throw new CliError({
           code: 'not_connected',
           message: `Wallet '${argv.wallet}' isn't connected, so it can't trade.`,
-          command: 'polygon-agent wallet login --email <email>'
+          command: loginCommand(argv.wallet)
         });
       }
       // Raised once the watch is saved.

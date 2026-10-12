@@ -3,7 +3,7 @@ name: polygon-oms-setup
 description: >-
   One-time setup of the Polygon OMS Agent Kit: installs the polygon-agent CLI
   and the polygon-oms-wallet skill into the assistant's workspace, then connects
-  the user's wallet with a spending allowance they approve by email code.
+  the user's wallet with a spending allowance they approve by signing in.
 ---
 
 # Set up the Polygon OMS Agent Kit
@@ -12,7 +12,7 @@ description: >-
 
 **For the assistant.** Follow these steps in order. Each one is safe to re-run. Tell the user what you're doing in plain words as you go, and never paste raw JSON to them.
 
-**What this sets up (tell the user in a sentence or two):** a Polygon OMS wallet that you, their assistant, can use within an allowance they approve by email code. You can check prices, watch them, buy, sell, swap and bridge tokens, bet on Polymarket prediction markets, and pay for x402 services. Anything beyond the allowance needs a new code from them. The wallet stays theirs. Each code signs the CLI in as them for a moment, just long enough to make that one change (approving an allowance, a withdrawal…), then signs out again. Only that limited key is kept, never their sign-in.
+**What this sets up (tell the user in a sentence or two):** your agent wallet (an OMS embedded wallet) that you, their assistant, can use within an allowance they approve by signing in (on a page in their browser, or with an emailed code). You can check prices, watch them, buy, sell, swap and bridge tokens, bet on Polymarket prediction markets, and pay for x402 services. Anything beyond the allowance needs a new sign-in from them. The wallet stays theirs. Each sign-in signs the CLI in as them for a moment, just long enough to make that one change (approving an allowance, a withdrawal…), then signs out again. Only that limited key is kept, never their sign-in.
 
 ## 1. Find the workspace
 
@@ -86,13 +86,14 @@ If it fails, stop and tell the user why. From here on, run `npm` and `node` with
   mkdir -p "$ROOT"
   PATH="$ROOT/node/bin:$PATH" npm install --ignore-scripts --prefix "$ROOT/cli" @polygonlabs/agent-cli@polymarket-qa
   PATH="$ROOT/node/bin:$PATH" node "$ROOT/cli/node_modules/@polygonlabs/agent-cli/dist/index.js" \
-    workspace init --root "$ROOT" --skills-dir "<skills folder>" --name "<install name>"
+    workspace init --root "$ROOT" --skills-dir "<skills folder>" --name "<install name>" --platform "<platform>"
 )
 ```
 
 - `--ignore-scripts`: nothing the CLI needs runs an install script, and none should run beside the wallet's keys.
 - `--skills-dir` is the skills folder from step 1. Leave it out if your platform has none.
 - `--name` is what the wallet owner sees in their list of installs with access, like "OpenClaw on laptop". It defaults to the host name. Reuse the same name when you reinstall, because the Polymarket key backup is labelled with it, and recovery finds the key by that label.
+- `--platform` is your own platform: `muse`, `openclaw`, `hermes`, `claude-code`, `cursor`, `codex` or `other`. Pass the one you are. The CLI uses it to pick the sign-in method: a chat code on a chat platform, a browser page on a desktop.
 - `workspace init` writes the wrapper `$ROOT/bin/polygon-agent` (the only command you'll use from now on), the state folder and a `.gitignore`, so workspace backups never pick it up. It also installs the `polygon-oms-wallet` skill, already pointed at the wrapper.
 
 Go on to step 5.
@@ -121,37 +122,40 @@ Then:
 Check these in order:
 
 1. `mode` is `"owner"`: this install is signed in with the browser login, as the wallet owner, with no allowance limits. Tell the user, and offer to switch to an allowance: `"$ROOT/bin/polygon-agent" wallet logout`, then step 7.
-2. `pendingRequest` is there: a code was already sent to `pendingRequest.email` for what `pendingRequest.approves` says. Ask the user for that code and go to step 7.5. Don't send another unless it expired or they can't find it.
+2. `pendingRequest` is there. If its `method` is `browser`, a sign-in page is waiting at `pendingRequest.url` for what `pendingRequest.approves` says: ask the user to finish it there, then run `pendingRequest.next`. Otherwise a code was already sent to `pendingRequest.email`: ask the user for it and run `pendingRequest.next` with it. Don't start another unless it expired.
 3. `connected` is `true`: skip to step 8.
 4. Otherwise, connect (step 7).
 
 ## 7. Connect
 
-Before asking for anything, explain how it works: the code lets the CLI sign in as the user for a moment, approve the allowance for this install's own limited key, and sign out. Only that key is kept.
+Before asking for anything, explain how it works: the sign-in lets the CLI act as the user for a moment, approve the allowance for this install's own limited key, and sign out. Only that key is kept.
 
-1. Ask the user for their email. Never guess it.
-2. Ask how much you may spend, explaining before anything is sent: "How much should I be able to spend on my own? I suggest up to **$1,000** over the next **30 days**, in USDC, USDT, ETH and BTC on Polygon and Base, for trades and paid services. Anything more, or other tokens or chains, needs a new code from you."
-3. Send the code:
-
-   ```sh
-   "$ROOT/bin/polygon-agent" wallet login --email <email> --allowance <usd> --days <days>
-   ```
-
-   Add `--chains polygon,base,…` only if the user asked for different chains; chains where the wallet already holds supported tokens are added on their own. The output has `status: "code_sent"`, the `plan` (every chain, token and limit, with the expiry) and `next`.
-4. Tell the user: "I've sent a code to <email>. Paste it here to approve: …", followed by a short summary of the plan from the output.
-5. As soon as the user gives the code, run `next`:
+1. Ask how much you may spend, explaining before anything is sent: "How much should I be able to spend on my own? I suggest up to **$1,000** over the next **30 days**, in USDC, USDT, ETH and BTC on Polygon and Base, for trades and paid services. Anything more, or other tokens or chains, needs a new sign-in from you."
+2. Start the connection. Don't ask for an email yet: the CLI picks the method (a browser page, or a code sent by email) and tells you what it needs.
 
    ```sh
-   "$ROOT/bin/polygon-agent" wallet confirm --request <request> --code <code>
+   "$ROOT/bin/polygon-agent" wallet login --allowance <usd> --days <days>
    ```
 
-   Use the code only here, once. Never store it or repeat it. If it fails with `invalid_code`, ask for the code again. If it fails with `request_expired`, start again at step 7.3. On any other error, follow its `hint` and `command`.
-6. Tell the user the result in plain words, for example: "Thanks for connecting! A smart session now lets me spend up to $1,000 from your agent wallet until Nov 7, in USDC, USDT, WETH and WBTC on Polygon and Base. If you'd like higher limits, just ask." Take the details from `allowance` in the output. Mention any chains in `failed` and any `warnings`.
-7. Give the address: end your message with "Your agent wallet address is:" and send the full address as the next message, with nothing else in it, so the user can copy it in one go. Never shorten it. (If your platform sends only one message per reply, put it alone on its own line.)
+   Add `--chains polygon,base,…` only if the user asked for different chains; chains where the wallet already holds supported tokens are added on their own. Then handle the outcome:
+
+   - `status: "waiting"`: the user signs in on a page. Tell them "A sign-in page opened in your browser. Sign in there to approve", with a short summary of the `plan`. If this machine has no browser, or they say nothing opened, send them the `url`. Then run `next` (it ends in `--wait`). It blocks for up to about 90 seconds. If it returns `waiting` again, run `next` again, until it finishes. If the user cancels on the page it fails with `request_cancelled`: ask whether to try again.
+   - `email_required` (an error): ask the user for their email. Never guess it. Then run its `command`, with the email in place of `<email>`.
+   - `status: "code_sent"`: tell the user "I've sent a code to <email>. Paste it here to approve: …", followed by a short summary of the `plan`. As soon as they give the code, run `next`:
+
+     ```sh
+     "$ROOT/bin/polygon-agent" wallet confirm --request <request> --code <code>
+     ```
+
+     Use the code only here, once. Never store it or repeat it. If it fails with `invalid_code`, ask for the code again. If it fails with `request_expired`, start again at step 2. On any other error, follow its `hint` and `command`.
+3. Two more errors. `browser_signin_failed` means the page sign-in stopped: run its `command` to sign in with an emailed code instead. `request_in_progress` means a sign-in for this wallet is already finishing: run its `--wait` command.
+4. Tell the user the result in plain words, for example: "Thanks for connecting! A smart session now lets me spend up to $1,000 from your agent wallet until Nov 7, in USDC, USDT, WETH and WBTC on Polygon and Base. If you'd like higher limits, just ask." Take the details from `allowance` in the output. Mention any chains in `failed` and any `warnings`.
+5. If the output has `funding`, the wallet is empty: send or open `funding.url` and say it's for adding money (see step 8).
+6. Give the address: end your message with "Your agent wallet address is:" and send the full address as the next message, with nothing else in it, so the user can copy it in one go. Never shorten it. (If your platform sends only one message per reply, put it alone on its own line.)
 
 ## 8. Funding
 
-Run `"$ROOT/bin/polygon-agent" wallet status` again. If it shows no `holdings`, run `"$ROOT/bin/polygon-agent" fund` and give the user the link in `url` (the address is already in its own message from step 7). Suggest USDC on Polygon; any covered token on a covered chain works.
+Run `"$ROOT/bin/polygon-agent" wallet status` again. If it shows no `holdings` and you haven't already sent a `funding.url`, run `"$ROOT/bin/polygon-agent" fund` and give the user the link in `url` (the address is already in its own message from step 7). Whenever any command's output has `funding`, send or open its `url` and tell the user what it's for. Suggest USDC on Polygon; any covered token on a covered chain works.
 
 ## 9. Watches
 
@@ -166,6 +170,6 @@ Tell the user what they can ask for now, in plain words. For example:
 - "Move 20 USDC to Base."
 - "What are the odds on <event>?" or "Put $5 on <something> on Polymarket."
 - "Search the web with a paid service" (x402).
-- "Raise my limit to $2,000" (a new email code approves it).
+- "Raise my limit to $2,000" (a new sign-in approves it).
 
 Re-run this file any time: if the wrapper is missing (the workspace was reset), it installs again; otherwise it refreshes the skill, checks the connection and moves on.

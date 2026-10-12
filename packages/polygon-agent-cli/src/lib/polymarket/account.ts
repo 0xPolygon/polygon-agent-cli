@@ -1,7 +1,7 @@
-// The Polymarket trading account for an OMS wallet name: a CLI-generated key
+// The Polymarket trading account for an agent wallet name: a CLI-generated key
 // that controls a Polymarket Deposit Wallet. Polymarket's relayer deploys the
 // wallet and runs its approvals and transfers, authorized by a builder API key
-// minted from the same key. The OMS wallet never signs for Polymarket.
+// minted from the same key. The agent wallet never signs for Polymarket.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -147,18 +147,19 @@ async function clientFor(
   return storedClient(wallet, acct, viem.privateKey(key));
 }
 
-// In session mode `agent wallet login` alone does not reach the backed-up key: either the
+// In session mode `agent wallet login` without --owner does not reach the backed-up key: either the
 // next owner approval recovers it, or the install switches to owner mode.
-const SESSION_RETRY_HINT = 'The next owner approval (email code) retries this.';
-const SESSION_OWNER_HINT = 'Run wallet logout, then agent wallet login to use it through OMS.';
+const SESSION_RETRY_HINT = 'The next owner approval retries this.';
+const SESSION_OWNER_HINT =
+  'Run wallet logout, then agent wallet login --owner to use it through OMS.';
 
 function keyBackedUpError(sessionMode: boolean): CliError {
   return new CliError({
     code: 'not_set_up',
     message: 'The Polymarket key is not on this machine; it is backed up in your OMS account.',
     hint: sessionMode
-      ? 'The next owner approval (email code) recovers it into a new key, or run wallet logout, then agent wallet login to use it through OMS.'
-      : 'Sign in with agent wallet login to use it.'
+      ? 'The next owner approval recovers it into a new key, or run wallet logout, then agent wallet login --owner to use it through OMS.'
+      : 'Sign in with agent wallet login --owner to use it.'
   });
 }
 
@@ -350,7 +351,7 @@ export function hasLocalKey(wallet: string): boolean {
   return fs.existsSync(accountFile(wallet, 'key.json'));
 }
 
-// Records which OMS wallet holds the imported copy of the trading key. No secret.
+// Records which agent wallet holds the imported copy of the trading key. No secret.
 // `kind` is absent on records written before it was added.
 export type BackupRecord = { omsWalletId: string; address: string; at: string; kind?: AccountKind };
 
@@ -845,7 +846,7 @@ async function unsettledDeposit(wallet: string): Promise<PendingDeposit | null> 
 
 const RETRY_HINT = SESSION_RETRY_HINT;
 const POSITIONS_HINT =
-  'Positions remain in the old Polymarket account. Sell or redeem them from an owner install (wallet logout, then agent wallet login, then polymarket setup --broadcast restores the account), then the next owner approval finishes the recovery.';
+  'Positions remain in the old Polymarket account. Sell or redeem them from an owner install (wallet logout, then agent wallet login --owner, then polymarket setup --broadcast restores the account), then the next owner approval finishes the recovery.';
 
 // Session-mode recovery, run during a confirmed owner request when the local trading key is
 // gone but OMS holds it (`target`). Sweeps the old account's pUSD to `mainAddress`, archives

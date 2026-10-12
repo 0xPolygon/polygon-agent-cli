@@ -27,6 +27,7 @@ import type { RacReader } from './sessions.ts';
 import { CliError, httpStatus, upstreamErrorName } from '../errors.ts';
 import { formatUnits } from '../utils.ts';
 import { appendLedger, readLedger, spentUsd } from './ledger.ts';
+import { loginCommand } from './rac.ts';
 import { getSessions, invalidateSessions, mapRacError, sessionForToken } from './sessions.ts';
 import { readApprovedPlan, readJsonFile, sessionDir, writeJsonFile } from './state.ts';
 import { chainLabel, findSupportedToken } from './tokens.ts';
@@ -519,8 +520,8 @@ export async function checkTransfer(params: {
     throw new CliError({
       code: 'not_connected',
       message: "This install's approved allowance is missing, so it can't check what it may spend.",
-      hint: 'Connect again with a new email code.',
-      command: 'polygon-agent wallet login --email <email>'
+      hint: 'Connect again.',
+      command: loginCommand(wallet)
     });
   }
   const sessions = await getSessions({

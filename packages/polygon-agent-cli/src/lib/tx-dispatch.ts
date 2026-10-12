@@ -1,4 +1,4 @@
-// Transaction dispatch. Every write from an OMS wallet goes through runTx:
+// Transaction dispatch. Every write from an agent wallet goes through runTx:
 // owner-mode wallets send with the owner's session (oms-tx.ts); session-mode
 // wallets transfer through the install's smart sessions (session/run-tx.ts).
 

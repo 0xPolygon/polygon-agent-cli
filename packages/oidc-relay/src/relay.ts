@@ -106,17 +106,23 @@ export default {
     const loginStub = (session: string) =>
       env.LOGIN_SESSION.get(env.LOGIN_SESSION.idFromName(session));
 
-    // POST /api/login/register { session } -> arm a pairing session (CLI).
+    // POST /api/login/register { session, context? } -> arm a pairing session (CLI).
+    // An invalid context is dropped by the session, never a 400.
     if (request.method === 'POST' && url.pathname === '/api/login/register') {
-      let body: { session?: unknown };
+      let body: { session?: unknown; context?: unknown };
       try {
-        body = (await request.json()) as { session?: unknown };
+        body = (await request.json()) as { session?: unknown; context?: unknown };
       } catch {
         return json({ error: 'invalid json' }, 400);
       }
       const session = typeof body.session === 'string' ? body.session : null;
       if (!validSession(session)) return json({ error: 'invalid session' }, 400);
-      await loginStub(session).fetch(new Request('https://do/register', { method: 'POST' }));
+      await loginStub(session).fetch(
+        new Request('https://do/register', {
+          method: 'POST',
+          body: JSON.stringify(body.context ?? null)
+        })
+      );
       return cors(new Response(null, { status: 204 }));
     }
 

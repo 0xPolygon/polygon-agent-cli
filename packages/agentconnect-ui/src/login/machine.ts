@@ -7,10 +7,57 @@ export type LoginStatus =
   | { status: 'auth-url'; url: string }
   | { status: 'otp-sent' }
   | { status: 'otp-invalid'; attemptsLeft?: number }
-  | { status: 'done'; walletAddress: string }
+  | { status: 'done'; walletAddress: string; funding?: { url: string } }
   | { status: 'error'; message: string };
 
-export type RelayStatus = LoginStatus | { status: 'expired' };
+// What the CLI says this sign-in approves. Optional everywhere: an older CLI
+// or relay sends none, and the page falls back to its generic copy.
+export interface LoginContext {
+  purpose: 'connect' | 'allowance' | 'renew' | 'withdraw' | 'access' | 'owner';
+  allowanceUsd?: number;
+  days?: number;
+  polymarket?: boolean;
+}
+
+export type RelayStatus = (LoginStatus | { status: 'expired' }) & { context?: LoginContext };
+
+export const DEFAULT_CONTEXT_LINE = 'This connects to your agent in your terminal.';
+
+function usd(n: number): string {
+  return `$${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+}
+
+function forDays(days?: number): string {
+  if (days === undefined) return '';
+  return ` for ${days} ${days === 1 ? 'day' : 'days'}`;
+}
+
+// The one line above the sign-in buttons. No (or unrecognized) context keeps
+// today's copy.
+export function contextLine(context?: LoginContext): string {
+  if (!context) return DEFAULT_CONTEXT_LINE;
+  const allowance =
+    context.allowanceUsd !== undefined ? ` with a ${usd(context.allowanceUsd)} allowance` : '';
+  switch (context.purpose) {
+    case 'connect':
+      return (
+        `Connect your assistant${allowance}${forDays(context.days)}.` +
+        (context.polymarket ? ' This also backs up your Polymarket trading key.' : '')
+      );
+    case 'allowance':
+      return `Change your assistant's allowance${context.allowanceUsd !== undefined ? ` to ${usd(context.allowanceUsd)}` : ''}${forDays(context.days)}.`;
+    case 'renew':
+      return `Renew your assistant's allowance${forDays(context.days)}.`;
+    case 'withdraw':
+      return 'Withdraw funds from your agent wallet.';
+    case 'access':
+      return "Review your assistant's access to your agent wallet.";
+    case 'owner':
+      return 'Confirm a change to your agent wallet.';
+    default:
+      return DEFAULT_CONTEXT_LINE;
+  }
+}
 
 export type MachineState =
   | { kind: 'method' }
@@ -23,7 +70,7 @@ export type MachineState =
   | { kind: 'email-wait'; email: string }
   | { kind: 'otp-entry'; email: string; invalid?: boolean; attemptsLeft?: number }
   | { kind: 'otp-wait'; email: string }
-  | { kind: 'success'; walletAddress: string }
+  | { kind: 'success'; walletAddress: string; funding?: { url: string } }
   | { kind: 'expired' }
   | { kind: 'failed'; message: string };
 
@@ -64,7 +111,11 @@ export function reduce(state: MachineState, event: MachineEvent): MachineState {
     // Terminal statuses win from anywhere.
     if (s.status === 'expired') return { kind: 'expired' };
     if (s.status === 'error') return { kind: 'failed', message: s.message };
-    if (s.status === 'done') return { kind: 'success', walletAddress: s.walletAddress };
+    if (s.status === 'done') {
+      return s.funding
+        ? { kind: 'success', walletAddress: s.walletAddress, funding: s.funding }
+        : { kind: 'success', walletAddress: s.walletAddress };
+    }
 
     // auth-pending only exits via a terminal status (handled above): once the
     // page is waiting out the Google redirect there is nothing else worth

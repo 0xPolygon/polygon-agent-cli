@@ -196,4 +196,17 @@ describe('runBrowserLogin', () => {
     expect(result).toEqual({ walletAddress: '0xMAIN', loginMethod: 'email' });
     expect(calls).toContain('selectMain');
   });
+
+  it('uses a session registered earlier as is, without registering it again', async () => {
+    const { deps, calls } = makeFakes([
+      { type: 'email', email: 'a@b.c' },
+      { type: 'otp', code: '123456' }
+    ]);
+    deps.randomSessionId = () => {
+      throw new Error('no new session expected');
+    };
+    await runBrowserLogin(deps, { ...OPTS, session: 'existing-session' });
+    expect(calls).not.toContain('registerSession');
+    expect(calls).toContain('announce:https://ui.test/login#existing-session');
+  });
 });

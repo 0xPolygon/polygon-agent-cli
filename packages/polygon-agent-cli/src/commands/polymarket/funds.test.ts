@@ -209,7 +209,7 @@ describe('deposit', () => {
     expect(loadPending('main')).toBeNull();
   });
 
-  it('keeps no record when the OMS wallet cannot pay the relayer fee', async () => {
+  it('keeps no record when the agent wallet cannot pay the relayer fee', async () => {
     const { makeFeeSelector } = await import('../../lib/oms-tx.ts');
     let refusal: unknown;
     try {
@@ -342,16 +342,31 @@ describe('deposit', () => {
     });
   });
 
-  it('points at a swap when the OMS wallet lacks USDC', async () => {
+  it('points at a swap when the agent wallet lacks USDC', async () => {
     m.tokenBalance.mockResolvedValue(1_000_000n);
     const out = await run(['deposit', '5', '--dry-run']);
     expect(out).toMatchObject({ ok: false, code: 'insufficient_balance' });
     expect(String(out.hint)).toMatch(/agent swap/);
   });
+
+  it('asks for the shortfall, but at least the bridge minimum, as funding', async () => {
+    m.tokenBalance.mockResolvedValue(1_000_000n);
+    const out = await run(['deposit', '5', '--dry-run']);
+    expect(out.funding).toMatchObject({
+      url: expect.stringMatching(/view=fund&amount=4$/),
+      amountUsd: '4'
+    });
+    m.tokenBalance.mockResolvedValue(4_500_000n);
+    const small = await run(['deposit', '5', '--dry-run']);
+    expect(small.funding).toMatchObject({
+      url: expect.stringMatching(/&amount=2$/),
+      amountUsd: '2'
+    });
+  });
 });
 
 describe('withdraw', () => {
-  it('withdraws everything to a bridge address paying the OMS wallet', async () => {
+  it('withdraws everything to a bridge address paying the agent wallet', async () => {
     m.pusdBalance.mockResolvedValue(3_250_000n);
     m.transferErc20.mockResolvedValue({ wait: async () => ({ transactionHash: '0xW' }) });
     const out = await run(['withdraw', 'all', '--broadcast']);
@@ -365,7 +380,7 @@ describe('withdraw', () => {
       tokenAddress: '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB'
     });
     expect(out).toMatchObject({ ok: true, txHash: '0xW', amountUsd: '3.25' });
-    expect(String(out.note)).toMatch(/pUSD transfer to Polymarket's bridge.*OMS wallet/);
+    expect(String(out.note)).toMatch(/pUSD transfer to Polymarket's bridge.*agent wallet/);
   });
 
   it('refuses more than the pUSD balance', async () => {

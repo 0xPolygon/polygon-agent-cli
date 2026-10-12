@@ -477,7 +477,7 @@ describe('getTradingClient with the key missing locally', () => {
     await expect(account.getTradingClient('main')).rejects.toMatchObject({
       code: 'not_set_up',
       message: 'The Polymarket key is not on this machine; it is backed up in your OMS account.',
-      hint: 'The next owner approval (email code) recovers it into a new key, or run wallet logout, then agent wallet login to use it through OMS.'
+      hint: 'The next owner approval recovers it into a new key, or run wallet logout, then agent wallet login --owner to use it through OMS.'
     });
     expect(account.hasLocalKey('main')).toBe(false);
     expect(sdk.createSecureClient).not.toHaveBeenCalled();
@@ -492,7 +492,7 @@ describe('getTradingClient with the key missing locally', () => {
     sdk.owner = owner;
     await expect(account.getTradingClient('main')).rejects.toMatchObject({
       code: 'not_set_up',
-      hint: 'Sign in with agent wallet login to use it.'
+      hint: 'Sign in with agent wallet login --owner to use it.'
     });
     expect(account.hasLocalKey('main')).toBe(false);
     expect(sdk.createSecureClient).not.toHaveBeenCalled();
@@ -550,7 +550,7 @@ describe('recoverAccount', () => {
     expect(sdk.clients[0].listPositions).toHaveBeenCalledWith({ status: 'OPEN' });
 
     // The old records moved, unchanged, into previous-<timestamp>/, plus a record of
-    // which OMS wallet holds the old key (there was no local backup.json).
+    // which agent wallet holds the old key (there was no local backup.json).
     const [prev] = previousDirs('rec');
     expect(out.recovered?.previousRecords).toBe(prev);
     const { 'backup.json': oldBackup, ...archived } = snapshot(
@@ -600,7 +600,7 @@ describe('recoverAccount', () => {
       recovered: { withdrawnUsd: '2.5', txHash: '0xSWEEP', positionsLeft: left },
       positionsLeft: left,
       error: 'Positions remain in the old Polymarket account; the key was not replaced.',
-      hint: 'Positions remain in the old Polymarket account. Sell or redeem them from an owner install (wallet logout, then agent wallet login, then polymarket setup --broadcast restores the account), then the next owner approval finishes the recovery.'
+      hint: 'Positions remain in the old Polymarket account. Sell or redeem them from an owner install (wallet logout, then agent wallet login --owner, then polymarket setup --broadcast restores the account), then the next owner approval finishes the recovery.'
     });
     expect(out).not.toHaveProperty('created');
     expect(sdk.clients[0].transferErc20).toHaveBeenCalledTimes(1);

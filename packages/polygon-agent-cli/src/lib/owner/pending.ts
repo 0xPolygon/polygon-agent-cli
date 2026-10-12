@@ -1,7 +1,7 @@
-// The pending owner request between step 1 (code sent) and step 2 (code
-// given): one per wallet, encrypted, deleted once used. It holds the throwaway
-// sign-in key, because the SDK signs the email-auth requests with it and step 2
-// must use the same key. A new step 1 replaces the request; step 2 deletes only
+// The pending owner request between step 1 (code sent, or browser sign-in
+// opened) and step 2 (signed in): one per wallet, encrypted, deleted once used.
+// It holds the throwaway sign-in key, because the SDK signs the auth requests
+// with it and step 2 must use the same key. A new step 1 replaces the request; step 2 deletes only
 // the request it used (under a lock), so it never removes a newer one.
 
 import fs from 'node:fs';
@@ -34,16 +34,31 @@ export type OwnerAction =
     }
   | { kind: 'access'; revoke?: { credentialId: string; sessionId?: string } };
 
-export interface PendingRequest {
+// What the login page is told about the request, so it can say what the
+// sign-in approves. Optional on both sides: an older page or relay ignores it.
+export interface LoginContext {
+  purpose: 'connect' | 'allowance' | 'renew' | 'withdraw' | 'access' | 'owner';
+  allowanceUsd?: number;
+  days?: number;
+  polymarket?: boolean;
+}
+
+export interface PendingBase {
   id: string;
   wallet: string;
-  email: string;
   action: OwnerAction;
   ownerKey: string;
-  attempt: EmailAttempt;
   createdAt: string;
   expiresAt: string;
 }
+
+// `email`: a code was emailed; `attempt` is the SDK's saved code request.
+// `browser`: the owner signs in on the login page paired by `relaySession`.
+export type PendingRequest = PendingBase &
+  (
+    | { method: 'email'; email: string; attempt: EmailAttempt }
+    | { method: 'browser'; relaySession: string; email?: string }
+  );
 
 const address = z.string().transform((value) => getAddress(value));
 
@@ -66,16 +81,34 @@ const OwnerActionSchema = z.discriminatedUnion('kind', [
   })
 ]);
 
-const PendingRequestSchema = z.object({
+const PendingBaseSchema = z.object({
   id: z.string(),
   wallet: z.string(),
-  email: z.string(),
   action: OwnerActionSchema,
   ownerKey: z.string(),
-  attempt: EmailAttemptSchema,
   createdAt: z.string(),
   expiresAt: z.string()
 });
+
+// Files written before sign-in methods existed have no `method`: they are email.
+const PendingRequestSchema = z.preprocess(
+  (value) =>
+    value && typeof value === 'object' && !('method' in value)
+      ? { ...value, method: 'email' }
+      : value,
+  z.discriminatedUnion('method', [
+    PendingBaseSchema.extend({
+      method: z.literal('email'),
+      email: z.string(),
+      attempt: EmailAttemptSchema
+    }),
+    PendingBaseSchema.extend({
+      method: z.literal('browser'),
+      relaySession: z.string(),
+      email: z.string().optional()
+    })
+  ])
+);
 
 const CipherSchema = z.object({ iv: z.string(), encrypted: z.string(), authTag: z.string() });
 

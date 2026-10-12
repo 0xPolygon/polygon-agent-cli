@@ -27,7 +27,7 @@ npm install -g @polygonlabs/agent-cli@latest   # upgrade
 
 ## Architecture
 
-The CLI uses the **OMS (Open Money Stack) V3 embedded-wallet** model (`@polygonlabs/oms-wallet`). By default, `wallet login` opens the agentconnect login page (`POLYGON_AGENT_LOGIN_UI`, default `https://agentconnect.polygon.technology`), where the user chooses Google or email (email sends a 6-digit code to the user's inbox, entered on the page). This works whether the browser is on this machine or a different one, so there is no separate headless mode. `--local` falls back to the legacy loopback flow (raw Google sign-in URL plus a localhost callback; browser must be on this same machine; Google only). `--remote` is deprecated and is now a no-op that prints a notice. Once the user signs in, the wallet is created or unlocked and the session credential is stored encrypted on disk. There is no on-chain permission scoping.
+The CLI uses the **OMS (Open Money Stack) V3 embedded-wallet** model (`@polygonlabs/oms-wallet`). `wallet login --owner` is the full owner sign-in. It opens the agentconnect login page (`POLYGON_AGENT_LOGIN_UI`, default `https://agentconnect.polygon.technology`), where the user chooses Google or email (email sends a 6-digit code to the user's inbox, entered on the page). This works whether the browser is on this machine or a different one, so there is no separate headless mode. With `--owner`, `--local` falls back to the legacy loopback flow (raw Google sign-in URL plus a localhost callback; browser must be on this same machine; Google only). `--remote` (also only with `--owner`) is deprecated and is now a no-op that prints a notice. Bare `wallet login` is **session mode** now (see below). Once the user signs in, the wallet is created or unlocked and the session credential is stored encrypted on disk. There is no on-chain permission scoping.
 
 | Wallet | Created by | Purpose | Fund? |
 |--------|-----------|---------|-------|
@@ -35,13 +35,21 @@ The CLI uses the **OMS (Open Money Stack) V3 embedded-wallet** model (`@polygonl
 
 The wallet address is the **same across all EVM chains**. Sessions last ~1 week before re-login is needed.
 
-## Session Mode (an allowance, by email code)
+## Session Mode (an allowance, approved by signing in)
 
-`agent wallet login --email <email>` connects this install with a **spending allowance** instead of a full sign-in. It's two non-interactive steps, so it works in a chat with no browser:
+Bare `agent wallet login` connects this install with a **spending allowance** instead of a full sign-in. The CLI picks the sign-in method itself: a browser page on a desktop, an emailed code in a chat or a headless session (see `workspace init --platform`). Set `POLYGON_AGENT_SIGNIN=browser` or `email` to force one.
 
 ```bash
-agent wallet login --email <email> [--allowance 1000] [--days 30] [--chains polygon,base]
-# → {status: "code_sent", request, plan, next}: show the user the plan; they get a code by email
+agent wallet login [--allowance 1000] [--days 30] [--chains polygon,base] [--email <email>]
+# browser → {status: "waiting", url, plan, next}: a sign-in page opens; run `next` (ends in --wait)
+agent wallet login --wait          # blocks up to ~90s; may print status "waiting" again, so run it again
+# chat code, no email known → error email_required, with `command` to run once you have the email
+# chat code → {status: "code_sent", request, plan, next}: show the user the plan; they get a code by email
+```
+
+`--email <email>` always uses the emailed code. Then, for a code:
+
+```bash
 agent wallet confirm --request <request> --code <code>
 # → signs in with the code, approves smart sessions with limits for this install's own key,
 #   checks them, then revokes the sign-in: only the limited key is kept
@@ -49,10 +57,12 @@ agent wallet confirm --request <request> --code <code>
 
 - **What it covers:** a USD total over a period (30 days by default) in USDC, USDT, USDG, ETH/WETH, POL/WPOL and BTC (WBTC or cbBTC) on the chosen chains (default Polygon, Base, and chains already holding those tokens). Each token also has an on-chain limit worth the allowance.
 - **What works:** `balances`, `send`/`send-token` (ERC-20s), `swap` (including bridges), `x402-pay`, `price`, `watch`, `alerts`. Native coins (ETH, POL, BNB, AVAX) can't be spent; buys of ETH or POL deliver WETH or WPOL.
-- **What doesn't:** `send-native`, `deposit`, `withdraw` (yield), `call` and ERC-8004 writes fail with `owner_required`.
-- **Owner requests** need a new code each time (same two steps, ending in `wallet confirm`): `wallet allowance set`, `wallet allowance renew`, `wallet withdraw`, `wallet access`.
-- **`agent wallet status`** is the place to start: connection, allowance used and left, holdings (and whether the allowance covers them), alerts, watches and the CLI version.
-- **Errors** in session mode carry `code`, `hint` and `command` (the next command to run), e.g. `not_connected`, `not_covered`, `allowance_exhausted`, `session_expired`, `owner_required`.
+- **What doesn't:** `send-native`, `deposit`, `withdraw` (yield), `call` and ERC-8004 writes fail with `owner_required`: they need the wallet owner (owner mode, `wallet login --owner`). Sign-in errors are listed under **Errors** below.
+- **Owner requests** need a new sign-in each time, with the same picker and `--email`: `wallet allowance set`, `wallet allowance renew`, `wallet withdraw`, `wallet access`. A browser request returns `waiting` and a `--wait` next (`wallet confirm --request <id> --wait` also waits); a chat code ends in `wallet confirm --request <id> --code <code>`.
+- **Funding:** an output may carry `funding: { url, reason?, amountUsd? }` (an empty wallet on connect, `insufficient_balance`, a Polymarket deposit shortfall). Open or send `funding.url`.
+- **Polymarket key:** every owner sign-in backs up the Polymarket trading key; the result shows it as `polymarket`.
+- **`agent wallet status`** is the place to start: connection, a pending sign-in (`pendingRequest` with `method` and, for the browser, `url`), allowance used and left, holdings (and whether the allowance covers them), alerts, watches and the CLI version.
+- **Errors** in session mode carry `code`, `hint` and `command` (the next command to run), e.g. `not_connected`, `not_covered`, `allowance_exhausted`, `session_expired`, `owner_required`, `email_required`, `browser_signin_failed`, `request_cancelled` (the user cancelled on the page), `request_in_progress` (a sign-in for this wallet is finishing: run its `--wait` command).
 
 ## Environment Variables
 
@@ -74,6 +84,7 @@ agent setup --oms-publishable-key <key>
 ### Optional overrides
 | Variable | Default |
 |----------|---------|
+| `POLYGON_AGENT_SIGNIN` | `browser` or `email`: forces the sign-in method for session mode instead of the automatic pick |
 | `POLYGON_AGENT_LOGIN_UI` | Base URL of the browser login page opened by `wallet login` (default `https://agentconnect.polygon.technology`) |
 | `POLYGON_AGENT_OIDC_RELAY` | Base URL of the OIDC relay used by `wallet login` (default `https://oidc-relay.polygon.technology`); also settable per run with `--relay-url` |
 | `SEQUENCE_PROJECT_ACCESS_KEY` | Used only as the Trails API key for DeFi earn-pool lookups (optional) |
@@ -84,13 +95,14 @@ agent setup --oms-publishable-key <key>
 ## Complete Setup Flow
 
 ```bash
-# Step 1: Log in in the browser
-agent wallet login
+# Step 1: Log in as the owner in the browser (developers; assistant installs use bare
+# `agent wallet login`, see Session Mode)
+agent wallet login --owner
 # → opens the agentconnect login page; choose Google or email (email sends
 #   a 6-digit code to the user's inbox, entered on the page)
 # → works whether the browser is on this machine or elsewhere, so there is
 #   no separate headless mode
-# → --local falls back to the legacy loopback flow (Google only, browser
+# → --local (with --owner) falls back to the legacy loopback flow (Google only, browser
 #   must be on this machine)
 # → session saved to ~/.polygon-agent/oms/main/; prints the walletAddress
 # → no setup step needed: the CLI ships a default OMS publishable key, and
@@ -108,7 +120,7 @@ agent mode auto      # or: agent mode dry-run
 agent fund
 # → reads walletAddress from session, builds Trails widget URL with toAddress=<walletAddress>
 # → ALWAYS run this command to get the URL — never construct it manually or hardcode any address
-# → send the returned `fundingUrl` to the user; `walletAddress` in the output confirms the recipient
+# → send the returned `url` to the user; `walletAddress` in the output confirms the recipient
 
 # Step 3: Verify balances
 agent balances
@@ -134,7 +146,7 @@ For specific workflows, fetch and load the relevant sub-skill **before attemptin
 > **IMPORTANT — x402 calls:** If the user asks to use x402 to fetch data or call a service (web search, scraping, news, LLM inference, email, on-chain wallet analytics, multi-chain RPC, etc.), follow these steps in order before making any request:
 >
 > 1. Fetch and read the discovery skill: `GET https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/polygon-discovery/SKILL.md`
-> 2. Run `agent wallet list` — if no wallet exists, log in: `agent wallet login` and sign in on the login page (Google or email), then fund the wallet before continuing. No setup step is needed first.
+> 2. Run `agent wallet list` — if no wallet exists, log in with `agent wallet login` and follow its output (a sign-in page, or an emailed code), then fund the wallet before continuing. No setup step is needed first.
 > 3. Run `agent balances` — confirm USDC is available before proceeding; x402 calls will fail with an EOA funding error if the wallet is empty
 >
 > Do not guess endpoints or search the web for x402 providers. The discovery skill documents the correct, working endpoints with exact URL formats.
@@ -154,23 +166,24 @@ agent mode [auto|dry-run]   # show or set the persisted transaction mode
 Valid `--chain` values for operations: a chain name or ID, e.g. `polygon` (default), `amoy` (Polygon testnet), `mainnet` (Ethereum), `arbitrum`, `optimism`, `base`, `bsc`, `avalanche`, `katana`. ERC-8004 agent operations only support `polygon`. The embedded wallet address is the same on every chain.
 
 ```bash
-agent wallet login [--name <n>] [--local] [--no-fund] [--force]
-# Opens the agentconnect login page; choose Google or email. Works whether the browser is local or remote, so there is no separate headless mode.
-# --local falls back to the legacy loopback flow (raw Google URL + localhost callback; browser must be on this machine; Google only). --remote is deprecated (now a no-op with a notice).
+agent wallet login --owner [--name <n>] [--local] [--no-fund] [--force]
+# Owner sign-in. Opens the agentconnect login page; choose Google or email. Bare `wallet login` (no --owner) is session mode. Works whether the browser is local or remote, so there is no separate headless mode.
+# --local (owner only) falls back to the legacy loopback flow (raw Google URL + localhost callback; browser must be on this machine; Google only). --remote is deprecated (now a no-op with a notice).
 agent wallet logout [--name <n>]   # owner mode: clears the local session; session mode: revokes this install's access
 agent wallet list
 agent wallet address [--name <n>]
 agent wallet remove [--name <n>]
 
-# Session mode (an allowance approved by email code; see Session Mode)
-agent wallet login --email <email> [--allowance <usd>] [--days <1-30>] [--chains <csv>]
-agent wallet confirm --request <id> --code <code>
+# Session mode (an allowance approved by signing in; see Session Mode)
+agent wallet login [--email <email>] [--allowance <usd>] [--days <1-30>] [--chains <csv>]   # picks browser or chat code
+agent wallet login --wait                                 # wait for a browser sign-in
+agent wallet confirm --request <id> (--code <code> | --wait)
 agent wallet status                                       # start here
 agent wallet allowance                                    # show it
-agent wallet allowance set [--amount <usd>] [--add <token>[@<chain>]] [--chains <csv>]   # sends a code
-agent wallet allowance renew [--days <n>]                 # sends a code
-agent wallet withdraw --to <addr> --token <SYM> --amount <n> [--chain <chain>]           # as the owner; sends a code
-agent wallet access [--revoke <credentialId>] [--session <id>]                           # sends a code
+agent wallet allowance set [--amount <usd>] [--add <token>[@<chain>]] [--chains <csv>]   # new sign-in
+agent wallet allowance renew [--days <n>]                 # new sign-in
+agent wallet withdraw --to <addr> --token <SYM> --amount <n> [--chain <chain>]           # as the owner; new sign-in
+agent wallet access [--revoke <credentialId>] [--session <id>]                           # new sign-in
 ```
 
 ### Operations
@@ -193,7 +206,7 @@ agent x402-pay --url <url> --wallet <n> [--chain <chain>] [--method GET] [--body
 agent polymarket status                              # start here: setup, balance, region, redeemable
 agent polymarket setup [--broadcast]                 # create the account (no POL needed)
 agent polymarket deposit <usd> [--again] [--no-wait] [--broadcast]   # min $2; counts against a session allowance
-agent polymarket withdraw <usd|all> [--broadcast]    # pays the OMS wallet as USDC
+agent polymarket withdraw <usd|all> [--broadcast]    # pays the agent wallet as USDC
 agent polymarket markets [--search <text>] [--limit <n>] [--cursor <c>]
 agent polymarket event <slug> | market <ref> | book <ref> <outcome> | history <ref> <outcome>
 agent polymarket buy <ref> <outcome> <usd> [--max-price <0-1>] [--price <0-1>] [--expires <min>] [--broadcast]
@@ -217,7 +230,7 @@ agent alerts --ack [id…]
 
 ### Workspace installs
 ```bash
-agent workspace init --root <workspace>/.polygon-agent [--skills-dir <dir>] [--name <install name>]
+agent workspace init --root <workspace>/.polygon-agent [--skills-dir <dir>] [--name <install name>] [--platform <muse|openclaw|hermes|claude-code|cursor|codex|other>]
 agent skills [show <name> | install <name> --dir <dir>]
 agent update                                      # workspace installs: latest CLI, refreshed skill
 ```
@@ -243,7 +256,7 @@ agent feedback --agent-id <id> --value <score> [--tag1 <t>] [--tag2 <t>] [--endp
 - **Smart defaults** — `--wallet main`, `--chain polygon`
 - **`balances --chains`** — comma-separated chains (max 20); two or more return JSON with `multiChain: true` and a `chains` array (same wallet address on each)
 - **Fee preference** — auto-selects USDC over native POL when both available; the relayer pays gas in whichever fee token the wallet can afford
-- **`fund`** — returns the agentconnect dashboard funding URL (wallet and chain prefilled) as the `fundingUrl`. Always run `agent fund` to get the URL and wallet address — never hardcode or construct manually.
+- **`fund`** — returns the agentconnect dashboard funding URL (wallet and chain prefilled) as `url`. Always run `agent fund` to get the URL and wallet address — never hardcode or construct manually.
 - **`deposit`** — picks highest-TVL pool via Trails `getEarnPools` and deposits directly. Full deposit reference: https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/polygon-defi/SKILL.md
 - **Gas reserve** — when using `deposit` or any command that spends tokens, always reserve at least 0.1 USDC or 0.1 POL in the wallet for gas. Never attempt to spend the full balance. The `deposit` command enforces a 0.1 reserve automatically, but the agent must apply the same rule when constructing amounts for `send`, `swap`, or direct contract calls.
 - **`withdraw`** — `--position` = aToken or ERC-4626 vault; `--amount` = `max` or underlying units (Aave / vault). Dry-run JSON includes `poolAddress` / `vault`.
@@ -254,7 +267,7 @@ agent feedback --agent-id <id> --value <score> [--tag1 <t>] [--tag2 <t>] [--endp
 - **`call`** — submit arbitrary pre-encoded calldata: `agent call --to <addr> --data 0x... [--value <amt>] [--prefer-native-fee] [--broadcast]`. The wallet can call any contract (no permission scoping in the V3 model)
 - **`send-native --direct`** — bypasses ValueForwarder contract for direct EOA transfer
 - **No permission scoping (owner mode)** — the V3 embedded wallet can call any contract and spend any amount it holds; there are no per-contract whitelists or spend limits. Guard spending in agent logic, not at the wallet layer.
-- **Session expiry** — ~1 week from login; on expiry, re-run `wallet login`
+- **Session expiry** — ~1 week from login; on expiry, re-run `wallet login --owner` (owner mode)
 
 ## Presenting Results to the User
 
@@ -267,7 +280,7 @@ CLI commands output JSON (non-TTY). After running a command, always render the r
 | `swap` | Summary: `X FROM → Y TO` with chain. If broadcast, show deposit tx hash + explorer link. |
 | `deposit` | Summary: amount, asset, protocol, pool address. If broadcast, show tx hash + explorer link. |
 | `withdraw` | Summary: `kind` (aave / erc4626), position, amount, pool or vault. If broadcast, show tx hash + explorer link. |
-| `fund` | Show the `fundingUrl` as a clickable link with a brief instruction to open it. |
+| `fund` | Show the `url` as a clickable link with a brief instruction to open it. |
 | `wallet login` / `wallet list` | Wallet name, truncated address, chain in a small table or bullet list. |
 | `register` | Show agent name and tx hash as a code span with Polygonscan link. Remind user to retrieve `agentId` from the Registered event on the Logs tab. |
 | `identity` | Show `agentId`, wallet address, whether a wallet is set, and the decoded metadata value when `--key` was passed. |
@@ -283,8 +296,8 @@ CLI commands output JSON (non-TTY). After running a command, always render the r
 
 | Issue | Fix |
 |-------|-----|
-| `Wallet not found` | `wallet list`, then `agent wallet login` |
-| Session expired (`OMS_SESSION_EXPIRED`) | Run `agent wallet login` (~1-week lifetime) |
+| `Wallet not found` / no wallet yet | `wallet list`, then `agent wallet login` |
+| Owner-mode session expired (`OMS_SESSION_EXPIRED`) | Run `agent wallet login --owner` (~1-week lifetime) |
 | `Fee option errors` | Set `POLYGON_AGENT_DEBUG_FEE=1`, ensure wallet has POL or a fee token. For native-only wallets, add `--prefer-native-fee` on `call` |
 | Wrong recipient in Trails widget | Run `agent fund` (do not construct the URL manually) |
 | `x402-pay`: no 402 response | Endpoint doesn't require x402 payment, or URL is wrong |
@@ -298,7 +311,7 @@ CLI commands output JSON (non-TTY). After running a command, always render the r
 ├── config.json           # transaction mode (auto | dry-run)
 ├── builder.json          # publishableKey, omsProjectId, access key
 ├── polymarket/<wallet>/  # Polymarket trading key, builder key, account (encrypted)
-├── wallets/<name>.json   # OMS wallet pointer: walletAddress, loginMethod, access (owner | session)
+├── wallets/<name>.json   # agent wallet pointer: walletAddress, loginMethod, access (owner | session)
 ├── oms/<name>/           # OMS SDK session storage + encrypted credential key (owner mode)
 ├── session/<name>/       # session key, approved plan, USD ledger (session mode)
 ├── trades/               # swap state by intent id

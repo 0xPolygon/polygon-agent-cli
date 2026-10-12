@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { LoginAction, MachineEvent, MachineState, RelayStatus } from './machine.js';
+import type {
+  LoginAction,
+  LoginContext,
+  MachineEvent,
+  MachineState,
+  RelayStatus
+} from './machine.js';
 
 import { LogoBadge } from '../App.js';
 import { oidcRelayUrl } from '../config';
-import { initialState, reduce } from './machine.js';
+import { contextLine, initialState, reduce } from './machine.js';
 import { getSessionId, isRelayReturn } from './returnUrl.js';
 
 // Poll fast while waiting on the CLI (returning from the provider, checking a
@@ -96,6 +102,7 @@ export function LoginPage() {
   const dispatch = useCallback((event: MachineEvent) => {
     setState((s) => reduce(s, event));
   }, []);
+  const [context, setContext] = useState<LoginContext | undefined>(undefined);
   const redirected = useRef(false);
   const postedRelayCallback = useRef(false);
 
@@ -140,6 +147,8 @@ export function LoginPage() {
   // without another click; the success card shows briefly, then we move on.
   useEffect(() => {
     if (state.kind !== 'success') return;
+    // With a funding link to offer, stay put so it can be used.
+    if (state.funding) return;
     const target = dashboardUrl(state.walletAddress);
     const timer = setTimeout(() => window.location.assign(target), 1800);
     return () => clearTimeout(timer);
@@ -153,6 +162,7 @@ export function LoginPage() {
       () => {
         void fetchStatus(session).then((status) => {
           if (status === null) return; // transient failure; keep polling
+          if (status.context) setContext(status.context);
           if (status.status === 'auth-url' && !redirected.current && state.kind === 'google-wait') {
             redirected.current = true;
             window.location.assign(status.url);
@@ -181,7 +191,7 @@ export function LoginPage() {
     );
   }
 
-  return <Shell>{renderState(state, session, dispatch)}</Shell>;
+  return <Shell>{renderState(state, session, dispatch, context)}</Shell>;
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -197,11 +207,17 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function renderState(state: MachineState, session: string, dispatch: (e: MachineEvent) => void) {
+function renderState(
+  state: MachineState,
+  session: string,
+  dispatch: (e: MachineEvent) => void,
+  context?: LoginContext
+) {
   switch (state.kind) {
     case 'method':
       return (
         <MethodChoice
+          line={contextLine(context)}
           onGoogle={() => {
             void postAction(session, { type: 'google' }).then((ok) => {
               if (ok) dispatch({ type: 'choose-google' });
@@ -260,13 +276,24 @@ function renderState(state: MachineState, session: string, dispatch: (e: Machine
           <h1 className="text-xl font-semibold text-[#141635]">You're signed in</h1>
           <p className="mt-2 text-sm text-[#64708f] break-all">Wallet {state.walletAddress}</p>
           <p className="mt-2 text-sm text-[#64708f]">
-            Your terminal session is ready. Taking you to your dashboard.
+            {state.funding
+              ? 'Your terminal session is ready. Your agent wallet is empty.'
+              : 'Your terminal session is ready. Taking you to your dashboard.'}
           </p>
+          {state.funding && (
+            <a
+              href={state.funding.url}
+              className="mt-6 inline-block rounded-xl bg-[#141635] px-5 py-3 text-sm font-medium text-white hover:bg-[#1e2155]"
+            >
+              Add funds
+            </a>
+          )}
+          <br />
           <a
             href={dashboardUrl(state.walletAddress)}
             className="mt-6 inline-block text-sm text-[#64708f] hover:text-[#141635] underline"
           >
-            Not redirected? Open your dashboard
+            {state.funding ? 'Open your dashboard' : 'Not redirected? Open your dashboard'}
           </a>
         </div>
       );
@@ -317,15 +344,21 @@ function GoogleLogo() {
   );
 }
 
-function MethodChoice({ onGoogle, onEmail }: { onGoogle: () => void; onEmail: () => void }) {
+function MethodChoice({
+  line,
+  onGoogle,
+  onEmail
+}: {
+  line: string;
+  onGoogle: () => void;
+  onEmail: () => void;
+}) {
   return (
     <div>
       <h1 className="text-xl font-semibold text-[#141635] text-center">
         Sign in to your agent wallet
       </h1>
-      <p className="mt-2 text-sm text-[#64708f] text-center">
-        This connects to your agent in your terminal.
-      </p>
+      <p className="mt-2 text-sm text-[#64708f] text-center">{line}</p>
       <button
         onClick={onGoogle}
         className="mt-6 w-full rounded-xl bg-[#141635] px-5 py-3 text-sm font-medium text-white hover:bg-[#1e2155] flex items-center justify-center gap-2.5"

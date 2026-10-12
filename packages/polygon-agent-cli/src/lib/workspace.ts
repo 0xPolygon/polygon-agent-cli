@@ -30,6 +30,17 @@ export POLYGON_AGENT_HOME="$ROOT/state" POLYGON_AGENT_ROOT="$ROOT" NODE_USE_ENV_
 exec "$NODE" "$ROOT/cli/node_modules/@polygonlabs/agent-cli/dist/index.js" "$@"
 `;
 
+export const PLATFORMS = [
+  'muse',
+  'openclaw',
+  'hermes',
+  'claude-code',
+  'cursor',
+  'codex',
+  'other'
+] as const;
+export type Platform = (typeof PLATFORMS)[number];
+
 // Lenient on read, so a record written by another CLI version still counts.
 const InstallRecord = z.object({
   root: z.string(),
@@ -37,6 +48,8 @@ const InstallRecord = z.object({
   version: z.string(),
   skillsDir: z.string().nullable().default(null),
   skillPath: z.string().nullable().default(null),
+  // An unknown platform (a newer CLI's) reads as none, never as no record.
+  platform: z.enum(PLATFORMS).optional().catch(undefined),
   installedAt: z.string(),
   updatedAt: z.string().optional()
 });
@@ -187,6 +200,7 @@ export function initWorkspace(params: {
   version: string;
   skillsDir?: string;
   name?: string;
+  platform?: Platform;
   sourceDir?: string | null;
 }): InitResult {
   const root = path.resolve(params.root);
@@ -263,6 +277,7 @@ export function initWorkspace(params: {
       name,
       version: params.version,
       skillsDir,
+      platform: params.platform ?? previous?.platform,
       skillPath: skill.installed && skill.path ? skill.path : (previous?.skillPath ?? null),
       installedAt: previous?.installedAt ?? now,
       updatedAt: now
