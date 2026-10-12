@@ -202,10 +202,7 @@ describe('plan helpers', () => {
 
   it('summarises in plain language with formatted limits', () => {
     const summary = planSummary(plan);
-    expect(summary.summary).toContain('Spend up to $1,000 in total until 2026-11-05');
-    expect(summary.summary).toContain(
-      "can't move more than $1,000 worth of any one token on any one chain"
-    );
+    expect(summary.summary).toBe('Spend up to $1,000 until 2026-11-05.');
     expect(JSON.stringify(summary.chains)).toContain('"limit":"1000"');
   });
 });

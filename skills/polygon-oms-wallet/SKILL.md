@@ -9,7 +9,7 @@ description: >-
 
 # Polygon agent wallet
 
-You look after your agent wallet (an OMS embedded wallet) with the `polygon-agent` CLI. You can spend on your own only within the **allowance** the user approved by signing in, on a page in their browser or with an emailed code: a USD total over a period (30 days by default), in the tokens and on the chains they chose. Anything beyond it (a higher amount, other tokens or chains, a renewal, a withdrawal, managing access) needs a new sign-in from the user.
+You look after your agent wallet (an OMS embedded wallet) with the `polygon-agent` CLI. You can spend on your own only within the **allowance** the user approved by signing in, on a page in their browser or with an emailed code: a USD total over a period (30 days by default). Anything beyond it (a higher amount, other tokens or chains, a renewal, a withdrawal, managing access) needs a new sign-in from the user.
 
 **How to talk to the user.** Talk like a helpful assistant: short, friendly, outcome first, one or two sentences. Don't narrate how things work (sign-in mechanics, session keys, the background sign-in, the Polymarket key backup or the extra wallet it adds, JSON fields or status names) unless the user asks or something fails. Keep what they need to act: what they're approving (amount and period, or the withdrawal details), where to sign in, or which code to paste.
 
@@ -43,20 +43,20 @@ Order of work: status → connect → funding → the user's request. Ask for an
 
 ## Connect
 
-1. Ask how much you may spend, suggesting **$1,000 over 30 days**: "How much should I be able to spend on my own? I suggest up to $1,000 over the next 30 days." (The default covers USDC, USDT, ETH and BTC on Polygon and Base; say so only if they ask.) If they ask how it works: the sign-in lets the CLI act as them just long enough to approve a limited key for this install, then signs out; only that key is kept, never their sign-in.
-2. `"$POLYGON_AGENT" wallet login --allowance <usd> --days <days>` starts the connection. The CLI picks the method itself, so don't ask for an email first. An emailed code is the default; a browser page is used only for a local coding agent on a desktop or a person typing in a terminal. Add `--chains polygon,base,…` only if the user asked for other chains; chains where the wallet already holds supported tokens are added on their own.
+1. Ask how much you may spend, suggesting **$1,000 over 30 days**: "How much should I be able to spend on my own? I suggest up to $1,000 over the next 30 days." If they ask how it works: the sign-in lets the CLI act as them just long enough to approve a limited key for this install, then signs out; only that key is kept, never their sign-in.
+2. `"$POLYGON_AGENT" wallet login --allowance <usd> --days <days>` starts the connection. The CLI picks the method itself, so don't ask for an email first. An emailed code is the default; a browser page is used only for a local coding agent on a desktop or a person typing in a terminal.
 3. Follow the outcome (the same for every owner request, below):
 
    | Output | Do |
    |---|---|
-   | `status: "waiting"` | Tell the user, for example, "Sign in on the page that just opened to approve $1,000 over 30 days." Take the amount and period from the `plan`, never from memory, and mention a token or chain only when the request adds one. If no browser opened or they can't see it, send them `url`. Run `next` (it ends in `--wait`). It blocks up to about 90 seconds; if it returns `waiting` again, run `next` again until it finishes. |
+   | `status: "waiting"` | Tell the user, for example, "Sign in on the page that just opened to approve $1,000 over 30 days." Take the amount and period from the `plan`, never from memory. If no browser opened or they can't see it, send them `url`. Run `next` (it ends in `--wait`). It blocks up to about 90 seconds; if it returns `waiting` again, run `next` again until it finishes. |
    | error `email_required` | Ask for the user's email. Never guess it. Run its `command` with the email in place of `<email>`. |
    | `status: "code_sent"` | Tell the user, for example, "I've sent a code to <email>. Paste it here to approve $1,000 over 30 days." (from the `plan`). When the code arrives, run `next` right away: `"$POLYGON_AGENT" wallet confirm --request <id> --code <code>`. |
    | error `browser_signin_failed` | The page sign-in stopped. Run its `command` to use an emailed code instead. |
    | error `request_cancelled` | The user cancelled on the page. Ask whether to try again. |
    | error `request_in_progress` | A sign-in for this wallet is already finishing. Run the `--wait` command in its `command`. |
 
-4. Tell the user the result in one short line, for example: "You're connected. I can spend up to $1,000 over the next 30 days." Take the amount and period from `allowance` in the output. If any chain is in `failed` or there are `warnings`, add one plain sentence about what it means for them. Then give the address (see The wallet address).
+4. Tell the user the result in one short line, for example: "You're connected. I can spend up to $1,000 over the next 30 days." Take the amount and period from `allowance` in the output. If anything is in `failed` or there are `warnings`, say briefly that part of the setup needs a retry, without naming chains, and run the hinted command. Talk about the allowance as a dollar amount and period only. Don't mention chains or tokens. Then give the address (see The wallet address).
 5. Then send: "You can see your wallet and add funds here: <dashboard.url>", with `dashboard.url` from the output, sent in full. Nothing opens on its own, so always send the link. `wallet status` returns the same `dashboard.url` when you need it later. Then go on to funding.
 
 ## The wallet address
@@ -145,10 +145,10 @@ Options: `--every 15m` (5m to 24h, whole minutes), `--expires 30d` (up to 90d), 
 
 ## Raising the limit
 
-When the user asks for a higher limit (or more tokens, more chains, or more time):
+When the user asks for a higher limit (or more time):
 
 1. Say yes and ask for the details you don't have, for example: "Sure, we can do that. How much would you like me to be able to spend?" `--amount` is the new total: for "raise it by $500", add $500 to the current allowance (`"$POLYGON_AGENT" wallet allowance`).
-2. Run `"$POLYGON_AGENT" wallet allowance set --amount <usd>` (add `--add <token>@<chain>` or `--chains <chain>` for tokens or chains; for more time, `wallet allowance renew --days <n>`). Handle the outcome as in Owner requests below.
+2. Run `"$POLYGON_AGENT" wallet allowance set --amount <usd>` (for more time, `wallet allowance renew --days <n>`). Handle the outcome as in Owner requests below.
 3. Once it's approved, confirm in one line: "Done. I can now spend up to $2,000 until Nov 7."
 
 ## Owner requests (a new sign-in each time)
