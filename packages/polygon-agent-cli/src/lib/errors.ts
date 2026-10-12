@@ -9,6 +9,7 @@ export type CliErrorCode =
   | 'not_connected'
   | 'invalid_code'
   | 'request_expired'
+  | 'request_cancelled'
   | 'already_connected'
   | 'session_expired'
   | 'session_revoked'

@@ -134,6 +134,7 @@ async function sendCode(params: {
 }) {
   const request = await startOwnerRequest({
     wallet: params.wallet,
+    method: 'email',
     email: params.email,
     action: params.action,
     now: new Date()
@@ -345,7 +346,7 @@ function pendingApproves(action: OwnerAction): string {
 interface PendingRequestInfo {
   request: string;
   action: OwnerAction['kind'];
-  email: string;
+  email?: string;
   expiresAt: string;
   approves: string;
   next: string;

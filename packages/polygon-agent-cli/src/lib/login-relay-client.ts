@@ -4,14 +4,17 @@
 // pairing session only ever carries session/action/status.
 
 import type { BrowserLoginDeps, LoginAction, LoginStatus } from './browser-login.ts';
+import type { LoginContext } from './owner/pending.ts';
 
 export function makeLoginRelay(relayBase: string): BrowserLoginDeps['relay'] {
   return {
-    async registerSession(session: string): Promise<void> {
+    // `context` tells the page what the sign-in approves; a relay that
+    // doesn't know it ignores it.
+    async registerSession(session: string, context?: LoginContext): Promise<void> {
       const res = await fetch(`${relayBase}/api/login/register`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ session })
+        body: JSON.stringify({ session, context })
       });
       if (!res.ok && res.status !== 204) {
         throw new Error(
