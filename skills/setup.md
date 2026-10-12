@@ -9,6 +9,7 @@ description: >-
 # Set up the Polygon OMS Agent Kit
 
 > **QA build (staging):** installs the `polymarket-qa` snapshot of the CLI (npm dist-tag), for testing before release. Don't run `polygon-agent update` during QA: it would compare against the released version.
+> This build signs in through the staging login page (agentconnect.staging.polygon.technology), which needs Polygon's Cloudflare WARP. Without it, the browser sign-in can't load: use the emailed code instead (`wallet login --email <email>`).
 
 **For the assistant.** Follow these steps in order. Each one is safe to re-run. Tell the user what you're doing in plain words as you go, and never paste raw JSON to them.
 

@@ -45,8 +45,9 @@ export function getOmsClient(walletName: string): OMSWallet {
 // vars. Production domains, provisioned by the oidc-relay and agentconnect-ui
 // deploys on merge to main. Override per environment (or to test against
 // staging) with POLYGON_AGENT_OIDC_RELAY / POLYGON_AGENT_LOGIN_UI.
-const DEFAULT_OIDC_RELAY = 'https://oidc-relay.polygon.technology';
-const DEFAULT_LOGIN_UI = 'https://agentconnect.polygon.technology';
+// QA build (staging branch only): default to the staging relay and login page.
+const DEFAULT_OIDC_RELAY = 'https://oidc-relay-staging.polygon-technology.workers.dev';
+const DEFAULT_LOGIN_UI = 'https://agentconnect.staging.polygon.technology';
 
 /**
  * Base URL of our login pairing relay (packages/oidc-relay). Read from
