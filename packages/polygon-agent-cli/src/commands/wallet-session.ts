@@ -509,7 +509,8 @@ export async function handleSessionLogin(argv: {
 
 // --- wallet confirm (step 2 of every owner request) ---
 
-type ConfirmedResult = Awaited<ReturnType<typeof confirmOwnerRequest<Record<string, unknown>>>>;
+// Also the action result before the revoke fields are known (the waiter builds it early).
+type ConfirmedResult = Record<string, unknown>;
 
 // What `wallet confirm` prints for a confirmed request, by code or by the
 // waiter. A newly connected install gets its own Builder access key (Trails
@@ -576,6 +577,8 @@ async function runBrowserWaiter(params: { wallet: string; id: string }): Promise
   writePid({ wallet, id, pid: process.pid, emailCommand: waiterEmailCommand(wallet, id) });
   try {
     let json: Record<string, unknown>;
+    // The result as built for the login page, reused so it is built once.
+    let early: Record<string, unknown> | undefined;
     try {
       const confirmed = await confirmOwnerRequest({
         wallet,
@@ -583,13 +586,26 @@ async function runBrowserWaiter(params: { wallet: string; id: string }): Promise
         now: new Date(),
         // The request's own expiry caps it.
         browser: { timeoutMs: REQUEST_LIFETIME_MS },
+        // The login page is told about funding once the result is known.
+        doneExtras: async (result) => {
+          early = await confirmedJson(wallet, result);
+          return { funding: early.funding as { url: string } | undefined };
+        },
         run: (context) =>
           withWalletKeys({
             wallet,
             fn: () => runOwnerAction({ context, wallet, now: new Date() })
           })
       });
-      json = await confirmedJson(wallet, confirmed);
+      json = early
+        ? {
+            ...early,
+            ownerSignInRevoked: confirmed.ownerSignInRevoked,
+            ...(confirmed.ownerSignInRevokeError === undefined
+              ? {}
+              : { ownerSignInRevokeError: confirmed.ownerSignInRevokeError })
+          }
+        : await confirmedJson(wallet, confirmed);
       await openFundingPage(json);
     } catch (error) {
       json = errorJson(error);

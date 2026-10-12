@@ -19,8 +19,36 @@ export type LoginStatus =
   | { status: 'auth-url'; url: string }
   | { status: 'otp-sent' }
   | { status: 'otp-invalid'; attemptsLeft?: number }
-  | { status: 'done'; walletAddress: string }
+  | { status: 'done'; walletAddress: string; funding?: { url: string } }
   | { status: 'error'; message: string };
+
+// What the sign-in approves, published by the CLI at register so the page can
+// say so. Entirely optional: an invalid context is dropped, never an error.
+export interface LoginContext {
+  purpose: 'connect' | 'allowance' | 'renew' | 'withdraw' | 'access' | 'owner';
+  allowanceUsd?: number;
+  days?: number;
+  polymarket?: boolean;
+}
+
+const PURPOSES = new Set(['connect', 'allowance', 'renew', 'withdraw', 'access', 'owner']);
+
+// Returns a reconstructed context with only known, valid fields, or undefined
+// when the input is not a usable context.
+export function parseLoginContext(c: unknown): LoginContext | undefined {
+  if (typeof c !== 'object' || c === null) return undefined;
+  const { purpose, allowanceUsd, days, polymarket } = c as Record<string, unknown>;
+  if (typeof purpose !== 'string' || !PURPOSES.has(purpose)) return undefined;
+  const out: LoginContext = { purpose: purpose as LoginContext['purpose'] };
+  if (typeof allowanceUsd === 'number' && Number.isFinite(allowanceUsd) && allowanceUsd >= 0) {
+    out.allowanceUsd = allowanceUsd;
+  }
+  if (typeof days === 'number' && Number.isInteger(days) && days >= 0 && days <= 3650) {
+    out.days = days;
+  }
+  if (typeof polymarket === 'boolean') out.polymarket = polymarket;
+  return out;
+}
 
 const VALID_STATUS_VALUES = new Set([
   'awaiting-method',
@@ -58,6 +86,21 @@ export function parseLoginStatus(s: unknown): LoginStatus | null {
   const attemptsLeft = (s as { attemptsLeft?: unknown }).attemptsLeft;
   if (attemptsLeft !== undefined && typeof attemptsLeft !== 'number') return null;
 
+  // Funding is a courtesy link: anything but a short https URL is dropped,
+  // leaving the done status itself intact.
+  const rawFunding = (s as { funding?: { url?: unknown } | null }).funding;
+  let funding: { url: string } | undefined;
+  if (typeof rawFunding === 'object' && rawFunding !== null) {
+    const furl = rawFunding.url;
+    if (typeof furl === 'string' && furl.length <= 2048) {
+      try {
+        if (new URL(furl).protocol === 'https:') funding = { url: furl };
+      } catch {
+        // not a URL; dropped
+      }
+    }
+  }
+
   // Reconstruct with only valid fields for this status
   switch (status) {
     case 'awaiting-method':
@@ -73,7 +116,9 @@ export function parseLoginStatus(s: unknown): LoginStatus | null {
         : { status: 'otp-invalid' };
     case 'done':
       if (typeof walletAddress !== 'string') return null;
-      return { status: 'done', walletAddress };
+      return funding
+        ? { status: 'done', walletAddress, funding }
+        : { status: 'done', walletAddress };
     case 'error':
       if (typeof message !== 'string') return null;
       return { status: 'error', message };
@@ -92,8 +137,11 @@ export interface SessionStore {
 export class LoginSessionCore {
   constructor(private readonly store: SessionStore) {}
 
-  async register(): Promise<void> {
+  async register(context?: unknown): Promise<void> {
+    const parsed = parseLoginContext(context);
     await this.store.put({ armed: true, status: { status: 'awaiting-method' } });
+    if (parsed) await this.store.put({ context: parsed });
+    else await this.store.delete('context');
   }
 
   async submitAction(
@@ -124,9 +172,12 @@ export class LoginSessionCore {
     return { ok: true };
   }
 
-  async getStatus(): Promise<LoginStatus | { status: 'expired' }> {
+  async getStatus(): Promise<(LoginStatus & { context?: LoginContext }) | { status: 'expired' }> {
     if (!(await this.store.get<boolean>('armed'))) return { status: 'expired' };
-    return (await this.store.get<LoginStatus>('status')) ?? { status: 'expired' };
+    const status = await this.store.get<LoginStatus>('status');
+    if (!status) return { status: 'expired' };
+    const context = await this.store.get<LoginContext>('context');
+    return context ? { ...status, context } : status;
   }
 }
 
@@ -153,7 +204,8 @@ export class LoginSession {
     const op = url.pathname; // internal path set by the router in relay.ts
 
     if (op === '/register') {
-      await this.core.register();
+      const context = await request.json().catch(() => undefined);
+      await this.core.register(context);
       await this.state.storage.setAlarm(Date.now() + SESSION_TTL_MS);
       return new Response(null, { status: 204 });
     }

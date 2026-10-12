@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { MachineState } from './machine.ts';
 
-import { initialState, reduce } from './machine.ts';
+import { contextLine, DEFAULT_CONTEXT_LINE, initialState, reduce } from './machine.ts';
 
 describe('login machine', () => {
   it('google: method -> google-wait -> success', () => {
@@ -138,6 +138,57 @@ describe('login machine', () => {
     });
     expect(reduce(initialState, { type: 'submit-email', email: 'a@b.co' })).toEqual({
       kind: 'method'
+    });
+  });
+});
+
+describe('contextLine', () => {
+  it('connect names the allowance and days', () => {
+    expect(contextLine({ purpose: 'connect', allowanceUsd: 1000, days: 30 })).toBe(
+      'Connect your assistant with a $1,000 allowance for 30 days.'
+    );
+  });
+
+  it('connect with polymarket adds the key backup sentence', () => {
+    expect(
+      contextLine({ purpose: 'connect', allowanceUsd: 1000, days: 30, polymarket: true })
+    ).toBe(
+      'Connect your assistant with a $1,000 allowance for 30 days. This also backs up your Polymarket trading key.'
+    );
+  });
+
+  it('has a line for every other purpose, with no em dashes', () => {
+    const lines = [
+      contextLine({ purpose: 'allowance', allowanceUsd: 250, days: 7 }),
+      contextLine({ purpose: 'renew', days: 30 }),
+      contextLine({ purpose: 'withdraw' }),
+      contextLine({ purpose: 'access' }),
+      contextLine({ purpose: 'owner' })
+    ];
+    expect(lines[0]).toBe("Change your assistant's allowance to $250 for 7 days.");
+    expect(lines[1]).toBe("Renew your assistant's allowance for 30 days.");
+    for (const l of lines) {
+      expect(l).not.toContain('\u2014');
+      expect(l).not.toContain('OMS');
+    }
+  });
+
+  it("no context keeps today's copy", () => {
+    expect(contextLine()).toBe(DEFAULT_CONTEXT_LINE);
+    expect(DEFAULT_CONTEXT_LINE).toBe('This connects to your agent in your terminal.');
+  });
+});
+
+describe('done with funding', () => {
+  it('carries the funding link into success', () => {
+    const s = reduce(initialState, {
+      type: 'status',
+      status: { status: 'done', walletAddress: '0xW', funding: { url: 'https://f.co/x' } }
+    });
+    expect(s).toEqual({
+      kind: 'success',
+      walletAddress: '0xW',
+      funding: { url: 'https://f.co/x' }
     });
   });
 });

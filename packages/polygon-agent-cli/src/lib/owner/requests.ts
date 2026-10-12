@@ -348,6 +348,11 @@ export async function confirmOwnerRequest<T extends Record<string, unknown>>(
     requestId: string;
     now: Date;
     run: (context: OwnerContext) => Promise<T>;
+    // Browser sign-in only. When given, the login page hears `done` after the
+    // action (and the revoke) instead of before it, with whatever this
+    // returns merged in (a funding link). A failed action is reported as an
+    // error. It runs after the sign-in is revoked, so it may use the network.
+    doneExtras?: (result: T) => Promise<{ funding?: { url: string } } | undefined>;
   } & OwnerSignInInput
 ): Promise<T & { ownerSignInRevoked: boolean; ownerSignInRevokeError?: string }> {
   const request = loadPending(params.wallet);
@@ -404,6 +409,7 @@ export async function confirmOwnerRequest<T extends Record<string, unknown>>(
   process.on('SIGTERM', onSignal);
 
   let outcome: { ok: true; result: T } | { ok: false; error: unknown };
+  let walletAddress: string | undefined;
   try {
     // Signed in: the key is now an owner credential, so it leaves the disk at
     // once. A newer request saved meanwhile (a new step 1) is left alone,
@@ -425,7 +431,10 @@ export async function confirmOwnerRequest<T extends Record<string, unknown>>(
       });
       throw error;
     }
-    await signedIn.report?.({ status: 'done', walletAddress: main.address });
+    if (!params.doneExtras) {
+      await signedIn.report?.({ status: 'done', walletAddress: main.address });
+    }
+    walletAddress = main.address;
     outcome = {
       ok: true,
       result: await params.run({ owner, walletAddress: main.address, request })
@@ -439,6 +448,27 @@ export async function confirmOwnerRequest<T extends Record<string, unknown>>(
 
   // Always: revoke the sign-in and drop the client.
   const revokeError = await revokeSignIn();
+
+  // The deferred `done` (see doneExtras); best effort, never fails the action.
+  if (params.doneExtras && walletAddress !== undefined && signedIn.report) {
+    try {
+      if (outcome.ok) {
+        const extras = await params.doneExtras(outcome.result).catch(() => undefined);
+        await signedIn.report({
+          status: 'done',
+          walletAddress,
+          ...(extras?.funding ? { funding: extras.funding } : {})
+        });
+      } else {
+        await signedIn.report({
+          status: 'error',
+          message: outcome.error instanceof Error ? outcome.error.message : String(outcome.error)
+        });
+      }
+    } catch {
+      // The page is a courtesy; the CLI result stands on its own.
+    }
+  }
 
   const revoke = {
     ownerSignInRevoked: revokeError === undefined,

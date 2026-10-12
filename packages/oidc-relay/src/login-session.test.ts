@@ -153,3 +153,58 @@ describe('parseLoginStatus', () => {
     });
   });
 });
+
+describe('login context', () => {
+  it('stores a valid context at register and returns it with the status', async () => {
+    const core = new LoginSessionCore(memoryStore());
+    await core.register({ purpose: 'connect', allowanceUsd: 1000, days: 30, polymarket: true });
+    expect(await core.getStatus()).toEqual({
+      status: 'awaiting-method',
+      context: { purpose: 'connect', allowanceUsd: 1000, days: 30, polymarket: true }
+    });
+    await core.setStatus({ status: 'otp-sent' });
+    expect(await core.getStatus()).toMatchObject({
+      status: 'otp-sent',
+      context: { purpose: 'connect' }
+    });
+  });
+
+  it('register without a context works and returns none', async () => {
+    const core = new LoginSessionCore(memoryStore());
+    await core.register();
+    expect(await core.getStatus()).toEqual({ status: 'awaiting-method' });
+  });
+
+  it('an invalid context is dropped silently', async () => {
+    const core = new LoginSessionCore(memoryStore());
+    await core.register({ purpose: 'steal-funds', days: 3 });
+    expect(await core.getStatus()).toEqual({ status: 'awaiting-method' });
+    await core.register('nonsense');
+    expect(await core.getStatus()).toEqual({ status: 'awaiting-method' });
+  });
+
+  it('drops invalid optional fields but keeps a valid purpose', async () => {
+    const core = new LoginSessionCore(memoryStore());
+    await core.register({ purpose: 'renew', days: -2, allowanceUsd: 'lots', extra: 1 });
+    expect(await core.getStatus()).toEqual({
+      status: 'awaiting-method',
+      context: { purpose: 'renew' }
+    });
+  });
+
+  it('done carries funding only when its url is https', () => {
+    expect(
+      parseLoginStatus({ status: 'done', walletAddress: '0xW', funding: { url: 'https://x.co/f' } })
+    ).toEqual({ status: 'done', walletAddress: '0xW', funding: { url: 'https://x.co/f' } });
+    expect(
+      parseLoginStatus({ status: 'done', walletAddress: '0xW', funding: { url: 'http://x.co/f' } })
+    ).toEqual({ status: 'done', walletAddress: '0xW' });
+    expect(
+      parseLoginStatus({ status: 'done', walletAddress: '0xW', funding: { url: 'javascript:1' } })
+    ).toEqual({ status: 'done', walletAddress: '0xW' });
+    expect(parseLoginStatus({ status: 'done', walletAddress: '0xW' })).toEqual({
+      status: 'done',
+      walletAddress: '0xW'
+    });
+  });
+});

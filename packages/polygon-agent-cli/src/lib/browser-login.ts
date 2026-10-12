@@ -17,7 +17,7 @@ export type LoginStatus =
   | { status: 'auth-url'; url: string }
   | { status: 'otp-sent' }
   | { status: 'otp-invalid'; attemptsLeft?: number }
-  | { status: 'done'; walletAddress: string }
+  | { status: 'done'; walletAddress: string; funding?: { url: string } }
   | { status: 'error'; message: string };
 
 export interface BrowserLoginDeps {

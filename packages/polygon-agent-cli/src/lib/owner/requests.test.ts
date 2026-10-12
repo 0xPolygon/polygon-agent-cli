@@ -201,6 +201,43 @@ describe('confirmOwnerRequest (browser)', () => {
     ]);
   });
 
+  it('with doneExtras the page hears done after the action, with the funding link', async () => {
+    const request = await startBrowser();
+    const { deps, statuses } = fakeDeps([...GOOGLE_DONE]);
+    const funding = { url: 'https://fund.example/x' };
+    await confirmOwnerRequest({
+      wallet,
+      requestId: request.id,
+      now: NOW,
+      browser: { deps, timeoutMs: 60_000 },
+      run: async () => ({ connected: true }),
+      doneExtras: async () => ({ funding })
+    });
+    expect(statuses.filter((s) => s.status === 'done')).toEqual([
+      { status: 'done', walletAddress: MAIN, funding }
+    ]);
+    expect(world.calls.indexOf('revoke:owner-cred')).toBeGreaterThan(-1);
+  });
+
+  it('with doneExtras a failed action is reported to the page as an error', async () => {
+    const request = await startBrowser();
+    const { deps, statuses } = fakeDeps([...GOOGLE_DONE]);
+    await expect(
+      confirmOwnerRequest({
+        wallet,
+        requestId: request.id,
+        now: NOW,
+        browser: { deps, timeoutMs: 60_000 },
+        run: async () => {
+          throw new Error('boom');
+        },
+        doneExtras: async () => undefined
+      })
+    ).rejects.toThrow();
+    expect(statuses.some((s) => s.status === 'done')).toBe(false);
+    expect(statuses).toContainEqual({ status: 'error', message: 'boom' });
+  });
+
   it('passes the short owner lifetime to an email sign-in on the page', async () => {
     const request = await startBrowser();
     const { deps } = fakeDeps([
