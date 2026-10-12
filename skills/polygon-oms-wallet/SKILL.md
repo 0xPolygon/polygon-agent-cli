@@ -44,7 +44,7 @@ Order of work: status → connect → funding → the user's request. Ask for an
 Before asking for anything, explain how it works: the sign-in lets the CLI act as the user for a moment, approve the allowance for this install's own limited key, and sign out. Only that key is kept, never their sign-in.
 
 1. Ask how much you may spend, suggesting **$1,000 over 30 days**: "How much should I be able to spend on my own? I suggest up to $1,000 over the next 30 days, in USDC, USDT, ETH and BTC on Polygon and Base, for trades and paid services. Anything more, or other tokens or chains, needs a new sign-in from you."
-2. `"$POLYGON_AGENT" wallet login --allowance <usd> --days <days>` starts the connection. The CLI picks the method itself, a browser page or an emailed code, so don't ask for an email first. Add `--chains polygon,base,…` only if the user asked for other chains; chains where the wallet already holds supported tokens are added on their own.
+2. `"$POLYGON_AGENT" wallet login --allowance <usd> --days <days>` starts the connection. The CLI picks the method itself, so don't ask for an email first. An emailed code is the default; a browser page is used only for a local coding agent on a desktop or a person typing in a terminal. Add `--chains polygon,base,…` only if the user asked for other chains; chains where the wallet already holds supported tokens are added on their own.
 3. Follow the outcome (the same for every owner request, below):
 
    | Output | Do |
@@ -56,7 +56,8 @@ Before asking for anything, explain how it works: the sign-in lets the CLI act a
    | error `request_cancelled` | The user cancelled on the page. Ask whether to try again. |
    | error `request_in_progress` | A sign-in for this wallet is already finishing. Run the `--wait` command in its `command`. |
 
-4. Tell the user the result in plain words, for example: "Thanks for connecting! A smart session now lets me spend up to $1,000 from your agent wallet until Nov 7, in USDC, USDT, WETH and WBTC on Polygon and Base. If you'd like higher limits, just ask." Take the amount, expiry, tokens and chains from `allowance` in the output. Mention any `failed` chains or `warnings`. Then give the address (see The wallet address) and go on to funding.
+4. Tell the user the result in plain words, for example: "Thanks for connecting! A smart session now lets me spend up to $1,000 from your agent wallet until Nov 7, in USDC, USDT, WETH and WBTC on Polygon and Base. If you'd like higher limits, just ask." Take the amount, expiry, tokens and chains from `allowance` in the output. Mention any `failed` chains or `warnings`. Then give the address (see The wallet address).
+5. Then send the wallet's page: "You can see your wallet and add funds here: <dashboard.url>", with `dashboard.url` from the output, sent in full. Nothing opens on its own, so always send the link. `wallet status` returns the same `dashboard.url` when you need it later. Then go on to funding.
 
 ## The wallet address
 
@@ -64,9 +65,9 @@ Whenever you give the user the wallet address (after connecting, for funding, or
 
 ## Funding
 
-`"$POLYGON_AGENT" fund` returns the address and a funding link (`url`); `"$POLYGON_AGENT" wallet address` returns just the address. Recommend USDC on Polygon; any covered token on a covered chain works. Funds in anything else show as not spendable by you.
+`dashboard.url` from `"$POLYGON_AGENT" wallet status` is the wallet's page, where the user adds funds; send it. `"$POLYGON_AGENT" fund` also opens that page in a browser on this machine, so use it only when the user is at this machine and asks for it. `"$POLYGON_AGENT" wallet address` returns just the address. Recommend USDC on Polygon; any covered token on a covered chain works. Funds in anything else show as not spendable by you.
 
-When any output has `funding`, open or send `funding.url` and tell the user what it's for. A connect to a wallet with no funds sets `funding.reason` to `empty`. A shortfall error (`insufficient_balance`, for gas or a Polymarket deposit) has no `reason`; its `funding.amountUsd`, when present, is how much is missing.
+When any output has `funding`, send `funding.url` and tell the user what it's for. Nothing opens on its own. A connect to a wallet with no funds sets `funding.reason` to `empty`. A shortfall error (`insufficient_balance`, for gas or a Polymarket deposit) has no `reason`; its `funding.amountUsd`, when present, is how much is missing.
 
 ## Common tasks
 

@@ -100,7 +100,7 @@ If it fails, stop and tell the user why. From here on, run `npm` and `node` with
 - `--ignore-scripts`: nothing the CLI needs runs an install script, and none should run beside the wallet's keys.
 - `--skills-dir` is the skills folder from step 1. Leave it out if your platform has none.
 - `--name` is what the wallet owner sees in their list of installs with access, like "OpenClaw on laptop". It defaults to the host name. Reuse the same name when you reinstall, because the Polymarket key backup is labelled with it, and recovery finds the key by that label.
-- `--platform` is your own platform: `muse`, `openclaw`, `hermes`, `claude-code`, `cursor`, `codex` or `other`. Pass the one you are. The CLI uses it to pick the sign-in method: a chat code on a chat platform, a browser page on a desktop.
+- `--platform` is your own platform: `muse`, `openclaw`, `hermes`, `claude-code`, `cursor`, `codex` or `other`. Pass the one you are; a platform not listed passes `other`. The CLI uses it to pick the sign-in method. An emailed code is the default. The browser is used only for a local coding agent (`claude-code`, `cursor`, `codex`) on a desktop, or a person typing in a terminal.
 - `workspace init` writes the wrapper `$ROOT/bin/polygon-agent` (the only command you'll use from now on), the state folder and a `.gitignore`, so workspace backups never pick it up. It also installs the `polygon-oms-wallet` skill, already pointed at the wrapper.
 
 Go on to step 5.
@@ -157,12 +157,12 @@ Before asking for anything, explain how it works: the sign-in lets the CLI act a
      Use the code only here, once. Never store it or repeat it. If it fails with `invalid_code`, ask for the code again. If it fails with `request_expired`, start again at step 2. On any other error, follow its `hint` and `command`.
 3. Two more errors. `browser_signin_failed` means the page sign-in stopped: run its `command` to sign in with an emailed code instead. `request_in_progress` means a sign-in for this wallet is already finishing: run its `--wait` command.
 4. Tell the user the result in plain words, for example: "Thanks for connecting! A smart session now lets me spend up to $1,000 from your agent wallet until Nov 7, in USDC, USDT, WETH and WBTC on Polygon and Base. If you'd like higher limits, just ask." Take the details from `allowance` in the output. Mention any chains in `failed` and any `warnings`.
-5. If the output has `funding`, the wallet is empty: send or open `funding.url` and say it's for adding money (see step 8).
-6. Give the address: end your message with "Your agent wallet address is:" and send the full address as the next message, with nothing else in it, so the user can copy it in one go. Never shorten it. (If your platform sends only one message per reply, put it alone on its own line.)
+5. Give the address: end your message with "Your agent wallet address is:" and send the full address as the next message, with nothing else in it, so the user can copy it in one go. Never shorten it. (If your platform sends only one message per reply, put it alone on its own line.)
+6. Then send the wallet's page: "You can see your wallet and add funds here: <dashboard.url>", with `dashboard.url` from the output, sent in full. Nothing opens on its own, so always send the link. If the output also has `funding`, the wallet is empty: say the page is where they add money (see step 8). `wallet status` returns the same `dashboard.url` whenever you need the link again.
 
 ## 8. Funding
 
-Run `"$ROOT/bin/polygon-agent" wallet status` again. If it shows no `holdings` and you haven't already sent a `funding.url`, run `"$ROOT/bin/polygon-agent" fund` and give the user the link in `url` (the address is already in its own message from step 7). Whenever any command's output has `funding`, send or open its `url` and tell the user what it's for. Suggest USDC on Polygon; any covered token on a covered chain works.
+Run `"$ROOT/bin/polygon-agent" wallet status` again. If it shows no `holdings` and you haven't already sent the link, send the user `dashboard.url` from its output (the address is already in its own message from step 7). Whenever any command's output has `funding`, send its `url` and tell the user what it's for. Nothing opens on its own. Suggest USDC on Polygon; any covered token on a covered chain works.
 
 ## 9. Watches
 

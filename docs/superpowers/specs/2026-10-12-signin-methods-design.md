@@ -43,15 +43,16 @@ Everything after the sign-in is unchanged: delete the pending file, select the m
 
 ### 2. Picking the method
 
-`lib/signin-method.ts` exports `pickSignInMethod(env): { method: 'browser' | 'email'; reason: string }`. First match wins:
+`lib/signin-method.ts` exports `pickSignInMethod(input): { method: 'browser' | 'email'; reason: string }`. An emailed code is the default: the browser is picked only on positive evidence of a person at a desktop (follow-up, James, 2026-10-12). First match wins:
 
 1. `POLYGON_AGENT_SIGNIN=browser|email` (an override for edge cases; never offered to the user).
-2. The platform `workspace init` recorded (`--platform`, from `setup.md`): `muse`, `openclaw`, `hermes` mean `email`; `claude-code`, `cursor`, `codex` mean the environment check below.
-3. The environment:
-   - `email` when `CI` is set, `SSH_CONNECTION` or `SSH_TTY` is set, `/.dockerenv` exists, or on Linux with neither `DISPLAY` nor `WAYLAND_DISPLAY`.
-   - Otherwise `browser` (macOS, Windows, Linux desktop).
+2. A chat platform recorded by `workspace init --platform` (`muse`, `openclaw`, `hermes`) means `email`.
+3. Headless signals mean `email`: `CI`; `SSH_CONNECTION` or `SSH_TTY`; a container (`/.dockerenv`, `/run/.containerenv`, `KUBERNETES_SERVICE_HOST`, or `/proc/1/cgroup` naming docker, kubepods, containerd, lxc or podman); Linux with neither `DISPLAY` nor `WAYLAND_DISPLAY`.
+4. An interactive terminal (stdin is a TTY) means `browser`.
+5. A local coding agent (`claude-code`, `cursor`, `codex`) means `browser`.
+6. Anything else (`other`, unknown, no platform) means `email`.
 
-`reason` is a short phrase for the output (`"desktop"`, `"ssh session"`, `"platform muse"`), so a wrong pick is easy to diagnose.
+`reason` is a short phrase for the output (`"terminal"`, `"platform claude-code"`, `"ssh session"`, `"default"`), so a wrong pick is easy to diagnose.
 
 ### 3. Commands
 
@@ -86,7 +87,7 @@ Everything after the sign-in is unchanged: delete the pending file, select the m
 
 ### 6. Funding
 
-- A successful connect (`wallet confirm`, `--wait` or owner login) checks the balance. When the wallet holds nothing on Polygon, the output includes `funding: { url, reason: 'empty' }`. With the browser method, the waiter's page shows the funding step itself (below), and the CLI also opens the URL when it runs on a desktop. With the chat code, the assistant sends the link.
+- A successful connect (`wallet confirm`, `--wait` or owner login) checks the balance. When the wallet holds nothing on Polygon, the output includes `funding: { url, reason: 'empty' }`. Every connect, and `wallet status`, also includes `dashboard: { url }`: the wallet's agentconnect page, on the fund view while it's empty and the dashboard view after. Nothing opens on its own: the assistant sends the link, and with the browser method the login page shows "Add funds" (below). Only `agent fund` opens the page.
 - `insufficient_balance` errors from `runTx`, and Polymarket `deposit` when the wallet is short, add `funding: { url, amountUsd }`, the amount being what's missing (at least the $2 bridge minimum for a deposit).
 - `showFunding`'s URL gains `&amount=<usd>` when there's an amount. `agentconnect-ui` reads `amount` and passes it to the Trails widget as the target amount in USDC on Polygon.
 
