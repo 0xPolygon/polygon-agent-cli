@@ -21,43 +21,8 @@ export interface LoginContext {
 
 export type RelayStatus = (LoginStatus | { status: 'expired' }) & { context?: LoginContext };
 
-export const DEFAULT_CONTEXT_LINE = 'This connects to your agent in your terminal.';
-
-function usd(n: number): string {
-  return `$${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
-}
-
-function forDays(days?: number): string {
-  if (days === undefined) return '';
-  return ` for ${days} ${days === 1 ? 'day' : 'days'}`;
-}
-
-// The one line above the sign-in buttons. No (or unrecognized) context keeps
-// today's copy.
-export function contextLine(context?: LoginContext): string {
-  if (!context) return DEFAULT_CONTEXT_LINE;
-  const allowance =
-    context.allowanceUsd !== undefined ? ` with a ${usd(context.allowanceUsd)} allowance` : '';
-  switch (context.purpose) {
-    case 'connect':
-      return (
-        `Connect your assistant${allowance}${forDays(context.days)}.` +
-        (context.polymarket ? ' This also backs up your Polymarket trading key.' : '')
-      );
-    case 'allowance':
-      return `Change your assistant's allowance${context.allowanceUsd !== undefined ? ` to ${usd(context.allowanceUsd)}` : ''}${forDays(context.days)}.`;
-    case 'renew':
-      return `Renew your assistant's allowance${forDays(context.days)}.`;
-    case 'withdraw':
-      return 'Withdraw funds from your agent wallet.';
-    case 'access':
-      return "Review your assistant's access to your agent wallet.";
-    case 'owner':
-      return 'Confirm a change to your agent wallet.';
-    default:
-      return DEFAULT_CONTEXT_LINE;
-  }
-}
+// The one line above the sign-in buttons.
+export const LOGIN_LINE = 'Login to your agent';
 
 export type MachineState =
   | { kind: 'method' }
