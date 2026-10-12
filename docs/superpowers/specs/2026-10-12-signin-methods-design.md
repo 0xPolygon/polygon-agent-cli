@@ -49,7 +49,7 @@ Everything after the sign-in is unchanged: delete the pending file, select the m
 2. A chat platform recorded by `workspace init --platform` (`muse`, `openclaw`, `hermes`) means `email`.
 3. Headless signals mean `email`: `CI`; `SSH_CONNECTION` or `SSH_TTY`; a container (`/.dockerenv`, `/run/.containerenv`, `KUBERNETES_SERVICE_HOST`, or `/proc/1/cgroup` naming docker, kubepods, containerd, lxc or podman); Linux with neither `DISPLAY` nor `WAYLAND_DISPLAY`.
 4. An interactive terminal (stdin is a TTY) means `browser`.
-5. A local coding agent (`claude-code`, `cursor`, `codex`) means `browser`.
+5. A local coding agent (`claude-code`, `cursor`, `codex`) means `browser`. With no platform recorded, `CLAUDECODE=1` (set by Claude Code) counts as `claude-code`; no other markers are guessed.
 6. Anything else (`other`, unknown, no platform) means `email`.
 
 `reason` is a short phrase for the output (`"terminal"`, `"platform claude-code"`, `"ssh session"`, `"default"`), so a wrong pick is easy to diagnose.

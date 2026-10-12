@@ -37,7 +37,7 @@ The wallet address is the **same across all EVM chains**. Sessions last ~1 week 
 
 ## Session Mode (an allowance, approved by signing in)
 
-Bare `agent wallet login` connects this install with a **spending allowance** instead of a full sign-in. The CLI picks the sign-in method itself, and an emailed code is the default. First match wins: `POLYGON_AGENT_SIGNIN=browser` or `email` forces one; a chat platform (`muse`, `openclaw`, `hermes`, from `workspace init --platform`) gets email; so does CI, an SSH session, a container, or Linux with no display; then an interactive terminal (stdin is a TTY) or a local coding agent (`claude-code`, `cursor`, `codex`) gets the browser; anything else gets email.
+Bare `agent wallet login` connects this install with a **spending allowance** instead of a full sign-in. The CLI picks the sign-in method itself, and an emailed code is the default. First match wins: `POLYGON_AGENT_SIGNIN=browser` or `email` forces one; a chat platform (`muse`, `openclaw`, `hermes`, from `workspace init --platform`) gets email; so does CI, an SSH session, a container, or Linux with no display; then an interactive terminal (stdin is a TTY) or a local coding agent (`claude-code`, `cursor`, `codex`; with no recorded platform, `CLAUDECODE=1` counts as `claude-code`) gets the browser; anything else gets email.
 
 ```bash
 agent wallet login [--allowance 1000] [--days 30] [--chains polygon,base] [--email <email>]
