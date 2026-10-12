@@ -282,9 +282,10 @@ export async function showFunding(
   walletName: string,
   walletAddress: string,
   chainId = 137,
-  opts?: { openBrowser?: boolean; remote?: boolean; amountUsd?: number | string }
+  // `funded`: a check the caller already made, so it isn't made twice.
+  opts?: { openBrowser?: boolean; amountUsd?: number | string; funded?: boolean }
 ): Promise<void> {
-  const funded = await isWalletFunded(walletName, walletAddress, chainId);
+  const funded = opts?.funded ?? (await isWalletFunded(walletName, walletAddress, chainId));
   const view = funded ? 'dashboard' : 'fund';
 
   const url = funded
@@ -293,7 +294,7 @@ export async function showFunding(
 
   // `agent fund` asks for the page, so open it. open() no-ops/throws on a
   // GUI-less host, so attempting it is safe; the URL is printed either way.
-  if (opts?.openBrowser && !opts?.remote) {
+  if (opts?.openBrowser) {
     try {
       const { default: open } = await import('open');
       await open(url);

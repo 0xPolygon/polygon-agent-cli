@@ -171,13 +171,6 @@ async function handleOwnerLogin(argv: LoginArgs): Promise<void> {
       return ok;
     }
 
-    // The wallet's agentconnect page, for the assistant to send after login.
-    const ownerDashboard = async (walletAddress: string) =>
-      dashboardInfo({
-        walletAddress,
-        funded: await isWalletFunded(argv.name, walletAddress, 137)
-      });
-
     // The owner is signed in: back up the Polymarket trading key too. Never throws.
     const backUpPolymarket = (mainAddress: string) =>
       polymarketOwnerStep({ wallet: argv.name, owner: oms.wallet, mainAddress }).catch(
@@ -205,7 +198,11 @@ async function handleOwnerLogin(argv: LoginArgs): Promise<void> {
         alreadyLoggedIn: true,
         builderProvisioned,
         polymarket,
-        dashboard: await ownerDashboard(oms.wallet.walletAddress),
+        // The wallet's agentconnect page, for the assistant to send after login.
+        dashboard: dashboardInfo({
+          walletAddress: oms.wallet.walletAddress,
+          funded: await isWalletFunded(argv.name, oms.wallet.walletAddress, 137)
+        }),
         txMode: txMode ?? loadTxMode(),
         ...(txMode === null ? { modePrompt: MODE_PROMPT } : {})
       });
@@ -286,6 +283,8 @@ async function handleOwnerLogin(argv: LoginArgs): Promise<void> {
     const builderProvisioned = await provisionBuilder(walletAddress);
 
     const polymarket = await backUpPolymarket(walletAddress);
+    // One funded check, for the dashboard link and the funding panel.
+    const funded = await isWalletFunded(argv.name, walletAddress, 137);
     const txMode = await maybeAskTxMode();
     jsonOut({
       ok: true,
@@ -294,7 +293,7 @@ async function handleOwnerLogin(argv: LoginArgs): Promise<void> {
       loginMethod,
       builderProvisioned,
       polymarket,
-      dashboard: await ownerDashboard(walletAddress),
+      dashboard: dashboardInfo({ walletAddress, funded }),
       txMode: txMode ?? loadTxMode(),
       ...(txMode === null ? { modePrompt: MODE_PROMPT } : {})
     });
@@ -302,7 +301,7 @@ async function handleOwnerLogin(argv: LoginArgs): Promise<void> {
     // Funding: print the panel only. Nothing opens on its own: the login page's
     // success screen has an "Add funds" button, and the assistant sends the link.
     if (argv.fund !== false) {
-      await showFunding(argv.name, walletAddress, 137);
+      await showFunding(argv.name, walletAddress, 137, { funded });
     }
   } catch (error) {
     jsonFail(error);

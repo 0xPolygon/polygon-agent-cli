@@ -24,8 +24,13 @@ const fake = vi.hoisted(() => ({
   signedIn: false
 }));
 
-const funds = vi.hoisted(() => ({ funded: false, opened: [] as string[] }));
-vi.mock('../lib/indexer.ts', () => ({ isWalletFunded: async () => funds.funded }));
+const funds = vi.hoisted(() => ({ funded: false, opened: [] as string[], checks: 0 }));
+vi.mock('../lib/indexer.ts', () => ({
+  isWalletFunded: async () => {
+    funds.checks += 1;
+    return funds.funded;
+  }
+}));
 vi.mock('open', () => ({
   default: async (url: string) => {
     funds.opened.push(url);
@@ -101,6 +106,7 @@ beforeEach(() => {
   fake.calls.length = 0;
   funds.funded = false;
   funds.opened.length = 0;
+  funds.checks = 0;
   step.fn.mockReset();
   step.fn.mockResolvedValue({ backedUp: true, omsWalletId: 'w-key' });
   vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -260,9 +266,18 @@ describe('wallet login --owner dashboard link', () => {
     });
   });
 
-  it('the funding step after login opens nothing', async () => {
+  it('the funding step after login opens nothing and shares the one funded check', async () => {
     await login('--owner');
-    expect(jsonLines('log')[0]).toMatchObject({ ok: true, dashboard: expect.any(Object) });
+    const [result, panel] = jsonLines('log');
+    expect(result).toMatchObject({
+      ok: true,
+      dashboard: { url: expect.stringContaining('view=fund') }
+    });
+    expect(panel).toMatchObject({
+      funded: false,
+      url: result?.dashboard && (result.dashboard as { url: string }).url
+    });
     expect(funds.opened).toEqual([]);
+    expect(funds.checks).toBe(1);
   });
 });
