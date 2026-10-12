@@ -266,7 +266,7 @@ agent feedback --agent-id <id> --value <score> [--tag1 <t>] [--tag2 <t>] [--endp
 - **`call`** — submit arbitrary pre-encoded calldata: `agent call --to <addr> --data 0x... [--value <amt>] [--prefer-native-fee] [--broadcast]`. The wallet can call any contract (no permission scoping in the V3 model)
 - **`send-native --direct`** — bypasses ValueForwarder contract for direct EOA transfer
 - **No permission scoping (owner mode)** — the V3 embedded wallet can call any contract and spend any amount it holds; there are no per-contract whitelists or spend limits. Guard spending in agent logic, not at the wallet layer.
-- **Session expiry** — ~1 week from login; on expiry, re-run `wallet login`
+- **Session expiry** — ~1 week from login; on expiry, re-run `wallet login --owner` (owner mode)
 
 ## Presenting Results to the User
 
@@ -295,8 +295,8 @@ CLI commands output JSON (non-TTY). After running a command, always render the r
 
 | Issue | Fix |
 |-------|-----|
-| `Wallet not found` | `wallet list`, then `agent wallet login` |
-| Session expired (`OMS_SESSION_EXPIRED`) | Run `agent wallet login` (~1-week lifetime) |
+| `Wallet not found` / no wallet yet | `wallet list`, then `agent wallet login` |
+| Owner-mode session expired (`OMS_SESSION_EXPIRED`) | Run `agent wallet login --owner` (~1-week lifetime) |
 | `Fee option errors` | Set `POLYGON_AGENT_DEBUG_FEE=1`, ensure wallet has POL or a fee token. For native-only wallets, add `--prefer-native-fee` on `call` |
 | Wrong recipient in Trails widget | Run `agent fund` (do not construct the URL manually) |
 | `x402-pay`: no 402 response | Endpoint doesn't require x402 payment, or URL is wrong |

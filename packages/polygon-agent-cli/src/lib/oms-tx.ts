@@ -100,9 +100,7 @@ export async function runOmsTx(params: OmsTxParams): Promise<OmsTxResult> {
   if (oms.wallet.walletAddress) await ensureMainWallet(walletName);
   const walletAddress = oms.wallet.walletAddress;
   if (!walletAddress) {
-    throw new Error(
-      `No active session for wallet '${walletName}'. Run: agent wallet login --owner`
-    );
+    throw new Error(`No active session for wallet '${walletName}'. Run: agent wallet login`);
   }
 
   // Dry-run: print the same JSON shape the legacy primitive produced and return.
