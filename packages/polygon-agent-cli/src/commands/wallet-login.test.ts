@@ -115,6 +115,36 @@ describe('wallet login routing', () => {
   });
 });
 
+describe('wallet login options', () => {
+  it('--local and --remote need --owner', async () => {
+    for (const flag of ['--local', '--remote']) {
+      vi.mocked(console.error).mockClear();
+      await login(flag).catch(() => undefined);
+      expect(jsonLines('error')[0]).toMatchObject({
+        code: 'invalid_input',
+        error: '--local and --remote only work with --owner.'
+      });
+    }
+    expect(fake.calls).toEqual([]);
+  });
+
+  it('--relay-url also sets the relay for the session-mode browser path (and its waiter)', async () => {
+    const saved = process.env.POLYGON_AGENT_OIDC_RELAY;
+    try {
+      await saveOmsWalletPointer(name, {
+        walletAddress: MAIN,
+        loginMethod: 'google',
+        createdAt: ''
+      });
+      await login('--relay-url', 'https://relay.example/').catch(() => undefined);
+      expect(process.env.POLYGON_AGENT_OIDC_RELAY).toBe('https://relay.example');
+    } finally {
+      if (saved === undefined) delete process.env.POLYGON_AGENT_OIDC_RELAY;
+      else process.env.POLYGON_AGENT_OIDC_RELAY = saved;
+    }
+  });
+});
+
 describe('wallet login --owner selection', () => {
   it('saves the main wallet when sign-in auto-selected the imported one', async () => {
     await ownerLogin();

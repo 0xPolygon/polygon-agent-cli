@@ -12,6 +12,7 @@ export type CliErrorCode =
   | 'request_cancelled'
   | 'email_required'
   | 'browser_signin_failed'
+  | 'request_in_progress'
   | 'already_connected'
   | 'session_expired'
   | 'session_revoked'

@@ -1,9 +1,10 @@
 // Owner requests end to end through the command handlers, against a fake OMS
 // that keeps sessions per credential like the real service.
 
+import type { ChildProcess } from 'node:child_process';
 import type { CommandModule } from 'yargs';
 
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -336,7 +337,8 @@ const {
 } = await import('./wallet-session.ts');
 const { handleLoginWait, waitSettings } = await import('./wallet-session.ts');
 const { loadPending, savePending } = await import('../lib/owner/pending.ts');
-const { pidFile, readResult, writePid, writeResult } = await import('../lib/owner/waiter.ts');
+const { latestWaiterRequest, pidFile, readResult, writePid, writeResult } =
+  await import('../lib/owner/waiter.ts');
 const { readApprovedPlan } = await import('../lib/session/state.ts');
 const { parkedRacSlots, readRacRecord } = await import('../lib/session/rac.ts');
 const { loadOmsWalletPointer, STORAGE_ROOT } = await import('../lib/storage.ts');
@@ -1126,6 +1128,32 @@ describe('browser sign-in', () => {
     return spawnSync(process.execPath, ['-e', '']).pid;
   }
 
+  const children: ChildProcess[] = [];
+  afterEach(() => {
+    for (const child of children.splice(0)) child.kill('SIGKILL');
+  });
+
+  // A running process whose command line is the waiter's for `id`, with its pid file.
+  function fakeWaiter(id: string): void {
+    const child = spawn(
+      process.execPath,
+      [
+        '-e',
+        'setInterval(() => {}, 1000)',
+        '--',
+        'wallet',
+        'confirm',
+        '--request',
+        id,
+        '--browser-waiter'
+      ],
+      { stdio: 'ignore' }
+    );
+    children.push(child);
+    if (child.pid === undefined) throw new Error('no pid');
+    writePid({ wallet, id, pid: child.pid });
+  }
+
   async function browserConnect(): Promise<Record<string, unknown>> {
     browser.method = 'browser';
     await handleSessionLogin({ name: wallet, allowance: 500, days: 7, chains: 'polygon,base' });
@@ -1212,9 +1240,62 @@ describe('browser sign-in', () => {
 
   it('a new request stops the waiter of the one it replaces', async () => {
     const first = await browserConnect();
+    fakeWaiter(String(first.request));
     await browserConnect();
     expect(browser.stopped).toEqual([[wallet, first.request]]);
     expect(browser.spawned).toHaveLength(2);
+  });
+
+  it('a waiter whose owner already signed in makes a new request wait for it', async () => {
+    const first = await browserConnect();
+    const firstId = String(first.request);
+    fakeWaiter(firstId);
+    // Signed in: the pending file is gone while the waiter runs the action.
+    const { deletePending } = await import('../lib/owner/pending.ts');
+    await deletePending({ wallet });
+    const racBefore = readRacRecord({ wallet, slot: 'rac' })?.credentialId;
+    world.calls.length = 0;
+    browser.method = 'browser';
+    await expect(
+      handleSessionLogin({ name: wallet, allowance: 500, days: 7, chains: 'polygon,base' })
+    ).rejects.toThrow('CLI exited');
+    expect(lastJson('error')).toMatchObject({
+      code: 'request_in_progress',
+      error: 'A sign-in for this wallet is finishing.',
+      command: `polygon-agent wallet confirm --request ${firstId} --wait --name ${wallet}`
+    });
+    // Nothing replaced: not the key, not the waiter.
+    expect(world.calls).toEqual([]);
+    expect(readRacRecord({ wallet, slot: 'rac' })?.credentialId).toBe(racBefore);
+    expect(browser.stopped).toEqual([]);
+    expect(browser.spawned).toHaveLength(1);
+  });
+
+  it('quotes command values that a shell would split', async () => {
+    browser.method = 'browser';
+    await handleSessionLogin({ name: wallet, chains: 'polygon, base' });
+    expect(browser.spawned[0]?.emailCommand).toBe(
+      `polygon-agent wallet login --email <email> --chains 'polygon, base' --name ${wallet}`
+    );
+  });
+
+  it('the waiter gives up at the request expiry, leaving a failure and no files', async () => {
+    const out = await browserConnect();
+    const request = String(out.request);
+    const pending = loadPending(wallet);
+    if (!pending) throw new Error('no pending request');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'Date'] });
+    try {
+      await savePending({ ...pending, expiresAt: new Date(Date.now() + 5_000).toISOString() });
+      const running = confirmArgs({ request, browserWaiter: true });
+      await vi.advanceTimersByTimeAsync(10_000);
+      await running;
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(readResult(wallet, request)).toMatchObject({ ok: false, code: 'request_expired' });
+    expect(loadPending(wallet)).toBeNull();
+    expect(fs.existsSync(pidFile(wallet, request))).toBe(false);
   });
 
   it('refuses an owner-mode wallet, with a note for anyone used to the old login', async () => {
@@ -1333,7 +1414,7 @@ describe('browser sign-in', () => {
 
     it('says waiting while the waiter is still running', async () => {
       const request = String((await browserAllowanceSet()).request);
-      writePid({ wallet, id: request, pid: process.pid });
+      fakeWaiter(request);
       const saved = waitSettings.timeoutMs;
       waitSettings.timeoutMs = 0;
       try {
@@ -1360,5 +1441,71 @@ describe('browser sign-in', () => {
         command: emailCommand
       });
     });
+  });
+});
+
+describe('browser sign-in on a connected wallet', () => {
+  async function connectThroughPage(): Promise<void> {
+    browser.method = 'browser';
+    await handleSessionLogin({ name: wallet, allowance: 500, days: 7, chains: 'polygon' });
+    const request = String(lastJson('log').request);
+    browser.actions.push(
+      { type: 'email', email: 'owner@example.com' },
+      { type: 'otp', code: world.code }
+    );
+    if (typeof confirmCommandModule.handler !== 'function') throw new Error('no handler');
+    await confirmCommandModule.handler({
+      _: [],
+      $0: 'polygon-agent',
+      name: wallet,
+      request,
+      wait: false,
+      'browser-waiter': true,
+      browserWaiter: true
+    });
+    expect(readResult(wallet, request)).toMatchObject({ ok: true, connected: true });
+  }
+
+  async function allowanceSet(...extra: string[]): Promise<void> {
+    const yargs = (await import('yargs')).default;
+    vi.mocked(console.log).mockClear();
+    vi.mocked(console.error).mockClear();
+    await yargs()
+      .command(allowanceCommandModule)
+      .parseAsync(['allowance', 'set', '--amount', '800', '--name', wallet, ...extra])
+      .catch(() => undefined);
+  }
+
+  it('asks for an email when the picker says email and none is known, and keeps it once used', async () => {
+    await connectThroughPage();
+    expect((await loadOmsWalletPointer(wallet))?.email).toBeUndefined();
+    browser.method = 'email';
+
+    await allowanceSet();
+    const errors = vi
+      .mocked(console.error)
+      .mock.calls.map((call) => String(call[0]))
+      .filter((line) => line.startsWith('{'));
+    expect(JSON.parse(String(errors.at(-1)))).toMatchObject({
+      code: 'email_required',
+      command: `polygon-agent wallet allowance set --amount 800 --email <email> --name ${wallet}`
+    });
+
+    await allowanceSet('--email', 'owner@example.com');
+    const step1 = lastJson('log');
+    expect(step1).toMatchObject({ status: 'code_sent', email: 'owner@example.com' });
+    expect(await confirm(String(step1.request))).toMatchObject({ ok: true, updated: true });
+    expect((await loadOmsWalletPointer(wallet))?.email).toBe('owner@example.com');
+  });
+
+  it('logout stops the waiters and removes their results and pid files', async () => {
+    await connectThroughPage();
+    const request = latestWaiterRequest(wallet);
+    expect(request).not.toBeNull();
+    writePid({ wallet, id: 'other1', pid: process.pid });
+    await logoutSessionWallet(wallet);
+    expect(latestWaiterRequest(wallet)).toBeNull();
+    expect(readResult(wallet, String(request))).toBeNull();
+    expect(fs.existsSync(pidFile(wallet, 'other1'))).toBe(false);
   });
 });

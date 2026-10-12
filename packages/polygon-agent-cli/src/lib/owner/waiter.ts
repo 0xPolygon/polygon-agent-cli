@@ -7,7 +7,7 @@
 //   waiter-<id>.pid    {pid, emailCommand}: present while the waiter runs
 //   result-<id>.json   the result, encrypted like the pending file
 
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -122,9 +122,52 @@ function processAlive(pid: number): boolean {
   }
 }
 
+// A pid file can outlive its waiter, and the pid can be reused: the process
+// counts as this request's waiter only if its command line says so. A command
+// line that can't be read counts as not ours.
+function isWaiterProcess(pid: number, id: string): boolean {
+  if (!processAlive(pid)) return false;
+  try {
+    const command = execFileSync('ps', ['-ww', '-p', String(pid), '-o', 'command='], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    });
+    const words = command.trim().split(/\s+/);
+    return words.includes('--browser-waiter') && words.includes(id);
+  } catch {
+    return false;
+  }
+}
+
+// True while the request's waiter runs; a pid file left by a dead waiter (or
+// naming someone else's process) is removed.
 export function waiterAlive(wallet: string, id: string): boolean {
   const record = readPid(wallet, id);
-  return record !== null && processAlive(record.pid);
+  if (!record) return false;
+  if (isWaiterProcess(record.pid, id)) return true;
+  removePid(wallet, id);
+  return false;
+}
+
+function waiterIds(wallet: string): string[] {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(waiterDir(wallet));
+  } catch {
+    return [];
+  }
+  return entries.flatMap((entry) => /^waiter-([a-z0-9]+)\.pid$/.exec(entry)?.[1] ?? []);
+}
+
+// The requests whose waiters are running, from the pid files (the pending file
+// is gone once the owner has signed in, while the waiter runs the action).
+export function liveWaiters(wallet: string): string[] {
+  return waiterIds(wallet).filter((id) => waiterAlive(wallet, id));
+}
+
+// Removes every result and pid file of the wallet (after its waiters stopped).
+export function clearWaiterFiles(wallet: string): void {
+  fs.rmSync(waiterDir(wallet), { recursive: true, force: true });
 }
 
 // The pid is written here as well as by the waiter itself, so a `--wait` run
@@ -170,7 +213,11 @@ export async function stopWaiter(
 ): Promise<void> {
   try {
     const record = readPid(wallet, id);
-    if (!record || !processAlive(record.pid)) return;
+    if (!record) return;
+    if (!isWaiterProcess(record.pid, id)) {
+      removePid(wallet, id);
+      return;
+    }
     process.kill(record.pid, 'SIGTERM');
     for (
       let waited = 0;
@@ -215,16 +262,21 @@ export async function waitForResult(params: {
   timeoutMs: number;
   sleep?: (ms: number) => Promise<void>;
 }): Promise<
-  { state: 'done'; result: Record<string, unknown> } | { state: 'waiting' } | { state: 'gone' }
+  | { state: 'done'; result: Record<string, unknown> }
+  | { state: 'waiting' }
+  | { state: 'gone'; emailCommand?: string }
 > {
   const sleep = params.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   for (let waited = 0; ; waited += POLL_MS) {
     const result = readResult(params.wallet, params.id);
     if (result) return { state: 'done', result };
+    // Read first: a dead waiter's pid file is removed by the check.
+    const emailCommand = waiterEmailCommand(params.wallet, params.id);
     if (!waiterAlive(params.wallet, params.id)) {
       // It may have written the result just before exiting.
       const last = readResult(params.wallet, params.id);
-      return last ? { state: 'done', result: last } : { state: 'gone' };
+      if (last) return { state: 'done', result: last };
+      return emailCommand ? { state: 'gone', emailCommand } : { state: 'gone' };
     }
     if (waited >= params.timeoutMs) return { state: 'waiting' };
     await sleep(POLL_MS);

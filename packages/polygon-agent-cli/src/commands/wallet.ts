@@ -130,6 +130,17 @@ async function obtainLoopbackCallbackUrl(
 // Session mode (connect with an allowance) unless --owner.
 async function handleLogin(argv: LoginArgs): Promise<void> {
   if (argv.owner) return handleOwnerLogin(argv);
+  if (argv.local || argv.remote) {
+    jsonFail(
+      new CliError({
+        code: 'invalid_input',
+        message: '--local and --remote only work with --owner.'
+      })
+    );
+  }
+  // The session browser path uses the relay too: the request registers its
+  // page there, and the waiter (which inherits the environment) polls it.
+  if (argv.relayUrl) process.env.POLYGON_AGENT_OIDC_RELAY = argv.relayUrl.replace(/\/+$/, '');
   if (argv.wait) return handleLoginWait(argv);
   return handleSessionLogin(argv);
 }
@@ -527,7 +538,7 @@ export const walletCommand: CommandModule = {
             })
             .option('relay-url', {
               type: 'string',
-              describe: 'Owner mode: relay base URL (overrides POLYGON_AGENT_OIDC_RELAY)'
+              describe: 'Relay base URL (overrides POLYGON_AGENT_OIDC_RELAY)'
             }),
         handler: (argv) => handleLogin(argv as unknown as LoginArgs)
       })

@@ -1,17 +1,21 @@
 // The background waiter's files: the encrypted result, the pid file, and
 // waiting for one or the other.
 
-import { spawnSync } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
+
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 process.env.POLYGON_AGENT_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-waiter-'));
 
 const {
+  clearWaiterFiles,
   deleteResult,
+  liveWaiters,
   latestWaiterRequest,
   pidFile,
   readResult,
@@ -19,6 +23,7 @@ const {
   waitForResult,
   waiterAlive,
   waiterEmailCommand,
+  stopWaiter,
   writePid,
   writeResult
 } = await import('./waiter.ts');
@@ -26,9 +31,36 @@ const {
 let wallet: string;
 let counter = 0;
 
+const children: ChildProcess[] = [];
+
 beforeEach(() => {
   wallet = `waiter${++counter}`;
 });
+
+afterEach(() => {
+  for (const child of children.splice(0)) child.kill('SIGKILL');
+});
+
+// A running process whose command line is a waiter's for `id`.
+function fakeWaiter(id: string): number {
+  const child = spawn(
+    process.execPath,
+    [
+      '-e',
+      'setInterval(() => {}, 1000)',
+      '--',
+      'wallet',
+      'confirm',
+      '--request',
+      id,
+      '--browser-waiter'
+    ],
+    { stdio: 'ignore' }
+  );
+  children.push(child);
+  if (child.pid === undefined) throw new Error('no pid');
+  return child.pid;
+}
 
 // A pid that certainly belonged to a process that has exited.
 function deadPid(): number {
@@ -55,19 +87,57 @@ describe('result file', () => {
 });
 
 describe('waiterAlive', () => {
-  it('is true for a running process and false for a dead one or none', () => {
+  it('is true for a running waiter and false for a dead one or none', () => {
     expect(waiterAlive(wallet, 'r1')).toBe(false);
-    writePid({ wallet, id: 'r1', pid: process.pid, emailCommand: 'retry' });
+    writePid({ wallet, id: 'r1', pid: fakeWaiter('r1'), emailCommand: 'retry' });
     expect(waiterAlive(wallet, 'r1')).toBe(true);
     expect(waiterEmailCommand(wallet, 'r1')).toBe('retry');
     writePid({ wallet, id: 'r1', pid: deadPid() });
     expect(waiterAlive(wallet, 'r1')).toBe(false);
+    expect(fs.existsSync(pidFile(wallet, 'r1'))).toBe(false);
+  });
+
+  it('a reused pid (a live process that is not this waiter) is not the waiter, and its file goes', () => {
+    writePid({ wallet, id: 'r1', pid: process.pid });
+    expect(waiterAlive(wallet, 'r1')).toBe(false);
+    expect(fs.existsSync(pidFile(wallet, 'r1'))).toBe(false);
+    // Another request's waiter is not this one's either.
+    writePid({ wallet, id: 'r1', pid: fakeWaiter('r2') });
+    expect(waiterAlive(wallet, 'r1')).toBe(false);
+  });
+
+  it('stopWaiter leaves a process that is not the waiter alone', async () => {
+    const pid = fakeWaiter('other');
+    writePid({ wallet, id: 'r1', pid });
+    await stopWaiter(wallet, 'r1', async () => undefined);
+    expect(() => process.kill(pid, 0)).not.toThrow();
+    expect(fs.existsSync(pidFile(wallet, 'r1'))).toBe(false);
+  });
+
+  it('stopWaiter ends a running waiter', async () => {
+    const pid = fakeWaiter('r1');
+    writePid({ wallet, id: 'r1', pid });
+    await stopWaiter(wallet, 'r1');
+    expect(() => process.kill(pid, 0)).toThrow();
+  });
+});
+
+describe('liveWaiters and clearWaiterFiles', () => {
+  it('lists running waiters from the pid files, and clears every file', async () => {
+    writePid({ wallet, id: 'a1', pid: fakeWaiter('a1') });
+    writePid({ wallet, id: 'b2', pid: deadPid() });
+    await writeResult(wallet, 'c3', { ok: true });
+    expect(liveWaiters(wallet)).toEqual(['a1']);
+    clearWaiterFiles(wallet);
+    expect(liveWaiters(wallet)).toEqual([]);
+    expect(readResult(wallet, 'c3')).toBeNull();
+    expect(latestWaiterRequest(wallet)).toBeNull();
   });
 });
 
 describe('waitForResult', () => {
   it('returns the result once written', async () => {
-    writePid({ wallet, id: 'r1', pid: process.pid });
+    writePid({ wallet, id: 'r1', pid: fakeWaiter('r1') });
     let polls = 0;
     const out = await waitForResult({
       wallet,
@@ -81,7 +151,7 @@ describe('waitForResult', () => {
   });
 
   it('is still waiting at the timeout while the waiter runs', async () => {
-    writePid({ wallet, id: 'r1', pid: process.pid });
+    writePid({ wallet, id: 'r1', pid: fakeWaiter('r1') });
     let polls = 0;
     const out = await waitForResult({
       wallet,
@@ -99,9 +169,10 @@ describe('waitForResult', () => {
     expect(await waitForResult({ wallet, id: 'r1', timeoutMs: 2_000, sleep: noSleep })).toEqual({
       state: 'gone'
     });
-    writePid({ wallet, id: 'r1', pid: deadPid() });
+    writePid({ wallet, id: 'r1', pid: deadPid(), emailCommand: 'retry by email' });
     expect(await waitForResult({ wallet, id: 'r1', timeoutMs: 2_000, sleep: noSleep })).toEqual({
-      state: 'gone'
+      state: 'gone',
+      emailCommand: 'retry by email'
     });
   });
 
@@ -117,7 +188,7 @@ describe('waitForResult', () => {
 describe('latestWaiterRequest', () => {
   it('finds the newest request with a waiter or a result', async () => {
     expect(latestWaiterRequest(wallet)).toBeNull();
-    writePid({ wallet, id: 'old', pid: process.pid });
+    writePid({ wallet, id: 'old', pid: deadPid() });
     const past = new Date(Date.now() - 60_000);
     fs.utimesSync(pidFile(wallet, 'old'), past, past);
     await writeResult(wallet, 'new', { ok: true });

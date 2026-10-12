@@ -9,6 +9,7 @@ import type { CommandModule } from 'yargs';
 import { getAddress, isAddress } from 'viem';
 
 import type { LoginContext, OwnerAction } from '../lib/owner/pending.ts';
+import type { OwnerContext } from '../lib/owner/requests.ts';
 import type { Plan, PlanToken } from '../lib/session/plan.ts';
 
 import { provisionBuilderOnce } from '../lib/builder-provision.ts';
@@ -29,8 +30,10 @@ import {
   startOwnerRequest
 } from '../lib/owner/requests.ts';
 import {
+  clearWaiterFiles,
   deleteResult,
   latestWaiterRequest,
+  liveWaiters,
   removePid,
   spawnWaiter,
   stopWaiter,
@@ -79,7 +82,7 @@ import {
   supportedTokens
 } from '../lib/session/tokens.ts';
 import { currentSignInMethod } from '../lib/signin-method.ts';
-import { deleteOmsWallet, loadOmsWalletPointer } from '../lib/storage.ts';
+import { deleteOmsWallet, loadOmsWalletPointer, saveOmsWalletPointer } from '../lib/storage.ts';
 import { formatUnits, parseUnits } from '../lib/utils.ts';
 import { cliVersion, getLatestVersion, isNewerVersion } from '../lib/version.ts';
 import { watchStatus } from '../lib/watch/status.ts';
@@ -102,17 +105,32 @@ function waitCommand(params: { wallet: string; request: string; action: OwnerAct
     : `polygon-agent wallet confirm --request ${params.request} --wait${nameFlag(params.wallet)}`;
 }
 
-// The same command with the emailed-code sign-in, for when the browser one fails.
-function emailVariant(params: {
+// Quotes a value for a shell command line, when it needs it.
+function shellQuote(value: string): string {
+  return /^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+// A flag's value: shell-quoted, or `placeholder` as is (e.g. <email>).
+type FlagValue = string | number | string[] | undefined | { placeholder: string };
+
+// A suggested `polygon-agent wallet ...` command line, its values quoted.
+function commandLine(params: {
   wallet: string;
   command: string;
-  flags: Record<string, string | number | string[] | undefined>;
+  flags: Record<string, FlagValue>;
+  // Run it with the emailed-code sign-in, whatever the picker says.
+  emailSignIn?: boolean;
 }): string {
-  const flags = Object.entries(params.flags).flatMap(([flag, value]) =>
-    value === undefined ? [] : [value].flat().map((v) => ` --${flag} ${v}`)
-  );
-  return `POLYGON_AGENT_SIGNIN=email polygon-agent wallet ${params.command}${flags.join('')}${nameFlag(params.wallet)}`;
+  const flags = Object.entries(params.flags).flatMap(([flag, value]) => {
+    if (value === undefined) return [];
+    if (typeof value === 'object' && !Array.isArray(value))
+      return [` --${flag} ${value.placeholder}`];
+    return [value].flat().map((v) => ` --${flag} ${shellQuote(String(v))}`);
+  });
+  return `${params.emailSignIn ? 'POLYGON_AGENT_SIGNIN=email ' : ''}polygon-agent wallet ${params.command}${flags.join('')}${nameFlag(params.wallet)}`;
 }
+
+const EMAIL_PLACEHOLDER = { placeholder: '<email>' };
 
 function loginEmailCommand(params: {
   wallet: string;
@@ -121,12 +139,16 @@ function loginEmailCommand(params: {
   days?: number;
   chains?: string;
 }): string {
-  const extra = [
-    params.allowance === undefined ? '' : ` --allowance ${params.allowance}`,
-    params.days === undefined ? '' : ` --days ${params.days}`,
-    params.chains === undefined ? '' : ` --chains ${params.chains}`
-  ].join('');
-  return `polygon-agent wallet login --email ${params.email ?? '<email>'}${extra}${nameFlag(params.wallet)}`;
+  return commandLine({
+    wallet: params.wallet,
+    command: 'login',
+    flags: {
+      email: params.email ?? EMAIL_PLACEHOLDER,
+      allowance: params.allowance,
+      days: params.days,
+      chains: params.chains
+    }
+  });
 }
 
 function requireEmail(value: string | undefined): string {
@@ -191,13 +213,44 @@ function parseChains(value: string | undefined): number[] | undefined {
 // login page (the picker's choice, with its reason).
 type RequestMethod = { method: 'email'; email: string } | { method: 'browser'; reason: string };
 
-// The picker's method for a request on a connected wallet; email uses the
-// owner's email from the connection.
-function requestMethod(ownerEmail: string | undefined): RequestMethod {
+// The method for a request on a connected wallet: an emailed code with
+// --email, else the picker's choice; email then needs --email or the owner's
+// email from the connection. Also gives the request's email-code variant.
+function starterMethod(params: {
+  wallet: string;
+  command: string;
+  flags: Record<string, FlagValue>;
+  email: string | undefined;
+  ownerEmail: string | undefined;
+}): { method: RequestMethod; emailCommand: string } {
+  const known = params.email ?? params.ownerEmail;
+  const variant = (emailSignIn: boolean) =>
+    commandLine({
+      wallet: params.wallet,
+      command: params.command,
+      flags: {
+        ...params.flags,
+        email: params.email ?? (known ? undefined : EMAIL_PLACEHOLDER)
+      },
+      emailSignIn
+    });
+  const emailCommand = variant(true);
+  if (params.email !== undefined) {
+    return { method: { method: 'email', email: requireEmail(params.email) }, emailCommand };
+  }
   const picked = currentSignInMethod();
-  return picked.method === 'browser'
-    ? { method: 'browser', reason: picked.reason }
-    : { method: 'email', email: requireEmail(ownerEmail) };
+  if (picked.method === 'browser') {
+    return { method: { method: 'browser', reason: picked.reason }, emailCommand };
+  }
+  if (!known) {
+    throw new CliError({
+      code: 'email_required',
+      message: `This install signs in with an emailed code (${picked.reason}), and no email is known yet.`,
+      hint: 'Ask the user for their email, then run `command` with it.',
+      command: variant(false)
+    });
+  }
+  return { method: { method: 'email', email: requireEmail(known) }, emailCommand };
 }
 
 // What the login page shows about the request.
@@ -221,11 +274,23 @@ async function openPage(url: string): Promise<void> {
   }
 }
 
-// A new request replaces the wallet's pending one, so a waiter still working
-// on that one is stopped first: it must not go on to approve it.
-async function stopPreviousWaiter(wallet: string): Promise<void> {
-  const previous = loadPending(wallet);
-  if (previous?.method === 'browser') await stopWaiter(wallet, previous.id);
+// Before a new request: a waiter still waiting for the sign-in of the request
+// it replaces is stopped (it must not go on to approve it). A waiter whose
+// owner already signed in is running its action, so the new request waits.
+// Waiters are found by their pid files: the pending file goes at sign-in.
+async function settleWaiters(wallet: string): Promise<void> {
+  const pending = loadPending(wallet);
+  const live = liveWaiters(wallet);
+  const finishing = live.find((id) => pending?.id !== id);
+  if (finishing) {
+    throw new CliError({
+      code: 'request_in_progress',
+      message: 'A sign-in for this wallet is finishing.',
+      hint: 'Run `command` to wait for it, then try again.',
+      command: `polygon-agent wallet confirm --request ${finishing} --wait${nameFlag(wallet)}`
+    });
+  }
+  for (const id of live) await stopWaiter(wallet, id);
 }
 
 async function startRequest(params: {
@@ -237,7 +302,6 @@ async function startRequest(params: {
   emailCommand: string;
 }) {
   const { wallet, method, action } = params;
-  await stopPreviousWaiter(wallet);
   if (method.method === 'email') {
     const request = await startOwnerRequest({
       wallet,
@@ -409,7 +473,7 @@ export async function handleSessionLogin(argv: {
     });
 
     // An earlier request's waiter must not go on to approve its plan for the key below.
-    await stopPreviousWaiter(wallet);
+    await settleWaiters(wallet);
     // A fresh session key for this connection; registering it needs no owner.
     await withWalletKeys({
       wallet,
@@ -463,6 +527,19 @@ async function confirmedJson(
     result = { ...result, builderAccess: provision.provisioned || provision.reason === 'existing' };
   }
   return { ok: !failedOutright, walletName: wallet, ...result };
+}
+
+// After an emailed-code request on a wallet whose owner email wasn't known
+// (connected through the browser), keep it: the next request can use it.
+async function rememberOwnerEmail(params: {
+  wallet: string;
+  request: OwnerContext['request'];
+}): Promise<void> {
+  if (params.request.method !== 'email') return;
+  const pointer = await loadOmsWalletPointer(params.wallet);
+  if (pointer && !pointer.email) {
+    await saveOmsWalletPointer(params.wallet, { ...pointer, email: params.request.email });
+  }
 }
 
 // The waiter: signs in through the login page, runs the action, and leaves
@@ -527,8 +604,7 @@ async function waitForRequest(params: {
     };
   }
   if (outcome.state === 'gone') {
-    const command = waiterEmailCommand(wallet, id) ?? loginEmailCommand({ wallet });
-    removePid(wallet, id);
+    const command = outcome.emailCommand ?? loginEmailCommand({ wallet });
     throw new CliError({
       code: 'browser_signin_failed',
       message: 'The browser sign-in stopped without finishing.',
@@ -628,7 +704,11 @@ export const confirmCommandModule: CommandModule<object, ConfirmArgs> = {
             requestId: argv.request,
             code,
             now,
-            run: (context) => runOwnerAction({ context, wallet, now })
+            run: async (context) => {
+              const result = await runOwnerAction({ context, wallet, now });
+              await rememberOwnerEmail({ wallet, request: context.request });
+              return result;
+            }
           })
       });
       json = await confirmedJson(wallet, confirmed);
@@ -870,6 +950,7 @@ export const statusCommandModule: CommandModule<object, NameArgs> = {
 
 interface AllowanceSetArgs {
   name: string;
+  email?: string;
   amount?: number;
   add?: string[];
   chains?: string;
@@ -881,6 +962,10 @@ const allowanceSetCommand: CommandModule<object, AllowanceSetArgs> = {
   builder: (y) =>
     y
       .option('name', { type: 'string', default: 'main', describe: 'Wallet name' })
+      .option('email', {
+        type: 'string',
+        describe: "The owner's email, for a sign-in with an emailed code"
+      })
       .option('amount', { type: 'number', describe: 'New allowance in USD' })
       .option('add', {
         type: 'string',
@@ -941,16 +1026,20 @@ const allowanceSetCommand: CommandModule<object, AllowanceSetArgs> = {
         now: new Date(),
         current
       });
+      const { method, emailCommand } = starterMethod({
+        wallet,
+        command: 'allowance set',
+        flags: { amount: argv.amount, add: argv.add, chains: argv.chains },
+        email: argv.email,
+        ownerEmail: pointer.email
+      });
+      await settleWaiters(wallet);
       await startRequest({
         wallet,
-        method: requestMethod(pointer.email),
+        method,
         action: { kind: 'allowance-set', plan },
         shown: { plan: planSummary(plan), previousAllowanceUsd: current.allowanceUsd },
-        emailCommand: emailVariant({
-          wallet,
-          command: 'allowance set',
-          flags: { amount: argv.amount, add: argv.add, chains: argv.chains }
-        })
+        emailCommand
       });
     } catch (error) {
       jsonFail(error);
@@ -960,6 +1049,7 @@ const allowanceSetCommand: CommandModule<object, AllowanceSetArgs> = {
 
 interface RenewArgs {
   name: string;
+  email?: string;
   days?: number;
 }
 
@@ -967,10 +1057,16 @@ const allowanceRenewCommand: CommandModule<object, RenewArgs> = {
   command: 'renew',
   describe: 'Renew the allowance for another period with a new session key; the owner approves it',
   builder: (y) =>
-    y.option('name', { type: 'string', default: 'main', describe: 'Wallet name' }).option('days', {
-      type: 'number',
-      describe: 'New period in days (default: the current one)'
-    }),
+    y
+      .option('name', { type: 'string', default: 'main', describe: 'Wallet name' })
+      .option('email', {
+        type: 'string',
+        describe: "The owner's email, for a sign-in with an emailed code"
+      })
+      .option('days', {
+        type: 'number',
+        describe: 'New period in days (default: the current one)'
+      }),
   handler: async (argv) => {
     try {
       const wallet = argv.name;
@@ -999,7 +1095,14 @@ const allowanceRenewCommand: CommandModule<object, RenewArgs> = {
         now: new Date()
       });
       // An earlier request's waiter must not go on to approve its plan for the key below.
-      await stopPreviousWaiter(wallet);
+      const { method, emailCommand } = starterMethod({
+        wallet,
+        command: 'allowance renew',
+        flags: { days: argv.days },
+        email: argv.email,
+        ownerEmail: pointer.email
+      });
+      await settleWaiters(wallet);
       await withWalletKeys({
         wallet,
         fn: async () => {
@@ -1016,14 +1119,10 @@ const allowanceRenewCommand: CommandModule<object, RenewArgs> = {
       });
       await startRequest({
         wallet,
-        method: requestMethod(pointer.email),
+        method,
         action: { kind: 'renew', plan },
         shown: { plan: planSummary(plan) },
-        emailCommand: emailVariant({
-          wallet,
-          command: 'allowance renew',
-          flags: { days: argv.days }
-        })
+        emailCommand
       });
     } catch (error) {
       jsonFail(error);
@@ -1052,6 +1151,7 @@ export const allowanceCommandModule: CommandModule<object, NameArgs> = {
 
 interface WithdrawArgs {
   name: string;
+  email?: string;
   to: string;
   token: string;
   amount: string;
@@ -1065,6 +1165,10 @@ export const withdrawCommandModule: CommandModule<object, WithdrawArgs> = {
   builder: (y) =>
     y
       .option('name', { type: 'string', default: 'main', describe: 'Wallet name' })
+      .option('email', {
+        type: 'string',
+        describe: "The owner's email, for a sign-in with an emailed code"
+      })
       .option('to', { type: 'string', demandOption: true, describe: 'Destination address' })
       .option('token', { type: 'string', demandOption: true, describe: 'Token symbol or address' })
       .option('amount', {
@@ -1096,14 +1200,18 @@ export const withdrawCommandModule: CommandModule<object, WithdrawArgs> = {
         });
       }
       const display = `${formatUnits(amount, token.decimals)} ${token.symbol}`;
+      const { method, emailCommand } = starterMethod({
+        wallet,
+        command: 'withdraw',
+        flags: { to, token: argv.token, amount: argv.amount, chain: argv.chain },
+        email: argv.email,
+        ownerEmail: pointer.email
+      });
+      await settleWaiters(wallet);
       await startRequest({
         wallet,
-        method: requestMethod(pointer.email),
-        emailCommand: emailVariant({
-          wallet,
-          command: 'withdraw',
-          flags: { to, token: argv.token, amount: argv.amount, chain: argv.chain }
-        }),
+        method,
+        emailCommand,
         action: {
           kind: 'withdraw',
           chainId,
@@ -1134,6 +1242,7 @@ export const withdrawCommandModule: CommandModule<object, WithdrawArgs> = {
 
 interface AccessArgs {
   name: string;
+  email?: string;
   revoke?: string;
   session?: string;
 }
@@ -1145,6 +1254,10 @@ export const accessCommandModule: CommandModule<object, AccessArgs> = {
   builder: (y) =>
     y
       .option('name', { type: 'string', default: 'main', describe: 'Wallet name' })
+      .option('email', {
+        type: 'string',
+        describe: "The owner's email, for a sign-in with an emailed code"
+      })
       .option('revoke', { type: 'string', describe: 'Credential id to revoke' })
       .option('session', { type: 'string', describe: 'With --revoke: only this session id' }),
   handler: async (argv) => {
@@ -1160,14 +1273,18 @@ export const accessCommandModule: CommandModule<object, AccessArgs> = {
       const revoke = argv.revoke
         ? { credentialId: argv.revoke, ...(argv.session ? { sessionId: argv.session } : {}) }
         : undefined;
+      const { method, emailCommand } = starterMethod({
+        wallet,
+        command: 'access',
+        flags: { revoke: argv.revoke, session: argv.session },
+        email: argv.email,
+        ownerEmail: pointer.email
+      });
+      await settleWaiters(wallet);
       await startRequest({
         wallet,
-        method: requestMethod(pointer.email),
-        emailCommand: emailVariant({
-          wallet,
-          command: 'access',
-          flags: { revoke: argv.revoke, session: argv.session }
-        }),
+        method,
+        emailCommand,
         action: { kind: 'access', revoke },
         shown: {
           summary: revoke
@@ -1228,7 +1345,10 @@ export async function logoutSessionWallet(wallet: string): Promise<Record<string
       }
       // Still under the wallet lock, so no spend or owner request interleaves.
       removeSessionState(wallet);
-      await stopPreviousWaiter(wallet);
+      // Every waiter stops (one past its sign-in revokes it), and no result is
+      // left for a later `--wait` to print.
+      for (const id of liveWaiters(wallet)) await stopWaiter(wallet, id);
+      clearWaiterFiles(wallet);
       await deletePending({ wallet });
       await deleteOmsWallet(wallet);
     }
