@@ -7,13 +7,17 @@ description: Swap, bridge, and deposit on Polygon using the Polygon Agent CLI. C
 
 ## Session Prerequisites
 
-**Before any DeFi operation, the wallet must be logged in.** The embedded wallet can call any contract and spend any amount it holds — there is no contract whitelist and no per-token spend limit, so no special setup is needed for deposits, swaps, or withdrawals. If the user is not logged in, log in now:
+**Before any DeFi operation, the wallet must be connected.** Check with `agent wallet status`.
+
+**Assistant installs** (session mode, set up from https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/setup.md) connect with bare `agent wallet login`. The CLI picks a sign-in page or an emailed code; follow its output (`waiting`, then `--wait`; or `email_required` and `code_sent`). Swaps and bridges work within the allowance. Yield `deposit` and `withdraw` need the wallet owner and fail with `owner_required` in session mode. Tell the user, and don't look for a way around it.
+
+**Developers running the CLI directly** can sign in as the owner instead:
 
 ```bash
 agent wallet login --owner
 ```
 
-This opens the agentconnect login page in the browser; choose Google or email, and once you sign in the embedded wallet is created or unlocked. This works whether the browser is local or remote, so no extra flags are needed on headless hosts. The wallet address is the same across all chains. Sessions last about a week; if calls start failing with an expired-session error, just re-run `wallet login --owner`.
+This opens the agentconnect login page in the browser; choose Google or email, and once you sign in the embedded wallet is created or unlocked. This works whether the browser is local or remote, so no extra flags are needed on headless hosts. In owner mode the wallet can call any contract and spend any amount it holds, with no contract whitelist and no per-token spend limit, so deposits, swaps, and withdrawals need no special setup. The wallet address is the same across all chains. Owner sessions last about a week; if calls start failing with an expired-session error, re-run `wallet login --owner`.
 
 ---
 
@@ -233,6 +237,7 @@ agent call --to 0x... --data 0x... --prefer-native-fee --broadcast
 |-------|-------|-----|
 | `Not logged in` / no wallet found | No wallet yet | Run `agent wallet login` |
 | Owner-mode session expired | Sessions last about a week | Run `agent wallet login --owner` |
+| `owner_required` on `deposit` or `withdraw` | This install connected with an allowance (session mode) | Yield needs the owner. Tell the user; a developer can use `agent wallet login --owner` |
 | `Insufficient <token>: wallet has X` | Balance too low for the requested deposit amount | Run `agent balances` and adjust `--amount` |
 | `Unable to pay gas` / `Wallet has no POL for gas` | Wallet can't cover the relayer fee in USDC or POL | Fund the wallet with a little POL or USDC; for a native-only wallet, pass `--prefer-native-fee` on `call` |
 | `Protocol X not yet supported` | Trails returned a protocol other than aave/morpho | Use `agent swap` to obtain the yield-bearing token manually |

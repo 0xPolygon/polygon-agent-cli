@@ -149,7 +149,7 @@ async function clientFor(
 
 // In session mode `agent wallet login` without --owner does not reach the backed-up key: either the
 // next owner approval recovers it, or the install switches to owner mode.
-const SESSION_RETRY_HINT = 'The next owner approval (email code) retries this.';
+const SESSION_RETRY_HINT = 'The next owner approval retries this.';
 const SESSION_OWNER_HINT =
   'Run wallet logout, then agent wallet login --owner to use it through OMS.';
 
@@ -158,7 +158,7 @@ function keyBackedUpError(sessionMode: boolean): CliError {
     code: 'not_set_up',
     message: 'The Polymarket key is not on this machine; it is backed up in your OMS account.',
     hint: sessionMode
-      ? 'The next owner approval (email code) recovers it into a new key, or run wallet logout, then agent wallet login --owner to use it through OMS.'
+      ? 'The next owner approval recovers it into a new key, or run wallet logout, then agent wallet login --owner to use it through OMS.'
       : 'Sign in with agent wallet login --owner to use it.'
   });
 }

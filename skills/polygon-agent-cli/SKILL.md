@@ -95,7 +95,8 @@ agent setup --oms-publishable-key <key>
 ## Complete Setup Flow
 
 ```bash
-# Step 1: Log in as the owner in the browser
+# Step 1: Log in as the owner in the browser (developers; assistant installs use bare
+# `agent wallet login`, see Session Mode)
 agent wallet login --owner
 # → opens the agentconnect login page; choose Google or email (email sends
 #   a 6-digit code to the user's inbox, entered on the page)
@@ -119,7 +120,7 @@ agent mode auto      # or: agent mode dry-run
 agent fund
 # → reads walletAddress from session, builds Trails widget URL with toAddress=<walletAddress>
 # → ALWAYS run this command to get the URL — never construct it manually or hardcode any address
-# → send the returned `fundingUrl` to the user; `walletAddress` in the output confirms the recipient
+# → send the returned `url` to the user; `walletAddress` in the output confirms the recipient
 
 # Step 3: Verify balances
 agent balances
@@ -145,7 +146,7 @@ For specific workflows, fetch and load the relevant sub-skill **before attemptin
 > **IMPORTANT — x402 calls:** If the user asks to use x402 to fetch data or call a service (web search, scraping, news, LLM inference, email, on-chain wallet analytics, multi-chain RPC, etc.), follow these steps in order before making any request:
 >
 > 1. Fetch and read the discovery skill: `GET https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/polygon-discovery/SKILL.md`
-> 2. Run `agent wallet list` — if no wallet exists, log in: `agent wallet login` and sign in on the login page (Google or email), then fund the wallet before continuing. No setup step is needed first.
+> 2. Run `agent wallet list` — if no wallet exists, log in with `agent wallet login` and follow its output (a sign-in page, or an emailed code), then fund the wallet before continuing. No setup step is needed first.
 > 3. Run `agent balances` — confirm USDC is available before proceeding; x402 calls will fail with an EOA funding error if the wallet is empty
 >
 > Do not guess endpoints or search the web for x402 providers. The discovery skill documents the correct, working endpoints with exact URL formats.
@@ -255,7 +256,7 @@ agent feedback --agent-id <id> --value <score> [--tag1 <t>] [--tag2 <t>] [--endp
 - **Smart defaults** — `--wallet main`, `--chain polygon`
 - **`balances --chains`** — comma-separated chains (max 20); two or more return JSON with `multiChain: true` and a `chains` array (same wallet address on each)
 - **Fee preference** — auto-selects USDC over native POL when both available; the relayer pays gas in whichever fee token the wallet can afford
-- **`fund`** — returns the agentconnect dashboard funding URL (wallet and chain prefilled) as the `fundingUrl`. Always run `agent fund` to get the URL and wallet address — never hardcode or construct manually.
+- **`fund`** — returns the agentconnect dashboard funding URL (wallet and chain prefilled) as `url`. Always run `agent fund` to get the URL and wallet address — never hardcode or construct manually.
 - **`deposit`** — picks highest-TVL pool via Trails `getEarnPools` and deposits directly. Full deposit reference: https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/polygon-defi/SKILL.md
 - **Gas reserve** — when using `deposit` or any command that spends tokens, always reserve at least 0.1 USDC or 0.1 POL in the wallet for gas. Never attempt to spend the full balance. The `deposit` command enforces a 0.1 reserve automatically, but the agent must apply the same rule when constructing amounts for `send`, `swap`, or direct contract calls.
 - **`withdraw`** — `--position` = aToken or ERC-4626 vault; `--amount` = `max` or underlying units (Aave / vault). Dry-run JSON includes `poolAddress` / `vault`.
@@ -279,7 +280,7 @@ CLI commands output JSON (non-TTY). After running a command, always render the r
 | `swap` | Summary: `X FROM → Y TO` with chain. If broadcast, show deposit tx hash + explorer link. |
 | `deposit` | Summary: amount, asset, protocol, pool address. If broadcast, show tx hash + explorer link. |
 | `withdraw` | Summary: `kind` (aave / erc4626), position, amount, pool or vault. If broadcast, show tx hash + explorer link. |
-| `fund` | Show the `fundingUrl` as a clickable link with a brief instruction to open it. |
+| `fund` | Show the `url` as a clickable link with a brief instruction to open it. |
 | `wallet login` / `wallet list` | Wallet name, truncated address, chain in a small table or bullet list. |
 | `register` | Show agent name and tx hash as a code span with Polygonscan link. Remind user to retrieve `agentId` from the Registered event on the Logs tab. |
 | `identity` | Show `agentId`, wallet address, whether a wallet is set, and the decoded metadata value when `--key` was passed. |
