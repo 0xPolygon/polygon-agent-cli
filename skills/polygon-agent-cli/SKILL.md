@@ -57,7 +57,7 @@ agent wallet confirm --request <request> --code <code>
 
 - **What it covers:** a USD total over a period (30 days by default) in USDC, USDT, USDG, ETH/WETH, POL/WPOL and BTC (WBTC or cbBTC) on the chosen chains (default Polygon, Base, and chains already holding those tokens). Each token also has an on-chain limit worth the allowance.
 - **What works:** `balances`, `send`/`send-token` (ERC-20s), `swap` (including bridges), `x402-pay`, `price`, `watch`, `alerts`. Native coins (ETH, POL, BNB, AVAX) can't be spent; buys of ETH or POL deliver WETH or WPOL.
-- **What doesn't:** `send-native`, `deposit`, `withdraw` (yield), `call` and ERC-8004 writes fail with `owner_required`, `email_required`, `browser_signin_failed`, `request_cancelled` (the user cancelled on the page), `request_in_progress` (a sign-in for this wallet is finishing: run its `--wait` command).
+- **What doesn't:** `send-native`, `deposit`, `withdraw` (yield), `call` and ERC-8004 writes fail with `owner_required`: they need the wallet owner (owner mode, `wallet login --owner`). Sign-in errors are listed under **Errors** below.
 - **Owner requests** need a new sign-in each time, with the same picker and `--email`: `wallet allowance set`, `wallet allowance renew`, `wallet withdraw`, `wallet access`. A browser request returns `waiting` and a `--wait` next (`wallet confirm --request <id> --wait` also waits); a chat code ends in `wallet confirm --request <id> --code <code>`.
 - **Funding:** an output may carry `funding: { url, reason?, amountUsd? }` (an empty wallet on connect, `insufficient_balance`, a Polymarket deposit shortfall). Open or send `funding.url`.
 - **Polymarket key:** every owner sign-in backs up the Polymarket trading key; the result shows it as `polymarket`.

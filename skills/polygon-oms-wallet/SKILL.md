@@ -66,7 +66,7 @@ Whenever you give the user the wallet address (after connecting, for funding, or
 
 `"$POLYGON_AGENT" fund` returns the address and a funding link (`url`); `"$POLYGON_AGENT" wallet address` returns just the address. Recommend USDC on Polygon; any covered token on a covered chain works. Funds in anything else show as not spendable by you.
 
-When any output has `funding`, open or send `funding.url` and tell the user what it's for. `funding.reason` is `empty` (a fresh wallet has no funds), `insufficient_balance` or a Polymarket deposit shortfall, and `funding.amountUsd` is how much is missing.
+When any output has `funding`, open or send `funding.url` and tell the user what it's for. A connect to a wallet with no funds sets `funding.reason` to `empty`. A shortfall error (`insufficient_balance`, for gas or a Polymarket deposit) has no `reason`; its `funding.amountUsd`, when present, is how much is missing.
 
 ## Common tasks
 
