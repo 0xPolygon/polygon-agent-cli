@@ -235,10 +235,4 @@ General codes you will also see: `invalid_input` (bad amount or flags, including
 
 ## Legacy
 
-Accounts that traded through an older Polymarket proxy wallet can attach it:
-
-```bash
-agent polymarket import-key <privateKey>
-```
-
-This stores the key encrypted as a legacy proxy account and mints the builder key that `withdraw` needs. If minting fails, the import still succeeds and the output has a `warning`. Run `agent polymarket setup --wallet <name> --broadcast` to mint it before withdrawing. Then `withdraw all --broadcast` drains the proxy's pUSD to the agent wallet. USDC.e left in a legacy proxy is not moved by `withdraw`. New users should use `setup` instead. The old names `clob-buy`, `proxy-wallet`, `approve` and `set-key` still work as hidden aliases for one release.
+Accounts already on disk as a legacy Polymarket proxy keep working: `status` shows them, and `withdraw all --broadcast` drains the proxy's pUSD to the agent wallet. `withdraw` needs a builder key, so run `agent polymarket setup --wallet <name> --broadcast` first if `status` says it is missing. USDC.e left in a legacy proxy is not moved by `withdraw`. The CLI no longer imports a private key (the old `import-key` and `set-key` commands are gone). To use a legacy key through OMS, run `agent wallet logout`, then `agent wallet login --owner`. The old names `clob-buy`, `proxy-wallet` and `approve` still work as hidden aliases for one release.

@@ -18,7 +18,6 @@ describe('polymarketCommand', () => {
     for (const name of [
       'setup',
       'status',
-      'import-key',
       'recover',
       'deposit',
       'withdraw',
@@ -38,7 +37,7 @@ describe('polymarketCommand', () => {
     ]) {
       expect(out).toContain(name);
     }
-    for (const hidden of ['clob-buy', 'proxy-wallet', 'set-key', ' approve']) {
+    for (const hidden of ['clob-buy', 'proxy-wallet', 'import-key', 'set-key', ' approve']) {
       expect(out).not.toContain(hidden);
     }
   });

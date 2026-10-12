@@ -1,4 +1,4 @@
-// setup / status / import-key: the Polymarket trading account for an agent wallet.
+// setup / status: the Polymarket trading account for an agent wallet.
 
 import type { CommandModule } from 'yargs';
 
@@ -10,7 +10,6 @@ import {
   ensureTradingKey,
   getTradingClient,
   hasLocalKey,
-  importLegacyKey,
   legacyNegRiskApproved,
   loadAccount,
   localTradingKeyAddresses,
@@ -386,20 +385,6 @@ async function handleRecover(argv: RecoverArgs): Promise<void> {
   }
 }
 
-async function handleImportKey(argv: { privateKey: string; wallet: string }): Promise<void> {
-  try {
-    const { account, builderKey, warning } = await importLegacyKey(argv.wallet, argv.privateKey);
-    ok({
-      account: { kind: account.kind, wallet: account.wallet, signer: account.signer },
-      builderKey,
-      note: 'This is a legacy proxy account: it trades through the Polymarket proxy wallet that belongs to the imported key. withdraw moves only its pUSD; USDC.e left in the proxy is not moved.',
-      ...(warning ? { warning } : {})
-    });
-  } catch (err) {
-    fail(err);
-  }
-}
-
 export const setupCommand: CommandModule = {
   command: 'setup',
   describe: 'Create the Polymarket trading account (key, builder key, Deposit Wallet, approvals)',
@@ -414,19 +399,6 @@ export const statusCommand: CommandModule = {
   builder: (y) => walletOption(y),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   handler: (argv) => handleStatus(argv as any)
-};
-
-export const importKeyCommand: CommandModule = {
-  command: 'import-key <privateKey>',
-  describe: 'Import an existing Polymarket private key as a legacy proxy account',
-  builder: (y) =>
-    walletOption(y).positional('privateKey', {
-      type: 'string',
-      demandOption: true,
-      describe: 'Hex private key (never printed)'
-    }),
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  handler: (argv) => handleImportKey(argv as any)
 };
 
 export const recoverCommand: CommandModule = {

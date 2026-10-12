@@ -299,7 +299,7 @@ export async function loadPolymarketKey(): Promise<string> {
   }
   if (data.polymarketPrivateKey) return decrypt(data.polymarketPrivateKey as CipherData);
   if (data.privateKey) return decrypt(data.privateKey as CipherData);
-  throw new Error('No EOA key found. Run: agent setup or agent polymarket set-key <privateKey>');
+  throw new Error('No EOA key found. Run: agent setup');
 }
 
 // ─── OMS (Open Money Stack V3 / typescript-sdk) config + session storage ──────
