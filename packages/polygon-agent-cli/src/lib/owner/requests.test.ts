@@ -27,8 +27,18 @@ vi.mock('@polygonlabs/oms-wallet', async (importOriginal) => {
   class FakeOwnerWallet {
     walletAddress: string | undefined;
     credentialId = 'owner-cred';
+    private readonly hasRedirectStorage: boolean;
+    constructor(hasRedirectStorage: boolean) {
+      this.hasRedirectStorage = hasRedirectStorage;
+    }
 
     async startOidcRedirectAuth(p: { sessionLifetimeSeconds?: number; provider: unknown }) {
+      // Like the real SDK in Node: no sessionStorage, so the client needs one.
+      if (!this.hasRedirectStorage) {
+        throw new Error(
+          'OIDC redirect auth requires redirectAuthStorage or browser sessionStorage'
+        );
+      }
       world.calls.push(
         `startOidc:${p.sessionLifetimeSeconds}:${String(p.provider === real.OmsRelayOidcProviders.google)}`
       );
@@ -70,7 +80,10 @@ vi.mock('@polygonlabs/oms-wallet', async (importOriginal) => {
   }
 
   class FakeOMSWallet {
-    wallet = new FakeOwnerWallet();
+    wallet: FakeOwnerWallet;
+    constructor(opts: { redirectAuthStorage?: unknown }) {
+      this.wallet = new FakeOwnerWallet(opts?.redirectAuthStorage !== undefined);
+    }
   }
   return { ...real, OMSWallet: FakeOMSWallet };
 });
