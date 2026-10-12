@@ -11,9 +11,11 @@ description: >-
 > **QA build (staging):** installs the `polymarket-qa` snapshot of the CLI (npm dist-tag), for testing before release. Don't run `polygon-agent update` during QA: it would compare against the released version.
 > This build signs in through the staging login page (agentconnect.staging.polygon.technology), which needs Polygon's Cloudflare WARP. Without it, the browser sign-in can't load: use the emailed code instead (`wallet login --email <email>`).
 
-**For the assistant.** Follow these steps in order. Each one is safe to re-run. Tell the user what you're doing in plain words as you go, and never paste raw JSON to them.
+**For the assistant.** Follow these steps in order. Each one is safe to re-run.
 
-**What this sets up (tell the user in a sentence or two):** your agent wallet (an OMS embedded wallet) that you, their assistant, can use within an allowance they approve by signing in (on a page in their browser, or with an emailed code). You can check prices, watch them, buy, sell, swap and bridge tokens, bet on Polymarket prediction markets, and pay for x402 services. Anything beyond the allowance needs a new sign-in from them. The wallet stays theirs. Each sign-in signs the CLI in as them for a moment, just long enough to make that one change (approving an allowance, a withdrawal…), then signs out again. Only that limited key is kept, never their sign-in.
+**How to talk to the user.** Talk like a helpful assistant: short, friendly, outcome first, one or two sentences. Don't narrate how things work (sign-in mechanics, session keys, the background sign-in, the Polymarket key backup or the extra wallet it adds, JSON fields or status names) unless the user asks or something fails. Never paste raw JSON. Install steps need no running commentary: say what you're setting up once, and speak up again only when you need something from them.
+
+**What this sets up.** Tell the user in one sentence, for example: "I'll set up an agent wallet I can spend from within a limit you approve. It stays yours." For you, if they ask: you can check and watch prices, buy, sell, swap and bridge tokens, bet on Polymarket, and pay for x402 services. Anything beyond the allowance needs a new sign-in from them. Each sign-in signs the CLI in as them just long enough to make that one change, then signs out; only this install's limited key is kept, never their sign-in.
 
 ## 1. Find the workspace
 
@@ -128,16 +130,14 @@ Then:
 
 Check these in order:
 
-1. `mode` is `"owner"`: this install is signed in with the browser login, as the wallet owner, with no allowance limits. Tell the user, and offer to switch to an allowance: `"$ROOT/bin/polygon-agent" wallet logout`, then step 7.
+1. `mode` is `"owner"`: this install has full owner access, with no spending limit. Tell the user briefly and offer to switch to a limit: `"$ROOT/bin/polygon-agent" wallet logout`, then step 7.
 2. `pendingRequest` is there. If its `method` is `browser`, a sign-in page is waiting at `pendingRequest.url` for what `pendingRequest.approves` says: ask the user to finish it there, then run `pendingRequest.next`. Otherwise a code was already sent to `pendingRequest.email`: ask the user for it and run `pendingRequest.next` with it. Don't start another unless it expired.
 3. `connected` is `true`: skip to step 8.
 4. Otherwise, connect (step 7).
 
 ## 7. Connect
 
-Before asking for anything, explain how it works: the sign-in lets the CLI act as the user for a moment, approve the allowance for this install's own limited key, and sign out. Only that key is kept.
-
-1. Ask how much you may spend, explaining before anything is sent: "How much should I be able to spend on my own? I suggest up to **$1,000** over the next **30 days**, in USDC, USDT, ETH and BTC on Polygon and Base, for trades and paid services. Anything more, or other tokens or chains, needs a new sign-in from you."
+1. Ask how much you may spend, for example: "How much should I be able to spend on my own? I suggest up to **$1,000** over the next **30 days**." (The default covers USDC, USDT, ETH and BTC on Polygon and Base; say so only if they ask.)
 2. Start the connection. Don't ask for an email yet: the CLI picks the method (a browser page, or a code sent by email) and tells you what it needs.
 
    ```sh
@@ -146,9 +146,9 @@ Before asking for anything, explain how it works: the sign-in lets the CLI act a
 
    Add `--chains polygon,base,…` only if the user asked for different chains; chains where the wallet already holds supported tokens are added on their own. Then handle the outcome:
 
-   - `status: "waiting"`: the user signs in on a page. Tell them "A sign-in page opened in your browser. Sign in there to approve", with a short summary of the `plan`. If this machine has no browser, or they say nothing opened, send them the `url`. Then run `next` (it ends in `--wait`). It blocks for up to about 90 seconds. If it returns `waiting` again, run `next` again, until it finishes. If the user cancels on the page it fails with `request_cancelled`: ask whether to try again.
+   - `status: "waiting"`: the user signs in on a page. Tell them, for example, "Sign in on the page that just opened to approve $1,000 over 30 days." (amount and period from the `plan`). If this machine has no browser, or they say nothing opened, send them the `url`. Then run `next` (it ends in `--wait`). It blocks for up to about 90 seconds. If it returns `waiting` again, run `next` again, until it finishes. If the user cancels on the page it fails with `request_cancelled`: ask whether to try again.
    - `email_required` (an error): ask the user for their email. Never guess it. Then run its `command`, with the email in place of `<email>`.
-   - `status: "code_sent"`: tell the user "I've sent a code to <email>. Paste it here to approve: …", followed by a short summary of the `plan`. As soon as they give the code, run `next`:
+   - `status: "code_sent"`: tell the user, for example, "I've sent a code to <email>. Paste it here to approve $1,000 over 30 days." (amount and period from the `plan`). As soon as they give the code, run `next`:
 
      ```sh
      "$ROOT/bin/polygon-agent" wallet confirm --request <request> --code <code>
@@ -156,21 +156,21 @@ Before asking for anything, explain how it works: the sign-in lets the CLI act a
 
      Use the code only here, once. Never store it or repeat it. If it fails with `invalid_code`, ask for the code again. If it fails with `request_expired`, start again at step 2. On any other error, follow its `hint` and `command`.
 3. Two more errors. `browser_signin_failed` means the page sign-in stopped: run its `command` to sign in with an emailed code instead. `request_in_progress` means a sign-in for this wallet is already finishing: run its `--wait` command.
-4. Tell the user the result in plain words, for example: "Thanks for connecting! A smart session now lets me spend up to $1,000 from your agent wallet until Nov 7, in USDC, USDT, WETH and WBTC on Polygon and Base. If you'd like higher limits, just ask." Take the details from `allowance` in the output. Mention any chains in `failed` and any `warnings`.
+4. Tell the user the result in one short line, for example: "You're connected. I can spend up to $1,000 over the next 30 days." Take the amount and period from `allowance` in the output. If any chain is in `failed` or there are `warnings`, add one plain sentence about what it means for them.
 5. Give the address: end your message with "Your agent wallet address is:" and send the full address as the next message, with nothing else in it, so the user can copy it in one go. Never shorten it. (If your platform sends only one message per reply, put it alone on its own line.)
-6. Then send the wallet's page: "You can see your wallet and add funds here: <dashboard.url>", with `dashboard.url` from the output, sent in full. Nothing opens on its own, so always send the link. If the output also has `funding`, the wallet is empty: say the page is where they add money (see step 8). `wallet status` returns the same `dashboard.url` whenever you need the link again.
+6. Then send: "You can see your wallet and add funds here: <dashboard.url>", with `dashboard.url` from the output, sent in full. Nothing opens on its own, so always send the link. `wallet status` returns the same `dashboard.url` whenever you need it again.
 
 ## 8. Funding
 
-Run `"$ROOT/bin/polygon-agent" wallet status` again. If it shows no `holdings` and you haven't already sent the link, send the user `dashboard.url` from its output (the address is already in its own message from step 7). Whenever any command's output has `funding`, send its `url` and tell the user what it's for. Nothing opens on its own. Suggest USDC on Polygon; any covered token on a covered chain works.
+Run `"$ROOT/bin/polygon-agent" wallet status` again. If it shows no `holdings` and you haven't already sent the link, send `dashboard.url` from its output (the address is already in its own message from step 7). Whenever any command's output has `funding`, send its `url` with a few words on what it's for. If they ask what to send, suggest USDC on Polygon.
 
 ## 9. Watches
 
-Check whether your platform can run a recurring task (a Muse scheduled task, OpenClaw cron, a Hermes cronjob, cron on a computer). You don't need one yet. When the user creates their first price watch, the skill explains how to schedule its check. If you can't schedule, tell the user that watches only run while you're active.
+Check whether your platform can run a recurring task (a Muse scheduled task, OpenClaw cron, a Hermes cronjob, cron on a computer). You don't need one yet, and there's nothing to tell the user now. When the user creates their first price watch, the skill explains how to schedule its check, and what to say if you can't.
 
 ## 10. Next steps
 
-Tell the user what they can ask for now, in plain words. For example:
+In a sentence or two, tell the user what they can ask for now, with two or three examples such as:
 
 - "What's ETH at?" or "Tell me if BTC drops below $90k."
 - "Buy 10 POL", "Buy $50 of ETH", or "Sell half my ETH if it goes over $4,000."
