@@ -58,7 +58,10 @@ const world = vi.hoisted(() => ({
     | undefined
     | Array<{ id: string; address: string; keyOrigin: 'generated' | 'imported' }>,
   // Where automatic selection lands at sign-in; undefined means walletAddress.
-  autoSelectAddress: undefined as string | undefined
+  autoSelectAddress: undefined as string | undefined,
+  // What the indexer returns; balancesError makes it fail.
+  balances: { nativeBalances: [] as unknown[], balances: [] as unknown[] },
+  balancesError: undefined as unknown
 }));
 
 const httpError = (status: number, name?: string) =>
@@ -206,7 +209,12 @@ vi.mock('@polygonlabs/oms-wallet', async (importOriginal) => {
 
   class FakeOMSWallet {
     wallet = new FakeOwnerWallet();
-    indexer = { getBalances: async () => ({ status: 200, nativeBalances: [], balances: [] }) };
+    indexer = {
+      getBalances: async () => {
+        if (world.balancesError) throw world.balancesError;
+        return { status: 200, ...world.balances };
+      }
+    };
   }
 
   class FakeRemoteAccessClient {
@@ -636,22 +644,39 @@ describe('status and Polymarket', () => {
     expect(JSON.stringify(report)).not.toContain('0x1111111111111111111111111111111111111111');
   });
 
-  it('links the wallet dashboard', async () => {
+  // The view comes from the balances status already read, not a second check.
+  it('links the wallet dashboard when the wallet holds something on Polygon', async () => {
     await confirm(await connectStep1());
-    const report = await sessionReport({ wallet, withVersion: false });
-    expect(report.dashboard).toEqual({
-      url: `${fundingUiBase()}/?wallet=${String(report.walletAddress)}&chain=137&view=dashboard`
-    });
+    funding.funded = false;
+    world.balances = {
+      nativeBalances: [{ chainId: 137, balance: '1000000000000000000', symbol: 'POL' }],
+      balances: []
+    };
+    try {
+      const report = await sessionReport({ wallet, withVersion: false });
+      expect(report.dashboard).toEqual({
+        url: `${fundingUiBase()}/?wallet=${String(report.walletAddress)}&chain=137&view=dashboard`
+      });
+    } finally {
+      funding.funded = true;
+      world.balances = { nativeBalances: [], balances: [] };
+    }
   });
 
   it('links the fund view while the wallet is empty', async () => {
     await confirm(await connectStep1());
-    funding.funded = false;
+    const report = await sessionReport({ wallet, withVersion: false });
+    expect(report.dashboard).toEqual({ url: expect.stringContaining('view=fund') });
+  });
+
+  it('links the dashboard view when balances could not be read', async () => {
+    await confirm(await connectStep1());
+    world.balancesError = new Error('indexer down');
     try {
       const report = await sessionReport({ wallet, withVersion: false });
-      expect(report.dashboard).toEqual({ url: expect.stringContaining('view=fund') });
+      expect(report.dashboard).toEqual({ url: expect.stringContaining('view=dashboard') });
     } finally {
-      funding.funded = true;
+      world.balancesError = undefined;
     }
   });
 

@@ -75,6 +75,7 @@ import { installName, readApprovedPlan, removeSessionState } from '../lib/sessio
 import {
   allowanceTotals,
   classifyHoldings,
+  holdsAnythingOn,
   describeSessions,
   sessionAlerts
 } from '../lib/session/status.ts';
@@ -941,7 +942,11 @@ export async function sessionReport(params: {
     connected: !accessError && sessions.some((s) => !s.expired),
     mode: 'session',
     walletAddress: pointer.walletAddress,
-    dashboard: await walletDashboard(wallet, pointer.walletAddress),
+    // From the balances read above; unreadable balances keep the dashboard view.
+    dashboard: dashboardInfo({
+      walletAddress: pointer.walletAddress,
+      funded: balances ? holdsAnythingOn(balances, 137) : true
+    }),
     email: pointer.email,
     installName: pointer.installName,
     ...(accessError ? { access: accessError } : {}),

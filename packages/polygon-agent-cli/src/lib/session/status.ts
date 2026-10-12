@@ -101,6 +101,20 @@ export function tokenLabel(params: {
 }
 
 // Every non-zero balance on the supported chains, and whether the sessions cover it.
+// Any non-zero native or token balance on the chain (a bad number counts as zero).
+export function holdsAnythingOn(balances: BalancesResult, chainId: number): boolean {
+  const positive = (value: string | undefined) => {
+    try {
+      return BigInt(value || '0') > 0n;
+    } catch {
+      return false;
+    }
+  };
+  return [...balances.nativeBalances, ...balances.balances].some(
+    (b) => b.chainId === chainId && positive(b.balance)
+  );
+}
+
 export function classifyHoldings(params: {
   balances: BalancesResult;
   sessions: LiveSession[];
