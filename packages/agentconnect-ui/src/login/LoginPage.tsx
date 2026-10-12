@@ -1,16 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type {
-  LoginAction,
-  LoginContext,
-  MachineEvent,
-  MachineState,
-  RelayStatus
-} from './machine.js';
+import type { LoginAction, MachineEvent, MachineState, RelayStatus } from './machine.js';
 
 import { LogoBadge } from '../App.js';
 import { oidcRelayUrl } from '../config';
-import { contextLine, initialState, reduce } from './machine.js';
+import { LOGIN_LINE, initialState, reduce } from './machine.js';
 import { getSessionId, isRelayReturn } from './returnUrl.js';
 
 // Poll fast while waiting on the CLI (returning from the provider, checking a
@@ -102,7 +96,6 @@ export function LoginPage() {
   const dispatch = useCallback((event: MachineEvent) => {
     setState((s) => reduce(s, event));
   }, []);
-  const [context, setContext] = useState<LoginContext | undefined>(undefined);
   const redirected = useRef(false);
   const postedRelayCallback = useRef(false);
 
@@ -162,7 +155,6 @@ export function LoginPage() {
       () => {
         void fetchStatus(session).then((status) => {
           if (status === null) return; // transient failure; keep polling
-          if (status.context) setContext(status.context);
           if (status.status === 'auth-url' && !redirected.current && state.kind === 'google-wait') {
             redirected.current = true;
             window.location.assign(status.url);
@@ -191,7 +183,7 @@ export function LoginPage() {
     );
   }
 
-  return <Shell>{renderState(state, session, dispatch, context)}</Shell>;
+  return <Shell>{renderState(state, session, dispatch)}</Shell>;
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -207,17 +199,12 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function renderState(
-  state: MachineState,
-  session: string,
-  dispatch: (e: MachineEvent) => void,
-  context?: LoginContext
-) {
+function renderState(state: MachineState, session: string, dispatch: (e: MachineEvent) => void) {
   switch (state.kind) {
     case 'method':
       return (
         <MethodChoice
-          line={contextLine(context)}
+          line={LOGIN_LINE}
           onGoogle={() => {
             void postAction(session, { type: 'google' }).then((ok) => {
               if (ok) dispatch({ type: 'choose-google' });
