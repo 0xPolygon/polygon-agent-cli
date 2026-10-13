@@ -851,6 +851,15 @@ export function EarnTab({
         )}
       </div>
 
+      {!!onPolygon && (
+        <div className="flex flex-col gap-3">
+          <SectionTitle>Also earning on Polygon</SectionTitle>
+          <HoldingsList
+            holdings={{ ...holdings, data: holdings.data!.filter((h) => h.kind === 'earn') }}
+          />
+        </div>
+      )}
+
       <div className="flex flex-col gap-3">
         <SectionTitle>Or let your agent manage it</SectionTitle>
         <Panel pad="p-5">
