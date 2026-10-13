@@ -3,8 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from './index.ts';
 
 import { issueCertificate, resetJwksCache } from './agent-auth.ts';
-import { resetAgentCardTokenCache } from './agentcard.ts';
+import { AgentCard, resetAgentCardTokenCache } from './agentcard.ts';
 import { handleApi } from './index.ts';
+import { decideApproval } from './services.ts';
 import { CredentialStore } from './store.ts';
 import {
   AGENT,
@@ -476,7 +477,14 @@ describe('/api/credentials/buy', () => {
     expect([...kv.data.values()].join()).not.toContain('act_usr_1');
   });
 
-  it('shops as the user, shipping to the saved address', async () => {
+  const setLimit = async (t: string, cents: number) =>
+    handleApi(
+      req('PUT', '/api/credentials/settings', { token: t, body: { autoPayLimitCents: cents } }),
+      env(),
+      '/api/credentials/settings'
+    );
+
+  it('pays right away under the auto-pay limit, shipping to the saved address', async () => {
     const t = await token();
     await connect(t);
     await handleApi(
@@ -488,32 +496,102 @@ describe('/api/credentials/buy', () => {
       '/api/credentials/address'
     );
     const res = await call(t, { ask: 'a bag of coffee' });
-    expect(await res.json()).toMatchObject({
-      conversationId: 'conv_1',
-      status: 'needs_input',
-      cart: { totalCents: 675, hash: '0123456789abcdef' }
-    });
+    expect(await res.json()).toMatchObject({ autoPay: true, conversationId: 'conv_1' });
+    expect(agentcard.buys).toHaveLength(2);
     expect(agentcard.buys[0].auth).toBe('Bearer act_usr_1');
     expect(agentcard.buys[0].body).toMatchObject({
       ask: 'a bag of coffee',
       delivery_address: { street: ADDRESS.line1, zip: ADDRESS.zip, phone: '+15555550100' }
     });
-  });
-
-  it('confirms with the vault card and returns the approval link', async () => {
-    const t = await token();
-    await connect(t);
-    const res = await call(t, { conversationId: 'conv_1', confirm: '0123456789abcdef' });
-    expect(await res.json()).toMatchObject({
-      status: 'declined',
-      declineCode: 'vault_approval_required',
-      approvalUrl: 'https://vault.test/authorize?id=cauth_1',
-      chargeStatus: 'none'
-    });
-    expect(agentcard.buys[0].body).toMatchObject({
+    expect(agentcard.buys[1].body).toMatchObject({
       conversation_id: 'conv_1',
       confirm: '0123456789abcdef',
       payment_source: 'vault'
+    });
+  });
+
+  it('waits for the owner over the limit, and places the cart once they approve', async () => {
+    const t = await token();
+    await connect(t);
+    await setLimit(t, 500);
+    const pending = (await (await call(t, { ask: 'a bag of coffee' })).json()) as {
+      status: string;
+      approvalId: string;
+      approvalUrl: string;
+    };
+    expect(pending.status).toBe('pending_approval');
+    expect(pending.approvalUrl).toBe(`https://agentconnect.test/approve?r=${pending.approvalId}`);
+    expect(agentcard.buys).toHaveLength(1);
+
+    const db = new CredentialStore(kv.kv, 'test-credentials-key');
+    const cards = new AgentCard({ clientId: 'client', clientSecret: 'acs_secret' });
+    await expect(
+      decideApproval(
+        db,
+        cards,
+        pending.approvalId,
+        '0x00000000000000000000000000000000000000bb',
+        true
+      )
+    ).rejects.toThrow(/another account/);
+    expect(await decideApproval(db, cards, pending.approvalId, WALLET, true)).toEqual({
+      status: 'awaiting_passkey',
+      passkeyUrl: 'https://vault.test/authorize?id=cauth_1'
+    });
+    expect(agentcard.buys[1].body).toMatchObject({
+      confirm: '0123456789abcdef',
+      payment_source: 'vault'
+    });
+
+    const status = await handleApi(
+      req('GET', `/api/credentials/approvals/${pending.approvalId}`, { token: t }),
+      env(),
+      `/api/credentials/approvals/${pending.approvalId}`
+    );
+    expect(await status.json()).toMatchObject({ status: 'awaiting_passkey' });
+  });
+
+  it('records a declined approval and places nothing', async () => {
+    const t = await token();
+    await connect(t);
+    await setLimit(t, 0);
+    const { approvalId } = (await (await call(t, { ask: 'coffee' })).json()) as {
+      approvalId: string;
+    };
+    const db = new CredentialStore(kv.kv, 'test-credentials-key');
+    const cards = new AgentCard({ clientId: 'client', clientSecret: 'acs_secret' });
+    expect(await decideApproval(db, cards, approvalId, WALLET, false)).toEqual({
+      status: 'declined'
+    });
+    expect(agentcard.buys).toHaveLength(1);
+  });
+
+  it("authorizes a checkout in the agent's browser by the limit", async () => {
+    const t = await token();
+    const checkout = (totalCents: number) =>
+      handleApi(
+        req('POST', '/api/credentials/checkout', {
+          token: t,
+          body: {
+            merchant: 'IKEA',
+            merchantUrl: 'https://www.ikea.com/us/en/',
+            totalCents,
+            items: [{ name: 'LISABO table', qty: 1 }]
+          }
+        }),
+        env(),
+        '/api/credentials/checkout'
+      );
+    expect(await (await checkout(1999)).json()).toMatchObject({
+      status: 'approved',
+      autoApproved: true
+    });
+    const over = (await (await checkout(14999)).json()) as { status: string; approvalId: string };
+    expect(over.status).toBe('pending_approval');
+    const db = new CredentialStore(kv.kv, 'test-credentials-key');
+    const cards = new AgentCard({ clientId: 'client', clientSecret: 'acs_secret' });
+    expect(await decideApproval(db, cards, over.approvalId, WALLET, true)).toEqual({
+      status: 'approved'
     });
   });
 
@@ -535,6 +613,6 @@ describe('/api/credentials/buy', () => {
     const t = await token();
     expect((await call(t, {})).status).toBe(400);
     expect((await call(t, { confirm: '0123456789abcdef' })).status).toBe(400);
-    expect((await call(t, { conversationId: 'c', confirm: 'yes' })).status).toBe(400);
+    expect((await setLimit(t, -1)).status).toBe(400);
   });
 });

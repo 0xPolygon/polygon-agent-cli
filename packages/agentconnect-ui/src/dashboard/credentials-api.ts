@@ -145,3 +145,18 @@ export const cardSessionStatus = (token: string, id: string) =>
     undefined,
     `/api/credentials/cards/session?id=${encodeURIComponent(id)}`
   );
+
+// ── Auto-pay: purchases at or under the limit go through without asking ──
+
+export const getAutoPayLimit = (token: string) =>
+  call<{ autoPayLimitCents: number }>(token, 'GET', undefined, '/api/credentials/settings').then(
+    (r) => r.autoPayLimitCents
+  );
+
+export const setAutoPayLimit = (token: string, cents: number) =>
+  call<{ autoPayLimitCents: number }>(
+    token,
+    'PUT',
+    { autoPayLimitCents: cents },
+    '/api/credentials/settings'
+  ).then((r) => r.autoPayLimitCents);

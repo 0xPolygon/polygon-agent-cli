@@ -6,6 +6,25 @@ import type { ShippingAddress } from './shipping.ts';
 
 import { b64urlDecode, b64urlEncode } from './agent-auth.ts';
 
+// A purchase over the owner's auto-pay limit, waiting for them to approve on
+// the approval page. `cart` purchases are placed by the worker once approved;
+// `checkout` ones (the agent's own browser) just let the agent proceed.
+export interface Approval {
+  id: string;
+  kind: 'cart' | 'checkout';
+  merchant: string;
+  merchantUrl: string | null;
+  totalCents: number;
+  items: { name: string; qty: number; priceCents?: number }[];
+  conversationId: string | null;
+  hash: string | null;
+  status: 'pending' | 'approved' | 'declined' | 'placed' | 'failed' | 'awaiting_passkey';
+  // Set once the cart was confirmed: what the store and AgentCard said.
+  result?: Record<string, unknown> | null;
+  createdAt: string;
+  decidedAt?: string;
+}
+
 export interface WalletRecord {
   address?: ShippingAddress | null;
   // AgentCard vault users this wallet has linked (a returning user may come
@@ -15,6 +34,9 @@ export interface WalletRecord {
   agentcardSession?: string;
   // Tokens that act as the vault user with the card, for purchases. Taken
   // once from a linked add-a-card session; the refresh token rotates.
+  // Purchases at or under this pay without asking; over it, the owner approves.
+  autoPayLimitCents?: number;
+  approvals?: Approval[];
   agentcardConnection?: {
     userId: string;
     accessToken: string;
@@ -80,6 +102,17 @@ export class CredentialStore {
 
   async get(wallet: string): Promise<WalletRecord> {
     return (await this.sealed.get<WalletRecord>(keyName(wallet))) ?? {};
+  }
+
+  /** Which wallet an approval belongs to, for the approval page (it has no agent token). */
+  async linkApproval(id: string, wallet: string): Promise<void> {
+    await this.sealed.put(`approval:${id}`, wallet.toLowerCase(), {
+      expirationTtl: 30 * 24 * 3600
+    });
+  }
+
+  async approvalWallet(id: string): Promise<string | null> {
+    return /^apr_[0-9a-f]{24}$/.test(id) ? this.sealed.get<string>(`approval:${id}`) : null;
   }
 
   /** Read, change, and write back the wallet's record. */

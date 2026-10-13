@@ -5,6 +5,8 @@
 export interface AgentCardConfig {
   clientId: string;
   clientSecret: string;
+  // Ask owners for app auto-approval on add-a-card links (production only).
+  autoApproval?: boolean;
   apiUrl?: string;
   fetchImpl?: typeof fetch;
 }
@@ -65,6 +67,19 @@ export interface BuyTurn {
   charge_status?: string | null;
   order_id?: string | null;
   payment_source?: { source: string; brand?: string; last4?: string } | null;
+}
+
+// The server's view of a purchase conversation (for a confirm that is still running).
+export interface BuyConversation {
+  turn_in_progress?: boolean;
+  last_checkout?: {
+    status?: string;
+    order_id?: string | null;
+    decline_code?: string | null;
+    approval_url?: string | null;
+    charge_status?: string;
+  } | null;
+  orders?: { order_id: string; merchant?: string; status?: string }[];
 }
 
 export interface BuyRequest {
@@ -177,12 +192,16 @@ export class AgentCard {
   }
 
   /** A single-use add-a-card link. With a known user it signs them in with a code first. */
-  createVaultSession(userId?: string | null): Promise<VaultSession> {
-    return this.call<VaultSession>(
-      'POST',
-      '/api/v2/vault_sessions',
-      userId ? { user_id: userId } : {}
-    );
+  createVaultSession(
+    userId?: string | null,
+    opts: { autoApproval?: boolean } = { autoApproval: this.cfg.autoApproval }
+  ): Promise<VaultSession> {
+    return this.call<VaultSession>('POST', '/api/v2/vault_sessions', {
+      ...(userId ? { user_id: userId } : {}),
+      // Asks the owner, on the vault page, to let us pay with this card without
+      // an approval link each time (production credentials only).
+      ...(opts.autoApproval ? { approval_mode: 'partner' } : {})
+    });
   }
 
   getVaultSession(id: string): Promise<VaultSession> {
@@ -226,8 +245,8 @@ export class AgentCard {
     return this.call<BuyTurn>('POST', '/buy', body, userToken);
   }
 
-  buyConversation(userToken: string, id: string): Promise<unknown> {
-    return this.call<unknown>(
+  buyConversation(userToken: string, id: string): Promise<BuyConversation> {
+    return this.call<BuyConversation>(
       'GET',
       `/buy/conversations/${encodeURIComponent(id)}`,
       undefined,

@@ -32,8 +32,12 @@ interface EmailAttempt {
 }
 
 export interface PendingConnect {
-  authRequest: AuthRequest;
-  clientName: string;
+  // Connecting an MCP client: its authorization request and name.
+  authRequest?: AuthRequest;
+  clientName?: string;
+  // Approving a purchase: which approval, and who signed in to decide it.
+  approvalId?: string;
+  signedIn?: SignedIn;
   // The OMS credential key for this sign-in only (hex).
   key: string;
   storage: Record<string, string>;
@@ -80,12 +84,16 @@ export class OwnerSignIn {
     private readonly publishableKey: string
   ) {}
 
-  /** Start connecting an MCP client. Returns the id the connect page carries. */
-  async create(authRequest: AuthRequest, clientName: string): Promise<string> {
+  /**
+   * Start a sign-in, for connecting an MCP client or approving a purchase.
+   * Returns the id the page carries between steps.
+   */
+  async create(
+    purpose: Pick<PendingConnect, 'authRequest' | 'clientName' | 'approvalId'>
+  ): Promise<string> {
     const id = hex(crypto.getRandomValues(new Uint8Array(16)));
     const pending: PendingConnect = {
-      authRequest,
-      clientName,
+      ...purpose,
       key: hex(crypto.getRandomValues(new Uint8Array(32))),
       storage: {},
       redirect: {}
@@ -105,6 +113,12 @@ export class OwnerSignIn {
 
   private async save(id: string, pending: PendingConnect): Promise<void> {
     await this.sealed.put(keyName(id), pending, { expirationTtl: TTL_SECONDS });
+  }
+
+  /** Keep who signed in, for a decision made in a later request. */
+  async markSignedIn(id: string, who: SignedIn): Promise<void> {
+    const pending = await this.load(id);
+    await this.save(id, { ...pending, signedIn: who });
   }
 
   async forget(id: string): Promise<void> {

@@ -11,7 +11,10 @@ import type { Env } from './index.ts';
 import { AgentCardError } from './agentcard.ts';
 import {
   agentCard,
+  approvalStatus,
+  authorizeCheckout,
   buyTurn,
+  parseCheckout,
   listWalletCards,
   pollCardSession,
   startCardSession,
@@ -27,13 +30,15 @@ export interface McpProps {
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const SERVER = { name: 'polygon-agent-wallet', title: 'Polygon agent wallet', version: '1.0.0' };
 
-const INSTRUCTIONS = `The owner's Polygon agent wallet: what it holds, their saved shipping address and cards, and buying with the card they keep in the AgentCard vault. Never ask the owner for a card number.
+const INSTRUCTIONS = `The owner's Polygon agent wallet: what it holds, their saved shipping address, and paying with the card they keep in the AgentCard vault. Never ask the owner for a card number.
 
-Paying at a store's checkout in your browser (Kernel or Browserbase with AgentCard): fill the shipping fields from get_shipping_address, enter a placeholder card (4242 4242 4242 4242, any future expiry, any CVC), and submit. The browser pauses the payment and gives you an approval link: send it to the owner on its own line. They approve with their passkey and their saved card pays. Confirm the order on the store's page before telling them it went through, and never retry a payment on your own.
+When something needs paying for, the owner has set an auto-pay limit. At or under it you pay without asking. Over it, you get an approval_url: send it to the owner on its own line, then call payment_status with the approval_id. It waits for their decision, so keep calling it until the status settles, and tell them the outcome.
 
-Without a browser: call buy with what they want. Show the cart (items and total) and ask before confirming. Confirm with the cart's hash. The confirm pauses with an approval_url: send it to the owner on its own line; they approve with their passkey, then call the same confirm again.
+Buying from a store AgentCard can order from (Amazon, Walmart, Target, Best Buy, DoorDash, and more): call buy with what they want. It ships to the saved address and pays with the saved card, or comes back for approval. Answer its questions with another buy call on the same conversation_id.
 
-No card saved yet: call add_card (buy does this for you) and send the link. Never repeat the shipping address outside a purchase. Sending, swapping, or predicting with the wallet's funds needs the Polygon agent CLI (npx skills add https://github.com/0xPolygon/polygon-agent-cli).`;
+Paying at any other store's checkout in your browser (Kernel or Browserbase with AgentCard): call authorize_checkout with the store and the checkout total first. Once it says approved, fill shipping from get_shipping_address, enter a placeholder card (4242 4242 4242 4242, any future expiry, any CVC), and submit; the saved card pays. Confirm the order on the store's page before reporting it, and never retry a payment on your own.
+
+No card saved yet: buy answers with the add-card link (or call add_card). Never repeat the shipping address outside a purchase. Sending, swapping, or predicting with the wallet's funds needs the Polygon agent CLI (npx skills add https://github.com/0xPolygon/polygon-agent-cli).`;
 
 const ADDRESS_PROPS = {
   name: { type: 'string', description: 'Recipient full name' },
@@ -101,18 +106,61 @@ const TOOLS = [
   },
   {
     name: 'buy',
-    title: 'Buy with the saved card',
+    title: 'Buy',
     description:
-      "Shop at real stores (Amazon, Walmart, Target, Best Buy, DoorDash, and more) with the saved card and address. Send `ask` with what they want, or their answer, plus conversation_id to continue. When a cart is shown, confirm its exact hash only after the owner agrees. A confirm pauses with approval_url for the owner's passkey; call the same confirm again after they approve. With no card saved yet it answers requires_action with nextAction.url: send that link to the owner, then call check_card. Each turn can take up to two minutes.",
+      "Buy something at a store AgentCard can order from (Amazon, Walmart, Target, Best Buy, DoorDash, and more), shipped to the saved address and paid with the saved card. Under the owner's auto-pay limit it is ordered right away; over it the answer is pending_approval with approval_url and approval_id (send the link, then call payment_status). Answer questions with another call on the same conversation_id. A turn can take up to two minutes.",
     inputSchema: {
       type: 'object',
       properties: {
         ask: { type: 'string', description: 'What to buy, or the answer to a question' },
-        conversation_id: { type: 'string', description: 'The purchase conversation to continue' },
-        confirm: { type: 'string', description: 'The cart hash to place (16 hex characters)' }
-      }
+        conversation_id: { type: 'string', description: 'The purchase conversation to continue' }
+      },
+      required: ['ask']
     },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true }
+  },
+  {
+    name: 'authorize_checkout',
+    title: 'Authorize a checkout',
+    description:
+      "Before paying at a store's checkout in your own browser: the store and the total. Under the owner's auto-pay limit it answers approved at once; over it, pending_approval with approval_url and approval_id. Pay only once approved.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        merchant: { type: 'string', description: 'The store, e.g. IKEA' },
+        merchant_url: { type: 'string', description: 'The checkout or product page' },
+        total_cents: {
+          type: 'integer',
+          description: 'The checkout total in cents, including tax and shipping'
+        },
+        items: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              qty: { type: 'integer' },
+              price_cents: { type: 'integer' }
+            },
+            required: ['name']
+          }
+        }
+      },
+      required: ['merchant', 'total_cents']
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false }
+  },
+  {
+    name: 'payment_status',
+    title: 'Payment status',
+    description:
+      'Where an approval is: pending, approved, declined, placed (the order went through), or failed. Waits up to 25 seconds for the owner, so call it again while it says pending.',
+    inputSchema: {
+      type: 'object',
+      properties: { approval_id: { type: 'string' } },
+      required: ['approval_id']
+    },
+    annotations: { readOnlyHint: true }
   }
 ];
 
@@ -200,20 +248,36 @@ async function callTool(
       return s;
     }
     case 'buy': {
-      const str = (k: string) => (typeof args[k] === 'string' ? (args[k] as string) : undefined);
-      const confirm = str('confirm');
-      if (confirm && !/^[0-9a-f]{16}$/.test(confirm)) {
-        throw new ValidationError('confirm must be the cart hash from the last turn.');
-      }
-      if (!str('ask') && !confirm)
-        throw new ValidationError('Send ask, or confirm with conversation_id.');
-      if (confirm && !str('conversation_id'))
-        throw new ValidationError('confirm needs conversation_id.');
-      return buyTurn(need(), needCards(), props.wallet, {
-        ask: str('ask'),
-        conversationId: str('conversation_id'),
-        confirm
-      });
+      const ask = typeof args.ask === 'string' ? args.ask.trim() : '';
+      if (!ask)
+        throw new ValidationError('ask is required: what to buy, or the answer to a question.');
+      const conversationId =
+        typeof args.conversation_id === 'string' ? args.conversation_id : undefined;
+      return buyTurn(need(), needCards(), props.wallet, { ask, conversationId }, origin);
+    }
+    case 'authorize_checkout':
+      return authorizeCheckout(
+        need(),
+        props.wallet,
+        parseCheckout({
+          merchant: args.merchant,
+          merchantUrl: args.merchant_url,
+          totalCents: args.total_cents,
+          items: Array.isArray(args.items)
+            ? (args.items as Record<string, unknown>[]).map((i) => ({
+                name: i.name,
+                qty: i.qty,
+                priceCents: i.price_cents
+              }))
+            : []
+        }),
+        origin
+      );
+    case 'payment_status': {
+      const id = typeof args.approval_id === 'string' ? args.approval_id : '';
+      const s = await approvalStatus(need(), needCards(), props.wallet, id, origin, 25_000);
+      if (!s) throw new ValidationError('No such approval for this wallet.');
+      return s;
     }
     default:
       return undefined;

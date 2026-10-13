@@ -79,7 +79,9 @@ describe('MCP server', () => {
       'list_cards',
       'add_card',
       'check_card',
-      'buy'
+      'buy',
+      'authorize_checkout',
+      'payment_status'
     ]);
   });
 
@@ -112,9 +114,9 @@ describe('MCP server', () => {
   });
 
   it('reports bad input as a tool error, not a protocol error', async () => {
-    const r = await call(env(), 'buy', { confirm: 'yes', conversation_id: 'c' });
+    const r = await call(env(), 'buy', { conversation_id: 'c' });
     expect(r.isError).toBe(true);
-    expect(r.content[0].text).toMatch(/cart hash/);
+    expect(r.content[0].text).toMatch(/ask is required/);
   });
 
   it('says when cards are not configured', async () => {

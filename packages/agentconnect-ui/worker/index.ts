@@ -16,7 +16,14 @@ import { handleMcp } from './mcp.ts';
 import { OwnerSignIn } from './owner-signin.ts';
 import {
   agentCard,
+  approvalForPage,
+  approvalStatus,
+  authorizeCheckout,
   buyTurn,
+  decideApproval,
+  getSettings,
+  parseCheckout,
+  setAutoPayLimit,
   listWalletCards,
   pollCardSession,
   startCardSession,
@@ -40,6 +47,8 @@ export interface Env {
   CREDENTIALS_KEY?: string;
   AGENTCARD_CLIENT_ID?: string;
   AGENTCARD_CLIENT_SECRET?: string;
+  // "on" asks owners for app auto-approval when they add a card (production).
+  AGENTCARD_AUTO_APPROVAL?: string;
   // Read balances for the MCP get_wallet tool.
   INDEXER_ACCESS_KEY?: string;
   // OMS project the MCP sign-in uses; defaults to the CLI's.
@@ -98,22 +107,13 @@ async function readBody(req: Request): Promise<unknown> {
   }
 }
 
-export function parseBuy(body: unknown): {
-  ask?: string;
-  conversationId?: string;
-  confirm?: string;
-} {
+export function parseBuy(body: unknown): { ask: string; conversationId?: string } {
   const b = (body ?? {}) as Record<string, unknown>;
   const str = (k: string) => (typeof b[k] === 'string' && (b[k] as string).trim()) || undefined;
-  const out = { ask: str('ask'), conversationId: str('conversationId'), confirm: str('confirm') };
-  if (!out.ask && !out.confirm)
-    throw new ValidationError('Send ask, or confirm with conversationId');
-  if (out.confirm && !out.conversationId) throw new ValidationError('confirm needs conversationId');
-  if (out.confirm && !/^[0-9a-f]{16}$/.test(out.confirm)) {
-    throw new ValidationError('confirm must be the cart hash (16 hex characters)');
-  }
-  if (out.ask && out.ask.length > 2000) throw new ValidationError('ask is too long');
-  return out;
+  const ask = str('ask');
+  if (!ask) throw new ValidationError('ask is required: what to buy, or the answer to a question');
+  if (ask.length > 2000) throw new ValidationError('ask is too long');
+  return { ask, conversationId: str('conversationId') };
 }
 
 /**
@@ -129,6 +129,8 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
     if (path === '/api/connect' && req.method === 'GET') {
       const id = new URL(req.url).searchParams.get('c') ?? '';
       const pending = await signIn.load(id);
+      if (!pending.authRequest)
+        throw new ValidationError('This link is not for connecting an agent.');
       return json({ clientName: pending.clientName });
     }
     if (req.method !== 'POST') return fail(405, 'method_not_allowed', 'Use POST');
@@ -141,6 +143,8 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
     };
     const finish = async (who: { wallet: string; email: string | null }) => {
       const pending = await signIn.load(id);
+      if (!pending.authRequest)
+        throw new ValidationError('This link is not for connecting an agent.');
       const props: McpProps = { wallet: who.wallet, email: who.email };
       const { redirectTo } = await env.OAUTH_PROVIDER!.completeAuthorization({
         request: pending.authRequest,
@@ -183,6 +187,91 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
   }
 }
 
+/**
+ * The approval page: show the purchase, sign the owner in (email code or
+ * Google, by the worker), and record their decision. The agent waiting on the
+ * approval sees it on its next status check.
+ */
+export async function handleApproveApi(req: Request, env: Env, path: string): Promise<Response> {
+  const signIn = ownerSignIn(env);
+  const db = store(env);
+  const cards = agentCard(env);
+  if (!signIn || !db || !cards) {
+    return fail(503, 'approvals_unavailable', 'Approvals are not configured on this deployment');
+  }
+  try {
+    if (path === '/api/approve' && req.method === 'GET') {
+      const found = await approvalForPage(db, new URL(req.url).searchParams.get('r') ?? '');
+      if (!found) return fail(404, 'not_found', 'This approval link is not valid.');
+      const a = found.approval;
+      const c = a.status === 'pending' ? await signIn.create({ approvalId: a.id }) : null;
+      return json({
+        merchant: a.merchant,
+        merchantUrl: a.merchantUrl,
+        totalCents: a.totalCents,
+        items: a.items,
+        kind: a.kind,
+        status: a.status,
+        c
+      });
+    }
+    if (req.method !== 'POST') return fail(405, 'method_not_allowed', 'Use POST');
+    const body = (await readBody(req)) as Record<string, unknown>;
+    const id = typeof body.c === 'string' ? body.c : '';
+    const str = (k: string) => {
+      const v = body[k];
+      if (typeof v !== 'string' || !v.trim()) throw new ValidationError(`${k} is required`);
+      return v.trim();
+    };
+    const signedIn = async (who: { wallet: string; email: string | null }) => {
+      await signIn.markSignedIn(id, who);
+      return json({ signedIn: true, email: who.email });
+    };
+    if (path === '/api/approve/email/start') {
+      await signIn.startEmail(id, str('email'));
+      return json({ sent: true });
+    }
+    if (path === '/api/approve/email/finish')
+      return signedIn(await signIn.finishEmail(id, str('code')));
+    if (path === '/api/approve/google/start') {
+      return json({ url: await signIn.startGoogle(id, `${new URL(req.url).origin}/login`) });
+    }
+    if (path === '/api/approve/google/finish') {
+      return signedIn(await signIn.finishGoogle(id, str('callbackUrl')));
+    }
+    if (path === '/api/approve/decide') {
+      const pending = await signIn.load(id);
+      if (!pending.approvalId || !pending.signedIn) throw new ValidationError('Sign in first.');
+      const result = await decideApproval(
+        db,
+        cards,
+        pending.approvalId,
+        pending.signedIn.wallet,
+        body.approve === true
+      );
+      await signIn.forget(id);
+      return json(result);
+    }
+    return fail(404, 'not_found', 'No such endpoint');
+  } catch (err) {
+    if (err instanceof ValidationError) return fail(400, 'invalid_request', err.message);
+    if (err instanceof AgentCardError) {
+      console.error('[approve agentcard]', err.status, err.code, err.message);
+      return fail(502, 'upstream_error', 'The card service is unavailable. Try again shortly.');
+    }
+    console.error('[approve]', err);
+    const message = err instanceof Error ? err.message : '';
+    if (/code|otp|expired|invalid/i.test(message)) {
+      return fail(
+        400,
+        'sign_in_failed',
+        'That sign-in did not work. Check the code and try again.'
+      );
+    }
+    return fail(500, 'internal_error', 'Something went wrong');
+  }
+}
+
 /** GET /authorize: an MCP client wants access. Hand off to the connect page. */
 async function handleAuthorize(req: Request, env: Env): Promise<Response> {
   const signIn = ownerSignIn(env);
@@ -192,7 +281,7 @@ async function handleAuthorize(req: Request, env: Env): Promise<Response> {
   const authRequest = await env.OAUTH_PROVIDER.parseAuthRequest(req);
   const client = await env.OAUTH_PROVIDER.lookupClient(authRequest.clientId);
   if (!client) return new Response('Unknown client', { status: 400 });
-  const id = await signIn.create(authRequest, client.clientName || 'An agent');
+  const id = await signIn.create({ authRequest, clientName: client.clientName || 'An agent' });
   return Response.redirect(`${new URL(req.url).origin}/connect?c=${id}`, 302);
 }
 
@@ -235,14 +324,47 @@ export async function handleApi(req: Request, env: Env, path: string): Promise<R
       return fail(405, 'method_not_allowed', 'Use GET, PUT, or DELETE');
     }
 
-    // POST /api/credentials/buy: one purchase turn ({ ask } or { conversationId, confirm }).
-    if (path === '/api/credentials/buy') {
-      if (req.method !== 'POST') return fail(405, 'method_not_allowed', 'Use POST');
+    // Purchases: POST /api/credentials/buy ({ ask, conversationId? }),
+    // POST /api/credentials/checkout (before paying in the agent's browser),
+    // GET /api/credentials/approvals/<id>?wait=<seconds>, and the owner's
+    // auto-pay limit at /api/credentials/settings.
+    if (
+      path === '/api/credentials/buy' ||
+      path === '/api/credentials/checkout' ||
+      path === '/api/credentials/settings' ||
+      path.startsWith('/api/credentials/approvals/')
+    ) {
       const who = await authenticate(req, env);
       const db = store(env);
       const cards = agentCard(env);
       if (!db || !cards) return fail(503, 'credentials_unavailable', 'Cards are not configured');
-      return json(await buyTurn(db, cards, who.wallet, parseBuy(await readBody(req))));
+      const origin = new URL(req.url).origin;
+      if (path === '/api/credentials/buy' && req.method === 'POST') {
+        return json(await buyTurn(db, cards, who.wallet, parseBuy(await readBody(req)), origin));
+      }
+      if (path === '/api/credentials/checkout' && req.method === 'POST') {
+        return json(
+          await authorizeCheckout(db, who.wallet, parseCheckout(await readBody(req)), origin)
+        );
+      }
+      if (path === '/api/credentials/settings') {
+        if (req.method === 'GET') return json(await getSettings(db, who.wallet));
+        if (req.method === 'PUT') {
+          const body = (await readBody(req)) as { autoPayLimitCents?: unknown };
+          return json(await setAutoPayLimit(db, who.wallet, body?.autoPayLimitCents));
+        }
+      }
+      const m = /^\/api\/credentials\/approvals\/(apr_[0-9a-f]{24})$/.exec(path);
+      if (m && req.method === 'GET') {
+        const wait = Math.min(
+          25,
+          Math.max(0, Number(new URL(req.url).searchParams.get('wait') ?? 0) || 0)
+        );
+        const status = await approvalStatus(db, cards, who.wallet, m[1], origin, wait * 1000);
+        if (!status) return fail(404, 'not_found', 'No such approval for this wallet');
+        return json(status);
+      }
+      return fail(405, 'method_not_allowed', 'Unsupported purchase request');
     }
 
     if (path.startsWith('/api/credentials/cards')) {
@@ -297,6 +419,8 @@ const app = {
     if (url.pathname === '/authorize') return handleAuthorize(request, env);
     if (url.pathname.startsWith('/api/connect'))
       return handleConnectApi(request, env, url.pathname);
+    if (url.pathname.startsWith('/api/approve'))
+      return handleApproveApi(request, env, url.pathname);
     if (url.pathname.startsWith('/api/')) return handleApi(request, env, url.pathname);
 
     if (!env.ASSETS) {

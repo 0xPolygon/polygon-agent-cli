@@ -269,20 +269,29 @@ const cardsWaitCommand: CommandModule<object, WaitArgs> = {
 
 interface BuyTurn {
   nextAction?: { type: string; message: string; url: string | null; sessionId: string };
-  conversationId: string;
+  conversationId?: string;
   status: string;
-  reply: string | null;
-  cart: { merchant_name?: string; totalCents: number; hash: string } | null;
-  approvalUrl: string | null;
-  declineCode: string | null;
-  orderId: string | null;
+  reply?: string | null;
+  cart?: { merchant_name?: string; totalCents: number } | null;
+  declineCode?: string | null;
+  orderId?: string | null;
+  autoPay?: boolean;
+  approvalId?: string;
+  approvalUrl?: string;
 }
 
-type BuyArgs = WalletArgs & { ask?: string; conversation?: string; confirm?: string };
+interface ApprovalStatus {
+  approvalId: string;
+  status: string;
+  merchant: string;
+  totalCents: number;
+  approvalUrl?: string;
+  result?: Record<string, unknown>;
+}
 
 const walletFlag = (w: string) => (w === 'main' ? '' : ` --wallet ${w}`);
 
-// What the agent should do after this turn.
+// What the agent should do after a purchase step.
 function buyNext(t: BuyTurn, wallet: string): Record<string, string> {
   if (t.status === 'requires_action' && t.nextAction?.type === 'add_card') {
     return {
@@ -290,11 +299,10 @@ function buyNext(t: BuyTurn, wallet: string): Record<string, string> {
       then: `polygon-agent credentials cards wait --session ${t.nextAction.sessionId}${walletFlag(wallet)}`
     };
   }
-  const again = `polygon-agent buy --conversation ${t.conversationId}`;
-  if (t.status === 'declined' && t.declineCode === 'vault_approval_required' && t.approvalUrl) {
+  if (t.status === 'pending_approval' && t.approvalId) {
     return {
-      next: 'Send the owner approvalUrl on its own line. They approve with their passkey; nothing is charged until then.',
-      then: `${again} --confirm ${t.cart?.hash ?? '<hash>'}${walletFlag(wallet)}`
+      next: "Over the owner's auto-pay limit. Send them approvalUrl alone on its own line, then wait for their answer.",
+      then: `polygon-agent buy --approval ${t.approvalId} --wait${walletFlag(wallet)}`
     };
   }
   if (t.declineCode) {
@@ -307,46 +315,157 @@ function buyNext(t: BuyTurn, wallet: string): Record<string, string> {
       next: 'Tell the owner the order is placed, with the total and the card it was charged to.'
     };
   }
-  if (t.cart && t.status === 'needs_input') {
-    return {
-      next: 'Show the owner the cart and total, and ask whether to place it.',
-      confirm: `${again} --confirm ${t.cart.hash}${walletFlag(wallet)}`,
-      change: `${again} "<what to change>"${walletFlag(wallet)}`
-    };
-  }
-  if (t.status === 'needs_input') {
+  if (t.status === 'needs_input' && t.conversationId) {
     return {
       next: 'Relay reply to the owner, then send their answer:',
-      answer: `${again} "<answer>"${walletFlag(wallet)}`
+      answer: `polygon-agent buy --conversation ${t.conversationId} "<answer>"${walletFlag(wallet)}`
     };
   }
   return {};
 }
 
+const SETTLED = new Set(['approved', 'declined', 'placed', 'failed']);
+
+async function waitForApproval(
+  wallet: string,
+  id: string,
+  timeoutSec: number
+): Promise<ApprovalStatus> {
+  const until = Date.now() + timeoutSec * 1000;
+  for (;;) {
+    const left = Math.max(0, Math.min(25, Math.floor((until - Date.now()) / 1000)));
+    const s = await credentialsApi<ApprovalStatus>(
+      wallet,
+      'GET',
+      `/api/credentials/approvals/${encodeURIComponent(id)}?wait=${left}`
+    );
+    if (SETTLED.has(s.status) || Date.now() >= until) return s;
+  }
+}
+
+function approvalNext(s: ApprovalStatus): Record<string, string> {
+  switch (s.status) {
+    case 'placed':
+      return { next: 'The owner approved and the order is placed. Tell them.' };
+    case 'approved':
+      return { next: 'Approved. Finish the checkout now with the placeholder card.' };
+    case 'declined':
+      return { next: 'The owner declined. Nothing was charged; do not retry.' };
+    case 'failed':
+      return { next: "It didn't go through and nothing was charged. Tell the owner." };
+    case 'awaiting_passkey':
+      return { next: 'Approved; the owner is confirming with their passkey. Check again shortly.' };
+    default:
+      return { next: 'Still waiting for the owner. Check again, or remind them of approvalUrl.' };
+  }
+}
+
+type BuyArgs = WalletArgs & {
+  ask?: string;
+  conversation?: string;
+  approval?: string;
+  wait?: boolean;
+  timeout: number;
+};
+
 export const buyCommand: CommandModule<object, BuyArgs> = {
   command: 'buy [ask]',
   describe:
-    'Shop at real stores with the saved card and address: describe it, show the cart, confirm its hash',
+    "Buy with the saved card and address. Under the owner's auto-pay limit it pays right away; over it, the owner approves",
   builder: (y) =>
     y
       .positional('ask', { type: 'string', describe: 'What to buy, or the answer to a question' })
       .option('conversation', { type: 'string', describe: 'Continue this purchase conversation' })
-      .option('confirm', { type: 'string', describe: 'Place the cart with this hash' })
+      .option('approval', {
+        type: 'string',
+        describe: 'Check an approval (with --wait, wait for it)'
+      })
+      .option('wait', { type: 'boolean', describe: 'Wait until the owner decides' })
+      .option('timeout', { type: 'number', default: 900, describe: 'Seconds to wait' })
       .option('wallet', walletOpt),
   handler: async (argv) => {
     try {
-      if (!argv.ask && !argv.confirm) {
+      if (argv.approval) {
+        const s = argv.wait
+          ? await waitForApproval(argv.wallet, argv.approval, argv.timeout)
+          : await credentialsApi<ApprovalStatus>(
+              argv.wallet,
+              'GET',
+              `/api/credentials/approvals/${encodeURIComponent(argv.approval)}`
+            );
+        jsonOut({ ok: true, walletName: argv.wallet, ...s, ...approvalNext(s) });
+        return;
+      }
+      if (!argv.ask) {
         throw new CliError({
           code: 'invalid_input',
-          message: 'Say what to buy, or pass --conversation and --confirm <hash>.'
+          message: 'Say what to buy, or pass --approval <id>.'
         });
       }
       const turn = await credentialsApi<BuyTurn>(argv.wallet, 'POST', '/api/credentials/buy', {
-        ...(argv.ask ? { ask: argv.ask } : {}),
-        ...(argv.conversation ? { conversationId: argv.conversation } : {}),
-        ...(argv.confirm ? { confirm: argv.confirm } : {})
+        ask: argv.ask,
+        ...(argv.conversation ? { conversationId: argv.conversation } : {})
       });
       jsonOut({ ok: true, walletName: argv.wallet, ...turn, ...buyNext(turn, argv.wallet) });
+    } catch (error) {
+      jsonFail(error);
+    }
+  }
+};
+
+type CheckoutArgs = WalletArgs & { merchant: string; url?: string; total: number; item?: string[] };
+
+export const checkoutCommand: CommandModule<object, CheckoutArgs> = {
+  command: 'checkout',
+  describe:
+    "Before paying at a store's checkout in your browser: approved at once under the auto-pay limit, else the owner approves",
+  builder: (y) =>
+    y
+      .option('merchant', { type: 'string', demandOption: true, describe: 'The store' })
+      .option('url', { type: 'string', describe: 'The checkout or product page' })
+      .option('total', { type: 'number', demandOption: true, describe: 'Checkout total in USD' })
+      .option('item', {
+        type: 'string',
+        array: true,
+        describe: 'An item, "name" or "2x name" (repeatable)'
+      })
+      .option('wallet', walletOpt),
+  handler: async (argv) => {
+    try {
+      if (!Number.isFinite(argv.total) || argv.total <= 0) {
+        throw new CliError({
+          code: 'invalid_input',
+          message: '--total must be the checkout total in USD.'
+        });
+      }
+      const items = (argv.item ?? []).map((raw) => {
+        const m = /^(\d+)\s*x\s+(.+)$/i.exec(raw.trim());
+        return m ? { name: m[2], qty: Number(m[1]) } : { name: raw.trim(), qty: 1 };
+      });
+      const s = await credentialsApi<{ status: string; approvalId?: string; approvalUrl?: string }>(
+        argv.wallet,
+        'POST',
+        '/api/credentials/checkout',
+        {
+          merchant: argv.merchant,
+          ...(argv.url ? { merchantUrl: argv.url } : {}),
+          totalCents: Math.round(argv.total * 100),
+          items
+        }
+      );
+      jsonOut({
+        ok: true,
+        walletName: argv.wallet,
+        ...s,
+        ...(s.status === 'approved'
+          ? {
+              next: 'Under the auto-pay limit: pay now with the placeholder card (4242 4242 4242 4242).'
+            }
+          : {
+              next: "Over the owner's auto-pay limit. Send them approvalUrl alone on its own line, then wait.",
+              then: `polygon-agent buy --approval ${s.approvalId} --wait${walletFlag(argv.wallet)}`
+            })
+      });
     } catch (error) {
       jsonFail(error);
     }

@@ -22,6 +22,7 @@ import { LogoBadge } from '../App.js';
 import { FundingScreen } from '../components/FundingScreen.js';
 import { fetchActivity, fetchHoldings } from '../indexer';
 import { SKILL_URL } from './agents.js';
+import { AutoPayPanel } from './AutoPay.js';
 import { CardsPanel } from './CardsPanel.js';
 import { accountEmail, takeLinkToken } from './credentials-api.js';
 import { CredentialsTab } from './Credentials.js';
@@ -267,6 +268,7 @@ export function Dashboard({
               <CredentialsTab token={linkToken} ctx={ctx} onSaved={flash} />
             )}
             {tab === 'activity' && <ActivityTab activity={activity} />}
+            {tab === 'settings' && <AutoPayPanel token={linkToken} />}
             {tab === 'settings' && <SettingsTab address={walletAddress} ctx={ctx} />}
 
             <div className="text-center text-[13px] text-[var(--slate-400)] pt-2">

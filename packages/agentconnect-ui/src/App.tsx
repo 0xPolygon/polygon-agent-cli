@@ -4,6 +4,7 @@ import './App.css';
 import { useMemo } from 'react';
 
 import { parseFundAmount } from './components/FundingScreen.js';
+import { Approve, isApproveReturn } from './dashboard/Approve.js';
 import { Connect, isConnectReturn } from './dashboard/Connect.js';
 import { Dashboard } from './dashboard/Dashboard.js';
 import { Onboarding } from './dashboard/Onboarding.js';
@@ -38,11 +39,18 @@ function App() {
     return <Connect />;
   }
 
+  if (window.location.pathname === '/approve') {
+    return <Approve />;
+  }
+
   if (window.location.pathname === '/login') {
     // Google sign-ins started here (connecting an agent, onboarding) come back
     // to /login too.
     if (isConnectReturn() && isRelayReturn(window.location.search)) {
       return <Connect finishing />;
+    }
+    if (isApproveReturn() && isRelayReturn(window.location.search)) {
+      return <Approve finishing />;
     }
     if (isWebSigninReturn() && isRelayReturn(window.location.search)) {
       return <Onboarding finishing />;
