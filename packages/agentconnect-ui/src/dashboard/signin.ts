@@ -9,6 +9,7 @@ import {
 } from '@polygonlabs/oms-wallet';
 
 import { omsPublishableKey } from '../config';
+import { rememberEmail } from './account.js';
 
 // Set while a Google sign-in started here is out at the relay. The relay
 // returns to the static `/login` (its allowlist is an exact match), and this
@@ -51,12 +52,15 @@ function oms(): OMSWallet {
 
 // The same wallet the CLI picks (`selectMainWallet`): the account's own, not an
 // imported one. Then sign out; the dashboard reads public data only.
-async function mainWalletAndSignOut(): Promise<string> {
+async function mainWalletAndSignOut(email: string | null): Promise<string> {
   const w = oms().wallet;
   try {
     const wallets = await w.listWallets();
     const main = wallets.find((x) => x.keyOrigin !== 'imported');
     if (!main) throw new Error('No agent wallet on this account');
+    // Google sign-ins name the account in the ID token.
+    const named = email ?? emailFromIdToken(await w.getIdToken().catch(() => ''));
+    rememberEmail(main.address, named);
     return main.address;
   } finally {
     await w.signOut().catch(() => {});
@@ -65,13 +69,16 @@ async function mainWalletAndSignOut(): Promise<string> {
   }
 }
 
+let pendingEmail: string | null = null;
+
 export async function startEmail(email: string): Promise<void> {
   await oms().wallet.startEmailAuth({ email });
+  pendingEmail = email;
 }
 
 export async function finishEmail(code: string): Promise<string> {
   await oms().wallet.completeEmailAuth({ code, walletSelection: 'automatic' });
-  return mainWalletAndSignOut();
+  return mainWalletAndSignOut(pendingEmail);
 }
 
 /** Sends the browser to Google; it comes back to `/login`. */
@@ -99,5 +106,14 @@ export async function finishGoogle(): Promise<string> {
     callbackUrl: window.location.href,
     walletSelection: 'automatic'
   });
-  return mainWalletAndSignOut();
+  return mainWalletAndSignOut(null);
+}
+
+function emailFromIdToken(token: string): string | null {
+  try {
+    const payload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    return (JSON.parse(atob(payload)) as { email?: string }).email ?? null;
+  } catch {
+    return null;
+  }
 }

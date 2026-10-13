@@ -20,11 +20,12 @@ import type { AgentContext, Loadable } from './tabs.js';
 import { LogoBadge } from '../App.js';
 import { FundingScreen } from '../components/FundingScreen.js';
 import { fetchActivity, fetchHoldings } from '../indexer';
+import { rememberedEmail } from './account.js';
 import { SKILL_URL } from './agents.js';
 import { fetchPolygonRates, fetchVaultBalances, fetchVaults } from './earn.js';
 import { fetchPositions, fetchPredictionCash } from './markets.js';
 import { ActivityTab, EarnTab, MarketsTab, OverviewTab, SettingsTab, WalletTab } from './tabs.js';
-import { AgentPromptBox, AmountChips, Modal, shortAddr, Toast, useCopy, usd } from './ui.js';
+import { AgentPromptBox, AmountChips, Modal, Toast, useCopy, usd } from './ui.js';
 
 type Tab = 'overview' | 'wallet' | 'markets' | 'earn' | 'activity' | 'settings';
 
@@ -82,6 +83,7 @@ export function Dashboard({
   const [copied, copy] = useCopy();
   const [toast, setToast] = useState<string | null>(null);
 
+  const [email] = useState(() => rememberedEmail(walletAddress));
   const holdings = useLoad<Holding[]>(
     () => fetchHoldings(walletAddress, chainId),
     [walletAddress, chainId]
@@ -182,7 +184,7 @@ export function Dashboard({
         <div className="flex items-center gap-2.5 p-3 border-t border-[var(--slate-100)]">
           <span className="w-8 h-8 rounded-full bg-gradient-to-br from-[var(--purple-500)] to-[var(--purple-300)] flex-shrink-0" />
           <span className="flex flex-col gap-0.5 min-w-0">
-            <span className="text-sm font-bold truncate">{shortAddr(walletAddress)}</span>
+            <span className="text-sm font-bold truncate">{email ?? 'Your wallet'}</span>
             <span className="text-xs text-[var(--slate-500)]">
               {totalBalance === null ? '…' : usd(totalBalance)}
             </span>
@@ -197,9 +199,9 @@ export function Dashboard({
             <img src="/logo-mark.svg" alt="" className="w-6 h-6" />
             <span className="font-bold text-[17px]">{title}</span>
           </div>
-          <span className="oms-mono text-xs text-[var(--slate-500)]">
-            {shortAddr(walletAddress)}
-          </span>
+          {email && (
+            <span className="text-xs text-[var(--slate-500)] truncate max-w-[50%]">{email}</span>
+          )}
         </div>
 
         <main className="flex-1 overflow-y-auto">
