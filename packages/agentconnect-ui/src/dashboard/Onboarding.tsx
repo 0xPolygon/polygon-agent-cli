@@ -22,8 +22,6 @@ const PREVIEW_ROWS = [
   { icon: ArrowDownLeft, title: 'Received 50 USDC', kind: 'Deposit', amount: '+$50.00' }
 ];
 
-const dashboardUrl = (wallet: string) => `/?wallet=${wallet}&chain=137&view=dashboard`;
-
 function StepBars({ step }: { step: number }) {
   return (
     <div className="flex gap-1.5">
@@ -206,7 +204,7 @@ function AddMoney({ onAdd, onSkip }: { onAdd: (amount: number) => void; onSkip: 
   );
 }
 
-function ConnectAgent({ wallet }: { wallet: string }) {
+function ConnectAgent() {
   const [limit, setLimit] = useState(200);
   const [copied, copy] = useCopy();
   const prompt = `Read ${SKILL_URL} and connect my Polygon agent wallet with a $${limit} spending limit.`;
@@ -252,7 +250,7 @@ function ConnectAgent({ wallet }: { wallet: string }) {
         </button>
       </div>
 
-      <a href={dashboardUrl(wallet)} className="btn btn-primary btn-lg w-full h-12">
+      <a href="/" className="btn btn-primary btn-lg w-full h-12">
         Go to my wallet
       </a>
     </div>
@@ -272,7 +270,7 @@ export function Onboarding({ finishing = false }: { finishing?: boolean }) {
   const signedIn = async (address: string) => {
     const holdings = await fetchHoldings(address).catch(() => []);
     if (holdings.some((h) => h.usd > 0)) {
-      window.location.assign(dashboardUrl(address));
+      window.location.assign('/');
       return;
     }
     window.history.replaceState(null, '', '/');
@@ -290,7 +288,7 @@ export function Onboarding({ finishing = false }: { finishing?: boolean }) {
           <StepBars step={step} />
           {step === 0 && <SignIn finishing={finishing} onSignedIn={signedIn} />}
           {step === 1 && wallet && <AddMoney onAdd={setFunding} onSkip={() => setStep(2)} />}
-          {step === 2 && wallet && <ConnectAgent wallet={wallet} />}
+          {step === 2 && wallet && <ConnectAgent />}
         </div>
 
         <div className="hidden md:flex bg-white border border-[var(--slate-200)] rounded-3xl p-7 flex-col gap-5">

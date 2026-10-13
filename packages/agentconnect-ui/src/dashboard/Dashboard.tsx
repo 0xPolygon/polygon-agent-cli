@@ -16,6 +16,7 @@ import { useEffect, useState } from 'react';
 import type { ActivityItem, Holding } from '../indexer';
 import type { Vault } from './earn.js';
 import type { Position } from './markets.js';
+import type { Session } from './signin.js';
 import type { AgentContext, Loadable } from './tabs.js';
 
 import { LogoBadge } from '../App.js';
@@ -24,10 +25,11 @@ import { fetchActivity, fetchHoldings } from '../indexer';
 import { SKILL_URL } from './agents.js';
 import { AutoPayPanel } from './AutoPay.js';
 import { CardsPanel } from './CardsPanel.js';
-import { accountEmail, takeLinkToken } from './credentials-api.js';
+import { accountEmail, SESSION_AUTH, takeLinkToken } from './credentials-api.js';
 import { CredentialsTab } from './Credentials.js';
 import { fetchPolygonRates, fetchVaultBalances, fetchVaults } from './earn.js';
 import { fetchPositions, fetchPredictionCash } from './markets.js';
+import { signOut } from './signin.js';
 import { ActivityTab, EarnTab, MarketsTab, OverviewTab, SettingsTab, WalletTab } from './tabs.js';
 import { AgentPromptBox, AmountChips, Modal, Toast, useCopy, usd } from './ui.js';
 
@@ -74,13 +76,16 @@ export function Dashboard({
   chainId,
   polymarketAddress,
   initialFundOpen,
-  fundAmount
+  fundAmount,
+  session
 }: {
   walletAddress: string;
   chainId: number;
   polymarketAddress?: string;
   initialFundOpen: boolean;
   fundAmount?: string;
+  // The owner signed in on this site, if anyone.
+  session: Session | null;
 }) {
   const [tab, setTab] = useState<Tab>('overview');
   const [moreOpen, setMoreOpen] = useState(false);
@@ -89,7 +94,12 @@ export function Dashboard({
   const [toast, setToast] = useState<string | null>(null);
   // The agent's signed token from the link fragment; read once per load.
   const [linkToken] = useState(() => takeLinkToken(walletAddress));
-  const [email] = useState(() => accountEmail(walletAddress, linkToken));
+  const owner = session?.wallet === walletAddress.toLowerCase() ? session : null;
+  // Saved details: the owner's own sign-in, else the agent's link.
+  const auth = owner ? SESSION_AUTH : linkToken;
+  const [email] = useState(() => owner?.email ?? accountEmail(walletAddress, linkToken));
+  const leave = () => void signOut().then(() => window.location.assign('/'));
+  const signIn = () => window.location.assign('/');
 
   const holdings = useLoad<Holding[]>(
     () => fetchHoldings(walletAddress, chainId),
@@ -242,9 +252,7 @@ export function Dashboard({
                 holdings={holdings}
                 onAdd={openAdd}
                 onWithdraw={openWithdraw}
-                cards={
-                  <CardsPanel token={linkToken} onFresh={() => go('credentials')} onSaved={flash} />
-                }
+                cards={<CardsPanel token={auth} onSignIn={signIn} onSaved={flash} />}
               />
             )}
             {tab === 'markets' && (
@@ -264,12 +272,19 @@ export function Dashboard({
                 onDeposit={(vault) => setModal({ kind: 'deposit', vault })}
               />
             )}
-            {tab === 'credentials' && (
-              <CredentialsTab token={linkToken} ctx={ctx} onSaved={flash} />
-            )}
+            {tab === 'credentials' && <CredentialsTab token={auth} onSaved={flash} />}
             {tab === 'activity' && <ActivityTab activity={activity} />}
-            {tab === 'settings' && <AutoPayPanel token={linkToken} />}
+            {tab === 'settings' && <AutoPayPanel token={auth} />}
             {tab === 'settings' && <SettingsTab address={walletAddress} ctx={ctx} />}
+            {tab === 'settings' && owner && (
+              <button
+                type="button"
+                onClick={leave}
+                className="btn btn-secondary btn-lg self-start bg-white"
+              >
+                Sign out
+              </button>
+            )}
 
             <div className="text-center text-[13px] text-[var(--slate-400)] pt-2">
               Powered by Polygon

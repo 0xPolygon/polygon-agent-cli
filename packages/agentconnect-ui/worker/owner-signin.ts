@@ -106,8 +106,7 @@ export class OwnerSignIn {
     const pending = /^[0-9a-f]{32}$/.test(id)
       ? await this.sealed.get<PendingConnect>(keyName(id))
       : null;
-    if (!pending)
-      throw new ValidationError('This connect link expired. Start again from your agent.');
+    if (!pending) throw new ValidationError('This sign-in expired. Start again.');
     return pending;
   }
 

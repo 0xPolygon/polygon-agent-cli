@@ -1,6 +1,7 @@
-// Saved credentials, read and written with the access token the agent put in
-// the dashboard link's fragment (#t=...). The fragment never reaches a server;
-// we move it to sessionStorage and clear it from the address bar.
+// Saved credentials, read and written as the owner signed in on this site
+// (a session cookie), or with the access token the agent put in the dashboard
+// link's fragment (#t=...). The fragment never reaches a server; we move it to
+// sessionStorage and clear it from the address bar.
 
 import { rememberedEmail, rememberEmail } from './account.js';
 
@@ -82,6 +83,9 @@ export function takeLinkToken(wallet: string): string | null {
   return token;
 }
 
+// Stands in for a token when the owner is signed in here: the cookie goes along.
+export const SESSION_AUTH = 'session';
+
 export class CredentialsError extends Error {
   constructor(
     public readonly status: number,
@@ -100,7 +104,7 @@ async function call<T>(
   const res = await fetch(path, {
     method,
     headers: {
-      Authorization: `Agent ${token}`,
+      ...(token === SESSION_AUTH ? {} : { Authorization: `Agent ${token}` }),
       ...(body ? { 'Content-Type': 'application/json' } : {})
     },
     body: body ? JSON.stringify(body) : undefined

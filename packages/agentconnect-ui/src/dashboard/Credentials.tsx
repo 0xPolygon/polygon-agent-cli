@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react';
 
 import type { ShippingAddress } from './credentials-api.js';
-import type { AgentContext } from './tabs.js';
 
-import { SKILL_URL } from './agents.js';
 import { CredentialsError, EMPTY_ADDRESS, getAddress, saveAddress } from './credentials-api.js';
-import { AgentPromptBox, EmptyState, Panel } from './ui.js';
+import { EmptyState, Panel } from './ui.js';
 
 const FIELDS: { key: keyof ShippingAddress; label: string; wide?: boolean; auto: string }[] = [
   { key: 'name', label: 'Full name', wide: true, auto: 'name' },
@@ -20,28 +18,24 @@ const FIELDS: { key: keyof ShippingAddress; label: string; wide?: boolean; auto:
 
 type Load = 'loading' | 'ready' | 'expired' | 'unavailable' | 'error';
 
-/** Ask the agent for a link that carries a fresh token. */
-function FreshLink({ ctx, reason }: { ctx: AgentContext; reason: string }) {
+function SignInFirst() {
   return (
-    <Panel className="flex flex-col gap-4">
-      <EmptyState title="Open this page from your agent">{reason}</EmptyState>
-      <AgentPromptBox
-        {...ctx}
-        id="fresh-link"
-        skill={SKILL_URL}
-        text="send me a fresh link to my Polygon agent wallet dashboard."
-      />
+    <Panel className="flex flex-col gap-4 items-start">
+      <EmptyState title="Sign in to see your saved details">
+        Your address and cards are only shown after you sign in.
+      </EmptyState>
+      <a href="/" className="btn btn-primary btn-lg">
+        Sign in
+      </a>
     </Panel>
   );
 }
 
 export function CredentialsTab({
   token,
-  ctx,
   onSaved
 }: {
   token: string | null;
-  ctx: AgentContext;
   onSaved: (msg: string) => void;
 }) {
   const [load, setLoad] = useState<Load>(token ? 'loading' : 'expired');
@@ -70,14 +64,7 @@ export function CredentialsTab({
     };
   }, [token]);
 
-  if (load === 'expired') {
-    return (
-      <FreshLink
-        ctx={ctx}
-        reason="Saved details are only shown when you open the dashboard from a link your agent just sent. Links work for an hour."
-      />
-    );
-  }
+  if (load === 'expired') return <SignInFirst />;
 
   const save = async () => {
     if (!token) return;

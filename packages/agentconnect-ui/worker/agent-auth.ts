@@ -50,7 +50,7 @@ const dec = new TextDecoder();
 
 export const encodeJson = (v: unknown) => b64urlEncode(enc.encode(JSON.stringify(v)));
 
-function decodeJson<T>(s: string): T {
+export function decodeJson<T>(s: string): T {
   try {
     return JSON.parse(dec.decode(b64urlDecode(s))) as T;
   } catch {
@@ -192,7 +192,7 @@ export interface Certificate {
   exp: number;
 }
 
-async function hmac(secret: string, data: string): Promise<string> {
+export async function hmac(secret: string, data: string): Promise<string> {
   const key = await crypto.subtle.importKey(
     'raw',
     enc.encode(secret),
@@ -203,7 +203,7 @@ async function hmac(secret: string, data: string): Promise<string> {
   return b64urlEncode(new Uint8Array(await crypto.subtle.sign('HMAC', key, enc.encode(data))));
 }
 
-function safeEqual(a: string, b: string): boolean {
+export function safeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);

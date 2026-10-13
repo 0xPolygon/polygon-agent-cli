@@ -8,10 +8,3 @@ export const trailsApiKey = (import.meta.env.VITE_TRAILS_API_KEY as string | und
 // as an empty string and must fall back to the production default too.
 const rawRelayUrl = import.meta.env.VITE_OIDC_RELAY_URL as string | undefined;
 export const oidcRelayUrl = rawRelayUrl ? rawRelayUrl : 'https://oidc-relay.polygon.technology';
-
-// OMS project for signing in on the onboarding page. Must match the CLI's
-// default (DEFAULT_OMS_PUBLISHABLE_KEY) so a sign-in finds the same agent wallet.
-const rawOmsKey = import.meta.env.VITE_OMS_PUBLISHABLE_KEY as string | undefined;
-export const omsPublishableKey = rawOmsKey
-  ? rawOmsKey
-  : 'pk_sdbx_01kqfw9zaykks_01kwvkkzs5e2wb6rfas2y2njm8';

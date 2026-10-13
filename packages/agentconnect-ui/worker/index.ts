@@ -13,6 +13,13 @@ import type { McpProps } from './mcp.ts';
 import { AuthError, issueCertificate, verifyAccessToken, verifyEnrollToken } from './agent-auth.ts';
 import { AgentCardError } from './agentcard.ts';
 import { handleMcp } from './mcp.ts';
+import {
+  issueSession,
+  sessionCookie,
+  sessionIdentity,
+  verifySession,
+  readSessionCookie
+} from './owner-session.ts';
 import { OwnerSignIn } from './owner-signin.ts';
 import {
   agentCard,
@@ -92,11 +99,14 @@ function idTokenConfig(env: Env): OmsIdTokenConfig {
   };
 }
 
+// An agent's signed token, or the owner's own sign-in on this site.
 async function authenticate(req: Request, env: Env): Promise<AgentIdentity> {
   const header = req.headers.get('Authorization') ?? '';
   const m = /^Agent\s+(\S+)$/.exec(header);
-  if (!m) throw new AuthError('unauthorized', 'Send Authorization: Agent <token>');
-  return verifyAccessToken(m[1], env.AGENT_CERT_SECRET!);
+  if (m) return verifyAccessToken(m[1], env.AGENT_CERT_SECRET!);
+  const owner = await sessionIdentity(req, env.AGENT_CERT_SECRET!);
+  if (owner) return owner;
+  throw new AuthError('unauthorized', 'Sign in, or send Authorization: Agent <token>');
 }
 
 async function readBody(req: Request): Promise<unknown> {
@@ -272,6 +282,84 @@ export async function handleApproveApi(req: Request, env: Env, path: string): Pr
   }
 }
 
+/**
+ * Signing in on the site: email code or Google (by the worker, like the
+ * connect page), ending in a session cookie for the agent wallet.
+ */
+export async function handleSessionApi(req: Request, env: Env, path: string): Promise<Response> {
+  const signIn = ownerSignIn(env);
+  if (!signIn || !env.AGENT_CERT_SECRET) {
+    return fail(503, 'signin_unavailable', 'Signing in is not configured on this deployment');
+  }
+  try {
+    if (path === '/api/session') {
+      if (req.method === 'GET') {
+        const token = readSessionCookie(req);
+        if (!token) return fail(401, 'unauthorized', 'Not signed in');
+        return json(await verifySession(token, env.AGENT_CERT_SECRET));
+      }
+      if (req.method === 'DELETE') {
+        return new Response(JSON.stringify({ signedIn: false }), {
+          headers: {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-store',
+            'Set-Cookie': sessionCookie(req, null)
+          }
+        });
+      }
+      return fail(405, 'method_not_allowed', 'Use GET or DELETE');
+    }
+    if (req.method !== 'POST') return fail(405, 'method_not_allowed', 'Use POST');
+    const body = (await readBody(req)) as Record<string, unknown>;
+    const str = (k: string) => {
+      const v = body[k];
+      if (typeof v !== 'string' || !v.trim()) throw new ValidationError(`${k} is required`);
+      return v.trim();
+    };
+    const finish = async (id: string, who: { wallet: string; email: string | null }) => {
+      await signIn.forget(id);
+      return new Response(JSON.stringify(who), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+          'Set-Cookie': sessionCookie(req, await issueSession(who, env.AGENT_CERT_SECRET!))
+        }
+      });
+    };
+    if (path === '/api/session/email/start') {
+      const c = await signIn.create({});
+      await signIn.startEmail(c, str('email'));
+      return json({ c });
+    }
+    if (path === '/api/session/email/finish') {
+      const c = str('c');
+      return finish(c, await signIn.finishEmail(c, str('code')));
+    }
+    if (path === '/api/session/google/start') {
+      const c = await signIn.create({});
+      return json({ c, url: await signIn.startGoogle(c, `${new URL(req.url).origin}/login`) });
+    }
+    if (path === '/api/session/google/finish') {
+      const c = str('c');
+      return finish(c, await signIn.finishGoogle(c, str('callbackUrl')));
+    }
+    return fail(404, 'not_found', 'No such endpoint');
+  } catch (err) {
+    if (err instanceof AuthError) return fail(401, err.code, err.message);
+    if (err instanceof ValidationError) return fail(400, 'invalid_request', err.message);
+    console.error('[session]', err);
+    const message = err instanceof Error ? err.message : '';
+    if (/code|otp|expired|invalid/i.test(message)) {
+      return fail(
+        400,
+        'sign_in_failed',
+        'That sign-in did not work. Check the code and try again.'
+      );
+    }
+    return fail(500, 'internal_error', 'Something went wrong');
+  }
+}
+
 /** GET /authorize: an MCP client wants access. Hand off to the connect page. */
 async function handleAuthorize(req: Request, env: Env): Promise<Response> {
   const signIn = ownerSignIn(env);
@@ -421,6 +509,8 @@ const app = {
       return handleConnectApi(request, env, url.pathname);
     if (url.pathname.startsWith('/api/approve'))
       return handleApproveApi(request, env, url.pathname);
+    if (url.pathname === '/api/session' || url.pathname.startsWith('/api/session/'))
+      return handleSessionApi(request, env, url.pathname);
     if (url.pathname.startsWith('/api/')) return handleApi(request, env, url.pathname);
 
     if (!env.ASSETS) {

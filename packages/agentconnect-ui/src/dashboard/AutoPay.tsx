@@ -45,7 +45,10 @@ export function AutoPayPanel({ token }: { token: string | null }) {
           />
         ) : (
           <span className="text-sm text-[var(--slate-500)]">
-            Open this page from a link your agent just sent to change it.
+            <a href="/" className="font-bold text-[var(--purple-600)]">
+              Sign in
+            </a>{' '}
+            to change this.
           </span>
         )}
         {error && <span className="text-sm text-[var(--red-700)]">{error}</span>}

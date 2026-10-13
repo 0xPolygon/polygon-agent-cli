@@ -1,14 +1,16 @@
 import './oms.css';
 import './App.css';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+
+import type { Session } from './dashboard/signin.js';
 
 import { parseFundAmount } from './components/FundingScreen.js';
 import { Approve, isApproveReturn } from './dashboard/Approve.js';
 import { Connect, isConnectReturn } from './dashboard/Connect.js';
 import { Dashboard } from './dashboard/Dashboard.js';
 import { Onboarding } from './dashboard/Onboarding.js';
-import { isWebSigninReturn } from './dashboard/signin.js';
+import { currentSession, isWebSigninReturn } from './dashboard/signin.js';
 import { LoginPage } from './login/LoginPage.js';
 import { isRelayReturn } from './login/returnUrl.js';
 
@@ -25,6 +27,15 @@ export function LogoBadge() {
       </span>
     </div>
   );
+}
+
+// Who is signed in here; undefined while asking.
+function useSession(): Session | null | undefined {
+  const [session, setSession] = useState<Session | null | undefined>(undefined);
+  useEffect(() => {
+    void currentSession().then(setSession);
+  }, []);
+  return session;
 }
 
 // ── Main App ──
@@ -58,7 +69,29 @@ function App() {
     return <LoginPage />;
   }
 
-  if (!walletAddress) {
+  return <Home walletAddress={walletAddress} chainId={chainId} pm={pm} params={params} />;
+}
+
+// The site itself: the dashboard for whoever is signed in (or the wallet an
+// agent's link names), else sign-in and onboarding.
+function Home({
+  walletAddress,
+  chainId,
+  pm,
+  params
+}: {
+  walletAddress: string;
+  chainId: number;
+  pm: string;
+  params: URLSearchParams;
+}) {
+  const session = useSession();
+  if (session === undefined) {
+    return <div className="min-h-[100dvh] bg-[var(--slate-50)]" />;
+  }
+
+  const wallet = walletAddress || session?.wallet;
+  if (!wallet) {
     return <Onboarding />;
   }
 
@@ -66,11 +99,12 @@ function App() {
   // funding widget already popped up, rather than a separate page.
   return (
     <Dashboard
-      walletAddress={walletAddress}
+      walletAddress={wallet}
       chainId={chainId}
       polymarketAddress={ADDRESS.test(pm) ? pm : undefined}
       initialFundOpen={params.get('view') === 'fund'}
       fundAmount={parseFundAmount(params.get('amount'))}
+      session={session}
     />
   );
 }

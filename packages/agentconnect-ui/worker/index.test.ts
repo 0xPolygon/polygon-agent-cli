@@ -4,7 +4,8 @@ import type { Env } from './index.ts';
 
 import { issueCertificate, resetJwksCache } from './agent-auth.ts';
 import { AgentCard, resetAgentCardTokenCache } from './agentcard.ts';
-import { handleApi } from './index.ts';
+import { handleApi, handleSessionApi } from './index.ts';
+import { issueSession, SESSION_COOKIE } from './owner-session.ts';
 import { decideApproval } from './services.ts';
 import { CredentialStore } from './store.ts';
 import {
@@ -313,6 +314,83 @@ describe('/api/credentials/address', () => {
       path
     );
     expect(res.status).toBe(503);
+  });
+});
+
+describe('signed in on the site (session cookie)', () => {
+  const path = '/api/credentials/address';
+  const cookie = async () =>
+    `${SESSION_COOKIE}=${await issueSession({ wallet: WALLET, email: 'owner@example.com' }, SECRET)}`;
+  const withCookie = (method: string, c: string, origin?: string, body?: unknown) =>
+    new Request(`https://agentconnect.test${path}`, {
+      method,
+      headers: {
+        Cookie: c,
+        ...(origin ? { Origin: origin } : {}),
+        ...(body ? { 'Content-Type': 'application/json' } : {})
+      },
+      body: body ? JSON.stringify(body) : undefined
+    });
+
+  it('reads and saves the address without an agent token', async () => {
+    const c = await cookie();
+    const put = await handleApi(
+      withCookie('PUT', c, 'https://agentconnect.test', ADDRESS),
+      env(),
+      path
+    );
+    expect(put.status).toBe(200);
+    const get = await handleApi(withCookie('GET', c), env(), path);
+    expect(await get.json()).toEqual({ address: ADDRESS });
+  });
+
+  it('refuses changes posted from another site', async () => {
+    const res = await handleApi(
+      withCookie('PUT', await cookie(), 'https://evil.test', ADDRESS),
+      env(),
+      path
+    );
+    expect(res.status).toBe(401);
+    expect(kv.data.size).toBe(0);
+  });
+
+  it('refuses a tampered cookie', async () => {
+    const c = (await cookie()).slice(0, -2) + 'xx';
+    const res = await handleApi(withCookie('GET', c), env(), path);
+    expect(res.status).toBe(401);
+  });
+
+  it('refuses an expired session', async () => {
+    const old = await issueSession({ wallet: WALLET, email: null }, SECRET, 1_000);
+    const res = await handleApi(withCookie('GET', `${SESSION_COOKIE}=${old}`), env(), path);
+    expect(res.status).toBe(401);
+  });
+
+  it('GET /api/session names the wallet; DELETE clears the cookie', async () => {
+    const e = env({ OAUTH_KV: fakeKv().kv });
+    const c = await cookie();
+    const who = await handleSessionApi(
+      new Request('https://agentconnect.test/api/session', { headers: { Cookie: c } }),
+      e,
+      '/api/session'
+    );
+    expect(await who.json()).toEqual({ wallet: WALLET, email: 'owner@example.com' });
+
+    const none = await handleSessionApi(
+      new Request('https://agentconnect.test/api/session'),
+      e,
+      '/api/session'
+    );
+    expect(none.status).toBe(401);
+
+    const out = await handleSessionApi(
+      new Request('https://agentconnect.test/api/session', { method: 'DELETE' }),
+      e,
+      '/api/session'
+    );
+    expect(out.headers.get('Set-Cookie')).toMatch(
+      new RegExp(`^${SESSION_COOKIE}=;.*HttpOnly.*Max-Age=0.*Secure`)
+    );
   });
 });
 
