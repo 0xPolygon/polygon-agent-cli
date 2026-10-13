@@ -268,6 +268,7 @@ const cardsWaitCommand: CommandModule<object, WaitArgs> = {
 };
 
 interface BuyTurn {
+  nextAction?: { type: string; message: string; url: string | null; sessionId: string };
   conversationId: string;
   status: string;
   reply: string | null;
@@ -283,7 +284,13 @@ const walletFlag = (w: string) => (w === 'main' ? '' : ` --wallet ${w}`);
 
 // What the agent should do after this turn.
 function buyNext(t: BuyTurn, wallet: string): Record<string, string> {
-  const again = `polygon-agent credentials buy --conversation ${t.conversationId}`;
+  if (t.status === 'requires_action' && t.nextAction?.type === 'add_card') {
+    return {
+      next: 'No card is saved yet. Send the owner nextAction.url alone on its own line, then wait for them.',
+      then: `polygon-agent credentials cards wait --session ${t.nextAction.sessionId}${walletFlag(wallet)}`
+    };
+  }
+  const again = `polygon-agent buy --conversation ${t.conversationId}`;
   if (t.status === 'declined' && t.declineCode === 'vault_approval_required' && t.approvalUrl) {
     return {
       next: 'Send the owner approvalUrl on its own line. They approve with their passkey; nothing is charged until then.',
@@ -316,7 +323,7 @@ function buyNext(t: BuyTurn, wallet: string): Record<string, string> {
   return {};
 }
 
-const buyCommand: CommandModule<object, BuyArgs> = {
+export const buyCommand: CommandModule<object, BuyArgs> = {
   command: 'buy [ask]',
   describe:
     'Shop at real stores with the saved card and address: describe it, show the cart, confirm its hash',
@@ -355,13 +362,8 @@ const cardsCommand: CommandModule = {
 
 export const credentialsCommand: CommandModule = {
   command: 'credentials',
-  describe: 'Saved details agents use to buy for the owner (shipping address, cards), and buying',
+  describe: 'Saved details agents use to buy for the owner (shipping address, cards)',
   builder: (y) =>
-    y
-      .command(statusCommand)
-      .command(addressCommand)
-      .command(cardsCommand)
-      .command(buyCommand)
-      .demandCommand(1),
+    y.command(statusCommand).command(addressCommand).command(cardsCommand).demandCommand(1),
   handler: () => {}
 };

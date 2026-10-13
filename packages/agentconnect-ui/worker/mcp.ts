@@ -101,7 +101,7 @@ const TOOLS = [
     name: 'buy',
     title: 'Buy with the saved card',
     description:
-      "Shop at real stores (Amazon, Walmart, Target, Best Buy, DoorDash, and more) with the saved card and address. Send `ask` with what they want, or their answer, plus conversation_id to continue. When a cart is shown, confirm its exact hash only after the owner agrees. A confirm pauses with approval_url for the owner's passkey; call the same confirm again after they approve. Each turn can take up to two minutes.",
+      "Shop at real stores (Amazon, Walmart, Target, Best Buy, DoorDash, and more) with the saved card and address. Send `ask` with what they want, or their answer, plus conversation_id to continue. When a cart is shown, confirm its exact hash only after the owner agrees. A confirm pauses with approval_url for the owner's passkey; call the same confirm again after they approve. With no card saved yet it answers requires_action with nextAction.url: send that link to the owner, then call check_card. Each turn can take up to two minutes.",
     inputSchema: {
       type: 'object',
       properties: {

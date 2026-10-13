@@ -217,9 +217,9 @@ agent credentials status             # linked? until when
 agent credentials cards              # → cards: [{ brand, last4, expMonth, expYear, label }]
 agent credentials cards add          # → { url, next }: a one-time AgentCard link for the user
 agent credentials cards wait --session <id>   # waits until the card is saved, then lists cards
-agent credentials buy "a 12 oz bag of whole bean coffee from Amazon"   # → { conversationId, status, reply, cart, products }
-agent credentials buy --conversation <id> "the medium roast"           # answer a question, or change the cart
-agent credentials buy --conversation <id> --confirm <cart.hash>        # place it with the saved card
+agent buy "a 12 oz bag of whole bean coffee from Amazon"   # → { conversationId, status, reply, cart, products }
+agent buy --conversation <id> "the medium roast"           # answer a question, or change the cart
+agent buy --conversation <id> --confirm <cart.hash>        # place it with the saved card
 ```
 
 - **Cards** are saved on AgentCard's secure page behind the user's passkey. Agents only ever get the brand, last four digits, and expiry; never the number. Send `cards add`'s `url` exactly as given, alone on its own line (anything appended breaks it), then run its `next`. If `wait` returns `status: waiting`, run `next` again once the user says they're done.
@@ -231,7 +231,7 @@ agent credentials buy --conversation <id> --confirm <cart.hash>        # place i
   - A `cart`: show the items and `totalCents` and ask before confirming. Confirm the exact `cart.hash`, never a guess.
   - `declineCode: vault_approval_required`: send `approvalUrl` alone on its own line. The owner approves with their passkey; then run the same confirm again (`then`). Nothing is charged before that.
   - Any other `declineCode` means it wasn't placed and nothing was charged. `sandbox_mode` is a test account that can't pay real stores.
-  - "No card is connected for purchases": the owner connects a card on the dashboard Wallet page (or `credentials cards add`), then try again.
+  - `status: requires_action` with `nextAction.type: add_card`: no card is saved yet. Send `nextAction.url` alone on its own line, run `then` to wait, and try the purchase again.
 
 ### Polymarket
 ```bash

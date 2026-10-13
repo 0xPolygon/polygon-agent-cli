@@ -459,10 +459,14 @@ describe('/api/credentials/buy', () => {
     );
   };
 
-  it('asks for a card first', async () => {
+  it('answers with an add-card link when no card is saved', async () => {
     const res = await call(await token(), { ask: 'coffee' });
-    expect(res.status).toBe(400);
-    expect(((await res.json()) as { message: string }).message).toMatch(/Connect a card/);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      status: 'requires_action',
+      nextAction: { type: 'add_card', url: 'https://vault.test/v?vs=vs_1.sig', sessionId: 'vs_1' }
+    });
+    expect(agentcard.buys).toHaveLength(0);
   });
 
   it('keeps the connection from a linked card session, sealed', async () => {

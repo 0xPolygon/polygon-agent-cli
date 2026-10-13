@@ -5,7 +5,6 @@ import type { BuyRequest, BuyTurn } from './agentcard.ts';
 import type { Env } from './index.ts';
 
 import { AgentCard, AgentCardError } from './agentcard.ts';
-import { ValidationError } from './shipping.ts';
 import { CredentialStore } from './store.ts';
 
 export function store(env: Env): CredentialStore | null {
@@ -107,6 +106,17 @@ const turnView = (t: BuyTurn) => ({
     : null
 });
 
+const addCardTurn = (session: { url?: string; sessionId: string }) => ({
+  status: 'requires_action' as const,
+  nextAction: {
+    type: 'add_card',
+    message:
+      'Save a card first: open this link, add a debit or credit card, and protect it with your passkey. Then ask again.',
+    url: session.url ?? null,
+    sessionId: session.sessionId
+  }
+});
+
 /**
  * One purchase turn for the wallet: shop with `ask`, place a shown cart with
  * `confirm`. Ships to the saved address and pays with the saved card, which
@@ -117,13 +127,10 @@ export async function buyTurn(
   cards: AgentCard,
   wallet: string,
   input: { ask?: string; conversationId?: string; confirm?: string }
-): Promise<ReturnType<typeof turnView>> {
+): Promise<ReturnType<typeof turnView> | ReturnType<typeof addCardTurn>> {
   const token = await userToken(db, cards, wallet);
-  if (!token) {
-    throw new ValidationError(
-      'No card is connected for purchases yet. Connect a card on the dashboard Wallet page first.'
-    );
-  }
+  // No card in the vault for purchases yet: answer with the link that adds one.
+  if (!token) return addCardTurn(await startCardSession(db, cards, wallet));
   const { address } = await db.get(wallet);
   const body: BuyRequest = {};
   if (input.ask) body.ask = input.ask;
