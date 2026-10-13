@@ -8,7 +8,7 @@ description: >-
 
 # Set up the Polygon OMS Agent Kit
 
-**For the assistant.** Follow these steps in order. Each one is safe to re-run. Tell the user what you're doing in plain words as you go, and never paste raw JSON to them.
+**For the assistant.** Follow these steps in order. Each one is safe to re-run. Tell the user what you're doing in plain words as you go, and never paste raw JSON to them. Whenever you hand the conversation back to them, end with a question or with exactly what they should do next. Never stop on a status report.
 
 **What this sets up (tell the user in a sentence or two):** a Polygon OMS wallet that you, their assistant, can use within an allowance they approve by email code. You can check prices, watch them, buy, sell, swap and bridge tokens, and pay for x402 services. Anything beyond the allowance needs a new code from them. The wallet stays theirs. Each code signs the CLI in as them for a moment, just long enough to make that one change (approving an allowance, a withdrawal…), then signs out again. Only that limited key is kept, never their sign-in.
 
@@ -121,14 +121,20 @@ Check these in order:
 1. `mode` is `"owner"`: this install is signed in with the browser login, as the wallet owner, with no allowance limits. Tell the user, and offer to switch to an allowance: `"$ROOT/bin/polygon-agent" wallet logout`, then step 7.
 2. `pendingRequest` is there: a code was already sent to `pendingRequest.email` for what `pendingRequest.approves` says. Ask the user for that code and go to step 7.5. Don't send another unless it expired or they can't find it.
 3. `connected` is `true`: skip to step 8.
-4. Otherwise, connect (step 7).
+4. Otherwise, go straight on to step 7 in the same reply.
 
 ## 7. Connect
 
-Before asking for anything, explain how it works: the code lets the CLI sign in as the user for a moment, approve the allowance for this install's own limited key, and sign out. Only that key is kept.
+Don't leave the user with a status report after the install: tell them what's next and ask whether to sign in now.
 
-1. Ask the user for their email. Never guess it.
-2. Ask how much you may spend, explaining before anything is sent: "How much should I be able to spend on my own? I suggest up to **$1,000** over the next **30 days**, in USDC, USDT, ETH and BTC on Polygon and Base, for trades and paid services. Anything more, or other tokens or chains, needs a new code from you."
+1. Say the install worked, explain signing in a sentence or two, and end with the question. For example:
+
+   > "Your agent wallet is installed. Next, sign in so I can use it: I'll send a code to your email, and pasting it here approves a spending limit for me, nothing more. Your sign-in itself is never kept here.
+   >
+   > Would you like to sign in to your agent wallet now?"
+
+   If they say yes, ask for their email: "What email should I use? If you don't have an agent wallet yet, signing in creates one." If they reply with their email straight away, use it. Never guess it. If they'd rather wait, tell them to just say "sign in to my agent wallet" when they're ready.
+2. Once you have the email, ask how much you may spend, before anything is sent: "How much should I be able to spend on my own? I suggest up to **$1,000** over the next **30 days**, in USDC, USDT, ETH and BTC on Polygon and Base, for trades and paid services. Anything more, or other tokens or chains, needs a new code from you." A plain yes means $1,000 for 30 days.
 3. Send the code:
 
    ```sh
@@ -149,7 +155,7 @@ Before asking for anything, explain how it works: the code lets the CLI sign in 
 
 ## 8. Funding
 
-Run `"$ROOT/bin/polygon-agent" wallet status` again. If it shows no `holdings`, run `"$ROOT/bin/polygon-agent" fund` and give the user the link in `url` (the address is already in its own message from step 7). Suggest USDC on Polygon; any covered token on a covered chain works.
+Run `"$ROOT/bin/polygon-agent" wallet status` again. If it shows no `holdings`, run `"$ROOT/bin/polygon-agent" fund` and give the user the link in `url` (the address is already in its own message from step 7). Suggest USDC on Polygon; any covered token on a covered chain works. Ask them to tell you once they've sent it, so you can check it arrived.
 
 ## 9. Watches
 
@@ -164,5 +170,7 @@ Tell the user what they can ask for now, in plain words. For example:
 - "Move 20 USDC to Base."
 - "Search the web with a paid service" (x402).
 - "Raise my limit to $2,000" (a new email code approves it).
+
+End by asking what they'd like to do first.
 
 Re-run this file any time: if the wrapper is missing (the workspace was reset), it installs again; otherwise it refreshes the skill, checks the connection and moves on.
