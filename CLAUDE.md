@@ -42,6 +42,6 @@ skill) and are distributed via `npx skills add` and agentconnect, not via npm.
 
 ## Saved credentials (agentconnect)
 
-- The agentconnect worker (`packages/agentconnect-ui/worker/`) serves `/api/agent/enroll` and `/api/credentials/address`. The shipping address is stored as `ship_*` metadata on an OMS customer per wallet (`externalId` = lowercase wallet address); OMS's `residentialAddress` is write-only, so it is not used.
+- The agentconnect worker (`packages/agentconnect-ui/worker/`) serves `/api/agent/enroll` and `/api/credentials/address`. Saved details are one Workers KV record per wallet (`CREDENTIALS` binding, key `wallet:<lowercase address>`), sealed with AES-GCM under a key derived from `CREDENTIALS_KEY` (`worker/store.ts`). OMS customers were the first choice but need full KYC (SSN, date of birth) and reject `metadata` in v0.13.
 - Agent sign-in: during any owner sign-in the CLI asks OMS for an ID token (`getIdToken`, custom claims `agent_key` + `purpose: agentconnect-enroll`). The worker verifies it against the OMS JWKS and returns a 30-day HMAC certificate. The agent then signs its own short-lived `at1` tokens (`lib/credentials/agent.ts`) for API calls and in dashboard links (`#t=` fragment, 1 hour). Token formats are mirrored in `worker/agent-auth.ts`.
-- Worker secrets per environment (`wrangler secret put --env <env>`): `AGENT_CERT_SECRET`, `OMS_API_KEY`, `OMS_API_SECRET`. `OMS_API_URL` is a wrangler var (staging: OMS sandbox).
+- Worker secrets are GitHub environment secrets, uploaded by the deploy workflow with `wrangler deploy --secrets-file`: `AGENT_CERT_SECRET`, `CREDENTIALS_KEY`. The KV namespace has no id in `wrangler.toml`; wrangler creates it on the first deploy.

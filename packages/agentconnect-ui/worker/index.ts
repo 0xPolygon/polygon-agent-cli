@@ -1,28 +1,24 @@
 // agentconnect worker: the SPA (with SPA fallback) plus the credentials API
 // that agents and the dashboard use to save and read a shipping address.
+// Saved details live in Workers KV (OMS customers need full KYC and don't
+// accept metadata yet).
 
 import type { AgentIdentity, OmsIdTokenConfig } from './agent-auth.ts';
 
 import { AuthError, issueCertificate, verifyAccessToken, verifyEnrollToken } from './agent-auth.ts';
-import { OmsCustomers, OmsError } from './oms-customers.ts';
-import {
-  addressFromMetadata,
-  addressToMetadata,
-  parseAddress,
-  ValidationError
-} from './shipping.ts';
+import { parseAddress, ValidationError } from './shipping.ts';
+import { CredentialStore } from './store.ts';
 
 export interface Env {
   ASSETS: Fetcher;
+  CREDENTIALS?: KVNamespace;
   // Vars (wrangler.toml)
-  OMS_API_URL?: string;
   OMS_ID_TOKEN_ISSUER?: string;
   OMS_ID_TOKEN_AUDIENCES?: string;
   OMS_JWKS_URL?: string;
   // Secrets (wrangler secret put)
-  OMS_API_KEY?: string;
-  OMS_API_SECRET?: string;
   AGENT_CERT_SECRET?: string;
+  CREDENTIALS_KEY?: string;
 }
 
 const DEFAULT_ISSUER = 'https://api.polygon.technology';
@@ -52,13 +48,9 @@ function idTokenConfig(env: Env): OmsIdTokenConfig {
   };
 }
 
-function customers(env: Env): OmsCustomers | null {
-  if (!env.OMS_API_URL || !env.OMS_API_KEY || !env.OMS_API_SECRET) return null;
-  return new OmsCustomers({
-    apiUrl: env.OMS_API_URL,
-    apiKey: env.OMS_API_KEY,
-    apiSecret: env.OMS_API_SECRET
-  });
+function store(env: Env): CredentialStore | null {
+  if (!env.CREDENTIALS || !env.CREDENTIALS_KEY) return null;
+  return new CredentialStore(env.CREDENTIALS, env.CREDENTIALS_KEY);
 }
 
 async function authenticate(req: Request, env: Env): Promise<AgentIdentity> {
@@ -96,22 +88,20 @@ export async function handleApi(req: Request, env: Env, path: string): Promise<R
 
     if (path === '/api/credentials/address') {
       const who = await authenticate(req, env);
-      const oms = customers(env);
-      if (!oms) return fail(503, 'credentials_unavailable', 'Address storage is not configured');
+      const db = store(env);
+      if (!db) return fail(503, 'credentials_unavailable', 'Address storage is not configured');
 
       if (req.method === 'GET') {
-        const c = await oms.findByWallet(who.wallet);
-        return json({ address: addressFromMetadata(c?.metadata) });
+        const r = await db.get(who.wallet);
+        return json({ address: r.address ?? null });
       }
       if (req.method === 'PUT') {
         const address = parseAddress(await readBody(req));
-        const c = await oms.upsertMetadata(who.wallet, who.email, addressToMetadata(address));
-        return json({ address: addressFromMetadata(c.metadata) ?? address });
+        await db.update(who.wallet, (r) => ({ ...r, address }));
+        return json({ address });
       }
       if (req.method === 'DELETE') {
-        const c = await oms.findByWallet(who.wallet);
-        if (c)
-          await oms.updateMetadata(c.id, { ...(c.metadata ?? {}), ...addressToMetadata(null) });
+        await db.update(who.wallet, (r) => ({ ...r, address: null }));
         return json({ address: null });
       }
       return fail(405, 'method_not_allowed', 'Use GET, PUT, or DELETE');
@@ -123,10 +113,6 @@ export async function handleApi(req: Request, env: Env, path: string): Promise<R
       return fail(401, err.code, err.message);
     }
     if (err instanceof ValidationError) return fail(400, 'invalid_request', err.message);
-    if (err instanceof OmsError) {
-      console.error('[oms]', err.status, err.code, err.message);
-      return fail(502, 'upstream_error', 'The address service is unavailable. Try again shortly.');
-    }
     console.error('[api]', err);
     return fail(500, 'internal_error', 'Something went wrong');
   }

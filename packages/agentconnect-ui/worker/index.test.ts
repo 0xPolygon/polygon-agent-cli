@@ -4,7 +4,6 @@ import type { Env } from './index.ts';
 
 import { issueCertificate, resetJwksCache } from './agent-auth.ts';
 import { handleApi } from './index.ts';
-import { resetOmsTokenCache } from './oms-customers.ts';
 import {
   AGENT,
   AUDIENCE,
@@ -15,7 +14,6 @@ import {
   WALLET
 } from './test-helpers.ts';
 
-const OMS = 'https://oms.test/v0.13';
 const ADDRESS = {
   name: 'Test Agent',
   line1: '214 Bergen St',
@@ -27,67 +25,40 @@ const ADDRESS = {
   phone: ''
 };
 
+// A tiny in-memory Workers KV.
+function fakeKv() {
+  const data = new Map<string, string>();
+  const kv = {
+    get: async (k: string) => data.get(k) ?? null,
+    put: async (k: string, v: string) => void data.set(k, v)
+  } as unknown as KVNamespace;
+  return { data, kv };
+}
+
+let kv: ReturnType<typeof fakeKv>;
+
 const env = (over: Partial<Env> = {}): Env => ({
   ASSETS: {} as Fetcher,
   AGENT_CERT_SECRET: SECRET,
-  OMS_API_URL: OMS,
-  OMS_API_KEY: 'sk_test',
-  OMS_API_SECRET: 'secret',
+  CREDENTIALS: kv.kv,
+  CREDENTIALS_KEY: 'test-credentials-key',
   OMS_ID_TOKEN_ISSUER: ISSUER,
   OMS_ID_TOKEN_AUDIENCES: AUDIENCE,
   OMS_JWKS_URL: 'https://jwks.test',
   ...over
 });
 
-// A tiny in-memory OMS customers API.
-function fakeOms() {
-  const customers: {
-    id: string;
-    externalId: string;
-    email?: string;
-    metadata: Record<string, string>;
-  }[] = [];
-  const calls: string[] = [];
-  const handler = async (url: string, init: RequestInit = {}) => {
-    const method = init.method ?? 'GET';
-    const path = url.replace(OMS, '');
-    calls.push(`${method} ${path.split('?')[0]}`);
-    const body = init.body ? JSON.parse(String(init.body)) : undefined;
-    if (path === '/auth/token') return Response.json({ accessToken: 'tok', expiresIn: 3600 });
-    if (method === 'GET' && path.startsWith('/customers?')) {
-      const ext = new URL(`https://x${path}`).searchParams.get('externalId');
-      return Response.json({ data: customers.filter((c) => c.externalId === ext), hasMore: false });
-    }
-    if (method === 'POST' && path === '/customers') {
-      const c = { id: `cst_${customers.length + 1}`, ...body };
-      customers.push(c);
-      return Response.json(c, { status: 201 });
-    }
-    const m = /^\/customers\/(.+)$/.exec(path);
-    if (method === 'PATCH' && m) {
-      const c = customers.find((x) => x.id === m[1])!;
-      // Replace semantics: the worker always sends the full map.
-      c.metadata = body.metadata;
-      return Response.json(c);
-    }
-    return Response.json({ error: 'NotFound' }, { status: 404 });
-  };
-  return { customers, calls, handler };
-}
-
-let oms: ReturnType<typeof fakeOms>;
 let jwksFetch: typeof fetch;
 
 beforeEach(async () => {
   resetJwksCache();
-  resetOmsTokenCache();
-  oms = fakeOms();
+  kv = fakeKv();
   const iss = await makeIssuer();
   jwksFetch = iss.fetchImpl;
   vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url === 'https://jwks.test') return jwksFetch(url, init);
-    return oms.handler(url, init);
+    return new Response('unexpected fetch', { status: 599 });
   });
   issuer = iss;
 });
@@ -151,22 +122,19 @@ describe('/api/credentials/address', () => {
     expect(await res.json()).toEqual({ address: null });
   });
 
-  it('creates the customer on first save, then reads it back', async () => {
+  it('saves the address sealed, then reads it back', async () => {
     const t = await token();
     const put = await handleApi(req('PUT', path, { token: t, body: ADDRESS }), env(), path);
     expect(put.status).toBe(200);
-    expect(oms.customers).toHaveLength(1);
-    expect(oms.customers[0]).toMatchObject({ externalId: WALLET, email: 'owner@example.com' });
-    expect(oms.customers[0].metadata).toMatchObject({
-      ship_line1: '214 Bergen St',
-      ship_city: 'Brooklyn'
-    });
+    const stored = kv.data.get(`wallet:${WALLET}`)!;
+    expect(stored).toMatch(/^v1\./);
+    expect(stored).not.toContain('Bergen');
 
     const get = await handleApi(req('GET', path, { token: t }), env(), path);
     expect(await get.json()).toEqual({ address: ADDRESS });
   });
 
-  it('updates the existing customer instead of creating another', async () => {
+  it('replaces the saved address', async () => {
     const t = await token();
     await handleApi(req('PUT', path, { token: t, body: ADDRESS }), env(), path);
     await handleApi(
@@ -174,8 +142,8 @@ describe('/api/credentials/address', () => {
       env(),
       path
     );
-    expect(oms.customers).toHaveLength(1);
-    expect(oms.customers[0].metadata.ship_city).toBe('Queens');
+    const get = await handleApi(req('GET', path, { token: t }), env(), path);
+    expect(await get.json()).toEqual({ address: { ...ADDRESS, city: 'Queens' } });
   });
 
   it('clears the address', async () => {
@@ -184,7 +152,15 @@ describe('/api/credentials/address', () => {
     await handleApi(req('DELETE', path, { token: t }), env(), path);
     const get = await handleApi(req('GET', path, { token: t }), env(), path);
     expect(await get.json()).toEqual({ address: null });
-    expect(oms.customers[0].metadata.agentconnect_wallet).toBe(WALLET);
+  });
+
+  it('refuses a record moved under another wallet', async () => {
+    const t = await token();
+    await handleApi(req('PUT', path, { token: t, body: ADDRESS }), env(), path);
+    const other = '0x00000000000000000000000000000000000000bb';
+    kv.data.set(`wallet:${other}`, kv.data.get(`wallet:${WALLET}`)!);
+    const { CredentialStore } = await import('./store.ts');
+    await expect(new CredentialStore(kv.kv, 'test-credentials-key').get(other)).rejects.toThrow();
   });
 
   it('validates the address', async () => {
@@ -194,13 +170,13 @@ describe('/api/credentials/address', () => {
       path
     );
     expect(res.status).toBe(400);
-    expect(oms.customers).toHaveLength(0);
+    expect(kv.data.size).toBe(0);
   });
 
-  it('answers 503 when OMS is not configured', async () => {
+  it('answers 503 when storage is not configured', async () => {
     const res = await handleApi(
       req('GET', path, { token: await token() }),
-      env({ OMS_API_SECRET: undefined }),
+      env({ CREDENTIALS_KEY: undefined }),
       path
     );
     expect(res.status).toBe(503);
@@ -222,13 +198,14 @@ describe('global fetch binding', () => {
   it('never calls fetch as a method (Workers throw Illegal invocation)', async () => {
     const strict = function (this: unknown, input: RequestInfo | URL, init?: RequestInit) {
       if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation');
-      return oms.handler(String(input), init);
+      return jwksFetch(String(input), init);
     };
     vi.stubGlobal('fetch', strict);
+    const idToken = await issuer.sign(issuer.enrollClaims());
     const res = await handleApi(
-      req('GET', '/api/credentials/address', { token: await token() }),
+      req('POST', '/api/agent/enroll', { body: { idToken } }),
       env(),
-      '/api/credentials/address'
+      '/api/agent/enroll'
     );
     expect(res.status).toBe(200);
   });

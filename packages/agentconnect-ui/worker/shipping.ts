@@ -1,6 +1,4 @@
-// The shipping address as agents and the dashboard see it, and its encoding
-// into OMS customer metadata (the only customer field OMS returns as written;
-// residentialAddress is write-only and tied to KYC).
+// The shipping address as agents and the dashboard see it.
 
 export interface ShippingAddress {
   name: string;
@@ -25,7 +23,6 @@ export const ADDRESS_FIELDS = [
 ] as const;
 const REQUIRED: (keyof ShippingAddress)[] = ['name', 'line1', 'city', 'country'];
 const MAX_LENGTH = 200;
-const PREFIX = 'ship_';
 
 export class ValidationError extends Error {
   constructor(
@@ -55,19 +52,4 @@ export function parseAddress(input: unknown): ShippingAddress {
     if (!out[f]) throw new ValidationError(`${f} is required`, f);
   }
   return out;
-}
-
-/** Every field, so a PATCH replaces the whole address whether OMS merges or replaces metadata. */
-export function addressToMetadata(a: ShippingAddress | null): Record<string, string> {
-  return Object.fromEntries(ADDRESS_FIELDS.map((f) => [PREFIX + f, a ? a[f] : '']));
-}
-
-export function addressFromMetadata(
-  meta: Record<string, string> | null | undefined
-): ShippingAddress | null {
-  if (!meta) return null;
-  const a = Object.fromEntries(
-    ADDRESS_FIELDS.map((f) => [f, meta[PREFIX + f] ?? ''])
-  ) as unknown as ShippingAddress;
-  return a.line1 ? a : null;
 }
