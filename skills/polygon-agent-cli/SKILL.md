@@ -227,6 +227,7 @@ agent buy --conversation <id> --confirm <cart.hash>        # place it with the s
 - `credentials_not_linked`: run its `command` (`wallet link-credentials`). In session mode it is an owner request (one sign-in, same picker); in owner mode it links straight away.
 - No address saved: ask the user for it, or send `dashboard.url` so they can fill it in on the Credentials page.
 - Only share the address with the store at checkout. Never repeat it in other chats or files.
+- **Paying at any store in your browser** (Kernel or Browserbase with AgentCard): never ask for a card number. Fill shipping from `credentials address`, enter a placeholder card (4242 4242 4242 4242, any future expiry, any CVC), and submit. Send the approval link the browser gives you to the owner on its own line; their passkey approval pays with their saved card. Confirm the order on the store's page before reporting success, and never retry a payment yourself.
 - **Buying** works at Amazon, Walmart, Target, Best Buy, DoorDash, and more. It ships to the saved address (retail needs a phone on it) and pays with the saved card. Each turn takes up to two minutes. Follow the result's `next`:
   - A `cart`: show the items and `totalCents` and ask before confirming. Confirm the exact `cart.hash`, never a guess.
   - `declineCode: vault_approval_required`: send `approvalUrl` alone on its own line. The owner approves with their passkey; then run the same confirm again (`then`). Nothing is charged before that.

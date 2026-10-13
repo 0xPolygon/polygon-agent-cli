@@ -27,11 +27,13 @@ export interface McpProps {
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const SERVER = { name: 'polygon-agent-wallet', title: 'Polygon agent wallet', version: '1.0.0' };
 
-const INSTRUCTIONS = `The owner's Polygon agent wallet: what it holds, their saved shipping address and cards, and buying at real stores with the saved card.
+const INSTRUCTIONS = `The owner's Polygon agent wallet: what it holds, their saved shipping address and cards, and buying with the card they keep in the AgentCard vault. Never ask the owner for a card number.
 
-To buy something: call buy with what they want. Show the cart (items and total) and ask before confirming. Confirm with the cart's hash. The confirm pauses with an approval_url: send it to the owner on its own line; they approve with their passkey, then call the same confirm again. Nothing is charged before they approve.
+Paying at a store's checkout in your browser (Kernel or Browserbase with AgentCard): fill the shipping fields from get_shipping_address, enter a placeholder card (4242 4242 4242 4242, any future expiry, any CVC), and submit. The browser pauses the payment and gives you an approval link: send it to the owner on its own line. They approve with their passkey and their saved card pays. Confirm the order on the store's page before telling them it went through, and never retry a payment on your own.
 
-Never repeat the shipping address outside a purchase. Sending, swapping, or predicting with the wallet's funds needs the Polygon agent CLI (npx skills add https://github.com/0xPolygon/polygon-agent-cli).`;
+Without a browser: call buy with what they want. Show the cart (items and total) and ask before confirming. Confirm with the cart's hash. The confirm pauses with an approval_url: send it to the owner on its own line; they approve with their passkey, then call the same confirm again.
+
+No card saved yet: call add_card (buy does this for you) and send the link. Never repeat the shipping address outside a purchase. Sending, swapping, or predicting with the wallet's funds needs the Polygon agent CLI (npx skills add https://github.com/0xPolygon/polygon-agent-cli).`;
 
 const ADDRESS_PROPS = {
   name: { type: 'string', description: 'Recipient full name' },
