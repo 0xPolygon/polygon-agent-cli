@@ -3,17 +3,34 @@
 // Saved details live in Workers KV (OMS customers need full KYC and don't
 // accept metadata yet).
 
+import type { OAuthHelpers } from '@cloudflare/workers-oauth-provider';
+
+import { OAuthProvider } from '@cloudflare/workers-oauth-provider';
+
 import type { AgentIdentity, OmsIdTokenConfig } from './agent-auth.ts';
-import type { BuyRequest, BuyTurn } from './agentcard.ts';
+import type { McpProps } from './mcp.ts';
 
 import { AuthError, issueCertificate, verifyAccessToken, verifyEnrollToken } from './agent-auth.ts';
-import { AgentCard, AgentCardError } from './agentcard.ts';
+import { AgentCardError } from './agentcard.ts';
+import { handleMcp } from './mcp.ts';
+import { OwnerSignIn } from './owner-signin.ts';
+import {
+  agentCard,
+  buyTurn,
+  listWalletCards,
+  pollCardSession,
+  startCardSession,
+  store
+} from './services.ts';
 import { parseAddress, ValidationError } from './shipping.ts';
-import { CredentialStore } from './store.ts';
+import { SealedKv } from './store.ts';
 
 export interface Env {
   ASSETS: Fetcher;
   CREDENTIALS?: KVNamespace;
+  // MCP: OAuth grants and tokens (the provider's own records), and its helpers.
+  OAUTH_KV?: KVNamespace;
+  OAUTH_PROVIDER?: OAuthHelpers;
   // Vars (wrangler.toml)
   OMS_ID_TOKEN_ISSUER?: string;
   OMS_ID_TOKEN_AUDIENCES?: string;
@@ -23,6 +40,20 @@ export interface Env {
   CREDENTIALS_KEY?: string;
   AGENTCARD_CLIENT_ID?: string;
   AGENTCARD_CLIENT_SECRET?: string;
+  // Read balances for the MCP get_wallet tool.
+  INDEXER_ACCESS_KEY?: string;
+  // OMS project the MCP sign-in uses; defaults to the CLI's.
+  OMS_PUBLISHABLE_KEY?: string;
+}
+
+const DEFAULT_PUBLISHABLE_KEY = 'pk_sdbx_01kqfw9zaykks_01kwvkkzs5e2wb6rfas2y2njm8';
+
+function ownerSignIn(env: Env): OwnerSignIn | null {
+  if (!env.OAUTH_KV || !env.CREDENTIALS_KEY) return null;
+  return new OwnerSignIn(
+    new SealedKv(env.OAUTH_KV, env.CREDENTIALS_KEY),
+    env.OMS_PUBLISHABLE_KEY || DEFAULT_PUBLISHABLE_KEY
+  );
 }
 
 const DEFAULT_ISSUER = 'https://api.polygon.technology';
@@ -50,145 +81,6 @@ function idTokenConfig(env: Env): OmsIdTokenConfig {
       .map((s) => s.trim())
       .filter(Boolean)
   };
-}
-
-function store(env: Env): CredentialStore | null {
-  if (!env.CREDENTIALS || !env.CREDENTIALS_KEY) return null;
-  return new CredentialStore(env.CREDENTIALS, env.CREDENTIALS_KEY);
-}
-
-function agentCard(env: Env): AgentCard | null {
-  if (!env.AGENTCARD_CLIENT_ID || !env.AGENTCARD_CLIENT_SECRET) return null;
-  return new AgentCard({
-    clientId: env.AGENTCARD_CLIENT_ID,
-    clientSecret: env.AGENTCARD_CLIENT_SECRET
-  });
-}
-
-const cardView = (c: {
-  id: string;
-  brand: string;
-  last4: string;
-  expiry_month: number;
-  expiry_year: number;
-}) => ({
-  id: c.id,
-  brand: c.brand,
-  last4: c.last4,
-  expMonth: c.expiry_month,
-  expYear: c.expiry_year
-});
-
-/**
- * Keep the user's connection from a linked add-a-card session. Single use, so
- * a failure (an account that needs a code, an already exchanged session) is
- * logged and the card still counts as saved.
- */
-async function connectFromSession(
-  db: CredentialStore,
-  cards: AgentCard,
-  wallet: string,
-  sessionId: string
-): Promise<void> {
-  try {
-    const c = await cards.exchangeVaultSession(sessionId);
-    if (!c.user?.id) return;
-    await db.update(wallet, (r) => ({
-      ...r,
-      agentcardConnection: {
-        userId: c.user!.id,
-        accessToken: c.access_token,
-        refreshToken: c.refresh_token,
-        expiresAt: Date.now() + (c.expires_in ?? 3600) * 1000
-      }
-    }));
-  } catch (err) {
-    console.error('[agentcard] exchange', err instanceof Error ? err.message : err);
-  }
-}
-
-/** A live token acting as the wallet's card user, refreshed when close to expiry. */
-async function userToken(
-  db: CredentialStore,
-  cards: AgentCard,
-  wallet: string
-): Promise<string | null> {
-  const conn = (await db.get(wallet)).agentcardConnection;
-  if (!conn) return null;
-  if (conn.expiresAt - 60_000 > Date.now()) return conn.accessToken;
-  const next = await cards.refreshConnection(conn.refreshToken);
-  await db.update(wallet, (r) => ({
-    ...r,
-    agentcardConnection: {
-      userId: conn.userId,
-      accessToken: next.access_token,
-      refreshToken: next.refresh_token,
-      expiresAt: Date.now() + (next.expires_in ?? 3600) * 1000
-    }
-  }));
-  return next.access_token;
-}
-
-// What agents see of a purchase turn: enough to show the cart and act on it.
-const turnView = (t: BuyTurn) => ({
-  conversationId: t.conversation_id,
-  status: t.status,
-  reply: t.reply ?? null,
-  cart: t.cart ?? null,
-  unmatched: t.unmatched ?? [],
-  products: (t.catalog?.items ?? []).slice(0, 8).map((i) => ({
-    name: i.name,
-    priceCents: i.priceCents ?? null,
-    url: i.id,
-    imageUrl: i.image_url ?? null
-  })),
-  declineCode: t.decline_code ?? null,
-  approvalUrl: t.approval_url ?? null,
-  chargeStatus: t.charge_status ?? null,
-  orderId: t.order_id ?? null,
-  paidWith: t.payment_source?.last4
-    ? `${t.payment_source.brand ?? 'card'} ending ${t.payment_source.last4}`
-    : null
-});
-
-/**
- * One purchase turn for the wallet: shop with `ask`, place a shown cart with
- * `confirm`. Ships to the saved address and pays with the saved card, which
- * the owner approves with their passkey.
- */
-export async function buyTurn(
-  db: CredentialStore,
-  cards: AgentCard,
-  wallet: string,
-  input: { ask?: string; conversationId?: string; confirm?: string }
-): Promise<ReturnType<typeof turnView>> {
-  const token = await userToken(db, cards, wallet);
-  if (!token) {
-    throw new ValidationError(
-      'No card is connected for purchases yet. Connect a card on the dashboard Wallet page first.'
-    );
-  }
-  const { address } = await db.get(wallet);
-  const body: BuyRequest = {};
-  if (input.ask) body.ask = input.ask;
-  if (input.conversationId) body.conversation_id = input.conversationId;
-  if (input.confirm) {
-    body.confirm = input.confirm;
-    body.payment_source = 'vault';
-  }
-  if (address) {
-    body.delivery_address = {
-      street: address.line1,
-      ...(address.line2 ? { address2: address.line2 } : {}),
-      city: address.city,
-      state: address.state,
-      zip: address.zip,
-      country: address.country,
-      name: address.name,
-      ...(address.phone ? { phone: address.phone } : {})
-    };
-  }
-  return turnView(await cards.buy(token, body));
 }
 
 async function authenticate(req: Request, env: Env): Promise<AgentIdentity> {
@@ -222,6 +114,86 @@ export function parseBuy(body: unknown): {
   }
   if (out.ask && out.ask.length > 2000) throw new ValidationError('ask is too long');
   return out;
+}
+
+/**
+ * The connect page's sign-in steps. On success the grant is issued and the
+ * page is sent back to the MCP client with its code.
+ */
+export async function handleConnectApi(req: Request, env: Env, path: string): Promise<Response> {
+  const signIn = ownerSignIn(env);
+  if (!signIn || !env.OAUTH_PROVIDER) {
+    return fail(503, 'mcp_unavailable', 'Connecting agents is not configured on this deployment');
+  }
+  try {
+    if (path === '/api/connect' && req.method === 'GET') {
+      const id = new URL(req.url).searchParams.get('c') ?? '';
+      const pending = await signIn.load(id);
+      return json({ clientName: pending.clientName });
+    }
+    if (req.method !== 'POST') return fail(405, 'method_not_allowed', 'Use POST');
+    const body = (await readBody(req)) as Record<string, unknown>;
+    const id = typeof body.c === 'string' ? body.c : '';
+    const str = (k: string) => {
+      const v = body[k];
+      if (typeof v !== 'string' || !v.trim()) throw new ValidationError(`${k} is required`);
+      return v.trim();
+    };
+    const finish = async (who: { wallet: string; email: string | null }) => {
+      const pending = await signIn.load(id);
+      const props: McpProps = { wallet: who.wallet, email: who.email };
+      const { redirectTo } = await env.OAUTH_PROVIDER!.completeAuthorization({
+        request: pending.authRequest,
+        userId: who.wallet,
+        metadata: { clientName: pending.clientName, email: who.email },
+        scope: pending.authRequest.scope,
+        props
+      });
+      await signIn.forget(id);
+      return json({ redirectTo });
+    };
+    if (path === '/api/connect/email/start') {
+      await signIn.startEmail(id, str('email'));
+      return json({ sent: true });
+    }
+    if (path === '/api/connect/email/finish') {
+      return finish(await signIn.finishEmail(id, str('code')));
+    }
+    if (path === '/api/connect/google/start') {
+      const url = await signIn.startGoogle(id, `${new URL(req.url).origin}/login`);
+      return json({ url });
+    }
+    if (path === '/api/connect/google/finish') {
+      return finish(await signIn.finishGoogle(id, str('callbackUrl')));
+    }
+    return fail(404, 'not_found', 'No such endpoint');
+  } catch (err) {
+    if (err instanceof ValidationError) return fail(400, 'invalid_request', err.message);
+    console.error('[connect]', err);
+    const message = err instanceof Error ? err.message : '';
+    // OMS refusals (a wrong code, an expired one) are the owner's to fix.
+    if (/code|otp|expired|invalid/i.test(message)) {
+      return fail(
+        400,
+        'sign_in_failed',
+        'That sign-in did not work. Check the code and try again.'
+      );
+    }
+    return fail(500, 'internal_error', 'Something went wrong');
+  }
+}
+
+/** GET /authorize: an MCP client wants access. Hand off to the connect page. */
+async function handleAuthorize(req: Request, env: Env): Promise<Response> {
+  const signIn = ownerSignIn(env);
+  if (!signIn || !env.OAUTH_PROVIDER) {
+    return new Response('Connecting agents is not configured on this deployment', { status: 503 });
+  }
+  const authRequest = await env.OAUTH_PROVIDER.parseAuthRequest(req);
+  const client = await env.OAUTH_PROVIDER.lookupClient(authRequest.clientId);
+  if (!client) return new Response('Unknown client', { status: 400 });
+  const id = await signIn.create(authRequest, client.clientName || 'An agent');
+  return Response.redirect(`${new URL(req.url).origin}/connect?c=${id}`, 302);
 }
 
 export async function handleApi(req: Request, env: Env, path: string): Promise<Response> {
@@ -279,67 +251,21 @@ export async function handleApi(req: Request, env: Env, path: string): Promise<R
       const cards = agentCard(env);
       if (!db || !cards) return fail(503, 'credentials_unavailable', 'Cards are not configured');
 
-      // GET /api/credentials/cards: the saved cards' display fields, across every
-      // vault user this wallet has linked.
       if (path === '/api/credentials/cards' && req.method === 'GET') {
-        const users = (await db.get(who.wallet)).agentcardUsers ?? [];
-        const lists = await Promise.all(users.map((u) => cards.listCards(u)));
-        const seen = new Set<string>();
-        const all = lists.flat().filter((c) => !seen.has(c.id) && seen.add(c.id));
-        return json({ cards: all.map(cardView) });
+        return json({ cards: await listWalletCards(db, cards, who.wallet) });
       }
 
       // POST /api/credentials/cards/session: a single-use add-a-card link.
       if (path === '/api/credentials/cards/session' && req.method === 'POST') {
-        const latest = (await db.get(who.wallet)).agentcardUsers?.at(-1) ?? null;
-        let session;
-        let returning = !!latest;
-        try {
-          session = await cards.createVaultSession(latest);
-        } catch (err) {
-          // A passkey-only vault user has no phone or email for the sign-in code.
-          // An open session still lets them pick "Unlock with your passkey".
-          if (!(latest && err instanceof AgentCardError && err.code === 'contact_missing'))
-            throw err;
-          session = await cards.createVaultSession(null);
-          returning = false;
-        }
-        await db.update(who.wallet, (r) => ({ ...r, agentcardSession: session.id }));
-        return json({
-          sessionId: session.id,
-          url: session.url,
-          expiresAt: session.expires_at,
-          pollInterval: session.poll_interval ?? 3,
-          // A returning user gets a code by email or text before the card form.
-          returning
-        });
+        return json(await startCardSession(db, cards, who.wallet));
       }
 
       // GET /api/credentials/cards/session?id=vs_...: poll until the card is saved.
-      // `linked` comes when the passkey user exists; the card lands after that.
       if (path === '/api/credentials/cards/session' && req.method === 'GET') {
         const id = new URL(req.url).searchParams.get('id') ?? '';
-        const record = await db.get(who.wallet);
-        if (!id || record.agentcardSession !== id) {
-          return fail(404, 'not_found', 'No such add-a-card session for this wallet');
-        }
-        const session = await cards.getVaultSession(id);
-        const user = session.user_id;
-        if (user && !(record.agentcardUsers ?? []).includes(user)) {
-          await db.update(who.wallet, (r) => ({
-            ...r,
-            agentcardUsers: [...(r.agentcardUsers ?? []), user]
-          }));
-        }
-        // Once the user exists, take the tokens that let agents buy as them.
-        if (user && record.agentcardConnection?.userId !== user) {
-          await connectFromSession(db, cards, who.wallet, id);
-        }
-        return json({
-          status: session.status ?? 'pending',
-          cardSaved: session.card === true || !!session.card_id,
-          pollInterval: session.poll_interval ?? 3
-        });
+        const status = await pollCardSession(db, cards, who.wallet, id);
+        if (!status) return fail(404, 'not_found', 'No such add-a-card session for this wallet');
+        return json(status);
       }
 
       return fail(405, 'method_not_allowed', 'Unsupported cards request');
@@ -362,12 +288,15 @@ export async function handleApi(req: Request, env: Env, path: string): Promise<R
   }
 }
 
-// Cloudflare Workers require a default export.
-// eslint-disable-next-line import-x/no-default-export
-export default {
+// The site: the SPA (with SPA fallback), the credentials API, and the MCP
+// connect flow. The OAuth provider sits in front of it for /mcp.
+const app = {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
+    if (url.pathname === '/authorize') return handleAuthorize(request, env);
+    if (url.pathname.startsWith('/api/connect'))
+      return handleConnectApi(request, env, url.pathname);
     if (url.pathname.startsWith('/api/')) return handleApi(request, env, url.pathname);
 
     if (!env.ASSETS) {
@@ -383,5 +312,44 @@ export default {
     const indexUrl = new URL(request.url);
     indexUrl.pathname = '/index.html';
     return env.ASSETS.fetch(new Request(indexUrl.toString(), request));
+  }
+};
+
+// One provider per origin: the protected resource is this deployment's /mcp.
+const providers = new Map<string, OAuthProvider<Env>>();
+function oauthFor(origin: string): OAuthProvider<Env> {
+  let p = providers.get(origin);
+  if (!p) {
+    p = new OAuthProvider<Env>({
+      apiRoute: '/mcp',
+      apiHandler: {
+        fetch: (request, env, ctx) =>
+          handleMcp(request, env, (ctx as ExecutionContext & { props: McpProps }).props)
+      },
+      defaultHandler: app,
+      authorizeEndpoint: '/authorize',
+      tokenEndpoint: '/oauth/token',
+      clientRegistrationEndpoint: '/oauth/register',
+      scopesSupported: ['wallet'],
+      resourceMetadata: {
+        resource: `${origin}/mcp`,
+        authorization_servers: [origin],
+        scopes_supported: ['wallet'],
+        bearer_methods_supported: ['header'],
+        resource_name: 'Polygon agent wallet'
+      }
+    });
+    providers.set(origin, p);
+  }
+  return p;
+}
+
+// Cloudflare Workers require a default export. Without the OAuth store the
+// site still runs; /mcp answers 404.
+// eslint-disable-next-line import-x/no-default-export
+export default {
+  fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    if (!env.OAUTH_KV) return app.fetch(request, env);
+    return oauthFor(new URL(request.url).origin).fetch(request, env, ctx);
   }
 };

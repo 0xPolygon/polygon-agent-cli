@@ -4,6 +4,7 @@ import './App.css';
 import { useMemo } from 'react';
 
 import { parseFundAmount } from './components/FundingScreen.js';
+import { Connect, isConnectReturn } from './dashboard/Connect.js';
 import { Dashboard } from './dashboard/Dashboard.js';
 import { Onboarding } from './dashboard/Onboarding.js';
 import { isWebSigninReturn } from './dashboard/signin.js';
@@ -33,8 +34,16 @@ function App() {
   // The Polymarket trading account, when the CLI knows it; positions live there.
   const pm = params.get('pm') ?? '';
 
+  if (window.location.pathname === '/connect') {
+    return <Connect />;
+  }
+
   if (window.location.pathname === '/login') {
-    // A Google sign-in started on the onboarding page comes back here too.
+    // Google sign-ins started here (connecting an agent, onboarding) come back
+    // to /login too.
+    if (isConnectReturn() && isRelayReturn(window.location.search)) {
+      return <Connect finishing />;
+    }
     if (isWebSigninReturn() && isRelayReturn(window.location.search)) {
       return <Onboarding finishing />;
     }
