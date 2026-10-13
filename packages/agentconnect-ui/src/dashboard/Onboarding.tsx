@@ -174,10 +174,6 @@ function SignIn({
       )}
 
       {error && <span className="text-sm text-[var(--red-700)] font-medium">{error}</span>}
-
-      <p className="m-0 text-[13px] text-[var(--slate-500)] leading-snug">
-        No seed phrase to write down. Your account is secured by your email and device.
-      </p>
     </div>
   );
 }
