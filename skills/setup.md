@@ -1,16 +1,16 @@
 ---
 name: polygon-oms-setup
 description: >-
-  One-time setup of the Polygon OMS Agent Kit: installs the polygon-agent CLI
+  One-time setup of the Polygon OMS Agent Wallet: installs the polygon-agent CLI
   and the polygon-oms-wallet skill into the assistant's workspace, then connects
   the user's wallet with a spending allowance they approve by email code.
 ---
 
-# Set up the Polygon OMS Agent Kit
+# Set up the Polygon OMS Agent Wallet
 
 **For the assistant.** Follow these steps in order. Each one is safe to re-run. Tell the user what you're doing in plain words as you go, and never paste raw JSON to them.
 
-**What this sets up (tell the user in a sentence or two):** a Polygon OMS wallet that you, their assistant, can use within an allowance they approve by email code. You can check prices, watch them, buy, sell, swap and bridge tokens, bet on Polymarket prediction markets, and pay for x402 services. Anything beyond the allowance needs a new code from them. The wallet stays theirs. Each code signs the CLI in as them for a moment, just long enough to make that one change (approving an allowance, a withdrawal…), then signs out again. Only that limited key is kept, never their sign-in.
+**What this sets up (tell the user in a sentence or two):** an agent wallet, a Polygon OMS wallet that you, their assistant, can use within an allowance they approve by email code. You can check prices, watch them, buy, sell, swap and bridge tokens, bet on Polymarket prediction markets, and pay for x402 services. Anything beyond the allowance needs a new code from them. The wallet stays theirs. Each code signs the CLI in as them for a moment, just long enough to make that one change (approving an allowance, a withdrawal…), then signs out again. Only that limited key is kept, never their sign-in.
 
 ## 1. Find the workspace
 

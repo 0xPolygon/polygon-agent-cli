@@ -166,7 +166,7 @@ vi.mock('@polygonlabs/oms-wallet', async (importOriginal) => {
           isCaller: false,
           sessionId,
           metadata: {
-            appName: 'Polygon OMS Agent Kit (test)',
+            appName: 'Polygon OMS Agent Wallet (test)',
             appUrl: '',
             appLogoUrl: '',
             custom: {}
