@@ -391,6 +391,33 @@ describe('withdraw', () => {
     });
   });
 
+  it('refuses amounts under the bridge minimum before anything is sent', async () => {
+    m.pusdBalance.mockResolvedValue(3_000_000n);
+    expect(await run(['withdraw', '1.5', '--broadcast'])).toMatchObject({
+      ok: false,
+      code: 'below_bridge_minimum'
+    });
+    expect(m.withdrawAddress).not.toHaveBeenCalled();
+    expect(m.transferErc20).not.toHaveBeenCalled();
+  });
+
+  it('refuses all when the balance is under the bridge minimum', async () => {
+    m.pusdBalance.mockResolvedValue(1_843_870n);
+    expect(await run(['withdraw', 'all', '--dry-run'])).toMatchObject({
+      ok: false,
+      code: 'below_bridge_minimum'
+    });
+  });
+
+  it('allows exactly the bridge minimum', async () => {
+    m.pusdBalance.mockResolvedValue(2_000_000n);
+    expect(await run(['withdraw', 'all', '--dry-run'])).toMatchObject({
+      ok: true,
+      dryRun: true,
+      amountUsd: '2'
+    });
+  });
+
   it('refuses an empty balance for all', async () => {
     m.pusdBalance.mockResolvedValue(0n);
     expect(await run(['withdraw', 'all', '--dry-run'])).toMatchObject({

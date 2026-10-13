@@ -318,7 +318,7 @@ export const depositCommand: CommandModule = {
 
 export const withdrawCommand: CommandModule = {
   command: 'withdraw <amount>',
-  describe: 'Move pUSD from the Polymarket account back to the agent wallet as USDC',
+  describe: 'Move pUSD from the Polymarket account back to the agent wallet as USDC (min $2)',
   builder: (y) =>
     withWriteFlags(
       walletOption(y).positional('amount', {

@@ -57,7 +57,7 @@ When the backup happens:
 A wiped machine loses nothing, as long as the user reinstalls with the same `--name` (see setup.md), because the backup is found by that label.
 
 - Owner mode: run `setup --broadcast`. It restores the account from OMS and never makes a new key over it (`restored: true`, `signer: "oms"`). Its dry run lists `restore the trading key from OMS` instead of `create trading key` when OMS holds this install's key.
-- Session mode: the next confirmed owner request (any sign-in) recovers it. It withdraws all pUSD from the old account to the agent wallet, archives the old records under `polymarket/<wallet>/previous-<timestamp>/`, then creates a new key and backs it up. Run `setup --broadcast` afterwards to deploy the new account. If local records name the lost key and OMS holds no backup of it, nothing is changed and no new key is made. With no local records and no OMS key for this install name, the step creates a new key and backs it up.
+- Session mode: the next confirmed owner request (any sign-in) recovers it. It withdraws all pUSD from the old account to the agent wallet (under $2 it stays there, since the bridge would not pay it out; the old key stays in OMS), archives the old records under `polymarket/<wallet>/previous-<timestamp>/`, then creates a new key and backs it up. Run `setup --broadcast` afterwards to deploy the new account. If local records name the lost key and OMS holds no backup of it, nothing is changed and no new key is made. With no local records and no OMS key for this install name, the step creates a new key and backs it up.
 
 The recovery never replaces a key that still controls something. It then stops with `backedUp: false` and an `error`, and the old key stays in use:
 
@@ -78,7 +78,7 @@ agent wallet <--withdraw-- Polymarket wallet (pUSD)
 ```
 
 - `deposit <usd>` sends Polygon USDC from the agent wallet to Polymarket's bridge, then waits for pUSD to be credited. Minimum $2.
-- `withdraw <usd|all>` always pays the agent wallet as Polygon USDC. It moves pUSD only.
+- `withdraw <usd|all>` always pays the agent wallet as Polygon USDC. It moves pUSD only. Minimum $2.
 - Trades use pUSD in the Polymarket wallet. A buy never touches the agent wallet.
 - In session mode, `deposit` is a plain USDC transfer, so it counts against the allowance. The Polymarket wallet is controlled by this install's trading key, not by the allowance, so trades and withdrawals are not limited by it.
 
@@ -110,6 +110,7 @@ agent polymarket withdraw all --broadcast
 
 - Output on broadcast: `txHash`, `amountUsd`, `to`, and a `note`. The `txHash` is the pUSD transfer to Polymarket's bridge, not the USDC payout. The USDC arrives in the agent wallet shortly after.
 - Fails with `insufficient_pusd` when the amount is zero or more than the balance.
+- Fails with `below_bridge_minimum` under $2, before anything is sent: the bridge never pays out less, and the pUSD would sit at the bridge address.
 
 ## Finding markets
 
@@ -206,7 +207,7 @@ agent polymarket pnl [--interval 1d|1w|1m|max]            # valueUsd, realized, 
 | Code | Meaning and fix |
 | --- | --- |
 | `not_set_up` | No Polymarket account for this wallet. Run `agent polymarket setup --wallet <name> --broadcast`. |
-| `below_bridge_minimum` | Deposit is under $2. Use $2 or more. |
+| `below_bridge_minimum` | Deposit or withdrawal is under $2. Use $2 or more. To withdraw a smaller balance, keep it in Polymarket until it reaches $2. |
 | `insufficient_pusd` | Not enough pUSD in the Polymarket wallet. Deposit more, or lower the amount. |
 | `insufficient_shares` | You hold fewer shares than asked, or none. Check `positions`. |
 | `bridge_pending` | An earlier deposit is not credited yet. Run `status`. Do not retry the deposit. |
