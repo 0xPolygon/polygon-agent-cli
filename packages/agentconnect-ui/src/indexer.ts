@@ -94,9 +94,91 @@ export function classifyToken(
 }
 
 interface RawTokenBalance {
+  contractAddress?: string;
   balance?: string;
   balanceUSD?: string;
   contractInfo?: { symbol?: string; name?: string; decimals?: number };
+}
+
+// Polygon stablecoins an earn receipt can be backed by, priced at $1, with
+// their decimals.
+const STABLES: Record<string, number> = {
+  '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359': 6, // USDC
+  '0x2791bca1f2de4661ed88a30c99a7a9449aa84174': 6, // USDC.e
+  '0xc2132d05d31c914a87c6611c10748aeb04b58e8f': 6, // USDT0
+  '0x8f3cf7ad23cd3cadbd9735aff958023239c6a063': 18 // DAI
+};
+
+const word = (hex: string) => hex.replace(/^0x/, '').toLowerCase().padStart(64, '0');
+const addressOf = (result?: string) =>
+  result && result.length >= 66 ? `0x${result.slice(-40)}`.toLowerCase() : undefined;
+
+async function rpcCalls(
+  chainId: number,
+  calls: { to: string; data: string }[]
+): Promise<(string | undefined)[]> {
+  const res = await fetch(
+    `https://nodes.sequence.app/${chainSlug(chainId)}/${getIndexerAccessKey() ?? ''}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(
+        calls.map((c, id) => ({
+          jsonrpc: '2.0',
+          id,
+          method: 'eth_call',
+          params: [{ to: c.to, data: c.data }, 'latest']
+        }))
+      )
+    }
+  );
+  if (!res.ok) throw new Error(`RPC failed: ${res.status}`);
+  const out = (await res.json()) as { id: number; result?: string }[];
+  return calls.map((_, id) => out.find((o) => o.id === id)?.result);
+}
+
+/**
+ * Values earn receipts the indexer has no price for, from the chain: ERC-4626
+ * vault shares (Morpho and others) through `convertToAssets`, and Aave aTokens
+ * 1:1 with what they wrap. Only receipts backed by a known stablecoin are
+ * priced; they are also marked as earning whatever their name says.
+ */
+export async function priceReceipts(
+  chainId: number,
+  tokens: { address: string; raw: bigint }[]
+): Promise<Map<string, number>> {
+  const priced = new Map<string, number>();
+  if (chainId !== 137 || tokens.length === 0) return priced;
+  // asset() = 0x38d52e0f, UNDERLYING_ASSET_ADDRESS() = 0xb16a19de
+  const backing = await rpcCalls(
+    chainId,
+    tokens.flatMap((t) => [
+      { to: t.address, data: '0x38d52e0f' },
+      { to: t.address, data: '0xb16a19de' }
+    ])
+  );
+  const vaults: { address: string; raw: bigint; decimals: number }[] = [];
+  tokens.forEach((t, i) => {
+    const asset = addressOf(backing[2 * i]);
+    const underlying = addressOf(backing[2 * i + 1]);
+    if (underlying && STABLES[underlying] !== undefined) {
+      priced.set(t.address, Number(t.raw) / 10 ** STABLES[underlying]);
+    } else if (asset && STABLES[asset] !== undefined) {
+      vaults.push({ ...t, decimals: STABLES[asset] });
+    }
+  });
+  if (vaults.length) {
+    // convertToAssets(uint256) = 0x07a2d13a
+    const assets = await rpcCalls(
+      chainId,
+      vaults.map((v) => ({ to: v.address, data: `0x07a2d13a${word(v.raw.toString(16))}` }))
+    );
+    vaults.forEach((v, i) => {
+      const r = assets[i];
+      if (r && r !== '0x') priced.set(v.address, Number(BigInt(r)) / 10 ** v.decimals);
+    });
+  }
+  return priced;
 }
 
 /** Every token the wallet holds on `chainId`, priced in USD, largest first. */
@@ -113,13 +195,29 @@ export async function fetchHoldings(walletAddress: string, chainId = 137): Promi
     ).catch(() => ({ balance: undefined }))
   ]);
 
+  const held = (tokens.balances ?? []).filter(
+    (b) => b.contractInfo?.symbol && units(b.balance, b.contractInfo?.decimals ?? 18) > 0
+  );
+  const unpriced = held.filter((b) => num(b.balanceUSD) === 0 && b.contractAddress && b.balance);
+  const receipts = await priceReceipts(
+    chainId,
+    unpriced.map((b) => ({ address: b.contractAddress!.toLowerCase(), raw: BigInt(b.balance!) }))
+  ).catch(() => new Map<string, number>());
+
   const out: Holding[] = [];
-  for (const b of tokens.balances ?? []) {
-    const symbol = b.contractInfo?.symbol ?? '';
+  for (const b of held) {
+    const symbol = b.contractInfo!.symbol!;
     const name = b.contractInfo?.name ?? symbol;
     const qty = units(b.balance, b.contractInfo?.decimals ?? 18);
-    if (!symbol || qty <= 0) continue;
-    out.push({ symbol, name, qty, usd: num(b.balanceUSD), ...classifyToken(symbol, name) });
+    const receipt = receipts.get(b.contractAddress?.toLowerCase() ?? '');
+    const kind = classifyToken(symbol, name);
+    out.push({
+      symbol,
+      name,
+      qty,
+      usd: receipt ?? num(b.balanceUSD),
+      ...(receipt === undefined ? kind : { kind: 'earn' as const, protocol: kind.protocol })
+    });
   }
   const nativeQty = units(native.balance?.balance, 18);
   if (nativeQty > 0) {
