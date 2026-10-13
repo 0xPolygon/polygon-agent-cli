@@ -52,7 +52,17 @@ function sum(holdings: Holding[] | null, kind?: Holding['kind']): number | null 
   return holdings.filter((h) => !kind || h.kind === kind).reduce((s, h) => s + h.usd, 0);
 }
 
-function Money({ value, className = '' }: { value: number | null; className?: string }) {
+// `failed` shows a dash instead of a skeleton that would never resolve.
+function Money({
+  value,
+  failed = false,
+  className = ''
+}: {
+  value: number | null;
+  failed?: boolean;
+  className?: string;
+}) {
+  if (value === null && failed) return <span className="text-[var(--slate-400)]">–</span>;
   return value === null ? (
     <Skeleton className="h-[1em] w-32" />
   ) : (
@@ -308,13 +318,21 @@ export function OverviewTab({
     {
       label: 'Available to spend',
       value: sum(holdings.data, 'spend'),
+      failed: holdings.error,
       color: 'var(--purple-500)',
       tab: 'wallet'
     },
-    { label: 'In predictions', value: positionsValue, color: 'var(--purple-300)', tab: 'markets' },
+    {
+      label: 'In predictions',
+      value: positionsValue,
+      failed: false,
+      color: 'var(--purple-300)',
+      tab: 'markets'
+    },
     {
       label: 'Earning',
       value: sum(holdings.data, 'earn'),
+      failed: holdings.error,
       color: 'var(--emerald-500)',
       tab: 'earn'
     }
@@ -352,7 +370,7 @@ export function OverviewTab({
                 {b.value === null && b.tab === 'markets' && !holdings.loading ? (
                   <span className="text-[var(--slate-400)]">See Markets</span>
                 ) : (
-                  <Money value={b.value} />
+                  <Money value={b.value} failed={b.failed} />
                 )}
               </span>
             </button>
@@ -739,8 +757,13 @@ export function EarnTab({
         <div className="flex flex-col gap-2">
           <span className="text-[15px] text-[var(--slate-500)]">Earning</span>
           <span className="text-[44px] font-bold tracking-[-0.02em] leading-none">
-            <Money value={earningTotal} />
+            <Money value={earningTotal} failed={holdings.error} />
           </span>
+          {holdings.error && (
+            <span className="text-sm text-[var(--red-700)] font-medium">
+              Couldn't load your balance. Refresh to try again.
+            </span>
+          )}
           {earningTotal === 0 && (
             <span className="text-sm text-[var(--slate-500)]">Nothing deposited yet.</span>
           )}
