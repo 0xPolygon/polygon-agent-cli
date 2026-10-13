@@ -124,6 +124,10 @@ export function Dashboard({
   const positionsValue = positions.data
     ? positions.data.reduce((s, p) => s + p.value, 0) + (predictionCash.data ?? 0)
     : null;
+  // Everything the wallet holds, as on Overview: Polygon, predictions, Katana vaults.
+  const totalBalance = holdings.data
+    ? holdings.data.reduce((t, h) => t + h.usd, 0) + (positionsValue ?? 0) + (vaultsValue ?? 0)
+    : null;
   const openAdd = () => setModal({ kind: 'add' });
   const openWithdraw = () => setModal({ kind: 'withdraw' });
 
@@ -161,9 +165,9 @@ export function Dashboard({
         <div className="flex items-center gap-2.5 p-3 border-t border-[var(--slate-100)]">
           <span className="w-8 h-8 rounded-full bg-gradient-to-br from-[var(--purple-500)] to-[var(--purple-300)] flex-shrink-0" />
           <span className="flex flex-col gap-0.5 min-w-0">
-            <span className="text-sm font-bold">Agent wallet</span>
-            <span className="text-xs text-[var(--slate-500)] oms-mono truncate">
-              {shortAddr(walletAddress)}
+            <span className="text-sm font-bold truncate">{shortAddr(walletAddress)}</span>
+            <span className="text-xs text-[var(--slate-500)]">
+              {totalBalance === null ? '…' : usd(totalBalance)}
             </span>
           </span>
         </div>
