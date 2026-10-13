@@ -197,7 +197,7 @@ agent send-token --symbol <SYM> --to <addr> --amount <num> [--token <addr>] [--d
 agent swap --to <SYM> (--amount <num|n%|all> | --amount-usd <usd> | --to-amount <num>) [--from <SYM>] [--chain <chain>] [--to-chain <chain>] [--slippage <num>] [--broadcast]
 agent swap --intent <intentId> --broadcast          # execute a quote from a dry run
 agent swap status --intent <intentId>               # follow a trade still in progress
-agent deposit --asset <SYM> --amount <num> [--protocol aave|morpho] [--broadcast]
+agent deposit --asset <SYM> --amount <num> [--protocol aave|morpho] [--vault <addr>] [--chain <c>] [--broadcast]
 agent withdraw --position <addr> --amount <num|max> [--chain <chain>] [--broadcast]
 agent fund [--wallet <n>]
 agent x402-pay --url <url> --wallet <n> [--chain <chain>] [--method GET] [--body <str>] [--header Key:Value] [--max-usd <usd>] [--yes] [--broadcast] [--dry-run]

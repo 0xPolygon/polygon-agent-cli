@@ -4,6 +4,7 @@ import type { CommandModule, Argv } from 'yargs';
 import React from 'react';
 import { encodeFunctionData, erc20Abi, getAddress, isAddress } from 'viem';
 
+import type { TrailsApi } from '@0xtrails/api';
 import type { ContractTokenBalance } from '@polygonlabs/oms-wallet';
 
 import { findNetworkById } from '@polygonlabs/oms-wallet';
@@ -1097,12 +1098,18 @@ export const depositCommand: CommandModule = {
           type: 'string',
           describe: 'Filter by protocol (aave, morpho)'
         })
+        .option('vault', {
+          type: 'string',
+          describe:
+            'Deposit into this ERC-4626 vault (e.g. a Morpho vault from the dashboard) instead of the largest pool'
+        })
     ),
   handler: async (argv) => {
     const walletName = (argv.wallet as string) || 'main';
     const assetSymbol = ((argv.asset as string) || 'USDC').toUpperCase();
     let amountArg = argv.amount as string;
     const protocolFilter = argv.protocol as string | undefined;
+    const vaultArg = argv.vault as string | undefined;
     const broadcast = resolveBroadcast(argv as { broadcast?: boolean; dryRun?: boolean });
 
     try {
@@ -1132,33 +1139,39 @@ export const depositCommand: CommandModule = {
         hostname: process.env.TRAILS_API_HOSTNAME
       });
 
-      const earnRes = await trails.getEarnPools({ chainIds: [chainId] });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let pools = ((earnRes as any)?.pools || []).filter(
+      let pool: any;
+      if (vaultArg) {
+        pool = await vaultPool({ vault: vaultArg, network, asset, assetSymbol, trails });
+      } else {
+        const earnRes = await trails.getEarnPools({ chainIds: [chainId] });
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (p: any) =>
-          p.isActive && p.chainId === chainId && p.token?.symbol?.toUpperCase() === assetSymbol
-      );
+        let pools = ((earnRes as any)?.pools || []).filter(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (p: any) =>
+            p.isActive && p.chainId === chainId && p.token?.symbol?.toUpperCase() === assetSymbol
+        );
 
-      if (protocolFilter) {
+        if (protocolFilter) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          pools = pools.filter((p: any) =>
+            p.protocol?.toLowerCase().includes(protocolFilter.toLowerCase())
+          );
+        }
+
+        if (pools.length === 0) {
+          throw new Error(
+            `No active ${assetSymbol} earn pools found on ${network.name}` +
+              (protocolFilter ? ` (protocol: ${protocolFilter})` : '') +
+              `. Confirm wallet state: agent balances. ` +
+              `Alternative: agent swap --from ${assetSymbol} --to <yield-token>.`
+          );
+        }
+
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        pools = pools.filter((p: any) =>
-          p.protocol?.toLowerCase().includes(protocolFilter.toLowerCase())
-        );
+        pools.sort((a: any, b: any) => b.tvl - a.tvl);
+        pool = pools[0];
       }
-
-      if (pools.length === 0) {
-        throw new Error(
-          `No active ${assetSymbol} earn pools found on ${network.name}` +
-            (protocolFilter ? ` (protocol: ${protocolFilter})` : '') +
-            `. Confirm wallet state: agent balances. ` +
-            `Alternative: agent swap --from ${assetSymbol} --to <yield-token>.`
-        );
-      }
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      pools.sort((a: any, b: any) => b.tvl - a.tvl);
-      const pool = pools[0];
       const proto = (pool.protocol || '').toLowerCase();
 
       const {
@@ -1313,7 +1326,7 @@ export const depositCommand: CommandModule = {
               walletAddress,
               protocol: pool.protocol,
               poolName: protocolLabel,
-              poolApy: `${pool.apy.toFixed(2)}%`,
+              poolApy: pool.apy === null ? null : `${pool.apy.toFixed(2)}%`,
               poolTvl: pool.tvl,
               depositAddress: pool.depositAddress,
               asset: assetSymbol,
@@ -1347,7 +1360,7 @@ export const depositCommand: CommandModule = {
             walletAddress,
             protocol: pool.protocol,
             poolName: protocolLabel,
-            poolApy: `${pool.apy.toFixed(2)}%`,
+            poolApy: pool.apy === null ? null : `${pool.apy.toFixed(2)}%`,
             asset: assetSymbol,
             amount: amountArg,
             chainId,
@@ -1453,9 +1466,20 @@ const ERC4626_REDEEM_ABI = [
 ] as const;
 
 async function viemChainMap() {
-  const { mainnet, polygon, arbitrum, optimism, base, avalanche, bsc, gnosis, polygonAmoy } =
-    await import('viem/chains');
+  const {
+    mainnet,
+    polygon,
+    arbitrum,
+    optimism,
+    base,
+    avalanche,
+    bsc,
+    gnosis,
+    polygonAmoy,
+    katana
+  } = await import('viem/chains');
   return {
+    747474: katana,
     1: mainnet,
     137: polygon,
     42161: arbitrum,
@@ -1466,6 +1490,74 @@ async function viemChainMap() {
     100: gnosis,
     80002: polygonAmoy
   } as const satisfies Record<number, unknown>;
+}
+
+/**
+ * The pool for `deposit --vault`: an ERC-4626 vault that must take `asset`. Rate and
+ * size come from the Trails Yield API when it lists the vault.
+ */
+async function vaultPool({
+  vault,
+  network,
+  asset,
+  assetSymbol,
+  trails
+}: {
+  vault: string;
+  network: ReturnType<typeof resolveNetwork>;
+  asset: { address: string };
+  assetSymbol: string;
+  trails: TrailsApi;
+}): Promise<{
+  protocol: string;
+  name: string;
+  apy: number | null;
+  tvl: number | null;
+  depositAddress: string;
+}> {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(vault))
+    throw new Error(`--vault must be an address, got ${vault}`);
+  const { createPublicClient, http } = await import('viem');
+  const client = createPublicClient({ transport: http(getReadRpcUrl(network)) });
+  const abi = [
+    {
+      name: 'asset',
+      type: 'function',
+      stateMutability: 'view',
+      inputs: [],
+      outputs: [{ type: 'address' }]
+    },
+    {
+      name: 'name',
+      type: 'function',
+      stateMutability: 'view',
+      inputs: [],
+      outputs: [{ type: 'string' }]
+    }
+  ] as const;
+  const address = vault as `0x${string}`;
+  const [vaultAsset, onchainName] = await Promise.all([
+    client.readContract({ address, abi, functionName: 'asset' }),
+    client.readContract({ address, abi, functionName: 'name' }).catch(() => 'Vault')
+  ]);
+  if (vaultAsset.toLowerCase() !== asset.address.toLowerCase()) {
+    throw new Error(
+      `Vault ${vault} takes ${vaultAsset}, not ${assetSymbol} (${asset.address}) on ${network.name}.`
+    );
+  }
+  const markets = await trails
+    .yieldGetMarkets({ chainId: String(network.chainId), limit: 100 })
+    .catch(() => ({ items: [] }));
+  const market = markets.items.find(
+    (m) => m.outputToken?.address?.toLowerCase() === vault.toLowerCase()
+  );
+  return {
+    protocol: 'Morpho',
+    name: market?.metadata.name ?? onchainName,
+    apy: market ? market.rewardRate.total * 100 : null,
+    tvl: market?.statistics?.tvlUsd ? Number(market.statistics.tvlUsd) : null,
+    depositAddress: vault
+  };
 }
 
 async function viemChainForDeposit(chainId: number) {

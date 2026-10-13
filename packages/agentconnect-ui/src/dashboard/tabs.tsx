@@ -5,12 +5,11 @@ import { useState } from 'react';
 
 import type { ActivityItem, Holding } from '../indexer';
 import type { Agent } from './agents.js';
-import type { EarnPool } from './earn.js';
+import type { Vault } from './earn.js';
 import type { Position } from './markets.js';
 
 import { dailyFlow } from '../indexer';
 import { POLYMARKET_SKILL_URL, PROMPT_CATEGORIES, SKILL_URL } from './agents.js';
-import { riskLabel } from './earn.js';
 import { cents } from './markets.js';
 import {
   AgentChips,
@@ -299,6 +298,7 @@ export function OverviewTab({
   holdings,
   activity,
   positionsValue,
+  vaultsValue,
   ctx,
   go,
   onAdd,
@@ -307,13 +307,17 @@ export function OverviewTab({
   holdings: Loadable<Holding[]>;
   activity: Loadable<ActivityItem[]>;
   positionsValue: number | null;
+  // Money in the Katana earn vaults (not in `holdings`, which is Polygon only).
+  vaultsValue: number | null;
   ctx: AgentContext;
   go: (tab: string) => void;
   onAdd: () => void;
   onWithdraw: () => void;
 }) {
   const total = holdings.error ? 0 : sum(holdings.data);
-  const totalWithPositions = total === null ? null : total + (positionsValue ?? 0);
+  const totalWithPositions =
+    total === null ? null : total + (positionsValue ?? 0) + (vaultsValue ?? 0);
+  const earning = sum(holdings.data, 'earn');
   const buckets = [
     {
       label: 'Available to spend',
@@ -331,7 +335,7 @@ export function OverviewTab({
     },
     {
       label: 'Earning',
-      value: sum(holdings.data, 'earn'),
+      value: earning === null ? null : earning + (vaultsValue ?? 0),
       failed: holdings.error,
       color: 'var(--emerald-500)',
       tab: 'earn'
@@ -735,31 +739,37 @@ export function MarketsTab({
 
 export function EarnTab({
   holdings,
-  pools,
+  vaults,
+  vaultBalances,
   ctx,
   onDeposit
 }: {
   holdings: Loadable<Holding[]>;
-  pools: Loadable<EarnPool[]>;
+  vaults: Loadable<Vault[]>;
+  vaultBalances: Loadable<Record<string, number>>;
   ctx: AgentContext;
-  onDeposit: (pool: EarnPool) => void;
+  onDeposit: (vault: Vault) => void;
 }) {
-  const earning = (holdings.data ?? []).filter((h) => h.kind === 'earn');
-  const earningTotal = holdings.data ? earning.reduce((s, h) => s + h.usd, 0) : null;
-  const best = pools.data?.[0];
-  const deposited = (p: EarnPool) =>
-    earning
-      .filter((h) => h.symbol.toUpperCase().endsWith(p.symbol.toUpperCase()))
-      .reduce((s, h) => s + h.usd, 0);
+  const inVaults = vaultBalances.data
+    ? Object.values(vaultBalances.data).reduce((s, v) => s + v, 0)
+    : null;
+  // Older Polygon lending positions still count toward what's earning.
+  const onPolygon = sum(holdings.data, 'earn');
+  const failed = holdings.error || vaultBalances.error || vaults.error;
+  const earningTotal =
+    onPolygon === null || (inVaults === null && !vaults.error && !vaultBalances.error)
+      ? null
+      : onPolygon + (inVaults ?? 0);
+  const prime = vaults.data?.[0];
   return (
     <div className="flex flex-col gap-8">
       <Panel className="flex flex-wrap gap-6 justify-between items-end">
         <div className="flex flex-col gap-2">
           <span className="text-[15px] text-[var(--slate-500)]">Earning</span>
           <span className="text-[44px] font-bold tracking-[-0.02em] leading-none">
-            <Money value={earningTotal} failed={holdings.error} />
+            <Money value={earningTotal} failed={failed} />
           </span>
-          {holdings.error && (
+          {failed && (
             <span className="text-sm text-[var(--red-700)] font-medium">
               Couldn't load your balance. Refresh to try again.
             </span>
@@ -768,11 +778,11 @@ export function EarnTab({
             <span className="text-sm text-[var(--slate-500)]">Nothing deposited yet.</span>
           )}
         </div>
-        {best && earningTotal !== null && earningTotal > 0 && (
+        {prime && earningTotal !== null && earningTotal > 0 && (
           <div className="flex flex-col gap-1 items-end">
-            <span className="text-sm text-[var(--slate-500)]">At today's best rate</span>
+            <span className="text-sm text-[var(--slate-500)]">At the Prime rate</span>
             <span className="text-lg font-bold">
-              ≈ {usd((earningTotal * best.apy) / 100)} a year
+              ≈ {usd((earningTotal * prime.apy) / 100)} a year
             </span>
           </div>
         )}
@@ -780,54 +790,56 @@ export function EarnTab({
 
       <div className="flex flex-col gap-3">
         <SectionTitle>Ways to earn</SectionTitle>
-        {pools.error ? (
+        {vaults.error ? (
           <RowList>
             <EmptyState title="Couldn't load rates">Refresh the page to try again.</EmptyState>
+          </RowList>
+        ) : vaults.data?.length === 0 ? (
+          <RowList>
+            <EmptyState title="No vaults open right now">Check back soon.</EmptyState>
           </RowList>
         ) : (
           <div
             className="grid gap-3"
             style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}
           >
-            {(pools.data ?? [null, null, null]).map((p, i) => {
-              if (!p) {
+            {(vaults.data ?? [null, null, null]).map((v, i) => {
+              if (!v) {
                 return (
                   <Panel key={i} pad="p-5">
                     <Skeleton className="h-24 w-full" />
                   </Panel>
                 );
               }
-              const risk = riskLabel(p.tvl);
-              const mine = deposited(p);
+              const mine = vaultBalances.data?.[v.address] ?? null;
               return (
                 <Panel
-                  key={p.id}
+                  key={v.address}
                   pad="p-5"
                   className={`flex flex-col gap-4 ${i === 0 ? '!border-[var(--purple-200)]' : ''}`}
                 >
                   <div className="flex justify-between items-center gap-2">
-                    <span className="text-[17px] font-bold">{p.symbol} savings</span>
-                    <span className={`oms-badge oms-badge--sm ${risk.badge}`}>{risk.label}</span>
+                    <span className="text-[17px] font-bold">{v.tier.name}</span>
+                    <span className={`oms-badge oms-badge--sm ${v.tier.badge}`}>{v.tier.risk}</span>
                   </div>
                   <span className="flex items-baseline gap-1.5">
                     <span className="text-[32px] font-bold text-[var(--purple-500)]">
-                      {p.apy.toFixed(2)}%
+                      {v.apy.toFixed(2)}%
                     </span>
                     <span className="text-sm text-[var(--slate-500)]">a year</span>
                   </span>
                   <span className="text-sm leading-snug text-[var(--slate-600)]">
-                    Lend your {p.symbol} on {p.protocol}, a large lending market. The rate changes
-                    daily and you can withdraw anytime.
+                    {v.tier.blurb} Earn on {v.symbol} and withdraw anytime.
                   </span>
                   <div className="flex justify-between text-[13px] text-[var(--slate-500)] pt-3 border-t border-[var(--slate-100)]">
-                    <span>Via {p.protocol}</span>
+                    <span>{usd(v.tvl)} in the vault</span>
                     <span className="font-bold text-[var(--slate-900)]">
-                      {mine > 0 ? `${usd(mine)} deposited` : 'Not deposited'}
+                      {mine === null ? '' : mine > 0 ? `${usd(mine)} deposited` : 'Not deposited'}
                     </span>
                   </div>
                   <button
                     type="button"
-                    onClick={() => onDeposit(p)}
+                    onClick={() => onDeposit(v)}
                     className="btn btn-primary btn-lg"
                   >
                     Deposit
@@ -847,7 +859,7 @@ export function EarnTab({
             onAgent={ctx.setAgent}
             id="earn"
             skill={SKILL_URL}
-            text="keep $300 available to spend and move anything above that into the best USDC lending vault on Polygon. Check every Monday."
+            text="keep $300 available to spend and move anything above that into the Prime earn vault on Katana. Check every Monday."
           />
         </Panel>
       </div>

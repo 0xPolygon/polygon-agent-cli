@@ -13,7 +13,7 @@ import {
 import { useEffect, useState } from 'react';
 
 import type { ActivityItem, Holding } from '../indexer';
-import type { EarnPool } from './earn.js';
+import type { Vault } from './earn.js';
 import type { Position } from './markets.js';
 import type { AgentContext, Loadable } from './tabs.js';
 
@@ -21,7 +21,7 @@ import { LogoBadge } from '../App.js';
 import { FundingScreen } from '../components/FundingScreen.js';
 import { fetchActivity, fetchHoldings } from '../indexer';
 import { agentById, SKILL_URL } from './agents.js';
-import { fetchEarnPools } from './earn.js';
+import { fetchVaultBalances, fetchVaults } from './earn.js';
 import { fetchPositions } from './markets.js';
 import { ActivityTab, EarnTab, MarketsTab, OverviewTab, SettingsTab, WalletTab } from './tabs.js';
 import { AgentPromptBox, AmountChips, Modal, shortAddr, Toast, useCopy, usd } from './ui.js';
@@ -61,7 +61,7 @@ function useLoad<T>(load: (() => Promise<T>) | null, deps: unknown[]): Loadable<
   return state;
 }
 
-type ModalState = { kind: 'add' } | { kind: 'withdraw' } | { kind: 'deposit'; pool: EarnPool };
+type ModalState = { kind: 'add' } | { kind: 'withdraw' } | { kind: 'deposit'; vault: Vault };
 
 export function Dashboard({
   walletAddress,
@@ -95,7 +95,14 @@ export function Dashboard({
     polymarketAddress ? () => fetchPositions(polymarketAddress) : null,
     [polymarketAddress]
   );
-  const pools = useLoad<EarnPool[]>(() => fetchEarnPools(chainId), [chainId]);
+  const vaults = useLoad<Vault[]>(fetchVaults, []);
+  const vaultBalances = useLoad<Record<string, number>>(
+    vaults.data ? () => fetchVaultBalances(walletAddress, vaults.data!) : null,
+    [walletAddress, vaults.data]
+  );
+  const vaultsValue = vaultBalances.data
+    ? Object.values(vaultBalances.data).reduce((s, v) => s + v, 0)
+    : null;
 
   useEffect(() => {
     if (!copied) return;
@@ -183,6 +190,7 @@ export function Dashboard({
                 holdings={holdings}
                 activity={activity}
                 positionsValue={positionsValue}
+                vaultsValue={vaultsValue}
                 ctx={ctx}
                 go={go}
                 onAdd={openAdd}
@@ -203,9 +211,10 @@ export function Dashboard({
             {tab === 'earn' && (
               <EarnTab
                 holdings={holdings}
-                pools={pools}
+                vaults={vaults}
+                vaultBalances={vaultBalances}
                 ctx={ctx}
-                onDeposit={(pool) => setModal({ kind: 'deposit', pool })}
+                onDeposit={(vault) => setModal({ kind: 'deposit', vault })}
               />
             )}
             {tab === 'activity' && <ActivityTab activity={activity} />}
@@ -292,10 +301,11 @@ export function Dashboard({
       {modal?.kind === 'withdraw' && <WithdrawModal ctx={ctx} onClose={() => setModal(null)} />}
       {modal?.kind === 'deposit' && (
         <DepositModal
-          pool={modal.pool}
+          vault={modal.vault}
           available={
-            holdings.data?.find((h) => h.symbol.toUpperCase() === modal.pool.symbol.toUpperCase())
-              ?.usd ?? null
+            holdings.data?.find(
+              (h) => h.kind === 'spend' && h.symbol.toUpperCase() === modal.vault.symbol
+            )?.usd ?? null
           }
           ctx={ctx}
           onClose={() => setModal(null)}
@@ -331,12 +341,12 @@ function WithdrawModal({ ctx, onClose }: { ctx: AgentContext; onClose: () => voi
 }
 
 function DepositModal({
-  pool,
+  vault,
   available,
   ctx,
   onClose
 }: {
-  pool: EarnPool;
+  vault: Vault;
   available: number | null;
   ctx: AgentContext;
   onClose: () => void;
@@ -344,11 +354,11 @@ function DepositModal({
   const [amount, setAmount] = useState(100);
   return (
     <Modal
-      title={`Deposit into ${pool.symbol} savings`}
+      title={`Deposit into ${vault.tier.name}`}
       sub={
         available === null
-          ? `Your agent moves ${pool.symbol} from your balance into ${pool.name}.`
-          : `From your available ${pool.symbol} balance of ${usd(available)}.`
+          ? `Your agent moves ${vault.symbol} from your balance into the ${vault.tier.name} vault.`
+          : `From your available ${vault.symbol} balance of ${usd(available)}.`
       }
       onClose={onClose}
     >
@@ -356,13 +366,17 @@ function DepositModal({
       <div className="bg-[var(--slate-50)] rounded-xl px-4 py-3.5 flex flex-col gap-2 text-sm">
         <span className="flex justify-between">
           <span className="text-[var(--slate-600)]">Rate</span>
-          <span className="font-bold">{pool.apy.toFixed(2)}% a year</span>
+          <span className="font-bold">{vault.apy.toFixed(2)}% a year</span>
         </span>
         <span className="flex justify-between">
           <span className="text-[var(--slate-600)]">Estimated in 1 year</span>
           <span className="font-bold text-[var(--emerald-700)]">
-            +{usd((amount * pool.apy) / 100)}
+            +{usd((amount * vault.apy) / 100)}
           </span>
+        </span>
+        <span className="flex justify-between">
+          <span className="text-[var(--slate-600)]">Risk</span>
+          <span className="font-bold">{vault.tier.risk}</span>
         </span>
         <span className="flex justify-between">
           <span className="text-[var(--slate-600)]">Withdraw</span>
@@ -374,7 +388,7 @@ function DepositModal({
         onAgent={ctx.setAgent}
         id="deposit"
         skill={SKILL_URL}
-        text={`deposit ${amount} ${pool.symbol} into the ${pool.protocol} ${pool.symbol} pool on Polygon and report the rate.`}
+        text={`deposit ${amount} ${vault.symbol} into the ${vault.tier.name} earn vault on Katana (vault ${vault.address}). Bridge the ${vault.symbol} from Polygon to Katana first if needed, then report the rate.`}
       />
     </Modal>
   );
