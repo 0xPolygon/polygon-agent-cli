@@ -4,6 +4,7 @@
 // accept metadata yet).
 
 import type { AgentIdentity, OmsIdTokenConfig } from './agent-auth.ts';
+import type { BuyRequest, BuyTurn } from './agentcard.ts';
 
 import { AuthError, issueCertificate, verifyAccessToken, verifyEnrollToken } from './agent-auth.ts';
 import { AgentCard, AgentCardError } from './agentcard.ts';
@@ -78,6 +79,118 @@ const cardView = (c: {
   expYear: c.expiry_year
 });
 
+/**
+ * Keep the user's connection from a linked add-a-card session. Single use, so
+ * a failure (an account that needs a code, an already exchanged session) is
+ * logged and the card still counts as saved.
+ */
+async function connectFromSession(
+  db: CredentialStore,
+  cards: AgentCard,
+  wallet: string,
+  sessionId: string
+): Promise<void> {
+  try {
+    const c = await cards.exchangeVaultSession(sessionId);
+    if (!c.user?.id) return;
+    await db.update(wallet, (r) => ({
+      ...r,
+      agentcardConnection: {
+        userId: c.user!.id,
+        accessToken: c.access_token,
+        refreshToken: c.refresh_token,
+        expiresAt: Date.now() + (c.expires_in ?? 3600) * 1000
+      }
+    }));
+  } catch (err) {
+    console.error('[agentcard] exchange', err instanceof Error ? err.message : err);
+  }
+}
+
+/** A live token acting as the wallet's card user, refreshed when close to expiry. */
+async function userToken(
+  db: CredentialStore,
+  cards: AgentCard,
+  wallet: string
+): Promise<string | null> {
+  const conn = (await db.get(wallet)).agentcardConnection;
+  if (!conn) return null;
+  if (conn.expiresAt - 60_000 > Date.now()) return conn.accessToken;
+  const next = await cards.refreshConnection(conn.refreshToken);
+  await db.update(wallet, (r) => ({
+    ...r,
+    agentcardConnection: {
+      userId: conn.userId,
+      accessToken: next.access_token,
+      refreshToken: next.refresh_token,
+      expiresAt: Date.now() + (next.expires_in ?? 3600) * 1000
+    }
+  }));
+  return next.access_token;
+}
+
+// What agents see of a purchase turn: enough to show the cart and act on it.
+const turnView = (t: BuyTurn) => ({
+  conversationId: t.conversation_id,
+  status: t.status,
+  reply: t.reply ?? null,
+  cart: t.cart ?? null,
+  unmatched: t.unmatched ?? [],
+  products: (t.catalog?.items ?? []).slice(0, 8).map((i) => ({
+    name: i.name,
+    priceCents: i.priceCents ?? null,
+    url: i.id,
+    imageUrl: i.image_url ?? null
+  })),
+  declineCode: t.decline_code ?? null,
+  approvalUrl: t.approval_url ?? null,
+  chargeStatus: t.charge_status ?? null,
+  orderId: t.order_id ?? null,
+  paidWith: t.payment_source?.last4
+    ? `${t.payment_source.brand ?? 'card'} ending ${t.payment_source.last4}`
+    : null
+});
+
+/**
+ * One purchase turn for the wallet: shop with `ask`, place a shown cart with
+ * `confirm`. Ships to the saved address and pays with the saved card, which
+ * the owner approves with their passkey.
+ */
+export async function buyTurn(
+  db: CredentialStore,
+  cards: AgentCard,
+  wallet: string,
+  input: { ask?: string; conversationId?: string; confirm?: string }
+): Promise<ReturnType<typeof turnView>> {
+  const token = await userToken(db, cards, wallet);
+  if (!token) {
+    throw new ValidationError(
+      'No card is connected for purchases yet. Connect a card on the dashboard Wallet page first.'
+    );
+  }
+  const { address } = await db.get(wallet);
+  const body: BuyRequest = {};
+  if (input.ask) body.ask = input.ask;
+  if (input.conversationId) body.conversation_id = input.conversationId;
+  if (input.confirm) {
+    body.confirm = input.confirm;
+    body.payment_source = 'vault';
+  }
+  if (address) {
+    body.delivery_address = {
+      street: address.line1,
+      ...(address.line2 ? { address2: address.line2 } : {}),
+      city: address.city,
+      state: address.state,
+      zip: address.zip,
+      country: address.country,
+      name: address.name,
+      ...(address.phone ? { phone: address.phone } : {})
+    };
+  }
+  return turnView(await cards.buy(token, body));
+}
+
 async function authenticate(req: Request, env: Env): Promise<AgentIdentity> {
   const header = req.headers.get('Authorization') ?? '';
   const m = /^Agent\s+(\S+)$/.exec(header);
@@ -91,6 +204,24 @@ async function readBody(req: Request): Promise<unknown> {
   } catch {
     throw new ValidationError('Request body must be JSON');
   }
+}
+
+export function parseBuy(body: unknown): {
+  ask?: string;
+  conversationId?: string;
+  confirm?: string;
+} {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const str = (k: string) => (typeof b[k] === 'string' && (b[k] as string).trim()) || undefined;
+  const out = { ask: str('ask'), conversationId: str('conversationId'), confirm: str('confirm') };
+  if (!out.ask && !out.confirm)
+    throw new ValidationError('Send ask, or confirm with conversationId');
+  if (out.confirm && !out.conversationId) throw new ValidationError('confirm needs conversationId');
+  if (out.confirm && !/^[0-9a-f]{16}$/.test(out.confirm)) {
+    throw new ValidationError('confirm must be the cart hash (16 hex characters)');
+  }
+  if (out.ask && out.ask.length > 2000) throw new ValidationError('ask is too long');
+  return out;
 }
 
 export async function handleApi(req: Request, env: Env, path: string): Promise<Response> {
@@ -130,6 +261,16 @@ export async function handleApi(req: Request, env: Env, path: string): Promise<R
         return json({ address: null });
       }
       return fail(405, 'method_not_allowed', 'Use GET, PUT, or DELETE');
+    }
+
+    // POST /api/credentials/buy: one purchase turn ({ ask } or { conversationId, confirm }).
+    if (path === '/api/credentials/buy') {
+      if (req.method !== 'POST') return fail(405, 'method_not_allowed', 'Use POST');
+      const who = await authenticate(req, env);
+      const db = store(env);
+      const cards = agentCard(env);
+      if (!db || !cards) return fail(503, 'credentials_unavailable', 'Cards are not configured');
+      return json(await buyTurn(db, cards, who.wallet, parseBuy(await readBody(req))));
     }
 
     if (path.startsWith('/api/credentials/cards')) {
@@ -189,6 +330,10 @@ export async function handleApi(req: Request, env: Env, path: string): Promise<R
             ...r,
             agentcardUsers: [...(r.agentcardUsers ?? []), user]
           }));
+        }
+        // Once the user exists, take the tokens that let agents buy as them.
+        if (user && record.agentcardConnection?.userId !== user) {
+          await connectFromSession(db, cards, who.wallet, id);
         }
         return json({
           status: session.status ?? 'pending',

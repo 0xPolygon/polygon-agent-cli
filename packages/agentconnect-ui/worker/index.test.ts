@@ -56,6 +56,9 @@ function fakeAgentCard() {
     }[]
   >();
   const created: { user_id?: string }[] = [];
+  const exchanged = new Set<string>();
+  const refreshed: string[] = [];
+  const buys: { auth: string | null; body: Record<string, unknown> }[] = [];
   let n = 0;
   const handler = async (url: string, init: RequestInit = {}) => {
     const u = new URL(url);
@@ -91,6 +94,47 @@ function fakeAgentCard() {
         ? Response.json({ id: sm[1], ...sess, poll_interval: 3 })
         : Response.json({}, { status: 404 });
     }
+    const ex = /^\/api\/v2\/vault_sessions\/(.+)\/exchange$/.exec(u.pathname);
+    if (method === 'POST' && ex) {
+      const sess = sessions.get(ex[1]);
+      if (!sess?.user_id) return Response.json({}, { status: 404 });
+      if (exchanged.has(ex[1])) {
+        return Response.json({ error: { code: 'already_exchanged' } }, { status: 410 });
+      }
+      exchanged.add(ex[1]);
+      return Response.json({
+        access_token: `act_${sess.user_id}`,
+        refresh_token: 'rct_1',
+        expires_in: 3600,
+        user: { id: sess.user_id }
+      });
+    }
+    if (method === 'POST' && u.pathname === '/api/v2/connect/refresh') {
+      refreshed.push(JSON.parse(String(init.body)).refresh_token);
+      return Response.json({ access_token: 'act_new', refresh_token: 'rct_2', expires_in: 3600 });
+    }
+    if (method === 'POST' && u.pathname === '/buy') {
+      const body = JSON.parse(String(init.body));
+      buys.push({ auth: new Headers(init.headers).get('Authorization'), body });
+      const cart = {
+        merchant: 'retail',
+        items: [{ name: 'Coffee', qty: 1, priceCents: 659 }],
+        totalCents: 675,
+        hash: '0123456789abcdef'
+      };
+      return Response.json(
+        body.confirm
+          ? {
+              conversation_id: 'conv_1',
+              status: 'declined',
+              decline_code: 'vault_approval_required',
+              approval_url: 'https://vault.test/authorize?id=cauth_1',
+              charge_status: 'none',
+              cart
+            }
+          : { conversation_id: 'conv_1', status: 'needs_input', reply: 'Found it.', cart }
+      );
+    }
     if (method === 'GET' && u.pathname === '/api/v2/vault_cards') {
       const list = cards.get(u.searchParams.get('user_id') ?? '');
       return list
@@ -116,7 +160,7 @@ function fakeAgentCard() {
       }
     ]);
   };
-  return { handler, passkey, finish, created, withContact };
+  return { handler, passkey, finish, created, withContact, buys, refreshed };
 }
 
 let agentcard: ReturnType<typeof fakeAgentCard>;
@@ -389,5 +433,104 @@ describe('/api/credentials/cards', () => {
       '/api/credentials/cards'
     );
     expect(res.status).toBe(503);
+  });
+});
+
+describe('/api/credentials/buy', () => {
+  const call = async (t: string, body: unknown) =>
+    handleApi(
+      req('POST', '/api/credentials/buy', { token: t, body }),
+      env(),
+      '/api/credentials/buy'
+    );
+  const connect = async (t: string) => {
+    const s = (await (
+      await handleApi(
+        req('POST', '/api/credentials/cards/session', { token: t }),
+        env(),
+        '/api/credentials/cards/session'
+      )
+    ).json()) as { sessionId: string };
+    agentcard.finish(s.sessionId, 'usr_1');
+    await handleApi(
+      req('GET', `/api/credentials/cards/session?id=${s.sessionId}`, { token: t }),
+      env(),
+      '/api/credentials/cards/session'
+    );
+  };
+
+  it('asks for a card first', async () => {
+    const res = await call(await token(), { ask: 'coffee' });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { message: string }).message).toMatch(/Connect a card/);
+  });
+
+  it('keeps the connection from a linked card session, sealed', async () => {
+    await connect(await token());
+    const rec = await new CredentialStore(kv.kv, 'test-credentials-key').get(WALLET);
+    expect(rec.agentcardConnection).toMatchObject({ userId: 'usr_1', accessToken: 'act_usr_1' });
+    expect([...kv.data.values()].join()).not.toContain('act_usr_1');
+  });
+
+  it('shops as the user, shipping to the saved address', async () => {
+    const t = await token();
+    await connect(t);
+    await handleApi(
+      req('PUT', '/api/credentials/address', {
+        token: t,
+        body: { ...ADDRESS, phone: '+15555550100' }
+      }),
+      env(),
+      '/api/credentials/address'
+    );
+    const res = await call(t, { ask: 'a bag of coffee' });
+    expect(await res.json()).toMatchObject({
+      conversationId: 'conv_1',
+      status: 'needs_input',
+      cart: { totalCents: 675, hash: '0123456789abcdef' }
+    });
+    expect(agentcard.buys[0].auth).toBe('Bearer act_usr_1');
+    expect(agentcard.buys[0].body).toMatchObject({
+      ask: 'a bag of coffee',
+      delivery_address: { street: ADDRESS.line1, zip: ADDRESS.zip, phone: '+15555550100' }
+    });
+  });
+
+  it('confirms with the vault card and returns the approval link', async () => {
+    const t = await token();
+    await connect(t);
+    const res = await call(t, { conversationId: 'conv_1', confirm: '0123456789abcdef' });
+    expect(await res.json()).toMatchObject({
+      status: 'declined',
+      declineCode: 'vault_approval_required',
+      approvalUrl: 'https://vault.test/authorize?id=cauth_1',
+      chargeStatus: 'none'
+    });
+    expect(agentcard.buys[0].body).toMatchObject({
+      conversation_id: 'conv_1',
+      confirm: '0123456789abcdef',
+      payment_source: 'vault'
+    });
+  });
+
+  it('refreshes an expired connection and keeps the new pair', async () => {
+    const t = await token();
+    await connect(t);
+    const db = new CredentialStore(kv.kv, 'test-credentials-key');
+    await db.update(WALLET, (r) => ({
+      ...r,
+      agentcardConnection: { ...r.agentcardConnection!, expiresAt: Date.now() - 1 }
+    }));
+    await call(t, { ask: 'coffee' });
+    expect(agentcard.refreshed).toEqual(['rct_1']);
+    expect(agentcard.buys[0].auth).toBe('Bearer act_new');
+    expect((await db.get(WALLET)).agentcardConnection).toMatchObject({ refreshToken: 'rct_2' });
+  });
+
+  it('validates the request', async () => {
+    const t = await token();
+    expect((await call(t, {})).status).toBe(400);
+    expect((await call(t, { confirm: '0123456789abcdef' })).status).toBe(400);
+    expect((await call(t, { conversationId: 'c', confirm: 'yes' })).status).toBe(400);
   });
 });

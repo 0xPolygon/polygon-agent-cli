@@ -13,6 +13,14 @@ export interface WalletRecord {
   // only finish its own session).
   agentcardUsers?: string[];
   agentcardSession?: string;
+  // Tokens that act as the vault user with the card, for purchases. Taken
+  // once from a linked add-a-card session; the refresh token rotates.
+  agentcardConnection?: {
+    userId: string;
+    accessToken: string;
+    refreshToken: string;
+    expiresAt: number;
+  } | null;
 }
 
 const VERSION = 'v1';

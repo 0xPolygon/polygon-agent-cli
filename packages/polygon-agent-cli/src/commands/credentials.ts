@@ -267,6 +267,85 @@ const cardsWaitCommand: CommandModule<object, WaitArgs> = {
   }
 };
 
+interface BuyTurn {
+  conversationId: string;
+  status: string;
+  reply: string | null;
+  cart: { merchant_name?: string; totalCents: number; hash: string } | null;
+  approvalUrl: string | null;
+  declineCode: string | null;
+  orderId: string | null;
+}
+
+type BuyArgs = WalletArgs & { ask?: string; conversation?: string; confirm?: string };
+
+const walletFlag = (w: string) => (w === 'main' ? '' : ` --wallet ${w}`);
+
+// What the agent should do after this turn.
+function buyNext(t: BuyTurn, wallet: string): Record<string, string> {
+  const again = `polygon-agent credentials buy --conversation ${t.conversationId}`;
+  if (t.status === 'declined' && t.declineCode === 'vault_approval_required' && t.approvalUrl) {
+    return {
+      next: 'Send the owner approvalUrl on its own line. They approve with their passkey; nothing is charged until then.',
+      then: `${again} --confirm ${t.cart?.hash ?? '<hash>'}${walletFlag(wallet)}`
+    };
+  }
+  if (t.declineCode) {
+    return {
+      next: `Not placed (${t.declineCode}), and nothing was charged. Tell the owner what reply says.`
+    };
+  }
+  if (t.status === 'order_placed' || t.status === 'partially_placed') {
+    return {
+      next: 'Tell the owner the order is placed, with the total and the card it was charged to.'
+    };
+  }
+  if (t.cart && t.status === 'needs_input') {
+    return {
+      next: 'Show the owner the cart and total, and ask whether to place it.',
+      confirm: `${again} --confirm ${t.cart.hash}${walletFlag(wallet)}`,
+      change: `${again} "<what to change>"${walletFlag(wallet)}`
+    };
+  }
+  if (t.status === 'needs_input') {
+    return {
+      next: 'Relay reply to the owner, then send their answer:',
+      answer: `${again} "<answer>"${walletFlag(wallet)}`
+    };
+  }
+  return {};
+}
+
+const buyCommand: CommandModule<object, BuyArgs> = {
+  command: 'buy [ask]',
+  describe:
+    'Shop at real stores with the saved card and address: describe it, show the cart, confirm its hash',
+  builder: (y) =>
+    y
+      .positional('ask', { type: 'string', describe: 'What to buy, or the answer to a question' })
+      .option('conversation', { type: 'string', describe: 'Continue this purchase conversation' })
+      .option('confirm', { type: 'string', describe: 'Place the cart with this hash' })
+      .option('wallet', walletOpt),
+  handler: async (argv) => {
+    try {
+      if (!argv.ask && !argv.confirm) {
+        throw new CliError({
+          code: 'invalid_input',
+          message: 'Say what to buy, or pass --conversation and --confirm <hash>.'
+        });
+      }
+      const turn = await credentialsApi<BuyTurn>(argv.wallet, 'POST', '/api/credentials/buy', {
+        ...(argv.ask ? { ask: argv.ask } : {}),
+        ...(argv.conversation ? { conversationId: argv.conversation } : {}),
+        ...(argv.confirm ? { confirm: argv.confirm } : {})
+      });
+      jsonOut({ ok: true, walletName: argv.wallet, ...turn, ...buyNext(turn, argv.wallet) });
+    } catch (error) {
+      jsonFail(error);
+    }
+  }
+};
+
 const cardsCommand: CommandModule = {
   command: 'cards',
   describe: 'Saved cards: list them, or `add` one through a secure link',
@@ -276,8 +355,13 @@ const cardsCommand: CommandModule = {
 
 export const credentialsCommand: CommandModule = {
   command: 'credentials',
-  describe: 'Saved details agents use to buy for the owner (shipping address, cards)',
+  describe: 'Saved details agents use to buy for the owner (shipping address, cards), and buying',
   builder: (y) =>
-    y.command(statusCommand).command(addressCommand).command(cardsCommand).demandCommand(1),
+    y
+      .command(statusCommand)
+      .command(addressCommand)
+      .command(cardsCommand)
+      .command(buyCommand)
+      .demandCommand(1),
   handler: () => {}
 };

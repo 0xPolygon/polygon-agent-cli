@@ -30,6 +30,60 @@ export interface VaultCard {
   created_at: string;
 }
 
+// A connection: tokens that act as one vault user, for the Purchase API.
+export interface Connection {
+  access_token: string;
+  refresh_token: string;
+  expires_in?: number;
+  user?: { id: string };
+}
+
+export interface BuyCart {
+  merchant: string;
+  merchant_name?: string;
+  items: { name: string; qty: number; priceCents: number; product_id?: string }[];
+  serviceFeesCents?: number;
+  tipCents?: number;
+  totalCents: number;
+  hash: string;
+}
+
+// One turn of a /buy conversation. Branch on `status`, never on `reply`.
+export interface BuyTurn {
+  conversation_id: string;
+  status: 'needs_input' | 'order_placed' | 'partially_placed' | 'declined' | string;
+  reply?: string;
+  cart?: BuyCart | null;
+  carts?: BuyCart[];
+  unmatched?: { name?: string; reason?: string }[];
+  catalog?: {
+    merchant_name?: string;
+    items?: { id: string; name: string; priceCents?: number; image_url?: string }[];
+  } | null;
+  decline_code?: string | null;
+  approval_url?: string | null;
+  charge_status?: string | null;
+  order_id?: string | null;
+  payment_source?: { source: string; brand?: string; last4?: string } | null;
+}
+
+export interface BuyRequest {
+  ask?: string;
+  conversation_id?: string;
+  confirm?: string;
+  payment_source?: 'vault';
+  delivery_address?: {
+    street: string;
+    address2?: string;
+    city: string;
+    state: string;
+    zip: string;
+    phone?: string;
+    name?: string;
+    country?: string;
+  };
+}
+
 export class AgentCardError extends Error {
   constructor(
     public readonly status: number,
@@ -92,17 +146,18 @@ export class AgentCard {
     return body.access_token;
   }
 
-  private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  // `asUser` sends a user's connection token instead of the platform token.
+  private async call<T>(method: string, path: string, body?: unknown, asUser?: string): Promise<T> {
     for (let attempt = 0; ; attempt++) {
       const res = await this.f(`${this.base}${path}`, {
         method,
         headers: {
-          Authorization: `Bearer ${await this.token()}`,
+          Authorization: `Bearer ${asUser ?? (await this.token())}`,
           ...(body === undefined ? {} : { 'Content-Type': 'application/json' })
         },
         body: body === undefined ? undefined : JSON.stringify(body)
       });
-      if (res.status === 401 && attempt === 0) {
+      if (res.status === 401 && attempt === 0 && !asUser) {
         tokenCache = null;
         continue;
       }
@@ -146,5 +201,37 @@ export class AgentCard {
       if (err instanceof AgentCardError && err.status === 404) return [];
       throw err;
     }
+  }
+
+  /**
+   * Turn a linked add-a-card session into the user's connection tokens. Single
+   * use: a second call is refused with 410 already_exchanged.
+   */
+  exchangeVaultSession(id: string): Promise<Connection> {
+    return this.call<Connection>(
+      'POST',
+      `/api/v2/vault_sessions/${encodeURIComponent(id)}/exchange`
+    );
+  }
+
+  /** A fresh token pair. The old refresh token stops working. */
+  refreshConnection(refreshToken: string): Promise<Connection> {
+    return this.call<Connection>('POST', '/api/v2/connect/refresh', {
+      refresh_token: refreshToken
+    });
+  }
+
+  /** One turn of the Purchase API, as the user. Money only moves on a confirm. */
+  buy(userToken: string, body: BuyRequest): Promise<BuyTurn> {
+    return this.call<BuyTurn>('POST', '/buy', body, userToken);
+  }
+
+  buyConversation(userToken: string, id: string): Promise<unknown> {
+    return this.call<unknown>(
+      'GET',
+      `/buy/conversations/${encodeURIComponent(id)}`,
+      undefined,
+      userToken
+    );
   }
 }
