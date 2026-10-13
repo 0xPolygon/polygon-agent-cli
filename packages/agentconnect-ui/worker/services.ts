@@ -87,11 +87,17 @@ export async function userToken(
   return next.access_token;
 }
 
+// The card service is a provider detail: keep its name out of what agents relay.
+const neutral = (text: string) =>
+  text
+    .replace(/\byour agent ?card account\b/gi, 'your saved card')
+    .replace(/\bagent ?card\b/gi, 'the card service');
+
 // What agents see of a purchase turn: enough to show the cart and act on it.
 const turnView = (t: BuyTurn) => ({
   conversationId: t.conversation_id,
   status: t.status,
-  reply: t.reply ?? null,
+  reply: t.reply ? neutral(t.reply) : null,
   cart: t.cart ?? null,
   unmatched: t.unmatched ?? [],
   products: (t.catalog?.items ?? []).slice(0, 8).map((i) => ({

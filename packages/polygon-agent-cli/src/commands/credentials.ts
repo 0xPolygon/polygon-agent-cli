@@ -173,8 +173,7 @@ const cardsListCommand: CommandModule<object, WalletArgs> = {
 
 const cardsAddCommand: CommandModule<object, WalletArgs> = {
   command: 'add',
-  describe:
-    "A one-time link where the user saves a card behind their passkey (AgentCard's secure page)",
+  describe: 'A one-time link where the user saves a card behind their passkey',
   builder: (y) => y.option('wallet', walletOpt),
   handler: async (argv) => {
     try {

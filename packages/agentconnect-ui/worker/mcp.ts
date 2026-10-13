@@ -30,13 +30,13 @@ export interface McpProps {
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const SERVER = { name: 'polygon-agent-wallet', title: 'Polygon agent wallet', version: '1.0.0' };
 
-const INSTRUCTIONS = `The owner's Polygon agent wallet: what it holds, their saved shipping address, and paying with the card they keep in the AgentCard vault. Never ask the owner for a card number.
+const INSTRUCTIONS = `The owner's Polygon agent wallet: what it holds, their saved shipping address, and paying with the card they saved securely. Never ask the owner for a card number.
 
 When something needs paying for, the owner has set an auto-pay limit. At or under it you pay without asking. Over it, you get an approval_url: send it to the owner on its own line, then call payment_status with the approval_id. It waits for their decision, so keep calling it until the status settles, and tell them the outcome.
 
-Buying from a store AgentCard can order from (Amazon, Walmart, Target, Best Buy, DoorDash, and more): call buy with what they want. It ships to the saved address and pays with the saved card, or comes back for approval. Answer its questions with another buy call on the same conversation_id.
+Buying from a store that takes orders directly (Amazon, Walmart, Target, Best Buy, DoorDash, and more): call buy with what they want. It ships to the saved address and pays with the saved card, or comes back for approval. Answer its questions with another buy call on the same conversation_id.
 
-Paying at any other store's checkout in your browser (Kernel or Browserbase with AgentCard): call authorize_checkout with the store and the checkout total first. Once it says approved, fill shipping from get_shipping_address, enter a placeholder card (4242 4242 4242 4242, any future expiry, any CVC), and submit; the saved card pays. Confirm the order on the store's page before reporting it, and never retry a payment on your own.
+Paying at any other store's checkout in your browser (Kernel or Browserbase with card checkout support): call authorize_checkout with the store and the checkout total first. Once it says approved, fill shipping from get_shipping_address, enter a placeholder card (4242 4242 4242 4242, any future expiry, any CVC), and submit; the saved card pays. Confirm the order on the store's page before reporting it, and never retry a payment on your own.
 
 No card saved yet: buy answers with the add-card link (or call add_card). Never repeat the shipping address outside a purchase. Sending, swapping, or predicting with the wallet's funds needs the Polygon agent CLI (npx skills add https://github.com/0xPolygon/polygon-agent-cli).`;
 
@@ -108,7 +108,7 @@ const TOOLS = [
     name: 'buy',
     title: 'Buy',
     description:
-      "Buy something at a store AgentCard can order from (Amazon, Walmart, Target, Best Buy, DoorDash, and more), shipped to the saved address and paid with the saved card. Under the owner's auto-pay limit it is ordered right away; over it the answer is pending_approval with approval_url and approval_id (send the link, then call payment_status). Answer questions with another call on the same conversation_id. A turn can take up to two minutes.",
+      "Buy something at a store that takes orders directly (Amazon, Walmart, Target, Best Buy, DoorDash, and more), shipped to the saved address and paid with the saved card. Under the owner's auto-pay limit it is ordered right away; over it the answer is pending_approval with approval_url and approval_id (send the link, then call payment_status). Answer questions with another call on the same conversation_id. A turn can take up to two minutes.",
     inputSchema: {
       type: 'object',
       properties: {
