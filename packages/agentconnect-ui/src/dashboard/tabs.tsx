@@ -1,13 +1,15 @@
 import { ArrowDownLeft, ArrowUpRight, Check, Copy, ExternalLink } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import type { ActivityItem, Holding } from '../indexer';
 import type { Vault } from './earn.js';
 import type { Position } from './markets.js';
+import type { TokenLook } from './tokens.js';
 
 import { dailyFlow } from '../indexer';
 import { buildPrompt, POLYMARKET_SKILL_URL, SKILL_URL } from './agents.js';
 import { cents } from './markets.js';
+import { fetchTokenLooks } from './tokens.js';
 import {
   AgentPromptBox,
   AmountChips,
@@ -318,68 +320,17 @@ export function OverviewTab({
 
 // ── Wallet ──
 
-const ASSET_COPY: Record<
-  string,
-  { name: string; sub: string; glyph: string; bg: string; fg: string }
-> = {
-  USDC: {
-    name: 'US dollars',
-    sub: 'Digital dollars (USDC). Always worth $1.',
-    glyph: '$',
-    bg: 'var(--purple-100)',
-    fg: 'var(--purple-600)'
-  },
-  'USDC.E': {
-    name: 'US dollars (bridged)',
-    sub: 'Bridged USDC. Always worth $1.',
-    glyph: '$',
-    bg: 'var(--purple-100)',
-    fg: 'var(--purple-600)'
-  },
-  USDT: {
-    name: 'Tether dollars',
-    sub: 'Digital dollars (USDT)',
-    glyph: '$',
-    bg: 'var(--emerald-50)',
-    fg: 'var(--emerald-700)'
-  },
-  USDT0: {
-    name: 'Tether dollars',
-    sub: 'Digital dollars (USDT0)',
-    glyph: '$',
-    bg: 'var(--emerald-50)',
-    fg: 'var(--emerald-700)'
-  },
-  POL: {
-    name: 'Polygon',
-    sub: 'Covers network fees',
-    glyph: 'P',
-    bg: 'var(--purple-50)',
-    fg: 'var(--purple-500)'
-  },
-  WETH: {
-    name: 'Ether',
-    sub: 'Price moves with the market',
-    glyph: 'E',
-    bg: 'var(--slate-100)',
-    fg: 'var(--slate-700)'
-  }
-};
-
-function assetCopy(h: Holding) {
-  const known = ASSET_COPY[h.symbol.toUpperCase()];
-  if (known) return known;
-  return {
-    name: h.name || h.symbol,
-    sub: h.kind === 'earn' ? `Earning${h.protocol ? ` via ${h.protocol}` : ''}` : h.symbol,
-    glyph: (h.symbol.replace(/^a(Pol)?/, '') || h.symbol).charAt(0).toUpperCase(),
-    bg: h.kind === 'earn' ? 'var(--emerald-50)' : 'var(--slate-100)',
-    fg: h.kind === 'earn' ? 'var(--emerald-700)' : 'var(--slate-700)'
-  };
-}
-
 export function HoldingsList({ holdings }: { holdings: Loadable<Holding[]> }) {
   const rows = holdings.data ?? [];
+  const [looks, setLooks] = useState<Record<string, TokenLook>>({});
+  useEffect(() => {
+    if (!holdings.data?.length) return;
+    let live = true;
+    void fetchTokenLooks(137, holdings.data).then((l) => live && setLooks(l));
+    return () => {
+      live = false;
+    };
+  }, [holdings.data]);
   return (
     <RowList>
       {holdings.loading ? (
@@ -393,25 +344,24 @@ export function HoldingsList({ holdings }: { holdings: Loadable<Holding[]> }) {
         <EmptyState title="Your wallet is empty">Add money to get your agents started.</EmptyState>
       ) : (
         rows.map((h) => {
-          const c = assetCopy(h);
+          const look = looks[h.address];
           return (
-            <div key={h.symbol + h.name} className="flex items-center gap-3.5 py-4">
-              <span
-                className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-[15px] flex-shrink-0"
-                style={{ background: c.bg, color: c.fg }}
-              >
-                {c.glyph}
-              </span>
-              <span className="flex-1 min-w-0 flex flex-col gap-1">
-                <span className="text-base font-bold">{c.name}</span>
-                <span className="text-[13px] text-[var(--slate-500)] truncate">{c.sub}</span>
-              </span>
-              <span className="flex flex-col gap-1 items-end">
-                <span className="text-base font-bold">{usd(h.usd)}</span>
-                <span className="text-[13px] text-[var(--slate-500)]">
-                  {qty(h.qty)} {h.symbol}
+            <div key={h.address + h.symbol} className="flex items-center gap-3.5 py-4">
+              {look?.logo ? (
+                <img
+                  src={look.logo}
+                  alt=""
+                  className="w-10 h-10 rounded-full flex-shrink-0 bg-[var(--slate-100)] object-cover"
+                />
+              ) : (
+                <span className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-[15px] flex-shrink-0 bg-[var(--slate-100)] text-[var(--slate-700)]">
+                  {(look?.name ?? h.name).charAt(0).toUpperCase()}
                 </span>
+              )}
+              <span className="flex-1 min-w-0 text-base font-bold truncate">
+                {look?.name ?? h.name}
               </span>
+              <span className="text-base font-bold">{usd(h.usd)}</span>
             </div>
           );
         })

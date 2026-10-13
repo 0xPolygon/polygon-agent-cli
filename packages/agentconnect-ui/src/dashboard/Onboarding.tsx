@@ -282,9 +282,8 @@ export function Onboarding({ finishing = false }: { finishing?: boolean }) {
 
   return (
     <div className="min-h-[100dvh] flex flex-col bg-[var(--slate-50)] text-[var(--slate-900)]">
-      <div className="h-16 flex items-center justify-between px-6 bg-white border-b border-[var(--slate-200)]">
+      <div className="h-16 flex items-center px-6 bg-white border-b border-[var(--slate-200)]">
         <LogoBadge />
-        <span className="text-sm text-[var(--slate-500)]">Step {step + 1} of 3</span>
       </div>
       <div className="flex-1 grid md:grid-cols-2 gap-12 max-w-[1120px] w-full mx-auto px-5 pt-7 pb-10 md:px-10 md:py-12 items-center">
         <div className="flex flex-col gap-7 max-w-[460px] w-full min-w-0">
