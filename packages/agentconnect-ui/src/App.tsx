@@ -6,7 +6,9 @@ import { useMemo } from 'react';
 import { parseFundAmount } from './components/FundingScreen.js';
 import { Dashboard } from './dashboard/Dashboard.js';
 import { Onboarding } from './dashboard/Onboarding.js';
+import { isWebSigninReturn } from './dashboard/signin.js';
 import { LoginPage } from './login/LoginPage.js';
+import { isRelayReturn } from './login/returnUrl.js';
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
@@ -32,6 +34,10 @@ function App() {
   const pm = params.get('pm') ?? '';
 
   if (window.location.pathname === '/login') {
+    // A Google sign-in started on the onboarding page comes back here too.
+    if (isWebSigninReturn() && isRelayReturn(window.location.search)) {
+      return <Onboarding finishing />;
+    }
     return <LoginPage />;
   }
 
