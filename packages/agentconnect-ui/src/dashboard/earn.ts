@@ -163,3 +163,30 @@ export async function fetchVaultBalances(
   });
   return out;
 }
+
+/**
+ * Today's rate (percent a year) for each Polygon earn position the CLI can open,
+ * keyed by its receipt token (vault share or aToken), lowercase.
+ */
+export async function fetchPolygonRates(): Promise<Record<string, number>> {
+  const lists = await Promise.all(
+    ['morpho', 'aave'].map(async (provider) => {
+      const res = await fetch(`${TRAILS}/YieldGetMarkets`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(trailsApiKey ? { 'X-Access-Key': trailsApiKey } : {})
+        },
+        body: JSON.stringify({ provider, chainId: '137', limit: 100 })
+      });
+      if (!res.ok) throw new Error(`YieldGetMarkets failed: ${res.status}`);
+      return ((await res.json()) as { items?: RawMarket[] }).items ?? [];
+    })
+  );
+  const out: Record<string, number> = {};
+  for (const m of lists.flat()) {
+    const address = m.outputToken?.address?.toLowerCase();
+    if (address) out[address] = (m.rewardRate?.total ?? 0) * 100;
+  }
+  return out;
+}

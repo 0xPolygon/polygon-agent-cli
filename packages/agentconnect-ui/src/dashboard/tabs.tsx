@@ -214,6 +214,7 @@ export function OverviewTab({
   activity,
   positionsValue,
   vaultsValue,
+  earningApy,
   go,
   onAdd,
   onWithdraw
@@ -223,6 +224,8 @@ export function OverviewTab({
   positionsValue: number | null;
   // Money in the Katana earn vaults (not in `holdings`, which is Polygon only).
   vaultsValue: number | null;
+  // Blended rate on what's earning, percent a year.
+  earningApy: number | null;
   go: (tab: string) => void;
   onAdd: () => void;
   onWithdraw: () => void;
@@ -251,7 +254,8 @@ export function OverviewTab({
       value: earning === null ? null : earning + (vaultsValue ?? 0),
       failed: holdings.error,
       color: 'var(--emerald-500)',
-      tab: 'earn'
+      tab: 'earn',
+      note: earningApy === null ? null : `${earningApy.toFixed(2)}% APY`
     }
   ];
   return (
@@ -290,6 +294,9 @@ export function OverviewTab({
                   <Money value={b.value} failed={b.failed} />
                 )}
               </span>
+              {'note' in b && b.note && (
+                <span className="text-sm font-bold text-[var(--emerald-700)] -mt-1">{b.note}</span>
+              )}
             </button>
           ))}
         </div>

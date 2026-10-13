@@ -21,7 +21,7 @@ import { LogoBadge } from '../App.js';
 import { FundingScreen } from '../components/FundingScreen.js';
 import { fetchActivity, fetchHoldings } from '../indexer';
 import { SKILL_URL } from './agents.js';
-import { fetchVaultBalances, fetchVaults } from './earn.js';
+import { fetchPolygonRates, fetchVaultBalances, fetchVaults } from './earn.js';
 import { fetchPositions, fetchPredictionCash } from './markets.js';
 import { ActivityTab, EarnTab, MarketsTab, OverviewTab, SettingsTab, WalletTab } from './tabs.js';
 import { AgentPromptBox, AmountChips, Modal, shortAddr, Toast, useCopy, usd } from './ui.js';
@@ -103,6 +103,7 @@ export function Dashboard({
     vaults.data ? () => fetchVaultBalances(walletAddress, vaults.data!) : null,
     [walletAddress, vaults.data]
   );
+  const polygonRates = useLoad<Record<string, number>>(fetchPolygonRates, []);
   const vaultsValue = vaultBalances.data
     ? Object.values(vaultBalances.data).reduce((s, v) => s + v, 0)
     : null;
@@ -128,6 +129,22 @@ export function Dashboard({
   const totalBalance = holdings.data
     ? holdings.data.reduce((t, h) => t + h.usd, 0) + (positionsValue ?? 0) + (vaultsValue ?? 0)
     : null;
+  // What the earning money makes, weighted by how much sits in each place.
+  const earningApy = (() => {
+    if (!holdings.data || !polygonRates.data) return null;
+    const parts: [number, number | undefined][] = [
+      ...holdings.data
+        .filter((h) => h.kind === 'earn')
+        .map((h): [number, number | undefined] => [h.usd, polygonRates.data![h.address]]),
+      ...(vaults.data ?? []).map((v): [number, number | undefined] => [
+        vaultBalances.data?.[v.address] ?? 0,
+        v.apy
+      ])
+    ];
+    const priced = parts.filter(([u, apy]) => u > 0 && apy !== undefined) as [number, number][];
+    const total = priced.reduce((t, [u]) => t + u, 0);
+    return total > 0 ? priced.reduce((t, [u, apy]) => t + u * apy, 0) / total : null;
+  })();
   const openAdd = () => setModal({ kind: 'add' });
   const openWithdraw = () => setModal({ kind: 'withdraw' });
 
@@ -201,6 +218,7 @@ export function Dashboard({
                 activity={activity}
                 positionsValue={positionsValue}
                 vaultsValue={vaultsValue}
+                earningApy={earningApy}
                 go={go}
                 onAdd={openAdd}
                 onWithdraw={openWithdraw}
