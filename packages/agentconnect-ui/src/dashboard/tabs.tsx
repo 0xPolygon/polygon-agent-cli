@@ -1,18 +1,14 @@
-import type { ElementType } from 'react';
-
 import { ArrowDownLeft, ArrowUpRight, Check, Copy, ExternalLink } from 'lucide-react';
 import { useState } from 'react';
 
 import type { ActivityItem, Holding } from '../indexer';
-import type { Agent } from './agents.js';
 import type { Vault } from './earn.js';
 import type { Position } from './markets.js';
 
 import { dailyFlow } from '../indexer';
-import { POLYMARKET_SKILL_URL, PROMPT_CATEGORIES, SKILL_URL } from './agents.js';
+import { buildPrompt, POLYMARKET_SKILL_URL, SKILL_URL } from './agents.js';
 import { cents } from './markets.js';
 import {
-  AgentChips,
   AgentPromptBox,
   AmountChips,
   Chip,
@@ -30,10 +26,8 @@ import {
 
 export type Loadable<T> = { data: T | null; loading: boolean; error: boolean };
 
-// Shared by every tab: who to run prompts with, and the copy state.
+// Shared by every tab: the copy state.
 export interface AgentContext {
-  agent: Agent;
-  setAgent: (id: string) => void;
   copied: string | null;
   copy: (id: string, text: string) => void;
 }
@@ -213,93 +207,11 @@ function FlowChart({ activity }: { activity: ActivityItem[] }) {
   );
 }
 
-function TryWithAgent({ ctx }: { ctx: AgentContext }) {
-  const [cat, setCat] = useState(PROMPT_CATEGORIES[0].id);
-  const [idx, setIdx] = useState(0);
-  const prompts = PROMPT_CATEGORIES.find((c) => c.id === cat)!.prompts;
-  const active = prompts[idx] ?? prompts[0];
-  return (
-    <div className="flex flex-col gap-3">
-      <SectionTitle>Try it with your agent</SectionTitle>
-      <div className="flex gap-2 flex-wrap">
-        {PROMPT_CATEGORIES.map((c) => (
-          <Chip
-            key={c.id}
-            active={c.id === cat}
-            onClick={() => {
-              setCat(c.id);
-              setIdx(0);
-            }}
-          >
-            {c.label}
-          </Chip>
-        ))}
-      </div>
-      <Panel pad="p-0" className="grid md:grid-cols-2">
-        <div className="p-4 flex flex-col gap-1 border-b md:border-b-0 md:border-r border-[var(--slate-100)]">
-          {prompts.map((p, i) => {
-            const Icon = p.icon as ElementType;
-            const on = i === idx;
-            return (
-              <button
-                key={p.label}
-                type="button"
-                onClick={() => setIdx(i)}
-                className="flex items-center gap-3 px-3.5 py-3 rounded-xl border-0 text-[15px] text-left cursor-pointer"
-                style={{
-                  background: on ? 'var(--slate-50)' : 'transparent',
-                  color: on ? 'var(--slate-900)' : 'var(--slate-600)',
-                  fontWeight: on ? 700 : 500
-                }}
-              >
-                <Icon className="w-[18px] h-[18px] flex-shrink-0 text-[var(--purple-500)]" />
-                {p.label}
-              </button>
-            );
-          })}
-        </div>
-        <div className="p-5 flex flex-col gap-4 min-w-0">
-          <div className="min-h-16">
-            <CommandLine agent={ctx.agent} text={active.text} />
-          </div>
-          <div className="h-px bg-[var(--slate-100)]" />
-          <AgentPromptBoxTail ctx={ctx} text={active.text} skill={active.skill} id="active" />
-        </div>
-      </Panel>
-    </div>
-  );
-}
-
-// The picker and copy button without the command line (shown separately above).
-function AgentPromptBoxTail({
-  ctx,
-  text,
-  skill,
-  id
-}: {
-  ctx: AgentContext;
-  text: string;
-  skill: string;
-  id: string;
-}) {
-  return (
-    <>
-      <AgentChips agent={ctx.agent} onPick={ctx.setAgent} />
-      <CopyButton
-        copied={ctx.copied === id}
-        onClick={() => ctx.copy(id, ctx.agent.build(text, skill))}
-        className="w-full h-11"
-      />
-    </>
-  );
-}
-
 export function OverviewTab({
   holdings,
   activity,
   positionsValue,
   vaultsValue,
-  ctx,
   go,
   onAdd,
   onWithdraw
@@ -309,7 +221,6 @@ export function OverviewTab({
   positionsValue: number | null;
   // Money in the Katana earn vaults (not in `holdings`, which is Polygon only).
   vaultsValue: number | null;
-  ctx: AgentContext;
   go: (tab: string) => void;
   onAdd: () => void;
   onWithdraw: () => void;
@@ -401,8 +312,6 @@ export function OverviewTab({
         </div>
         <ActivityList activity={activity} limit={4} />
       </div>
-
-      <TryWithAgent ctx={ctx} />
     </div>
   );
 }
@@ -720,18 +629,17 @@ export function MarketsTab({
 
       <div className="flex flex-col gap-3">
         <SectionTitle>Ask your agent</SectionTitle>
-        <AgentChips agent={ctx.agent} onPick={ctx.setAgent} />
         <RowList>
           {MARKET_PROMPTS.map((t, i) => (
             <div key={t} className="flex items-center gap-3.5 py-3.5">
               <span className="flex-1 min-w-0">
-                <CommandLine agent={ctx.agent} text={t} />
+                <CommandLine text={t} />
               </span>
               <CopyButton
                 size="md"
                 label="Copy"
                 copied={ctx.copied === `m${i}`}
-                onClick={() => ctx.copy(`m${i}`, ctx.agent.build(t, POLYMARKET_SKILL_URL))}
+                onClick={() => ctx.copy(`m${i}`, buildPrompt(t, POLYMARKET_SKILL_URL))}
                 className="flex-shrink-0"
               />
             </div>
@@ -872,7 +780,6 @@ export function EarnTab({
         <Panel pad="p-5">
           <AgentPromptBox
             {...ctx}
-            onAgent={ctx.setAgent}
             id="earn"
             skill={SKILL_URL}
             text="keep $300 available to spend and move anything above that into the Prime earn vault on Katana. Check every Monday."
@@ -945,13 +852,7 @@ export function SettingsTab({ address, ctx }: { address: string; ctx: AgentConte
             or browser.
           </span>
           <AmountChips values={[50, 100, 200, 500]} value={limit} onPick={setLimit} />
-          <AgentPromptBox
-            {...ctx}
-            onAgent={ctx.setAgent}
-            id="limit"
-            skill={SKILL_URL}
-            text={limitText}
-          />
+          <AgentPromptBox {...ctx} id="limit" skill={SKILL_URL} text={limitText} />
         </Panel>
       </div>
 

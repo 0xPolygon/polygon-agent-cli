@@ -20,7 +20,7 @@ import type { AgentContext, Loadable } from './tabs.js';
 import { LogoBadge } from '../App.js';
 import { FundingScreen } from '../components/FundingScreen.js';
 import { fetchActivity, fetchHoldings } from '../indexer';
-import { agentById, SKILL_URL } from './agents.js';
+import { SKILL_URL } from './agents.js';
 import { fetchVaultBalances, fetchVaults } from './earn.js';
 import { fetchPositions, fetchPredictionCash } from './markets.js';
 import { ActivityTab, EarnTab, MarketsTab, OverviewTab, SettingsTab, WalletTab } from './tabs.js';
@@ -79,7 +79,6 @@ export function Dashboard({
   const [tab, setTab] = useState<Tab>('overview');
   const [moreOpen, setMoreOpen] = useState(false);
   const [modal, setModal] = useState<ModalState | null>(initialFundOpen ? { kind: 'add' } : null);
-  const [agentId, setAgentId] = useState('claude');
   const [copied, copy] = useCopy();
   const [toast, setToast] = useState<string | null>(null);
 
@@ -110,12 +109,12 @@ export function Dashboard({
 
   useEffect(() => {
     if (!copied) return;
-    setToast('Copied. Paste it into your terminal.');
+    setToast('Copied. Paste it into your agent.');
     const t = setTimeout(() => setToast(null), 2200);
     return () => clearTimeout(t);
   }, [copied]);
 
-  const ctx: AgentContext = { agent: agentById(agentId), setAgent: setAgentId, copied, copy };
+  const ctx: AgentContext = { copied, copy };
   const go = (t: string) => {
     setTab(t as Tab);
     setMoreOpen(false);
@@ -198,7 +197,6 @@ export function Dashboard({
                 activity={activity}
                 positionsValue={positionsValue}
                 vaultsValue={vaultsValue}
-                ctx={ctx}
                 go={go}
                 onAdd={openAdd}
                 onWithdraw={openWithdraw}
@@ -343,7 +341,6 @@ function WithdrawModal({ ctx, onClose }: { ctx: AgentContext; onClose: () => voi
       <AmountChips values={[25, 50, 100, 250]} value={amount} onPick={setAmount} />
       <AgentPromptBox
         {...ctx}
-        onAgent={ctx.setAgent}
         id="withdraw"
         skill={SKILL_URL}
         text={`withdraw ${amount} USDC from my agent wallet to my own wallet. Ask me which address to send it to.`}
@@ -397,7 +394,6 @@ function DepositModal({
       </div>
       <AgentPromptBox
         {...ctx}
-        onAgent={ctx.setAgent}
         id="deposit"
         skill={SKILL_URL}
         text={`deposit ${amount} ${vault.symbol} into the ${vault.tier.name} earn vault on Katana (vault ${vault.address}). Bridge the ${vault.symbol} from Polygon to Katana first if needed, then report the rate.`}

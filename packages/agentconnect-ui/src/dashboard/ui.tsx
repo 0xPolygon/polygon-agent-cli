@@ -3,9 +3,7 @@ import type { ReactNode } from 'react';
 import { CircleCheckBig, Copy, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { Agent } from './agents.js';
-
-import { AGENTS } from './agents.js';
+import { buildPrompt } from './agents.js';
 
 export const usd = (n: number) =>
   '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -135,51 +133,11 @@ export function AmountChips({
   );
 }
 
-export function AgentChips({
-  agent,
-  onPick,
-  size = 'sm',
-  label = 'Run with'
-}: {
-  agent: Agent;
-  onPick: (id: string) => void;
-  size?: 'sm' | 'md';
-  label?: string | null;
-}) {
-  return (
-    <div className="flex items-center gap-2 flex-wrap">
-      {label && <span className="text-sm text-[var(--slate-500)]">{label}</span>}
-      {AGENTS.map((a) => {
-        const on = a.id === agent.id;
-        return (
-          <button
-            key={a.id}
-            type="button"
-            onClick={() => onPick(a.id)}
-            className={`flex items-center gap-1.5 ${size === 'sm' ? 'h-[30px] px-3 text-[13px]' : 'h-9 px-3.5 text-sm'} rounded-full border font-bold cursor-pointer transition-colors`}
-            style={{
-              background: on ? a.color : '#fff',
-              borderColor: on ? a.color : 'var(--slate-200)',
-              color: on ? '#fff' : 'var(--slate-600)'
-            }}
-          >
-            <span
-              className="w-1.5 h-1.5 rounded-full"
-              style={{ background: on ? '#fff' : a.color }}
-            />
-            {a.name}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-/** The terminal line: colored agent prefix, then the quoted prompt. */
-export function CommandLine({ agent, text }: { agent: Agent; text: string }) {
+/** The prompt as the visitor will paste it into any agent. */
+export function CommandLine({ text }: { text: string }) {
   return (
     <code className="oms-mono text-[13px] leading-relaxed text-[var(--slate-600)] break-words">
-      <span style={{ color: agent.color }}>{agent.prefix}</span> "{sentence(text)}"
+      {sentence(text)}
     </code>
   );
 }
@@ -187,7 +145,7 @@ export function CommandLine({ agent, text }: { agent: Agent; text: string }) {
 export function CopyButton({
   copied,
   onClick,
-  label = 'Copy to your terminal',
+  label = 'Copy',
   size = 'lg',
   className = ''
 }: {
@@ -209,18 +167,14 @@ export function CopyButton({
   );
 }
 
-/** A self-contained "ask your agent" block: command, agent picker, copy. */
+/** A self-contained "ask your agent" block: the prompt and a copy button. */
 export function AgentPromptBox({
-  agent,
-  onAgent,
   text,
   skill,
   id,
   copied,
   copy
 }: {
-  agent: Agent;
-  onAgent: (id: string) => void;
   text: string;
   skill: string;
   id: string;
@@ -229,11 +183,10 @@ export function AgentPromptBox({
 }) {
   return (
     <div className="flex flex-col gap-4">
-      <CommandLine agent={agent} text={text} />
-      <AgentChips agent={agent} onPick={onAgent} />
+      <CommandLine text={text} />
       <CopyButton
         copied={copied === id}
-        onClick={() => copy(id, agent.build(text, skill))}
+        onClick={() => copy(id, buildPrompt(text, skill))}
         className="w-full h-11"
       />
     </div>
