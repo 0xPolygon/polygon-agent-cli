@@ -520,6 +520,26 @@ describe('recoverAccount', () => {
     expect(owner.walletAddress).toBe(MAIN);
   });
 
+  it('leaves pUSD under the bridge minimum in the old account and still rotates', async () => {
+    const signer = await accountWithLostKey('rec');
+    sdk.updateBalanceAllowance.mockResolvedValueOnce({ balance: '1843870', allowances: {} });
+    const owner = fakeOwner(signer);
+    const out = await account.recoverAccount({
+      wallet: 'rec',
+      owner: owner as never,
+      mainAddress: MAIN,
+      target: { id: 'w-old', address: signer }
+    });
+
+    expect(out).toMatchObject({
+      backedUp: true,
+      omsWalletId: 'w-new',
+      recovered: { withdrawnUsd: '0', txHash: null, positionsLeft: [] }
+    });
+    expect(sdk.withdrawAddress).not.toHaveBeenCalled();
+    expect(sdk.clients[0].transferErc20).not.toHaveBeenCalled();
+  });
+
   it('refuses to rotate while the old account holds open positions, after the sweep', async () => {
     const signer = await accountWithLostKey('rec');
     const dir = account.accountDir('rec');
@@ -919,6 +939,18 @@ describe('sweepOldKey', () => {
     expect(out).toBeNull();
     expect(sdk.created).toHaveLength(1);
     expect(sdk.created[0].apiKey).toBeUndefined();
+    expect(sdk.createBuilderApiKey).not.toHaveBeenCalled();
+    expect(sdk.withdrawAddress).not.toHaveBeenCalled();
+  });
+
+  it('returns null and sends nothing under the bridge minimum', async () => {
+    sdk.updateBalanceAllowance.mockResolvedValueOnce({ balance: '1999999', allowances: {} });
+    const out = await account.sweepOldKey({
+      owner: fakeOwner(old) as never,
+      target: { id: 'w-old', address: old },
+      mainAddress: MAIN
+    });
+    expect(out).toBeNull();
     expect(sdk.createBuilderApiKey).not.toHaveBeenCalled();
     expect(sdk.withdrawAddress).not.toHaveBeenCalled();
   });

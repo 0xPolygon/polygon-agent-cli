@@ -5,7 +5,7 @@
 import type { SecureClient } from './account.ts';
 
 import { formatUnits6 } from './amounts.ts';
-import { withdrawAddress } from './bridge.ts';
+import { BRIDGE_MIN_WITHDRAW_UNITS, withdrawAddress } from './bridge.ts';
 import { PolymarketError, PUSD } from './gamma.ts';
 import { loadSdk, mapSdkError } from './sdk.ts';
 
@@ -27,6 +27,12 @@ export function assertWithdrawable(amount: bigint, balance: bigint): void {
     throw new PolymarketError(
       'insufficient_pusd',
       `The Polymarket wallet holds $${formatUnits6(balance)} pUSD.`
+    );
+  }
+  if (amount < BRIDGE_MIN_WITHDRAW_UNITS) {
+    throw new PolymarketError(
+      'below_bridge_minimum',
+      `Polymarket's bridge needs at least $${formatUnits6(BRIDGE_MIN_WITHDRAW_UNITS)} per withdrawal; less is never paid out.`
     );
   }
 }
@@ -60,7 +66,8 @@ export type WithdrawAllResult = {
 };
 
 // Withdraws the whole pUSD balance of `account` to `recipient`. Fails with
-// insufficient_pusd on an empty account, before anything is sent.
+// insufficient_pusd on an empty account, or below_bridge_minimum under the bridge
+// minimum, before anything is sent.
 export async function withdrawAll(p: {
   client: SecureClient;
   account: string;

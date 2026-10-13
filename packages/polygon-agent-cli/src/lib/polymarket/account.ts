@@ -17,7 +17,7 @@ import { getOmsClient } from '../oms-client.ts';
 import { readJsonFile, writeJsonFile } from '../session/state.ts';
 import { decrypt, encrypt, loadOmsWalletPointer, STORAGE_ROOT } from '../storage.ts';
 import { formatUnits6 } from './amounts.ts';
-import { bridgeStatus } from './bridge.ts';
+import { BRIDGE_MIN_WITHDRAW_UNITS, bridgeStatus } from './bridge.ts';
 import { loadPending } from './deposits.ts';
 import {
   CTF,
@@ -664,7 +664,9 @@ async function sweepTradingKeyAccount(p: {
   }
   const balance = await pusdBalanceOf(probe);
   const account = probe.account.wallet as string;
-  if (!p.broadcast || balance === 0n) return { account, balance, client: probe };
+  // Under the bridge minimum a withdrawal is never paid out: leave the pUSD where it is.
+  if (!p.broadcast || balance < BRIDGE_MIN_WITHDRAW_UNITS)
+    return { account, balance, client: probe };
   const builder = await mintBuilderCreds(p.signer, p.address);
   const client = await createClient({
     signer: p.signer,
@@ -688,7 +690,8 @@ async function sweepTradingKeyAccount(p: {
 
 // Sweeps the pUSD of the Deposit Wallet an older trading key controls to `mainAddress`.
 // Returns null when there is nothing to sweep (no deployed wallet, or 0 pUSD): then the
-// only calls made are the client creation and the balance read.
+// only calls made are the client creation and the balance read. Under the bridge minimum
+// it is null too, and the pUSD stays put.
 export async function sweepOldKey(p: {
   owner: OmsWalletLike;
   target: { id: string; address: string };
@@ -845,7 +848,8 @@ export async function recoverAccount(p: {
         message: `The backed-up key controls ${oldWallet}, not the recorded Polymarket wallet ${local.wallet}.`
       });
     }
-    if ((await pusdBalanceOf(client)) > 0n) {
+    // Under the bridge minimum a withdrawal is never paid out, so it stays in the old account.
+    if ((await pusdBalanceOf(client)) >= BRIDGE_MIN_WITHDRAW_UNITS) {
       const res = await withdrawAll({
         client,
         account: oldWallet,
