@@ -113,7 +113,7 @@ const word = (hex: string) => hex.replace(/^0x/, '').toLowerCase().padStart(64, 
 const addressOf = (result?: string) =>
   result && result.length >= 66 ? `0x${result.slice(-40)}`.toLowerCase() : undefined;
 
-async function rpcCalls(
+export async function rpcCalls(
   chainId: number,
   calls: { to: string; data: string }[]
 ): Promise<(string | undefined)[]> {

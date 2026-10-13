@@ -586,10 +586,12 @@ const MARKET_PROMPTS = [
 
 export function MarketsTab({
   positions,
+  cash,
   hasAccount,
   ctx
 }: {
   positions: Loadable<Position[]>;
+  cash: Loadable<number>;
   hasAccount: boolean;
   ctx: AgentContext;
 }) {
@@ -607,6 +609,11 @@ export function MarketsTab({
           {[
             ['Current value', positions.data ? usd(value) : null, undefined],
             ['You put in', positions.data ? usd(cost) : null, undefined],
+            [
+              'Cash to predict with',
+              cash.data !== null ? usd(cash.data) : cash.error ? '–' : null,
+              undefined
+            ],
             [
               'Gain',
               positions.data ? signedUsd(gain) : null,

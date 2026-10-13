@@ -22,7 +22,7 @@ import { FundingScreen } from '../components/FundingScreen.js';
 import { fetchActivity, fetchHoldings } from '../indexer';
 import { agentById, SKILL_URL } from './agents.js';
 import { fetchVaultBalances, fetchVaults } from './earn.js';
-import { fetchPositions } from './markets.js';
+import { fetchPositions, fetchPredictionCash } from './markets.js';
 import { ActivityTab, EarnTab, MarketsTab, OverviewTab, SettingsTab, WalletTab } from './tabs.js';
 import { AgentPromptBox, AmountChips, Modal, shortAddr, Toast, useCopy, usd } from './ui.js';
 
@@ -95,6 +95,10 @@ export function Dashboard({
     polymarketAddress ? () => fetchPositions(polymarketAddress) : null,
     [polymarketAddress]
   );
+  const predictionCash = useLoad<number>(
+    polymarketAddress ? () => fetchPredictionCash(polymarketAddress) : null,
+    [polymarketAddress]
+  );
   const vaults = useLoad<Vault[]>(fetchVaults, []);
   const vaultBalances = useLoad<Record<string, number>>(
     vaults.data ? () => fetchVaultBalances(walletAddress, vaults.data!) : null,
@@ -117,7 +121,10 @@ export function Dashboard({
     setMoreOpen(false);
   };
   const title = NAV.find((n) => n.id === tab)!.label;
-  const positionsValue = positions.data ? positions.data.reduce((s, p) => s + p.value, 0) : null;
+  // Open positions plus pUSD waiting in the trading account.
+  const positionsValue = positions.data
+    ? positions.data.reduce((s, p) => s + p.value, 0) + (predictionCash.data ?? 0)
+    : null;
   const openAdd = () => setModal({ kind: 'add' });
   const openWithdraw = () => setModal({ kind: 'withdraw' });
 
@@ -206,7 +213,12 @@ export function Dashboard({
               />
             )}
             {tab === 'markets' && (
-              <MarketsTab positions={positions} hasAccount={!!polymarketAddress} ctx={ctx} />
+              <MarketsTab
+                positions={positions}
+                cash={predictionCash}
+                hasAccount={!!polymarketAddress}
+                ctx={ctx}
+              />
             )}
             {tab === 'earn' && (
               <EarnTab
