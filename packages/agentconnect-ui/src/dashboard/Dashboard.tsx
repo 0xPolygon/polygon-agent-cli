@@ -21,9 +21,8 @@ import type { AgentContext, Loadable } from './tabs.js';
 import { LogoBadge } from '../App.js';
 import { FundingScreen } from '../components/FundingScreen.js';
 import { fetchActivity, fetchHoldings } from '../indexer';
-import { rememberedEmail } from './account.js';
 import { SKILL_URL } from './agents.js';
-import { takeLinkToken } from './credentials-api.js';
+import { accountEmail, takeLinkToken } from './credentials-api.js';
 import { CredentialsTab } from './Credentials.js';
 import { fetchPolygonRates, fetchVaultBalances, fetchVaults } from './earn.js';
 import { fetchPositions, fetchPredictionCash } from './markets.js';
@@ -88,8 +87,8 @@ export function Dashboard({
   const [toast, setToast] = useState<string | null>(null);
   // The agent's signed token from the link fragment; read once per load.
   const [linkToken] = useState(() => takeLinkToken(walletAddress));
+  const [email] = useState(() => accountEmail(walletAddress, linkToken));
 
-  const [email] = useState(() => rememberedEmail(walletAddress));
   const holdings = useLoad<Holding[]>(
     () => fetchHoldings(walletAddress, chainId),
     [walletAddress, chainId]

@@ -2,6 +2,8 @@
 // the dashboard link's fragment (#t=...). The fragment never reaches a server;
 // we move it to sessionStorage and clear it from the address bar.
 
+import { rememberedEmail, rememberEmail } from './account.js';
+
 const STORAGE_KEY = 'agentconnect.token';
 
 export interface ShippingAddress {
@@ -33,6 +35,23 @@ function tokenClaims(token: string): { w?: string; exp?: number } | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The owner's email, from the certificate inside the agent's link token. It is
+ * remembered per wallet so the sidebar keeps it after the token expires.
+ */
+export function accountEmail(wallet: string, token: string | null): string | null {
+  try {
+    const cert = token?.split('.')[1];
+    const email = cert
+      ? (JSON.parse(atob(cert.replace(/-/g, '+').replace(/_/g, '/'))) as { e?: string }).e
+      : undefined;
+    rememberEmail(wallet, email);
+  } catch {
+    // An unreadable token: fall back to what this browser remembers.
+  }
+  return rememberedEmail(wallet);
 }
 
 /** Take the token from the URL fragment (once), else from this tab's storage. */
