@@ -22,19 +22,19 @@ Install into the folder your platform keeps across restarts:
 |---|---|---|
 | Muse | the VM's persistent workspace folder | the workspace's skills folder |
 | OpenClaw | `~/.openclaw/workspace` | `~/.openclaw/workspace/skills` |
-| Hermes | `~/.hermes` | `~/.hermes/skills` |
+| Hermes | `$HERMES_HOME` (`~/.hermes` if it's not set) | `$HERMES_HOME/skills` |
 | Claude Code | `$HOME` | `~/.claude/skills` |
 | Codex | `$HOME` | `~/.codex/skills` |
 | Cursor | `$HOME` | `~/.cursor/skills` |
 | A computer, anything else | `$HOME` | your platform's skills folder, if it has one |
 
-If you're not sure which folder survives a restart, ask the user. Use absolute paths throughout (expand `~`). The install goes in `<workspace>/.polygon-agent`; below it's `$ROOT`:
+If you're not sure which folder survives a restart, ask the user. Use absolute paths throughout (expand `~` and variables like `$HERMES_HOME`). The install goes in `<workspace>/.polygon-agent`; below it's `$ROOT`:
 
 ```sh
-ROOT='/absolute/path/to/workspace/.polygon-agent'
+export ROOT='/absolute/path/to/workspace/.polygon-agent'
 ```
 
-Keep the single quotes, so a path with spaces works (a `'` in the path itself is written `'\''`). Run each code block below as one command. Shell variables don't carry over between commands on every platform; if they don't on yours, start each block with this `ROOT=` line. The blocks that write files stop if `ROOT` isn't set, or still holds the example path.
+Keep the single quotes, so a path with spaces works (a `'` in the path itself is written `'\''`). Run each code block below as one command. Some platforms keep exported variables from one command to the next and some don't; if `ROOT` is empty in a later step, start each block with this `export ROOT=` line. The blocks that write files stop if `ROOT` isn't set, or still holds the example path. Steps 3 and 4 download and install, which can take a few minutes: if your platform limits how long a command may run, allow up to 10 minutes for them.
 
 ## 2. Already installed?
 
@@ -108,7 +108,7 @@ If you came here from step 2 (already installed), refresh the install first. Thi
 Then:
 
 - If the output of `workspace init` says `skill.installed: false` and your platform has a skills folder, run it again with `--skills-dir "<skills folder>"`. If its hint says this CLI version doesn't include the skill, run `"$ROOT/bin/polygon-agent" update` (it refreshes the install too).
-- If there's still no skill installed, print it and save it with your platform's own skill tool: `"$ROOT/bin/polygon-agent" skills show polygon-oms-wallet`. Or use `npx skills add 0xPolygon/polygon-agent-cli -s polygon-oms-wallet -g -y -a <agent>`, where `<agent>` is `claude-code`, `codex`, `cursor`, `openclaw` or `hermes-agent`. That copy doesn't know the wrapper's path, so tell it: `$ROOT/bin/polygon-agent`.
+- If there's still no skill installed, print it and save it with your platform's own skill tool: `"$ROOT/bin/polygon-agent" skills show polygon-oms-wallet`. Or use `npx skills add 0xPolygon/polygon-agent-cli -s polygon-oms-wallet -g -y --copy -a <agent>`, where `<agent>` is `claude-code`, `codex`, `cursor`, `openclaw` or `hermes-agent`. That copy doesn't know the wrapper's path, so tell it: `$ROOT/bin/polygon-agent`.
 
 - Read the skill now (`<skills folder>/polygon-oms-wallet/SKILL.md`, or the printed one), even if it was installed before. Follow its rules for the rest of this conversation, starting with the steps below.
 
@@ -161,7 +161,7 @@ Run `"$ROOT/bin/polygon-agent" wallet status` again. If it shows no `holdings`, 
 
 ## 9. Watches
 
-Check whether your platform can run a recurring task (a Muse scheduled task, OpenClaw cron, a Hermes cronjob, cron on a computer). You don't need one yet. When the user creates their first price watch, the skill explains how to schedule its check. If you can't schedule, tell the user that watches only run while you're active.
+Check whether your platform can run a recurring task (a Muse scheduled task, OpenClaw cron, a Hermes cron job, cron on a computer). You don't need one yet. Hermes cron jobs only run while the Hermes gateway is running (`hermes gateway start`); if it isn't, tell the user. When the user creates their first price watch, the skill explains how to schedule its check. If you can't schedule, tell the user that watches only run while you're active.
 
 ## 10. Next steps
 
