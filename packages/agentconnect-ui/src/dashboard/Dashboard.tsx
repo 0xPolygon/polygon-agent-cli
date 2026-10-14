@@ -204,7 +204,9 @@ export function Dashboard({
         <div className="flex items-center gap-2.5 p-3 border-t border-[var(--slate-100)]">
           <span className="w-8 h-8 rounded-full bg-gradient-to-br from-[var(--purple-500)] to-[var(--purple-300)] flex-shrink-0" />
           <span className="flex flex-col gap-0.5 min-w-0">
-            <span className="text-sm font-bold truncate">{email ?? 'Your wallet'}</span>
+            <span className="text-sm font-bold truncate max-w-[140px]">
+              {email ?? 'Your wallet'}
+            </span>
             <span className="text-xs text-[var(--slate-500)]">
               {totalBalance === null ? '…' : usd(totalBalance)}
             </span>
