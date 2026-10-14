@@ -15,12 +15,13 @@ import type { Plan, PlanChain } from '../session/plan.ts';
 import type { RacSlot } from '../session/rac.ts';
 import type { OwnerContext } from './requests.ts';
 
-import { CliError, mapOmsError } from '../errors.ts';
+import { CliError, httpStatus, mapOmsError } from '../errors.ts';
 import { makeFeeSelector } from '../oms-tx.ts';
 import { polymarketOwnerStep } from '../polymarket/owner-step.ts';
 import { resetLedger } from '../session/ledger.ts';
 import { planSummary, toGrants } from '../session/plan.ts';
 import {
+  hasRacKey,
   parkedRacSlots,
   racClient,
   readRacRecord,
@@ -570,18 +571,54 @@ async function access(params: {
   };
 }
 
+// Revokes a session key like `wallet logout`: through the key itself (a key OMS no longer
+// accepts, 401, has no access left), else as the owner. Throws if neither works.
+async function revokeSessionKey(params: {
+  wallet: string;
+  slot: RacSlot;
+  record: { credentialId: string };
+  owner: Pick<OMSWallet['wallet'], 'revokeAccess'>;
+}): Promise<void> {
+  const { credentialId } = params.record;
+  let keyError: unknown;
+  if (hasRacKey({ wallet: params.wallet, slot: params.slot })) {
+    try {
+      await racClient({ wallet: params.wallet, slot: params.slot }).revokeCredential({
+        credentialId
+      });
+      return;
+    } catch (error) {
+      if (httpStatus(error) === 401) return;
+      keyError = error;
+    }
+  }
+  try {
+    await params.owner.revokeAccess({ credentialId });
+  } catch (error) {
+    const reason = (e: unknown) => (e instanceof Error ? e.message : String(e));
+    throw new CliError({
+      code: 'upstream_unavailable',
+      message: `Couldn't revoke this install's session key ${credentialId} (${reason(keyError ?? error)}), so nothing changed. Try again shortly.`,
+      cause: error
+    });
+  }
+}
+
 // The sign-in is kept as this install's own (confirmOwnerRequest leaves it live). Its session
 // keys are revoked while the owner is signed in, then the session records go and the pointer
 // says owner. If a revoke fails nothing local changes, and the sign-in is revoked instead.
 async function keepSignedIn(params: { context: OwnerContext; wallet: string; now: Date }) {
   const { owner, walletAddress, request } = params.context;
-  const records = (['rac', 'rac-next', ...parkedRacSlots(params.wallet)] as const)
-    .map((slot) => readRacRecord({ wallet: params.wallet, slot }))
-    .filter((record) => record !== null);
-  for (const record of records) {
+  const slots = (['rac', 'rac-next', ...parkedRacSlots(params.wallet)] as const).flatMap((slot) => {
+    const record = readRacRecord({ wallet: params.wallet, slot });
+    return record ? [{ slot, record }] : [];
+  });
+  for (const { slot, record } of slots) {
+    // Past its lifetime, a key has no access left.
     if (Date.parse(record.expiresAt) <= params.now.getTime()) continue;
-    await owner.wallet.revokeAccess({ credentialId: record.credentialId });
+    await revokeSessionKey({ wallet: params.wallet, slot, record, owner: owner.wallet });
   }
+  const records = slots.map((s) => s.record);
   removeSessionState(params.wallet);
   const pointer = await loadOmsWalletPointer(params.wallet);
   await saveOmsWalletPointer(params.wallet, {
