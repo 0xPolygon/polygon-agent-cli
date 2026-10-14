@@ -337,6 +337,64 @@ describe('polymarketOwnerStep', () => {
       expect(out).toMatchObject({ backedUp: false, existingAccount: { address: A } });
     });
 
+    describe('when several hold money', () => {
+      const B = '0x00000000000000000000000000000000000000B0';
+      const twoFunded = async () => {
+        const owner = fakeOwner();
+        await addKey(owner, { id: 'w-a', address: A, reference: THEIRS });
+        await addKey(owner, { id: 'w-b', address: B, reference: 'polymarket-trading-key' });
+        recoverOtherKey.mockImplementation(async ({ target }: { target: { id: string } }) =>
+          target.id === 'w-a' ? holds('3') : holds('1.5', [{ title: 'Q' }])
+        );
+        return owner;
+      };
+
+      it('a sign-in that ends gives the plain message with the totals, making nothing', async () => {
+        const owner = await twoFunded();
+        const out = await step(owner);
+        expect(out).toEqual({
+          backedUp: false,
+          existingAccount: {
+            pusd: '4.5',
+            positions: 1,
+            accounts: 2,
+            message:
+              'You already have 2 Polymarket accounts with $4.50 and 1 open position in total. Sign in once more to use them here.',
+            command: `polygon-agent wallet login --owner --name ${wallet}`
+          }
+        });
+        expect(readExistingAccount(wallet)).toMatchObject({ accounts: 2 });
+        expect(owner.importWallet).not.toHaveBeenCalled();
+        expect(restoreFromOms).not.toHaveBeenCalled();
+      });
+
+      it('signed in, asks which account this agent uses, restoring none', async () => {
+        const owner = await twoFunded();
+        const out = await step(owner, true);
+        expect(out).toEqual({
+          backedUp: false,
+          chooseAccount: {
+            accounts: [
+              { address: A, reference: THEIRS, account: '0xACCOUNT', pusd: '3', positions: 0 },
+              {
+                address: B,
+                reference: 'polymarket-trading-key',
+                account: '0xACCOUNT',
+                pusd: '1.5',
+                positions: 1
+              }
+            ],
+            message:
+              'You have 2 Polymarket accounts with money in them. Which one should this agent use?',
+            command: `polygon-agent polymarket setup --broadcast --from <address> --wallet ${wallet}`
+          }
+        });
+        expect(restoreFromOms).not.toHaveBeenCalled();
+        expect(owner.importWallet).not.toHaveBeenCalled();
+        expect(owner.walletAddress).toBe(MAIN);
+      });
+    });
+
     it('is not probed when this machine already uses it under another wallet name', async () => {
       const owner = fakeOwner();
       await addKey(owner, { id: 'w-a', address: A, reference: THEIRS });

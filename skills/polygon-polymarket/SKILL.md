@@ -49,6 +49,7 @@ Every sign-in checks this automatically: `wallet login --owner`, and every confi
   - Owner mode: the account is restored and OMS signs as the key (`restored: true`). Nothing else to do.
   - Session mode: this install can't sign as that key once the sign-in ends, so nothing is made over the account. The result has `existingAccount` with `message` and `command`. Tell the user the `message` as it is ("You already have a Polymarket account with $4.20 and 2 open positions. Sign in once more to use it here."), and run the `command` (`wallet login --owner`) once they agree. On a session-mode install that starts one more sign-in by the same method as before (a page or an emailed code: show it, then `wallet confirm`). Once confirmed, the install stays signed in and uses the account (`action: "owner"`, `polymarket.restored: true`). Don't explain allowances or modes unless the user asks.
   - If the account's key holds nothing, a session-mode install gets its own key under the shared label instead.
+  - Several older accounts hold money (from earlier installs): session mode gives the same `existingAccount` message with totals ("You already have 2 Polymarket accounts with $4.50 in total. Sign in once more to use them here."). Signed in, the result has `chooseAccount` instead: tell the user its `message`, show each of `chooseAccount.accounts` (balance and open positions), and once they pick, run its `command` with that account's `address`. Nothing is restored or made until they pick.
 - Local records name a key OMS doesn't hold: nothing changes and no key is made (`backedUp: false` with an `error`).
 
 A key is never replaced, and no second account is made over one that holds anything.
@@ -207,7 +208,7 @@ agent polymarket pnl [--interval 1d|1w|1m|max]            # valueUsd, realized, 
 | Code | Meaning and fix |
 | --- | --- |
 | `not_set_up` | No Polymarket account for this wallet. Run `agent polymarket setup --wallet <name> --broadcast`. |
-| `ambiguous_trading_key` | `setup` found several backed-up keys holding funds, or one it couldn't read, and made nothing. Ask the user which of `details.tradingKeys` to restore, then `setup --broadcast --from <address>`, or `--new` for a separate account. |
+| `ambiguous_trading_key` | `setup` found several accounts holding money, or one it couldn't read, and made nothing. Tell the user the message, show each of `details.tradingKeys` (balance and open positions), and once they pick, run `setup --broadcast --from <address>`. Unreadable: try again shortly. |
 | `below_bridge_minimum` | Deposit or withdrawal is under $2. Use $2 or more. To withdraw a smaller balance, keep it in Polymarket until it reaches $2. |
 | `insufficient_pusd` | Not enough pUSD in the Polymarket wallet. For a buy, the message gives the balance and the shortfall: offer to bid the balance, or deposit the `hint` amount. Never wait for more to arrive. |
 | `sign_in_required` | The user's Polymarket account exists, and this install needs one more sign-in to use it. Tell the user the `message`, then run the `command` when they agree. |
