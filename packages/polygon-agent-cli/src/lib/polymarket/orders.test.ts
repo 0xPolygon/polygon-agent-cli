@@ -20,6 +20,8 @@ vi.mock('./account.ts', () => ({
   getTradingClient: async () => client,
   pusdBalance: async () => pusd.value
 }));
+const pendingDeposit = vi.hoisted(() => ({ value: null as null | Record<string, unknown> }));
+vi.mock('./deposits.ts', () => ({ loadPending: () => pendingDeposit.value }));
 vi.mock('./region.ts', async (o) => ({
   ...(await o<Record<string, unknown>>()),
   checkRegion: async () => region.value
@@ -138,15 +140,42 @@ describe('buy', () => {
     ).rejects.toMatchObject({ code: 'region_close_only' });
   });
 
-  it('refuses with insufficient_pusd and a deposit hint, posting nothing', async () => {
-    pusd.value = 1_000_000n;
+  it('refuses a bid over the balance at once, with the shortfall and both ways out', async () => {
+    pusd.value = 9_870_000n;
     client.estimateMarketPrice.mockResolvedValue(0.5);
     await expect(
-      buy({ wallet: 'main', ref: 'will-x', outcome: 'yes', usd: '5', broadcast: true })
+      buy({ wallet: 'main', ref: 'will-x', outcome: 'yes', usd: '10', broadcast: true })
     ).rejects.toMatchObject({
       code: 'insufficient_pusd',
-      hint: expect.stringContaining('agent polymarket deposit 5')
+      message:
+        'The Polymarket account holds $9.87, $0.13 short of the $10 bid. Bid $9.87 or less, or deposit more.',
+      // Under the bridge minimum, the deposit is the minimum.
+      hint: 'agent polymarket deposit 2 --wallet main --broadcast',
+      details: { balanceUsd: '9.87', bidUsd: '10', shortfallUsd: '0.13' }
     });
+    expect(client.placeMarketOrder).not.toHaveBeenCalled();
+  });
+
+  it('suggests depositing the whole shortfall when it is over the bridge minimum', async () => {
+    pusd.value = 1_000_000n;
+    await expect(
+      buy({ wallet: 'main', ref: 'will-x', outcome: 'yes', usd: '5', broadcast: true })
+    ).rejects.toMatchObject({ hint: 'agent polymarket deposit 4 --wallet main --broadcast' });
+  });
+
+  it('says a deposit is still being credited instead of asking for another', async () => {
+    pusd.value = 0n;
+    pendingDeposit.value = { amountUnits: '5000000' };
+    try {
+      await expect(
+        buy({ wallet: 'main', ref: 'will-x', outcome: 'yes', usd: '5', broadcast: true })
+      ).rejects.toMatchObject({
+        code: 'bridge_pending',
+        details: { pendingDepositUsd: '5', shortfallUsd: '5' }
+      });
+    } finally {
+      pendingDeposit.value = null;
+    }
     expect(client.placeMarketOrder).not.toHaveBeenCalled();
   });
 

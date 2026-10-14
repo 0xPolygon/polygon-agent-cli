@@ -28,7 +28,17 @@ export function tradingKeyReference(install: string): string {
   return `${prefix}${name || 'install'}`;
 }
 
-// This install's trading-key reference.
+// The one trading key every install of a user shares, so one Polymarket account follows the
+// user across machines. New keys are backed up under it; per-install labels are older keys.
+export const SHARED_TRADING_KEY_REFERENCE = `${TRADING_KEY_REFERENCE}:agent`;
+
+// The command that signs this install in to use the account through OMS. A session-mode install
+// keeps that sign-in, by the same method it signs in with (`wallet login --owner` routes it).
+export function signInAgainCommand(wallet: string): string {
+  return `polygon-agent wallet login --owner${wallet === 'main' ? '' : ` --name ${wallet}`}`;
+}
+
+// This install's own trading-key reference (keys backed up before the shared one).
 export function installTradingKeyReference(): string {
   return tradingKeyReference(installName());
 }

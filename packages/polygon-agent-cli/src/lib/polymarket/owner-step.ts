@@ -1,29 +1,44 @@
-// Best-effort step run while an owner request is confirmed (the CLI is briefly signed in as
-// the owner): create the Polymarket trading key if needed and back it up into the user's
-// OMS account. It never throws, so it can never fail the owner request it rides on.
+// Best-effort step run while the owner is signed in (a login, or any owner request): make sure
+// this install can use the user's one Polymarket account. It never throws, so it can never fail
+// the sign-in it rides on.
+//
+// One trading key per user, backed up in OMS under the shared label. An install that has the
+// key locally backs it up. One that doesn't finds the account's key in OMS: kept signed in, it
+// restores the account and signs through OMS; otherwise, once this sign-in ends it can't sign
+// as that key, so it records the account and says one more sign-in uses it here. A key is never
+// replaced, and no second account is made over one that holds anything.
 
 import { privateKeyToAccount } from 'viem/accounts';
 
 import type { RecoveryResult } from './account.ts';
+import type { ExistingAccount } from './find-key.ts';
 import type { OmsWalletLike } from './oms-key.ts';
 
 import {
   ensureTradingKey,
   hasLocalKey,
-  loadAccount,
   localTradingKeyAddresses,
+  loadAccount,
   previousTradingKeyAddresses,
   readBackup,
-  recoverAccount,
+  restoreFromOms,
   sweepOldKey,
   writeBackup
 } from './account.ts';
 import {
+  clearExistingAccount,
+  existingAccountMessage,
+  findAccountKey,
+  holdsSomething,
+  probeKey,
+  writeExistingAccount
+} from './find-key.ts';
+import {
   backupTradingKey,
   findTradingKeyWallet,
-  installTradingKeyReference,
-  listTradingKeyWallets,
-  selectMainWallet
+  SHARED_TRADING_KEY_REFERENCE,
+  selectMainWallet,
+  signInAgainCommand
 } from './oms-key.ts';
 
 type SweepEntry =
@@ -34,52 +49,31 @@ export type OwnerStepResult = RecoveryResult & {
   mainWalletError?: string;
   sweptPrevious?: SweepEntry[];
   sweepError?: string;
-  otherTradingKeys?: Array<{ address: string; reference: string }>;
+  restored?: true;
+  account?: string;
+  existingAccount?: Omit<ExistingAccount, 'at'> & { message: string; command: string };
 };
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 async function backUp(wallet: string, owner: OmsWalletLike, created: boolean) {
   const key = await ensureTradingKey(wallet);
-  const res = await backupTradingKey(owner, key, installTradingKeyReference());
+  const res = await backupTradingKey(owner, key, SHARED_TRADING_KEY_REFERENCE);
   writeBackup(wallet, {
     omsWalletId: res.omsWalletId,
     address: res.address,
     at: new Date().toISOString(),
     kind: loadAccount(wallet)?.kind ?? 'deposit-wallet'
   });
+  clearExistingAccount(wallet);
   return { backedUp: true, omsWalletId: res.omsWalletId, ...(created ? { created: true } : {}) };
-}
-
-// The trading key is gone locally. Recovers through OMS when OMS holds the key: the old
-// account is swept to the main wallet before any new key is made. When OMS doesn't hold
-// it, the key is lost: never generate or import a replacement over the old account.
-async function recoverMissingKey(p: {
-  wallet: string;
-  owner: OmsWalletLike;
-  mainAddress: string;
-  found: { id: string; address: string } | null;
-  attempted: Set<string>;
-}): Promise<OwnerStepResult> {
-  if (p.found) p.attempted.add(p.found.address.toLowerCase());
-  if (!p.found) {
-    return {
-      backedUp: false,
-      error: 'trading key missing locally and OMS holds no backup of it; nothing was changed'
-    };
-  }
-  return recoverAccount({
-    wallet: p.wallet,
-    owner: p.owner,
-    mainAddress: p.mainAddress,
-    target: p.found
-  });
 }
 
 async function step(p: {
   wallet: string;
   owner: OmsWalletLike;
   mainAddress: string;
+  signsWithOms: boolean;
   attempted: Set<string>;
 }): Promise<OwnerStepResult> {
   const { wallet, owner } = p;
@@ -92,33 +86,53 @@ async function step(p: {
     }
     return backUp(wallet, owner, false);
   }
-  // Local records name the lost key: recover that exact key or change nothing.
-  const local = loadAccount(wallet);
-  const backup = readBackup(wallet);
-  if (local || backup) {
-    const known = local?.signer ?? backup?.address;
-    const found = known ? await findTradingKeyWallet(owner, { address: known }) : null;
-    return recoverMissingKey({ ...p, found });
+  const recorded = !!loadAccount(wallet) || !!readBackup(wallet);
+  const target = await findAccountKey(wallet, owner);
+  if (target) p.attempted.add(target.address.toLowerCase());
+  if (!target) {
+    // Local records name a key OMS doesn't hold: it is lost. Never make a key over its account.
+    if (recorded) {
+      return {
+        backedUp: false,
+        error: 'trading key missing locally and OMS holds no backup of it; nothing was changed'
+      };
+    }
+    return backUp(wallet, owner, true);
   }
-  // A wiped machine loses account.json too: if OMS holds this install's key, recover it, never
-  // re-create.
-  const found = await findTradingKeyWallet(owner, { reference: installTradingKeyReference() });
-  if (found) return recoverMissingKey({ ...p, found });
-  // Keys other installs labelled may hold this user's account (a reinstall under another name,
-  // a new VM). A key made here would stop setup from restoring one, so setup decides instead:
-  // it restores the funded key, or makes this install its own.
-  const mine = localTradingKeyAddresses();
-  const others = (await listTradingKeyWallets(owner)).filter(
-    (x) => !mine.has(x.address.toLowerCase())
-  );
-  if (others.length > 0) {
+  if (p.signsWithOms) {
+    const restored = await restoreFromOms({ wallet, owner, target });
+    clearExistingAccount(wallet);
     return {
-      backedUp: false,
-      otherTradingKeys: others.map(({ address, reference }) => ({ address, reference })),
-      hint: 'Run polymarket setup --broadcast: it restores the backed-up key that holds funds or positions, or makes a new one when none does.'
+      backedUp: true,
+      omsWalletId: restored.backup.omsWalletId,
+      restored: true,
+      account: restored.account.wallet
     };
   }
-  return backUp(wallet, owner, true);
+  // This sign-in ends after the request: the key can't sign here afterwards.
+  const probe = await probeKey(owner, target);
+  if (!holdsSomething(probe) && !recorded) {
+    // Nothing to keep: give this install the account to trade with. The newest key under the
+    // shared label is the one every install finds next.
+    return backUp(wallet, owner, true);
+  }
+  const existing: ExistingAccount = {
+    address: target.address,
+    account: probe.account,
+    pusd: probe.pusd,
+    positions: Array.isArray(probe.positionsLeft) ? probe.positionsLeft.length : null,
+    at: new Date().toISOString()
+  };
+  writeExistingAccount(wallet, existing);
+  const { at: _at, ...shown } = existing;
+  return {
+    backedUp: false,
+    existingAccount: {
+      ...shown,
+      message: existingAccountMessage(existing),
+      command: signInAgainCommand(wallet)
+    }
+  };
 }
 
 // Keys this install replaced (recorded in its previous-* folders) can still hold pUSD, e.g.
@@ -151,6 +165,8 @@ export async function polymarketOwnerStep(p: {
   wallet: string;
   owner: OmsWalletLike;
   mainAddress: string;
+  // True when the sign-in stays (owner mode): the account is restored and signed through OMS.
+  signsWithOms: boolean;
 }): Promise<OwnerStepResult> {
   let result: OwnerStepResult;
   const attempted = new Set<string>();

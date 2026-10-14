@@ -47,6 +47,7 @@ export type PolymarketErrorCode =
   | 'market_not_accepting_orders'
   | 'not_set_up'
   | 'ambiguous_trading_key'
+  | 'sign_in_required'
   | 'below_bridge_minimum'
   | 'insufficient_pusd'
   | 'insufficient_shares'

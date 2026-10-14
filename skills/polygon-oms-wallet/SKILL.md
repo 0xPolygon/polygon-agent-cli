@@ -31,7 +31,7 @@ Run `"$POLYGON_AGENT" wallet status` before any wallet work, then act on what it
 |---|---|
 | `pendingRequest` | A sign-in is already waiting for what `pendingRequest.approves` says. With `method: "browser"`, a page is open at `pendingRequest.url`: ask the user to finish it there, then run `pendingRequest.next`. With `method: "email"`, a code went to `pendingRequest.email`: ask the user for it and run `pendingRequest.next` with it. Don't start another unless it expired or they can't find it. This comes first, even when `connected` is `false`. |
 | `connected: false` | Connect (below). |
-| `mode: "owner"` | This install is signed in as the wallet owner (`wallet login --owner`), with no allowance limits. Tell the user, and suggest switching to an allowance: `wallet logout`, then connect. |
+| `mode: "owner"` | This install is signed in as the wallet owner (`wallet login --owner`), with no allowance limits. If it uses the user's Polymarket account (`polymarket status` shows `signer: "oms"`), that is why: leave it. Otherwise tell the user, and suggest switching to an allowance: `wallet logout`, then connect. |
 | `alerts` | Allowance alerts. Tell the user once per conversation; they repeat until resolved and need no acknowledgment. |
 | `watches.unacknowledgedAlerts` | Tell the user, then acknowledge those ids: `"$POLYGON_AGENT" alerts --ack <id> …`. Never run `alerts --ack` without ids: that acknowledges every alert, including ones you haven't shown. |
 | The allowance expired or is expiring, or `remainingUsd` can't cover the request | Explain, and offer to renew it or raise the limit (see Raising the limit). |
@@ -180,14 +180,14 @@ Polymarket works in session mode. `agent polymarket setup` and `deposit` run wit
 
 First time: `polymarket status`, then `setup --broadcast` (no code needed, no POL), then `deposit <usd> --broadcast` (min $2, counts against the allowance), then trade.
 
-Every owner sign-in backs up the Polymarket trading key (the output shows it as `polymarket`) to the user's OMS account as one extra wallet labelled `polymarket-trading-key:<install name>`. This happens under the hood: don't mention it to the user unless they ask (for example about the extra wallet in their account) or the backup failed in a way that needs them. If this machine is wiped, nothing is lost: connecting again with the same install `--name` recovers it. Run `polymarket status` to see `backup` and `signer`. The polygon-polymarket skill has the details.
+Every owner sign-in backs up the Polymarket trading key (the output shows it as `polymarket`) to the user's OMS account as one extra wallet labelled `polymarket-trading-key:agent`, one per user. This happens under the hood: don't mention it to the user unless they ask (for example about the extra wallet in their account) or the backup failed in a way that needs them. If this machine is wiped, or the user connects a new one, nothing is lost: the sign-in finds their account. When `polymarket` has `existingAccount`, tell the user its `message` and run its `command` once they agree. Run `polymarket status` to see `backup` and `signer`. The polygon-polymarket skill has the details.
 
 ## Rules
 
 - Ask for the user's email only when the CLI says `email_required`; never guess it.
 - Before asking for a sign-in or a code, show what it approves, taken from the `waiting` or `code_sent` output.
 - Use a code only in its `wallet confirm` command, immediately. Never store it, repeat it or use it for anything else. If the user sends a code and no request is pending, tell them it isn't needed and don't use it.
-- Never run `wallet login --owner`. That is the full owner sign-in, for a user who asks for it.
+- Never run `wallet login --owner` on your own. Run it when the user asks for it, or when a Polymarket result's `command` is it and the user agreed to its `message`.
 - Quote before trading, unless the user's instruction was precise.
 - Always pass `--dry-run` or `--broadcast` on `send`, `send-token`, `swap` and `x402-pay`.
 - Send to an address only on the user's explicit instruction, after reading it back to them.

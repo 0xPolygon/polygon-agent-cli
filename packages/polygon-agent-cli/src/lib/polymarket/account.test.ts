@@ -418,21 +418,22 @@ describe('getTradingClient with the key missing locally', () => {
     expect(owner.walletAddress).toBe(MAIN);
   });
 
-  it('fails with not_set_up and a session-mode hint without an owner session, making no key', async () => {
+  it('asks for one more sign-in in session mode, making no key', async () => {
     const signer = await accountWithLostKey('main');
     account.writeBackup('main', { omsWalletId: 'w-old', address: signer, at: 'x' });
     await pointer('session');
     sdk.owner = fakeOwner(signer);
     await expect(account.getTradingClient('main')).rejects.toMatchObject({
-      code: 'not_set_up',
-      message: 'The Polymarket key is not on this machine; it is backed up in your OMS account.',
-      hint: 'The next owner approval recovers it into a new key, or run wallet logout, then agent wallet login --owner to use it through OMS.'
+      code: 'sign_in_required',
+      message:
+        "This Polymarket account's key is kept in your wallet, not on this machine. Sign in once more to use it here.",
+      command: 'polygon-agent wallet login --owner'
     });
     expect(account.hasLocalKey('main')).toBe(false);
     expect(sdk.createSecureClient).not.toHaveBeenCalled();
   });
 
-  it('fails the same way in owner mode when signed out', async () => {
+  it('asks for the sign-in the same way in owner mode when signed out', async () => {
     const signer = await accountWithLostKey('main');
     account.writeBackup('main', { omsWalletId: 'w-old', address: signer, at: 'x' });
     await pointer();
@@ -440,8 +441,8 @@ describe('getTradingClient with the key missing locally', () => {
     owner.walletAddress = undefined;
     sdk.owner = owner;
     await expect(account.getTradingClient('main')).rejects.toMatchObject({
-      code: 'not_set_up',
-      hint: 'Sign in with agent wallet login --owner to use it.'
+      code: 'sign_in_required',
+      command: 'polygon-agent wallet login --owner'
     });
     expect(account.hasLocalKey('main')).toBe(false);
     expect(sdk.createSecureClient).not.toHaveBeenCalled();
@@ -459,268 +460,8 @@ describe('getTradingClient with the key missing locally', () => {
   });
 });
 
-describe('recoverAccount', () => {
-  const previousDirs = (wallet: string) =>
-    fs.readdirSync(account.accountDir(wallet)).filter((x) => x.startsWith('previous-'));
-
-  it('sweeps pUSD to the main wallet, archives the old records, creates and backs up a new key', async () => {
-    const signer = await accountWithLostKey('rec');
-    const before = snapshot(account.accountDir('rec'));
-    const owner = fakeOwner(signer);
-    const out = await account.recoverAccount({
-      wallet: 'rec',
-      owner: owner as never,
-      mainAddress: MAIN,
-      target: { id: 'w-old', address: signer }
-    });
-
-    expect(out).toMatchObject({
-      backedUp: true,
-      omsWalletId: 'w-new',
-      created: true,
-      recovered: {
-        withdrawnUsd: '2.5',
-        txHash: '0xSWEEP',
-        previousAccount: DEPOSIT_WALLET,
-        positionsLeft: []
-      }
-    });
-    // The old account signs through OMS, with its stored builder key: nothing is minted.
-    expect(await (sdk.created[0].signer as { getAddress(): Promise<string> }).getAddress()).toBe(
-      signer
-    );
-    expect(sdk.createBuilderApiKey).not.toHaveBeenCalled();
-    expect(sdk.withdrawAddress).toHaveBeenCalledWith({ wallet: DEPOSIT_WALLET, recipient: MAIN });
-    expect(sdk.clients[0].transferErc20).toHaveBeenCalledWith({
-      amount: 2_500_000n,
-      recipientAddress: '0xB2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2',
-      tokenAddress: PUSD_TOKEN
-    });
-    expect(sdk.clients[0].listPositions).toHaveBeenCalledWith({ status: 'OPEN' });
-
-    // The old records moved, unchanged, into previous-<timestamp>/, plus a record of
-    // which agent wallet holds the old key (there was no local backup.json).
-    const [prev] = previousDirs('rec');
-    expect(out.recovered?.previousRecords).toBe(prev);
-    const { 'backup.json': oldBackup, ...archived } = snapshot(
-      path.join(account.accountDir('rec'), prev)
-    );
-    expect(archived).toEqual(before);
-    expect(JSON.parse(oldBackup)).toMatchObject({ omsWalletId: 'w-old', address: signer });
-
-    // A new key, backed up to OMS, and no account.json yet (setup creates the new account).
-    const newKey = await account.ensureTradingKey('rec');
-    expect(privateKeyToAccount(newKey).address).not.toBe(signer);
-    expect(owner.importWallet).toHaveBeenCalledTimes(1);
-    expect(account.readBackup('rec')).toMatchObject({
-      omsWalletId: 'w-new',
-      address: privateKeyToAccount(newKey).address
-    });
-    expect(account.loadAccount('rec')).toBeNull();
-    expect(owner.walletAddress).toBe(MAIN);
-  });
-
-  it('leaves pUSD under the bridge minimum in the old account and still rotates', async () => {
-    const signer = await accountWithLostKey('rec');
-    sdk.updateBalanceAllowance.mockResolvedValueOnce({ balance: '1843870', allowances: {} });
-    const owner = fakeOwner(signer);
-    const out = await account.recoverAccount({
-      wallet: 'rec',
-      owner: owner as never,
-      mainAddress: MAIN,
-      target: { id: 'w-old', address: signer }
-    });
-
-    expect(out).toMatchObject({
-      backedUp: true,
-      omsWalletId: 'w-new',
-      recovered: { withdrawnUsd: '0', txHash: null, positionsLeft: [] }
-    });
-    expect(sdk.withdrawAddress).not.toHaveBeenCalled();
-    expect(sdk.clients[0].transferErc20).not.toHaveBeenCalled();
-  });
-
-  it('refuses to rotate while the old account holds open positions, after the sweep', async () => {
-    const signer = await accountWithLostKey('rec');
-    const dir = account.accountDir('rec');
-    const before = snapshot(dir);
-    sdk.positions = [
-      {
-        title: 'Will it rain?',
-        outcome: 'Yes',
-        conditionId: '0xc1',
-        currentSize: '10',
-        currentValue: '4.2'
-      }
-    ];
-    const owner = fakeOwner(signer);
-    const out = await account.recoverAccount({
-      wallet: 'rec',
-      owner: owner as never,
-      mainAddress: MAIN,
-      target: { id: 'w-old', address: signer }
-    });
-    const left = [
-      { title: 'Will it rain?', outcome: 'Yes', conditionId: '0xc1', shares: '10', valueUsd: '4.2' }
-    ];
-    expect(out).toMatchObject({
-      backedUp: false,
-      omsWalletId: 'w-old',
-      recovered: { withdrawnUsd: '2.5', txHash: '0xSWEEP', positionsLeft: left },
-      positionsLeft: left,
-      error: 'Positions remain in the old Polymarket account; the key was not replaced.',
-      hint: 'Positions remain in the old Polymarket account. Sell or redeem them from an owner install (wallet logout, then agent wallet login --owner, then polymarket setup --broadcast restores the account), then the next owner approval finishes the recovery.'
-    });
-    expect(out).not.toHaveProperty('created');
-    expect(sdk.clients[0].transferErc20).toHaveBeenCalledTimes(1);
-    expect(snapshot(dir)).toEqual(before);
-    expect(previousDirs('rec')).toHaveLength(0);
-    expect(account.hasLocalKey('rec')).toBe(false);
-    expect(owner.importWallet).not.toHaveBeenCalled();
-    expect(owner.walletAddress).toBe(MAIN);
-  });
-
-  it('refuses to rotate when the open positions cannot be read', async () => {
-    const signer = await accountWithLostKey('rec');
-    const dir = account.accountDir('rec');
-    const before = snapshot(dir);
-    const owner = fakeOwner(signer);
-    sdk.positionsFail = new Error('data api down');
-    const out = await account.recoverAccount({
-      wallet: 'rec',
-      owner: owner as never,
-      mainAddress: MAIN,
-      target: { id: 'w-old', address: signer }
-    });
-    expect(out).toMatchObject({
-      backedUp: false,
-      omsWalletId: 'w-old',
-      recovered: { withdrawnUsd: '2.5', txHash: '0xSWEEP', positionsLeft: null },
-      positionsLeft: null,
-      positionsError: expect.stringContaining('data api down'),
-      error: 'Positions remain in the old Polymarket account; the key was not replaced.'
-    });
-    expect(snapshot(dir)).toEqual(before);
-    expect(account.hasLocalKey('rec')).toBe(false);
-    expect(owner.importWallet).not.toHaveBeenCalled();
-  });
-
-  it('a withdraw failure changes nothing on disk and creates no key', async () => {
-    const signer = await accountWithLostKey('rec');
-    const dir = account.accountDir('rec');
-    const before = snapshot(dir);
-    sdk.transferFail = new Error('relayer down');
-    const owner = fakeOwner(signer);
-    const out = await account.recoverAccount({
-      wallet: 'rec',
-      owner: owner as never,
-      mainAddress: MAIN,
-      target: { id: 'w-old', address: signer }
-    });
-    expect(out).toEqual({ backedUp: false, omsWalletId: 'w-old', error: 'relayer down' });
-    expect(snapshot(dir)).toEqual(before);
-    expect(account.hasLocalKey('rec')).toBe(false);
-    expect(owner.importWallet).not.toHaveBeenCalled();
-  });
-
-  it('stops before anything moves when the key controls a different wallet than recorded', async () => {
-    const signer = await accountWithLostKey('rec');
-    const file = account.accountFile('rec', 'account.json');
-    const rec = JSON.parse(fs.readFileSync(file, 'utf8'));
-    fs.writeFileSync(
-      file,
-      JSON.stringify({ ...rec, wallet: '0xE0000000000000000000000000000000000000E0' })
-    );
-    const before = snapshot(account.accountDir('rec'));
-    const out = await account.recoverAccount({
-      wallet: 'rec',
-      owner: fakeOwner(signer) as never,
-      mainAddress: MAIN,
-      target: { id: 'w-old', address: signer }
-    });
-    expect(out.backedUp).toBe(false);
-    expect(out.error).toMatch(/not the recorded Polymarket wallet/);
-    expect(sdk.clients[0].transferErc20).not.toHaveBeenCalled();
-    expect(snapshot(account.accountDir('rec'))).toEqual(before);
-  });
-
-  it('skips the withdraw for an empty account and still replaces the key', async () => {
-    const signer = await accountWithLostKey('rec');
-    sdk.updateBalanceAllowance.mockResolvedValue({ balance: '0', allowances: {} });
-    const out = await account.recoverAccount({
-      wallet: 'rec',
-      owner: fakeOwner(signer) as never,
-      mainAddress: MAIN,
-      target: { id: 'w-old', address: signer }
-    });
-    sdk.updateBalanceAllowance.mockResolvedValue({ balance: '2500000', allowances: {} });
-    expect(out).toMatchObject({
-      backedUp: true,
-      created: true,
-      recovered: { withdrawnUsd: '0', txHash: null, positionsLeft: [] }
-    });
-    expect(sdk.clients[0].transferErc20).not.toHaveBeenCalled();
-    expect(previousDirs('rec')).toHaveLength(1);
-  });
-
-  it('rebuilds a wiped account from OMS alone: mints a builder key as the EOA, then sweeps', async () => {
-    const lost = privateKeyToAccount(`0x${'cd'.repeat(32)}`).address;
-    const owner = fakeOwner(lost);
-    const out = await account.recoverAccount({
-      wallet: 'wiped',
-      owner: owner as never,
-      mainAddress: MAIN,
-      target: { id: 'w-old', address: lost }
-    });
-    expect(out).toMatchObject({
-      backedUp: true,
-      created: true,
-      recovered: { withdrawnUsd: '2.5', txHash: '0xSWEEP', previousAccount: DEPOSIT_WALLET }
-    });
-    // EOA-mode client mints the builder key, then the deposit-wallet client uses it.
-    expect(sdk.created[0].wallet).toBe(lost);
-    expect(sdk.createBuilderApiKey).toHaveBeenCalledTimes(1);
-    expect(sdk.created[1].wallet).toBeUndefined();
-    expect(sdk.created[1].apiKey).toEqual({
-      __builder: { key: 'b-key', secret: 'b-secret', passphrase: 'b-pass' }
-    });
-    expect(sdk.clients[1].transferErc20).toHaveBeenCalledTimes(1);
-    // The old account's identity is kept in the archive.
-    const [prev] = previousDirs('wiped');
-    const archived = snapshot(path.join(account.accountDir('wiped'), prev));
-    expect(JSON.parse(archived['account.json'])).toMatchObject({
-      kind: 'deposit-wallet',
-      signer: lost,
-      wallet: DEPOSIT_WALLET
-    });
-    expect(JSON.parse(archived['backup.json'])).toMatchObject({
-      omsWalletId: 'w-old',
-      address: lost
-    });
-    expect(account.readBackup('wiped')?.omsWalletId).toBe('w-new');
-  });
-
-  it('a failed builder-key mint on a wiped machine writes nothing', async () => {
-    const lost = privateKeyToAccount(`0x${'ef'.repeat(32)}`).address;
-    sdk.createBuilderApiKey.mockRejectedValueOnce(new Error('relayer down'));
-    const owner = fakeOwner(lost);
-    const out = await account.recoverAccount({
-      wallet: 'wiped2',
-      owner: owner as never,
-      mainAddress: MAIN,
-      target: { id: 'w-old', address: lost }
-    });
-    expect(out).toEqual({ backedUp: false, omsWalletId: 'w-old', error: 'relayer down' });
-    expect(
-      fs.existsSync(path.join(String(process.env.POLYGON_AGENT_HOME), 'polymarket', 'wiped2'))
-    ).toBe(false);
-    expect(owner.importWallet).not.toHaveBeenCalled();
-  });
-});
-
 const USDC_E_TOKEN = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
 const { getPolymarketProxyWalletAddress } = await import('./gamma.ts');
-const { savePending } = await import('./deposits.ts');
 const signerOf = (opts: Record<string, unknown>) =>
   (opts.signer as { getAddress(): Promise<string> }).getAddress();
 
@@ -822,107 +563,6 @@ describe('restoreFromOms (owner mode, local key missing)', () => {
     });
     expect(res.account.kind).toBe('legacy-proxy');
     expect(res.account.wallet).toBe(await getPolymarketProxyWalletAddress(lost));
-  });
-});
-
-describe('recoverAccount refusals', () => {
-  it('refuses to rotate while a deposit to the old account is in flight', async () => {
-    const signer = await accountWithLostKey('rec');
-    savePending('rec', {
-      status: 'sent',
-      txHash: '0xDEP',
-      amountUnits: '5000000',
-      bridgeAddress: '0xB1',
-      sentAt: 'then',
-      baselineCount: 0,
-      pusdBefore: '0'
-    });
-    const dir = account.accountDir('rec');
-    const before = snapshot(dir);
-    const owner = fakeOwner(signer);
-    const out = await account.recoverAccount({
-      wallet: 'rec',
-      owner: owner as never,
-      mainAddress: MAIN,
-      target: { id: 'w-old', address: signer }
-    });
-    expect(out).toMatchObject({
-      backedUp: false,
-      omsWalletId: 'w-old',
-      recovered: { withdrawnUsd: '2.5', txHash: '0xSWEEP' },
-      pendingDeposit: { amountUsd: '5', txHash: '0xDEP', sentAt: 'then' }
-    });
-    expect(out.hint).toMatch(/after it settles/);
-    expect(snapshot(dir)).toEqual(before);
-    expect(account.hasLocalKey('rec')).toBe(false);
-    expect(owner.importWallet).not.toHaveBeenCalled();
-  });
-
-  it('rotates once the bridge reports the pending deposit completed', async () => {
-    const signer = await accountWithLostKey('rec');
-    savePending('rec', {
-      status: 'sent',
-      txHash: '0xDEP',
-      amountUnits: '5000000',
-      bridgeAddress: '0xB1',
-      sentAt: 'then',
-      baselineCount: 0,
-      pusdBefore: '0'
-    });
-    sdk.bridgeStatus.mockResolvedValueOnce({ transactions: [{ status: 'COMPLETED' }] });
-    const out = await account.recoverAccount({
-      wallet: 'rec',
-      owner: fakeOwner(signer) as never,
-      mainAddress: MAIN,
-      target: { id: 'w-old', address: signer }
-    });
-    expect(out).toMatchObject({ backedUp: true, created: true });
-    expect(sdk.bridgeStatus).toHaveBeenCalledWith('0xB1');
-  });
-
-  it('refuses to rotate an unknown-kind key whose legacy proxy holds funds, touching nothing', async () => {
-    const lost = privateKeyToAccount(`0x${'b1'.repeat(32)}`).address;
-    sdk.chain.balances[PUSD_TOKEN.toLowerCase()] = 7_000_000n;
-    const owner = fakeOwner(lost);
-    const out = await account.recoverAccount({
-      wallet: 'legacy-w',
-      owner: owner as never,
-      mainAddress: MAIN,
-      target: { id: 'w-old', address: lost }
-    });
-    expect(out).toMatchObject({
-      backedUp: false,
-      omsWalletId: 'w-old',
-      legacyProxy: {
-        address: await getPolymarketProxyWalletAddress(lost),
-        balances: { pusd: '7', usdcE: '0' }
-      }
-    });
-    expect(sdk.createSecureClient).not.toHaveBeenCalled();
-    expect(
-      fs.existsSync(path.join(String(process.env.POLYGON_AGENT_HOME), 'polymarket', 'legacy-w'))
-    ).toBe(false);
-    expect(owner.importWallet).not.toHaveBeenCalled();
-  });
-
-  it('sweeps a recorded legacy-proxy account from its proxy wallet', async () => {
-    const lost = privateKeyToAccount(`0x${'b2'.repeat(32)}`).address;
-    const proxy = await getPolymarketProxyWalletAddress(lost);
-    account.writeBackup('legacy-k', {
-      omsWalletId: 'w-old',
-      address: lost,
-      at: 'x',
-      kind: 'legacy-proxy'
-    });
-    const out = await account.recoverAccount({
-      wallet: 'legacy-k',
-      owner: fakeOwner(lost) as never,
-      mainAddress: MAIN,
-      target: { id: 'w-old', address: lost }
-    });
-    expect(sdk.created[1].wallet).toBe(proxy);
-    expect(sdk.withdrawAddress).toHaveBeenCalledWith({ wallet: proxy, recipient: MAIN });
-    expect(out).toMatchObject({ backedUp: true, recovered: { withdrawnUsd: '2.5' } });
   });
 });
 

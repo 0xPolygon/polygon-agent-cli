@@ -36,6 +36,7 @@ import {
   accessCommandModule,
   allowanceCommandModule,
   confirmCommandModule,
+  handleKeepSignedIn,
   handleLoginWait,
   handleSessionLogin,
   logoutSessionWallet,
@@ -150,6 +151,10 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
 
 // --owner: sign in from the browser and keep the owner session on disk.
 async function handleOwnerLogin(argv: LoginArgs): Promise<void> {
+  // A session-mode install keeps its next sign-in instead, by the same method it signs in with.
+  if ((await loadOmsWalletPointer(argv.name))?.access === 'session') {
+    return handleKeepSignedIn({ name: argv.name, email: argv.email });
+  }
   try {
     await refuseSessionWallet({ name: argv.name, action: 'login' });
     const oms = getOmsClient(argv.name);
@@ -173,12 +178,15 @@ async function handleOwnerLogin(argv: LoginArgs): Promise<void> {
 
     // The owner is signed in: back up the Polymarket trading key too. Never throws.
     const backUpPolymarket = (mainAddress: string) =>
-      polymarketOwnerStep({ wallet: argv.name, owner: oms.wallet, mainAddress }).catch(
-        (error: unknown) => ({
-          backedUp: false,
-          error: error instanceof Error ? error.message : String(error)
-        })
-      );
+      polymarketOwnerStep({
+        wallet: argv.name,
+        owner: oms.wallet,
+        mainAddress,
+        signsWithOms: true
+      }).catch((error: unknown) => ({
+        backedUp: false,
+        error: error instanceof Error ? error.message : String(error)
+      }));
 
     // Short-circuit if already logged in (the SDK restores the session from
     // storage on construction). Starting a new auth would clearSession(), so
