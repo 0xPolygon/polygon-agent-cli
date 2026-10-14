@@ -60,13 +60,26 @@ export function probeKey(w: OmsWalletLike, target: KeyTarget): Promise<OtherKeyR
   });
 }
 
+// A backed-up key whose account holds something, or couldn't be read (`error`).
+export type FundedKey = {
+  address: string;
+  reference: string;
+  account?: string | null;
+  pusd?: string;
+  positions?: number | null;
+  error?: string;
+};
+
+// What the user is asked when several accounts hold money: which one this agent uses.
+export function chooseAccountMessage(keys: FundedKey[]): string {
+  return `You have ${keys.length} Polymarket accounts with money in them. Which one should this agent use?`;
+}
+
 // Probes each untracked backed-up key's account, one at a time (the OMS signer is not
 // reentrant). One that holds something is the account; several, or one it can't read, need
 // the user to pick with --from.
 async function fundedOtherKey(w: OmsWalletLike): Promise<KeyTarget | null> {
-  const funded: Array<
-    { id: string; address: string; reference: string } & Record<string, unknown>
-  > = [];
+  const funded: Array<FundedKey & { id: string }> = [];
   for (const key of await untrackedTradingKeys(w)) {
     try {
       const r = await probeKey(w, key);
@@ -85,16 +98,15 @@ async function fundedOtherKey(w: OmsWalletLike): Promise<KeyTarget | null> {
     return { id: funded[0].id, address: funded[0].address };
   }
   if (funded.length === 0) return null;
+  const tradingKeys: FundedKey[] = funded.map(({ id: _id, ...rest }) => rest);
   throw new CliError({
     code: 'ambiguous_trading_key',
     message:
       funded.length === 1
-        ? `Couldn't read the account of backed-up trading key ${funded[0].address}, so a new one won't be made over it.`
-        : `${funded.length} backed-up Polymarket trading keys hold funds or positions.`,
-    hint: 'Pick one with: agent polymarket setup --broadcast --from <address>, or make a new account with --new',
-    details: {
-      tradingKeys: funded.map(({ id: _id, ...rest }) => rest)
-    }
+        ? `Couldn't read your Polymarket account (${funded[0].address}), so a new one won't be made over it. Try again shortly.`
+        : chooseAccountMessage(tradingKeys),
+    hint: 'Ask the user which account (details.tradingKeys), then: agent polymarket setup --broadcast --from <address>',
+    details: { tradingKeys }
   });
 }
 
@@ -139,11 +151,14 @@ export async function findAccountKey(
 
 // An account this install found while signed in but can't sign for once the sign-in ends.
 // Session-mode `setup` reads it (it can't ask OMS) so it never makes a second account.
+// With several accounts holding money, `accounts` counts them, and pUSD and positions are
+// totals over the ones that could be read; the sign-in that follows asks which to use.
 export type ExistingAccount = {
-  address: string;
-  account: string | null;
+  address?: string;
+  account?: string | null;
   pusd: string;
   positions: number | null;
+  accounts?: number;
   at: string;
 };
 
@@ -162,10 +177,28 @@ export function clearExistingAccount(wallet: string): void {
 }
 
 // What the user is told, in their words: the account exists, and one more sign-in uses it here.
-export function existingAccountMessage(existing: Pick<ExistingAccount, 'pusd' | 'positions'>) {
+export function existingAccountMessage(
+  existing: Pick<ExistingAccount, 'pusd' | 'positions' | 'accounts'>
+) {
   const parts = [`$${Number(existing.pusd).toFixed(2)}`];
   if (existing.positions) {
     parts.push(`${existing.positions} open position${existing.positions === 1 ? '' : 's'}`);
   }
+  if (existing.accounts && existing.accounts > 1) {
+    return `You already have ${existing.accounts} Polymarket accounts with ${parts.join(' and ')} in total. Sign in once more to use them here.`;
+  }
   return `You already have a Polymarket account with ${parts.join(' and ')}. Sign in once more to use it here.`;
+}
+
+// The marker for several accounts holding money, from the ambiguous_trading_key details.
+export function existingAccounts(keys: FundedKey[]): ExistingAccount {
+  const read = keys.filter((k) => k.error === undefined);
+  const pusd = read.reduce((sum, k) => sum + Number(k.pusd ?? 0), 0);
+  const positions = read.reduce((sum, k) => sum + (k.positions ?? 0), 0);
+  return {
+    pusd: String(Math.round(pusd * 1e6) / 1e6),
+    positions,
+    accounts: keys.length,
+    at: new Date().toISOString()
+  };
 }

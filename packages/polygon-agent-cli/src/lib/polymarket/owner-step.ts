@@ -11,9 +11,10 @@
 import { privateKeyToAccount } from 'viem/accounts';
 
 import type { RecoveryResult } from './account.ts';
-import type { ExistingAccount } from './find-key.ts';
+import type { ExistingAccount, FundedKey } from './find-key.ts';
 import type { OmsWalletLike } from './oms-key.ts';
 
+import { CliError } from '../errors.ts';
 import {
   ensureTradingKey,
   hasLocalKey,
@@ -28,6 +29,7 @@ import {
 import {
   clearExistingAccount,
   existingAccountMessage,
+  existingAccounts,
   findAccountKey,
   holdsSomething,
   probeKey,
@@ -52,9 +54,15 @@ export type OwnerStepResult = RecoveryResult & {
   restored?: true;
   account?: string;
   existingAccount?: Omit<ExistingAccount, 'at'> & { message: string; command: string };
+  chooseAccount?: { accounts: FundedKey[]; message: string; command: string };
 };
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+// Restores the account the user picked, signing through OMS.
+function chooseAccountCommand(wallet: string): string {
+  return `polygon-agent polymarket setup --broadcast --from <address>${wallet === 'main' ? '' : ` --wallet ${wallet}`}`;
+}
 
 async function backUp(wallet: string, owner: OmsWalletLike, created: boolean) {
   const key = await ensureTradingKey(wallet);
@@ -87,7 +95,37 @@ async function step(p: {
     return backUp(wallet, owner, false);
   }
   const recorded = !!loadAccount(wallet) || !!readBackup(wallet);
-  const target = await findAccountKey(wallet, owner);
+  let target: Awaited<ReturnType<typeof findAccountKey>>;
+  try {
+    target = await findAccountKey(wallet, owner);
+  } catch (error) {
+    // Several accounts hold money (or one couldn't be read): nothing is made or chosen here.
+    if (!(error instanceof CliError) || error.code !== 'ambiguous_trading_key') throw error;
+    const keys = (error.details?.tradingKeys ?? []) as FundedKey[];
+    if (p.signsWithOms) {
+      // Signed in: the user picks which account this agent uses.
+      clearExistingAccount(wallet);
+      return {
+        backedUp: false,
+        chooseAccount: {
+          accounts: keys,
+          message: error.message,
+          command: chooseAccountCommand(wallet)
+        }
+      };
+    }
+    const existing = existingAccounts(keys);
+    writeExistingAccount(wallet, existing);
+    const { at: _at, ...shown } = existing;
+    return {
+      backedUp: false,
+      existingAccount: {
+        ...shown,
+        message: existingAccountMessage(existing),
+        command: signInAgainCommand(wallet)
+      }
+    };
+  }
   if (target) p.attempted.add(target.address.toLowerCase());
   if (!target) {
     // Local records name a key OMS doesn't hold: it is lost. Never make a key over its account.
