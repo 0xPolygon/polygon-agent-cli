@@ -109,6 +109,33 @@ export class AgentCardError extends Error {
   }
 }
 
+// What to tell the owner or agent when a card call fails. Request problems they can fix get a
+// specific message; anything else reads as an outage.
+export function agentCardFailure(err: AgentCardError): {
+  status: number;
+  code: string;
+  message: string;
+} {
+  if (err.code === 'invalid_delivery_address')
+    return {
+      status: 400,
+      code: err.code,
+      message:
+        'The store cannot deliver to the saved shipping address. Save a US address and try again.'
+    };
+  if (err.status === 429)
+    return {
+      status: 429,
+      code: 'rate_limited',
+      message: 'Too many card requests. Try again in a minute.'
+    };
+  return {
+    status: 502,
+    code: 'upstream_error',
+    message: 'The card service is unavailable. Try again shortly.'
+  };
+}
+
 // The token endpoint allows 30 requests per 5 minutes per IP: reuse tokens.
 let tokenCache: { key: string; token: string; expiresAt: number } | null = null;
 

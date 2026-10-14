@@ -8,7 +8,7 @@
 
 import type { Env } from './index.ts';
 
-import { AgentCardError } from './agentcard.ts';
+import { AgentCardError, agentCardFailure } from './agentcard.ts';
 import {
   agentCard,
   approvalStatus,
@@ -313,10 +313,7 @@ async function handleMessage(env: Env, props: McpProps, msg: Rpc, origin: string
         if (err instanceof ValidationError) return rpcResult(msg.id, toolText(err.message, true));
         if (err instanceof AgentCardError) {
           console.error('[mcp agentcard]', err.status, err.code, err.message);
-          return rpcResult(
-            msg.id,
-            toolText('The card service is unavailable. Try again shortly.', true)
-          );
+          return rpcResult(msg.id, toolText(agentCardFailure(err).message, true));
         }
         console.error('[mcp]', err);
         return rpcResult(msg.id, toolText('Something went wrong. Try again.', true));
