@@ -4,7 +4,13 @@ import type { Env } from './index.ts';
 
 import { issueCertificate, resetJwksCache } from './agent-auth.ts';
 import { AgentCard, resetAgentCardTokenCache } from './agentcard.ts';
-import { handleAgentsApi, handleApi, handleConnectApi, handleSessionApi } from './index.ts';
+import {
+  agentName,
+  handleAgentsApi,
+  handleApi,
+  handleConnectApi,
+  handleSessionApi
+} from './index.ts';
 import { issueSession, SESSION_COOKIE } from './owner-session.ts';
 import { OwnerSignIn } from './owner-signin.ts';
 import { decideApproval } from './services.ts';
@@ -859,5 +865,14 @@ describe('connecting an agent (consent)', () => {
     );
     expect(crossSite.status).toBe(401);
     expect(revoked).toHaveLength(0);
+  });
+});
+
+describe('agentName', () => {
+  it('drops the server label MCP clients add', () => {
+    expect(agentName('Claude Code (polygon-wallet)')).toBe('Claude Code');
+    expect(agentName('Muse')).toBe('Muse');
+    expect(agentName('')).toBe('An agent');
+    expect(agentName('(polygon-wallet)')).toBe('An agent');
   });
 });

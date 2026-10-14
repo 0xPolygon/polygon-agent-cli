@@ -254,7 +254,7 @@ export async function handleAgentsApi(req: Request, env: Env, path: string): Pro
         const page = await env.OAUTH_PROVIDER.listUserGrants(owner.wallet, { cursor });
         for (const g of page.items) {
           const meta = (g.metadata ?? {}) as { clientName?: string };
-          agents.push({ id: g.id, name: meta.clientName || 'An agent', connectedAt: g.createdAt });
+          agents.push({ id: g.id, name: agentName(meta.clientName), connectedAt: g.createdAt });
         }
         cursor = page.cursor;
       } while (cursor);
@@ -437,6 +437,14 @@ export async function handleSessionApi(req: Request, env: Env, path: string): Pr
   }
 }
 
+/**
+ * The agent's name as the owner knows it. MCP clients often add the server's
+ * label, as in "Claude Code (polygon-wallet)"; drop that.
+ */
+export function agentName(clientName: string | undefined): string {
+  return (clientName ?? '').replace(/\s*\([^)]*\)\s*$/, '').trim() || 'An agent';
+}
+
 /** GET /authorize: an MCP client wants access. Hand off to the connect page. */
 async function handleAuthorize(req: Request, env: Env): Promise<Response> {
   const signIn = ownerSignIn(env);
@@ -446,7 +454,7 @@ async function handleAuthorize(req: Request, env: Env): Promise<Response> {
   const authRequest = await env.OAUTH_PROVIDER.parseAuthRequest(req);
   const client = await env.OAUTH_PROVIDER.lookupClient(authRequest.clientId);
   if (!client) return new Response('Unknown client', { status: 400 });
-  const id = await signIn.create({ authRequest, clientName: client.clientName || 'An agent' });
+  const id = await signIn.create({ authRequest, clientName: agentName(client.clientName) });
   return Response.redirect(`${new URL(req.url).origin}/connect?c=${id}`, 302);
 }
 
