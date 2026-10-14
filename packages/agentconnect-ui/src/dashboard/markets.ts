@@ -52,7 +52,8 @@ export async function fetchPositions(address: string): Promise<Position[]> {
   }));
 }
 
-export const cents = (price: number) => `${Math.round(price * 100)}¢`;
+// Tenths of a cent, so a small move (17¢ to 16.5¢) doesn't round away.
+export const cents = (price: number) => `${Math.round(price * 1000) / 10}¢`;
 
 /** pUSD cash in the Polymarket trading account, not yet in a position. */
 export async function fetchPredictionCash(address: string): Promise<number> {

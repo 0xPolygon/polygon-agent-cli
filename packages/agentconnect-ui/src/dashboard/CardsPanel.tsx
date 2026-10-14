@@ -27,12 +27,12 @@ type State = 'loading' | 'ready' | 'waiting' | 'unavailable' | 'error';
  */
 export function CardsPanel({
   token,
-  onFresh,
+  onSignIn,
   onSaved
 }: {
   token: string | null;
-  // Ask the agent for a fresh link (shown when the token is missing or expired).
-  onFresh: () => void;
+  // Not signed in, or the sign-in expired.
+  onSignIn: () => void;
   onSaved: (msg: string) => void;
 }) {
   const [state, setState] = useState<State>(token ? 'loading' : 'ready');
@@ -57,7 +57,7 @@ export function CardsPanel({
 
   const connect = async () => {
     if (!token) {
-      onFresh();
+      onSignIn();
       return;
     }
     setError(null);
@@ -89,7 +89,7 @@ export function CardsPanel({
       poll.current = setTimeout(check, session.pollInterval * 1000);
     } catch (err) {
       tab?.close();
-      if (err instanceof CredentialsError && err.status === 401) onFresh();
+      if (err instanceof CredentialsError && err.status === 401) onSignIn();
       else setError(err instanceof Error ? err.message : 'Could not start adding a card');
     }
   };
@@ -109,7 +109,7 @@ export function CardsPanel({
             ? 'Waiting for your card…'
             : token
               ? 'Connect a card'
-              : 'Get a link from your agent'}
+              : 'Sign in to connect a card'}
         </button>
       </div>
       {error && <span className="text-sm text-[var(--red-700)]">{error}</span>}

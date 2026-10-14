@@ -3,9 +3,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from './index.ts';
 
 import { issueCertificate, resetJwksCache } from './agent-auth.ts';
-import { resetAgentCardTokenCache } from './agentcard.ts';
-import { handleApi } from './index.ts';
-import { CredentialStore } from './store.ts';
+import { AgentCard, resetAgentCardTokenCache } from './agentcard.ts';
+import {
+  agentName,
+  handleAgentsApi,
+  handleApi,
+  handleConnectApi,
+  handleSessionApi
+} from './index.ts';
+import { issueSession, SESSION_COOKIE } from './owner-session.ts';
+import { OwnerSignIn } from './owner-signin.ts';
+import { decideApproval } from './services.ts';
+import { CredentialStore, SealedKv } from './store.ts';
 import {
   AGENT,
   AUDIENCE,
@@ -56,6 +65,9 @@ function fakeAgentCard() {
     }[]
   >();
   const created: { user_id?: string }[] = [];
+  const exchanged = new Set<string>();
+  const refreshed: string[] = [];
+  const buys: { auth: string | null; body: Record<string, unknown> }[] = [];
   let n = 0;
   const handler = async (url: string, init: RequestInit = {}) => {
     const u = new URL(url);
@@ -91,6 +103,47 @@ function fakeAgentCard() {
         ? Response.json({ id: sm[1], ...sess, poll_interval: 3 })
         : Response.json({}, { status: 404 });
     }
+    const ex = /^\/api\/v2\/vault_sessions\/(.+)\/exchange$/.exec(u.pathname);
+    if (method === 'POST' && ex) {
+      const sess = sessions.get(ex[1]);
+      if (!sess?.user_id) return Response.json({}, { status: 404 });
+      if (exchanged.has(ex[1])) {
+        return Response.json({ error: { code: 'already_exchanged' } }, { status: 410 });
+      }
+      exchanged.add(ex[1]);
+      return Response.json({
+        access_token: `act_${sess.user_id}`,
+        refresh_token: 'rct_1',
+        expires_in: 3600,
+        user: { id: sess.user_id }
+      });
+    }
+    if (method === 'POST' && u.pathname === '/api/v2/connect/refresh') {
+      refreshed.push(JSON.parse(String(init.body)).refresh_token);
+      return Response.json({ access_token: 'act_new', refresh_token: 'rct_2', expires_in: 3600 });
+    }
+    if (method === 'POST' && u.pathname === '/buy') {
+      const body = JSON.parse(String(init.body));
+      buys.push({ auth: new Headers(init.headers).get('Authorization'), body });
+      const cart = {
+        merchant: 'retail',
+        items: [{ name: 'Coffee', qty: 1, priceCents: 659 }],
+        totalCents: 675,
+        hash: '0123456789abcdef'
+      };
+      return Response.json(
+        body.confirm
+          ? {
+              conversation_id: 'conv_1',
+              status: 'declined',
+              decline_code: 'vault_approval_required',
+              approval_url: 'https://vault.test/authorize?id=cauth_1',
+              charge_status: 'none',
+              cart
+            }
+          : { conversation_id: 'conv_1', status: 'needs_input', reply: 'Found it.', cart }
+      );
+    }
     if (method === 'GET' && u.pathname === '/api/v2/vault_cards') {
       const list = cards.get(u.searchParams.get('user_id') ?? '');
       return list
@@ -116,7 +169,7 @@ function fakeAgentCard() {
       }
     ]);
   };
-  return { handler, passkey, finish, created, withContact };
+  return { handler, passkey, finish, created, withContact, buys, refreshed };
 }
 
 let agentcard: ReturnType<typeof fakeAgentCard>;
@@ -151,7 +204,10 @@ beforeEach(async () => {
   });
   issuer = iss;
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 let issuer: Awaited<ReturnType<typeof makeIssuer>>;
 
@@ -185,6 +241,17 @@ describe('POST /api/agent/enroll', () => {
     const body = (await res.json()) as { certificate: string; wallet: string };
     expect(body.wallet).toBe(WALLET);
     expect(body.certificate).toMatch(/^c1\./);
+  });
+
+  it("links the owner's verified email to the agent wallet", async () => {
+    const idToken = await issuer.sign(issuer.enrollClaims());
+    await handleApi(
+      req('POST', '/api/agent/enroll', { body: { idToken } }),
+      env(),
+      '/api/agent/enroll'
+    );
+    const db = new CredentialStore(kv.kv, 'test-credentials-key');
+    expect(await db.ownerWallet('Owner@Example.com')).toBe(WALLET);
   });
 
   it('refuses a bad token', async () => {
@@ -268,6 +335,99 @@ describe('/api/credentials/address', () => {
       path
     );
     expect(res.status).toBe(503);
+  });
+});
+
+describe('signed in on the site (session cookie)', () => {
+  const path = '/api/credentials/address';
+  const cookie = async () =>
+    `${SESSION_COOKIE}=${await issueSession({ wallet: WALLET, email: 'owner@example.com' }, SECRET)}`;
+  const withCookie = (method: string, c: string, origin?: string, body?: unknown) =>
+    new Request(`https://agentconnect.test${path}`, {
+      method,
+      headers: {
+        Cookie: c,
+        ...(origin ? { Origin: origin } : {}),
+        ...(body ? { 'Content-Type': 'application/json' } : {})
+      },
+      body: body ? JSON.stringify(body) : undefined
+    });
+
+  it('reads and saves the address without an agent token', async () => {
+    const c = await cookie();
+    const put = await handleApi(
+      withCookie('PUT', c, 'https://agentconnect.test', ADDRESS),
+      env(),
+      path
+    );
+    expect(put.status).toBe(200);
+    const get = await handleApi(withCookie('GET', c), env(), path);
+    expect(await get.json()).toEqual({ address: ADDRESS });
+  });
+
+  it('refuses changes posted from another site', async () => {
+    const res = await handleApi(
+      withCookie('PUT', await cookie(), 'https://evil.test', ADDRESS),
+      env(),
+      path
+    );
+    expect(res.status).toBe(401);
+    expect(kv.data.size).toBe(0);
+  });
+
+  it('refuses a tampered cookie', async () => {
+    const c = (await cookie()).slice(0, -2) + 'xx';
+    const res = await handleApi(withCookie('GET', c), env(), path);
+    expect(res.status).toBe(401);
+  });
+
+  it('refuses an expired session', async () => {
+    const old = await issueSession({ wallet: WALLET, email: null }, SECRET, 1_000);
+    const res = await handleApi(withCookie('GET', `${SESSION_COOKIE}=${old}`), env(), path);
+    expect(res.status).toBe(401);
+  });
+
+  it("signs the owner in to their agent's wallet, whichever wallet the sign-in made", async () => {
+    await new CredentialStore(kv.kv, 'test-credentials-key').linkOwner('owner@example.com', WALLET);
+    const other = '0x' + '1'.repeat(40);
+    vi.spyOn(OwnerSignIn.prototype, 'finishEmail').mockResolvedValue({
+      wallet: other,
+      email: 'owner@example.com'
+    });
+    vi.spyOn(OwnerSignIn.prototype, 'forget').mockResolvedValue();
+    const res = await handleSessionApi(
+      req('POST', '/api/session/email/finish', { body: { c: 'c1', code: '123456' } }),
+      env({ OAUTH_KV: fakeKv().kv }),
+      '/api/session/email/finish'
+    );
+    expect(await res.json()).toEqual({ wallet: WALLET, email: 'owner@example.com' });
+  });
+
+  it('GET /api/session names the wallet; DELETE clears the cookie', async () => {
+    const e = env({ OAUTH_KV: fakeKv().kv });
+    const c = await cookie();
+    const who = await handleSessionApi(
+      new Request('https://agentconnect.test/api/session', { headers: { Cookie: c } }),
+      e,
+      '/api/session'
+    );
+    expect(await who.json()).toEqual({ wallet: WALLET, email: 'owner@example.com' });
+
+    const none = await handleSessionApi(
+      new Request('https://agentconnect.test/api/session'),
+      e,
+      '/api/session'
+    );
+    expect(none.status).toBe(401);
+
+    const out = await handleSessionApi(
+      new Request('https://agentconnect.test/api/session', { method: 'DELETE' }),
+      e,
+      '/api/session'
+    );
+    expect(out.headers.get('Set-Cookie')).toMatch(
+      new RegExp(`^${SESSION_COOKIE}=;.*HttpOnly.*Max-Age=0.*Secure`)
+    );
   });
 });
 
@@ -389,5 +549,360 @@ describe('/api/credentials/cards', () => {
       '/api/credentials/cards'
     );
     expect(res.status).toBe(503);
+  });
+});
+
+describe('/api/credentials/buy', () => {
+  const call = async (t: string, body: unknown) =>
+    handleApi(
+      req('POST', '/api/credentials/buy', { token: t, body }),
+      env(),
+      '/api/credentials/buy'
+    );
+  const connect = async (t: string) => {
+    const s = (await (
+      await handleApi(
+        req('POST', '/api/credentials/cards/session', { token: t }),
+        env(),
+        '/api/credentials/cards/session'
+      )
+    ).json()) as { sessionId: string };
+    agentcard.finish(s.sessionId, 'usr_1');
+    await handleApi(
+      req('GET', `/api/credentials/cards/session?id=${s.sessionId}`, { token: t }),
+      env(),
+      '/api/credentials/cards/session'
+    );
+  };
+
+  it('answers with an add-card link when no card is saved', async () => {
+    const res = await call(await token(), { ask: 'coffee' });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      status: 'requires_action',
+      nextAction: { type: 'add_card', url: 'https://vault.test/v?vs=vs_1.sig', sessionId: 'vs_1' }
+    });
+    expect(agentcard.buys).toHaveLength(0);
+  });
+
+  it('keeps the connection from a linked card session, sealed', async () => {
+    await connect(await token());
+    const rec = await new CredentialStore(kv.kv, 'test-credentials-key').get(WALLET);
+    expect(rec.agentcardConnection).toMatchObject({ userId: 'usr_1', accessToken: 'act_usr_1' });
+    expect([...kv.data.values()].join()).not.toContain('act_usr_1');
+  });
+
+  const setLimit = async (t: string, cents: number) =>
+    handleApi(
+      req('PUT', '/api/credentials/settings', { token: t, body: { autoPayLimitCents: cents } }),
+      env(),
+      '/api/credentials/settings'
+    );
+
+  it('pays right away under the auto-pay limit, shipping to the saved address', async () => {
+    const t = await token();
+    await connect(t);
+    await handleApi(
+      req('PUT', '/api/credentials/address', {
+        token: t,
+        body: { ...ADDRESS, phone: '+15555550100' }
+      }),
+      env(),
+      '/api/credentials/address'
+    );
+    const res = await call(t, { ask: 'a bag of coffee' });
+    expect(await res.json()).toMatchObject({ autoPay: true, conversationId: 'conv_1' });
+    expect(agentcard.buys).toHaveLength(2);
+    expect(agentcard.buys[0].auth).toBe('Bearer act_usr_1');
+    expect(agentcard.buys[0].body).toMatchObject({
+      ask: 'a bag of coffee',
+      delivery_address: { street: ADDRESS.line1, zip: ADDRESS.zip, phone: '+15555550100' }
+    });
+    expect(agentcard.buys[1].body).toMatchObject({
+      conversation_id: 'conv_1',
+      confirm: '0123456789abcdef',
+      payment_source: 'vault'
+    });
+  });
+
+  it('waits for the owner over the limit, and places the cart once they approve', async () => {
+    const t = await token();
+    await connect(t);
+    await setLimit(t, 500);
+    const pending = (await (await call(t, { ask: 'a bag of coffee' })).json()) as {
+      status: string;
+      approvalId: string;
+      approvalUrl: string;
+    };
+    expect(pending.status).toBe('pending_approval');
+    expect(pending.approvalUrl).toBe(`https://agentconnect.test/approve?r=${pending.approvalId}`);
+    expect(agentcard.buys).toHaveLength(1);
+
+    const db = new CredentialStore(kv.kv, 'test-credentials-key');
+    const cards = new AgentCard({ clientId: 'client', clientSecret: 'acs_secret' });
+    await expect(
+      decideApproval(
+        db,
+        cards,
+        pending.approvalId,
+        '0x00000000000000000000000000000000000000bb',
+        true
+      )
+    ).rejects.toThrow(/another account/);
+    expect(await decideApproval(db, cards, pending.approvalId, WALLET, true)).toEqual({
+      status: 'awaiting_passkey',
+      passkeyUrl: 'https://vault.test/authorize?id=cauth_1'
+    });
+    expect(agentcard.buys[1].body).toMatchObject({
+      confirm: '0123456789abcdef',
+      payment_source: 'vault'
+    });
+
+    const status = await handleApi(
+      req('GET', `/api/credentials/approvals/${pending.approvalId}`, { token: t }),
+      env(),
+      `/api/credentials/approvals/${pending.approvalId}`
+    );
+    expect(await status.json()).toMatchObject({ status: 'awaiting_passkey' });
+  });
+
+  it('records a declined approval and places nothing', async () => {
+    const t = await token();
+    await connect(t);
+    await setLimit(t, 0);
+    const { approvalId } = (await (await call(t, { ask: 'coffee' })).json()) as {
+      approvalId: string;
+    };
+    const db = new CredentialStore(kv.kv, 'test-credentials-key');
+    const cards = new AgentCard({ clientId: 'client', clientSecret: 'acs_secret' });
+    expect(await decideApproval(db, cards, approvalId, WALLET, false)).toEqual({
+      status: 'declined'
+    });
+    expect(agentcard.buys).toHaveLength(1);
+  });
+
+  it("authorizes a checkout in the agent's browser by the limit", async () => {
+    const t = await token();
+    const checkout = (totalCents: number) =>
+      handleApi(
+        req('POST', '/api/credentials/checkout', {
+          token: t,
+          body: {
+            merchant: 'IKEA',
+            merchantUrl: 'https://www.ikea.com/us/en/',
+            totalCents,
+            items: [{ name: 'LISABO table', qty: 1 }]
+          }
+        }),
+        env(),
+        '/api/credentials/checkout'
+      );
+    expect(await (await checkout(1999)).json()).toMatchObject({
+      status: 'approved',
+      autoApproved: true
+    });
+    const over = (await (await checkout(14999)).json()) as { status: string; approvalId: string };
+    expect(over.status).toBe('pending_approval');
+    const db = new CredentialStore(kv.kv, 'test-credentials-key');
+    const cards = new AgentCard({ clientId: 'client', clientSecret: 'acs_secret' });
+    expect(await decideApproval(db, cards, over.approvalId, WALLET, true)).toEqual({
+      status: 'approved'
+    });
+  });
+
+  it('refreshes an expired connection and keeps the new pair', async () => {
+    const t = await token();
+    await connect(t);
+    const db = new CredentialStore(kv.kv, 'test-credentials-key');
+    await db.update(WALLET, (r) => ({
+      ...r,
+      agentcardConnection: { ...r.agentcardConnection!, expiresAt: Date.now() - 1 }
+    }));
+    await call(t, { ask: 'coffee' });
+    expect(agentcard.refreshed).toEqual(['rct_1']);
+    expect(agentcard.buys[0].auth).toBe('Bearer act_new');
+    expect((await db.get(WALLET)).agentcardConnection).toMatchObject({ refreshToken: 'rct_2' });
+  });
+
+  it('validates the request', async () => {
+    const t = await token();
+    expect((await call(t, {})).status).toBe(400);
+    expect((await call(t, { confirm: '0123456789abcdef' })).status).toBe(400);
+    expect((await setLimit(t, -1)).status).toBe(400);
+  });
+});
+
+describe('connecting an agent (consent)', () => {
+  const ORIGIN = 'https://agentconnect.test';
+  const authRequest = {
+    responseType: 'code',
+    clientId: 'cli_1',
+    redirectUri: 'http://localhost:9999/callback',
+    scope: ['wallet'],
+    state: 'st_1',
+    codeChallenge: 'x',
+    codeChallengeMethod: 'S256'
+  };
+  const cookie = async () =>
+    `${SESSION_COOKIE}=${await issueSession({ wallet: WALLET, email: 'owner@example.com' }, SECRET)}`;
+
+  function setup() {
+    const oauthKv = fakeKv();
+    const completed: unknown[] = [];
+    const revoked: [string, string][] = [];
+    const grants = [
+      {
+        id: 'g1',
+        clientId: 'cli_1',
+        userId: WALLET,
+        scope: ['wallet'],
+        metadata: { clientName: 'Claude Code' },
+        createdAt: 100
+      },
+      {
+        id: 'g2',
+        clientId: 'cli_2',
+        userId: WALLET,
+        scope: ['wallet'],
+        metadata: {},
+        createdAt: 200
+      }
+    ];
+    const provider = {
+      completeAuthorization: async (o: unknown) => {
+        completed.push(o);
+        return { redirectTo: 'http://localhost:9999/callback?code=abc&state=st_1' };
+      },
+      listUserGrants: async (userId: string) => ({
+        items: grants.filter((g) => g.userId === userId)
+      }),
+      revokeGrant: async (id: string, userId: string) => {
+        revoked.push([id, userId]);
+      }
+    };
+    const e = env({
+      OAUTH_KV: oauthKv.kv,
+      OAUTH_PROVIDER: provider as unknown as Env['OAUTH_PROVIDER']
+    });
+    const signIn = new OwnerSignIn(new SealedKv(oauthKv.kv, 'test-credentials-key'), 'pk_test');
+    return { e, signIn, completed, revoked };
+  }
+  const call = (
+    e: Env,
+    method: string,
+    path: string,
+    opts: { cookie?: string; body?: unknown } = {}
+  ) =>
+    handleConnectApi(
+      new Request(`${ORIGIN}${path}`, {
+        method,
+        headers: {
+          ...(opts.cookie ? { Cookie: opts.cookie } : {}),
+          ...(opts.body ? { 'Content-Type': 'application/json', Origin: ORIGIN } : {})
+        },
+        body: opts.body ? JSON.stringify(opts.body) : undefined
+      }),
+      e,
+      new URL(`${ORIGIN}${path}`).pathname
+    );
+
+  it('asks a signed-out owner to sign in', async () => {
+    const { e, signIn } = setup();
+    const c = await signIn.create({ authRequest: authRequest as never, clientName: 'Claude Code' });
+    const res = await call(e, 'GET', `/api/connect?c=${c}`);
+    expect(await res.json()).toEqual({ clientName: 'Claude Code', signedIn: false });
+  });
+
+  it('refuses to allow before sign-in', async () => {
+    const { e, signIn, completed } = setup();
+    const c = await signIn.create({ authRequest: authRequest as never, clientName: 'Claude Code' });
+    const res = await call(e, 'POST', '/api/connect/decide', { body: { c, allow: true } });
+    expect(res.status).toBe(400);
+    expect(completed).toHaveLength(0);
+  });
+
+  it('skips sign-in for an owner signed in on the site, showing the auto-pay limit', async () => {
+    const { e, signIn, completed } = setup();
+    const c = await signIn.create({ authRequest: authRequest as never, clientName: 'Claude Code' });
+    const res = await call(e, 'GET', `/api/connect?c=${c}`, { cookie: await cookie() });
+    expect(await res.json()).toEqual({
+      clientName: 'Claude Code',
+      signedIn: true,
+      email: 'owner@example.com',
+      autoPayLimitCents: 2500
+    });
+    const allow = await call(e, 'POST', '/api/connect/decide', { body: { c, allow: true } });
+    expect(await allow.json()).toEqual({
+      redirectTo: 'http://localhost:9999/callback?code=abc&state=st_1'
+    });
+    expect(completed[0]).toMatchObject({ userId: WALLET, props: { wallet: WALLET } });
+  });
+
+  it("sends the agent back with access_denied on Don't allow", async () => {
+    const { e, signIn, completed } = setup();
+    const c = await signIn.create({ authRequest: authRequest as never, clientName: 'Claude Code' });
+    await call(e, 'GET', `/api/connect?c=${c}`, { cookie: await cookie() });
+    const res = await call(e, 'POST', '/api/connect/decide', { body: { c, allow: false } });
+    const { redirectTo } = (await res.json()) as { redirectTo: string };
+    const back = new URL(redirectTo);
+    expect(back.origin + back.pathname).toBe('http://localhost:9999/callback');
+    expect(back.searchParams.get('error')).toBe('access_denied');
+    expect(back.searchParams.get('state')).toBe('st_1');
+    expect(completed).toHaveLength(0);
+  });
+
+  it('lists connected agents for the signed-in owner, newest first, and disconnects one', async () => {
+    const { e, revoked } = setup();
+    const c = await cookie();
+    const list = await handleAgentsApi(
+      new Request(`${ORIGIN}/api/agents`, { headers: { Cookie: c } }),
+      e,
+      '/api/agents'
+    );
+    expect(await list.json()).toEqual({
+      agents: [
+        { id: 'g2', name: 'An agent', connectedAt: 200 },
+        { id: 'g1', name: 'Claude Code', connectedAt: 100 }
+      ]
+    });
+    const del = await handleAgentsApi(
+      new Request(`${ORIGIN}/api/agents/g1`, {
+        method: 'DELETE',
+        headers: { Cookie: c, Origin: ORIGIN }
+      }),
+      e,
+      '/api/agents/g1'
+    );
+    expect(del.status).toBe(200);
+    expect(revoked).toEqual([['g1', WALLET]]);
+  });
+
+  it('keeps the agent list from agents and other sites', async () => {
+    const { e, revoked } = setup();
+    const withToken = await handleAgentsApi(
+      new Request(`${ORIGIN}/api/agents`, { headers: { Authorization: `Agent ${await token()}` } }),
+      e,
+      '/api/agents'
+    );
+    expect(withToken.status).toBe(401);
+    const crossSite = await handleAgentsApi(
+      new Request(`${ORIGIN}/api/agents/g1`, {
+        method: 'DELETE',
+        headers: { Cookie: await cookie(), Origin: 'https://evil.test' }
+      }),
+      e,
+      '/api/agents/g1'
+    );
+    expect(crossSite.status).toBe(401);
+    expect(revoked).toHaveLength(0);
+  });
+});
+
+describe('agentName', () => {
+  it('drops the server label MCP clients add', () => {
+    expect(agentName('Claude Code (polygon-wallet)')).toBe('Claude Code');
+    expect(agentName('Muse')).toBe('Muse');
+    expect(agentName('')).toBe('An agent');
+    expect(agentName('(polygon-wallet)')).toBe('An agent');
   });
 });

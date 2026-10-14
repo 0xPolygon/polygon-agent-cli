@@ -562,7 +562,7 @@ export function MarketsTab({
                       {p.outcome}
                     </span>
                     <span>
-                      Odds {cents(p.avgPrice)} → {cents(p.curPrice)}
+                      Bought at {cents(p.avgPrice)} · Now {cents(p.curPrice)}
                     </span>
                     {p.endDate && (
                       <span>

@@ -5,6 +5,8 @@
 export interface AgentCardConfig {
   clientId: string;
   clientSecret: string;
+  // Ask owners for app auto-approval on add-a-card links (production only).
+  autoApproval?: boolean;
   apiUrl?: string;
   fetchImpl?: typeof fetch;
 }
@@ -30,6 +32,73 @@ export interface VaultCard {
   created_at: string;
 }
 
+// A connection: tokens that act as one vault user, for the Purchase API.
+export interface Connection {
+  access_token: string;
+  refresh_token: string;
+  expires_in?: number;
+  user?: { id: string };
+}
+
+export interface BuyCart {
+  merchant: string;
+  merchant_name?: string;
+  items: { name: string; qty: number; priceCents: number; product_id?: string }[];
+  serviceFeesCents?: number;
+  tipCents?: number;
+  totalCents: number;
+  hash: string;
+}
+
+// One turn of a /buy conversation. Branch on `status`, never on `reply`.
+export interface BuyTurn {
+  conversation_id: string;
+  status: 'needs_input' | 'order_placed' | 'partially_placed' | 'declined' | string;
+  reply?: string;
+  cart?: BuyCart | null;
+  carts?: BuyCart[];
+  unmatched?: { name?: string; reason?: string }[];
+  catalog?: {
+    merchant_name?: string;
+    items?: { id: string; name: string; priceCents?: number; image_url?: string }[];
+  } | null;
+  decline_code?: string | null;
+  approval_url?: string | null;
+  charge_status?: string | null;
+  order_id?: string | null;
+  payment_source?: { source: string; brand?: string; last4?: string } | null;
+}
+
+// The server's view of a purchase conversation (for a confirm that is still running).
+export interface BuyConversation {
+  turn_in_progress?: boolean;
+  last_checkout?: {
+    status?: string;
+    order_id?: string | null;
+    decline_code?: string | null;
+    approval_url?: string | null;
+    charge_status?: string;
+  } | null;
+  orders?: { order_id: string; merchant?: string; status?: string }[];
+}
+
+export interface BuyRequest {
+  ask?: string;
+  conversation_id?: string;
+  confirm?: string;
+  payment_source?: 'vault';
+  delivery_address?: {
+    street: string;
+    address2?: string;
+    city: string;
+    state: string;
+    zip: string;
+    phone?: string;
+    name?: string;
+    country?: string;
+  };
+}
+
 export class AgentCardError extends Error {
   constructor(
     public readonly status: number,
@@ -38,6 +107,33 @@ export class AgentCardError extends Error {
   ) {
     super(message);
   }
+}
+
+// What to tell the owner or agent when a card call fails. Request problems they can fix get a
+// specific message; anything else reads as an outage.
+export function agentCardFailure(err: AgentCardError): {
+  status: number;
+  code: string;
+  message: string;
+} {
+  if (err.code === 'invalid_delivery_address')
+    return {
+      status: 400,
+      code: err.code,
+      message:
+        'The store cannot deliver to the saved shipping address. Save a US address and try again.'
+    };
+  if (err.status === 429)
+    return {
+      status: 429,
+      code: 'rate_limited',
+      message: 'Too many card requests. Try again in a minute.'
+    };
+  return {
+    status: 502,
+    code: 'upstream_error',
+    message: 'The card service is unavailable. Try again shortly.'
+  };
 }
 
 // The token endpoint allows 30 requests per 5 minutes per IP: reuse tokens.
@@ -92,17 +188,18 @@ export class AgentCard {
     return body.access_token;
   }
 
-  private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  // `asUser` sends a user's connection token instead of the platform token.
+  private async call<T>(method: string, path: string, body?: unknown, asUser?: string): Promise<T> {
     for (let attempt = 0; ; attempt++) {
       const res = await this.f(`${this.base}${path}`, {
         method,
         headers: {
-          Authorization: `Bearer ${await this.token()}`,
+          Authorization: `Bearer ${asUser ?? (await this.token())}`,
           ...(body === undefined ? {} : { 'Content-Type': 'application/json' })
         },
         body: body === undefined ? undefined : JSON.stringify(body)
       });
-      if (res.status === 401 && attempt === 0) {
+      if (res.status === 401 && attempt === 0 && !asUser) {
         tokenCache = null;
         continue;
       }
@@ -122,12 +219,16 @@ export class AgentCard {
   }
 
   /** A single-use add-a-card link. With a known user it signs them in with a code first. */
-  createVaultSession(userId?: string | null): Promise<VaultSession> {
-    return this.call<VaultSession>(
-      'POST',
-      '/api/v2/vault_sessions',
-      userId ? { user_id: userId } : {}
-    );
+  createVaultSession(
+    userId?: string | null,
+    opts: { autoApproval?: boolean } = { autoApproval: this.cfg.autoApproval }
+  ): Promise<VaultSession> {
+    return this.call<VaultSession>('POST', '/api/v2/vault_sessions', {
+      ...(userId ? { user_id: userId } : {}),
+      // Asks the owner, on the vault page, to let us pay with this card without
+      // an approval link each time (production credentials only).
+      ...(opts.autoApproval ? { approval_mode: 'partner' } : {})
+    });
   }
 
   getVaultSession(id: string): Promise<VaultSession> {
@@ -146,5 +247,37 @@ export class AgentCard {
       if (err instanceof AgentCardError && err.status === 404) return [];
       throw err;
     }
+  }
+
+  /**
+   * Turn a linked add-a-card session into the user's connection tokens. Single
+   * use: a second call is refused with 410 already_exchanged.
+   */
+  exchangeVaultSession(id: string): Promise<Connection> {
+    return this.call<Connection>(
+      'POST',
+      `/api/v2/vault_sessions/${encodeURIComponent(id)}/exchange`
+    );
+  }
+
+  /** A fresh token pair. The old refresh token stops working. */
+  refreshConnection(refreshToken: string): Promise<Connection> {
+    return this.call<Connection>('POST', '/api/v2/connect/refresh', {
+      refresh_token: refreshToken
+    });
+  }
+
+  /** One turn of the Purchase API, as the user. Money only moves on a confirm. */
+  buy(userToken: string, body: BuyRequest): Promise<BuyTurn> {
+    return this.call<BuyTurn>('POST', '/buy', body, userToken);
+  }
+
+  buyConversation(userToken: string, id: string): Promise<BuyConversation> {
+    return this.call<BuyConversation>(
+      'GET',
+      `/buy/conversations/${encodeURIComponent(id)}`,
+      undefined,
+      userToken
+    );
   }
 }
