@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 import { ArrowDownLeft, ArrowUpRight, Check, Copy, ExternalLink } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -406,16 +408,20 @@ export function WalletTab({
   address,
   holdings,
   onAdd,
-  onWithdraw
+  onWithdraw,
+  cards
 }: {
   address: string;
   holdings: Loadable<Holding[]>;
   onAdd: () => void;
   onWithdraw: () => void;
+  // The "Connect a card" panel, when cards are part of this page.
+  cards?: ReactNode;
 }) {
   const [showReceive, setShowReceive] = useState(false);
   return (
     <div className="flex flex-col gap-8">
+      {cards}
       <div className="flex gap-2 flex-wrap">
         <button type="button" onClick={onAdd} className="btn btn-secondary btn-lg">
           Add money
@@ -556,7 +562,7 @@ export function MarketsTab({
                       {p.outcome}
                     </span>
                     <span>
-                      Odds {cents(p.avgPrice)} → {cents(p.curPrice)}
+                      Bought at {cents(p.avgPrice)} · Now {cents(p.curPrice)}
                     </span>
                     {p.endDate && (
                       <span>

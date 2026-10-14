@@ -1,6 +1,7 @@
-// Saved credentials, read and written with the access token the agent put in
-// the dashboard link's fragment (#t=...). The fragment never reaches a server;
-// we move it to sessionStorage and clear it from the address bar.
+// Saved credentials, read and written as the owner signed in on this site
+// (a session cookie), or with the access token the agent put in the dashboard
+// link's fragment (#t=...). The fragment never reaches a server; we move it to
+// sessionStorage and clear it from the address bar.
 
 import { rememberedEmail, rememberEmail } from './account.js';
 
@@ -82,6 +83,9 @@ export function takeLinkToken(wallet: string): string | null {
   return token;
 }
 
+// Stands in for a token when the owner is signed in here: the cookie goes along.
+export const SESSION_AUTH = 'session';
+
 export class CredentialsError extends Error {
   constructor(
     public readonly status: number,
@@ -91,11 +95,16 @@ export class CredentialsError extends Error {
   }
 }
 
-async function call<T>(token: string, method: string, body?: unknown): Promise<T> {
-  const res = await fetch('/api/credentials/address', {
+async function call<T>(
+  token: string,
+  method: string,
+  body?: unknown,
+  path = '/api/credentials/address'
+): Promise<T> {
+  const res = await fetch(path, {
     method,
     headers: {
-      Authorization: `Agent ${token}`,
+      ...(token === SESSION_AUTH ? {} : { Authorization: `Agent ${token}` }),
       ...(body ? { 'Content-Type': 'application/json' } : {})
     },
     body: body ? JSON.stringify(body) : undefined
@@ -111,3 +120,47 @@ export const getAddress = (token: string) =>
 
 export const saveAddress = (token: string, address: ShippingAddress) =>
   call<{ address: ShippingAddress }>(token, 'PUT', address).then((r) => r.address);
+
+// ── Cards (AgentCard vault): display fields only, never the number ──
+
+export interface Card {
+  id: string;
+  brand: string;
+  last4: string;
+  expMonth: number;
+  expYear: number;
+}
+
+export const listCards = (token: string) =>
+  call<{ cards: Card[] }>(token, 'GET', undefined, '/api/credentials/cards').then((r) => r.cards);
+
+export const startCardSession = (token: string) =>
+  call<{ sessionId: string; url: string; pollInterval: number; returning: boolean }>(
+    token,
+    'POST',
+    undefined,
+    '/api/credentials/cards/session'
+  );
+
+export const cardSessionStatus = (token: string, id: string) =>
+  call<{ status: 'pending' | 'linked' | 'expired'; cardSaved: boolean; pollInterval: number }>(
+    token,
+    'GET',
+    undefined,
+    `/api/credentials/cards/session?id=${encodeURIComponent(id)}`
+  );
+
+// ── Auto-pay: purchases at or under the limit go through without asking ──
+
+export const getAutoPayLimit = (token: string) =>
+  call<{ autoPayLimitCents: number }>(token, 'GET', undefined, '/api/credentials/settings').then(
+    (r) => r.autoPayLimitCents
+  );
+
+export const setAutoPayLimit = (token: string, cents: number) =>
+  call<{ autoPayLimitCents: number }>(
+    token,
+    'PUT',
+    { autoPayLimitCents: cents },
+    '/api/credentials/settings'
+  ).then((r) => r.autoPayLimitCents);

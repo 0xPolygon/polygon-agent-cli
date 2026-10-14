@@ -65,6 +65,18 @@ function serveSkills(): Plugin {
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss(), serveSkills()],
+  // Worker tests run in Node, where the Workers runtime module doesn't exist.
+  ...(process.env.VITEST
+    ? {
+        resolve: {
+          alias: {
+            'cloudflare:workers': path.resolve(pkgDir, 'worker/test-cloudflare-workers.ts')
+          }
+        },
+        // Bundle the OAuth provider so the alias reaches its import.
+        test: { server: { deps: { inline: ['@cloudflare/workers-oauth-provider'] } } }
+      }
+    : {}),
   server: {
     port: 4444
   }
