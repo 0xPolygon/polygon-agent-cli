@@ -22,6 +22,7 @@ import {
   backupTradingKey,
   findTradingKeyWallet,
   installTradingKeyReference,
+  listTradingKeyWallets,
   selectMainWallet
 } from './oms-key.ts';
 
@@ -33,6 +34,7 @@ export type OwnerStepResult = RecoveryResult & {
   mainWalletError?: string;
   sweptPrevious?: SweepEntry[];
   sweepError?: string;
+  otherTradingKeys?: Array<{ address: string; reference: string }>;
 };
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -99,9 +101,23 @@ async function step(p: {
     return recoverMissingKey({ ...p, found });
   }
   // A wiped machine loses account.json too: if OMS holds this install's key, recover it, never
-  // re-create. Keys other installs labelled are theirs: this install then makes its own.
+  // re-create.
   const found = await findTradingKeyWallet(owner, { reference: installTradingKeyReference() });
   if (found) return recoverMissingKey({ ...p, found });
+  // Keys other installs labelled may hold this user's account (a reinstall under another name,
+  // a new VM). A key made here would stop setup from restoring one, so setup decides instead:
+  // it restores the funded key, or makes this install its own.
+  const mine = localTradingKeyAddresses();
+  const others = (await listTradingKeyWallets(owner)).filter(
+    (x) => !mine.has(x.address.toLowerCase())
+  );
+  if (others.length > 0) {
+    return {
+      backedUp: false,
+      otherTradingKeys: others.map(({ address, reference }) => ({ address, reference })),
+      hint: 'Run polymarket setup --broadcast: it restores the backed-up key that holds funds or positions, or makes a new one when none does.'
+    };
+  }
   return backUp(wallet, owner, true);
 }
 

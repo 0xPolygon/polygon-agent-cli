@@ -54,10 +54,11 @@ When the backup happens:
 | `signer` | `local`: the key file is on this machine. `oms`: it is gone and OMS signs as the backed-up key. Status, trading, redeem and withdraw all keep working. This is owner mode only. In session mode with the key gone, commands fail with `not_set_up` until the next owner approval recovers it. |
 | `backup` | `{ backedUp: true, omsWalletId }` once the key is in OMS. `{ backedUp: false }` if not. |
 
-A wiped machine loses nothing, as long as the user reinstalls with the same `--name` (see setup.md), because the backup is found by that label.
+A wiped machine loses nothing. The backup is found by its label when the user reinstalls with the same `--name` (see setup.md), and by what it holds when the name differs (a new machine or VM).
 
 - Owner mode: run `setup --broadcast`. It restores the account from OMS and never makes a new key over it (`restored: true`, `signer: "oms"`). Its dry run lists `restore the trading key from OMS` instead of `create trading key` when OMS holds this install's key.
-- Session mode: the next confirmed owner request (any sign-in) recovers it. It withdraws all pUSD from the old account to the agent wallet (under $2 it stays there, since the bridge would not pay it out; the old key stays in OMS), archives the old records under `polymarket/<wallet>/previous-<timestamp>/`, then creates a new key and backs it up. Run `setup --broadcast` afterwards to deploy the new account. If local records name the lost key and OMS holds no backup of it, nothing is changed and no new key is made. With no local records and no OMS key for this install name, the step creates a new key and backs it up.
+- Owner mode, under another install name: with no key of its own, `setup --broadcast` checks every other backed-up trading key, read only, and restores the one whose account holds pUSD, open positions, or a funded legacy proxy. It makes a new key only when none holds anything. Several funded keys, or one it couldn't read, fail with `ambiguous_trading_key` and list them in `details.tradingKeys`. Then ask the user which to restore and run `setup --broadcast --from <address>`. `--new` makes a new account even when another install's key holds funds: use it for a second install the user wants kept separate. The dry run lists `restore the backed-up trading key that holds funds or positions, or create one if none does`.
+- Session mode: the next confirmed owner request (any sign-in) recovers it. It withdraws all pUSD from the old account to the agent wallet (under $2 it stays there, since the bridge would not pay it out; the old key stays in OMS), archives the old records under `polymarket/<wallet>/previous-<timestamp>/`, then creates a new key and backs it up. Run `setup --broadcast` afterwards to deploy the new account. If local records name the lost key and OMS holds no backup of it, nothing is changed and no new key is made. With no local records and no OMS key for this install name, the step makes no key when OMS holds other installs' trading keys (it returns them as `otherTradingKeys` with a hint to run `setup --broadcast`, which picks in owner mode). With none, it creates a new key and backs it up.
 
 The recovery never replaces a key that still controls something. It then stops with `backedUp: false` and an `error`, and the old key stays in use:
 
@@ -207,6 +208,7 @@ agent polymarket pnl [--interval 1d|1w|1m|max]            # valueUsd, realized, 
 | Code | Meaning and fix |
 | --- | --- |
 | `not_set_up` | No Polymarket account for this wallet. Run `agent polymarket setup --wallet <name> --broadcast`. |
+| `ambiguous_trading_key` | `setup` found several backed-up keys holding funds, or one it couldn't read, and made nothing. Ask the user which of `details.tradingKeys` to restore, then `setup --broadcast --from <address>`, or `--new` for a separate account. |
 | `below_bridge_minimum` | Deposit or withdrawal is under $2. Use $2 or more. To withdraw a smaller balance, keep it in Polymarket until it reaches $2. |
 | `insufficient_pusd` | Not enough pUSD in the Polymarket wallet. Deposit more, or lower the amount. |
 | `insufficient_shares` | You hold fewer shares than asked, or none. Check `positions`. |
