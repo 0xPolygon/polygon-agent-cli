@@ -113,10 +113,12 @@ vi.mock('../../lib/storage.ts', async (o) => ({
 }));
 
 const cmds = await import('./account.ts');
-const { installTradingKeyReference } = await import('../../lib/polymarket/oms-key.ts');
+const { SHARED_TRADING_KEY_REFERENCE } = await import('../../lib/polymarket/oms-key.ts');
 const portfolio = await import('./portfolio.ts');
 const { saveOmsWalletPointer } = await import('../../lib/storage.ts');
 const { accountFile, readBackup, writeBackup } = await import('../../lib/polymarket/account.ts');
+const { readExistingAccount, writeExistingAccount } =
+  await import('../../lib/polymarket/find-key.ts');
 const TRADING_KEY = `0x${'11'.repeat(32)}`;
 const BACKUP = { omsWalletId: 'w-imported', address: '0xAbC', at: '2026-10-09T00:00:00.000Z' };
 
@@ -208,7 +210,7 @@ describe('setup', () => {
       'approve the legacy NegRiskAdapter for neg-risk markets (gasless)'
     ]);
     expect(m.findTradingKeyWallet).toHaveBeenCalledWith(m.omsWallet, {
-      reference: installTradingKeyReference()
+      reference: SHARED_TRADING_KEY_REFERENCE
     });
     expect(m.restoreFromOms).not.toHaveBeenCalled();
     expect(m.ensureMainWallet).not.toHaveBeenCalled();
@@ -267,7 +269,7 @@ describe('setup', () => {
     expect(m.backupTradingKey).toHaveBeenCalledWith(
       m.omsWallet,
       TRADING_KEY,
-      installTradingKeyReference()
+      SHARED_TRADING_KEY_REFERENCE
     );
     expect(out.backup).toEqual({ backedUp: true, omsWalletId: 'w-imported', imported: true });
     expect(readBackup('main')).toMatchObject({ omsWalletId: 'w-imported', address: '0xAbC' });
@@ -357,9 +359,9 @@ describe('setup', () => {
       backup: { omsWalletId: 'w-old', address: found.address, at: 'x', kind: 'deposit-wallet' }
     });
     const out = await run(['setup', '--broadcast']);
-    // No local record: only this install's own label is looked up.
+    // No local record: the shared label is looked up first.
     expect(m.findTradingKeyWallet).toHaveBeenCalledWith(m.omsWallet, {
-      reference: installTradingKeyReference()
+      reference: SHARED_TRADING_KEY_REFERENCE
     });
     expect(m.restoreFromOms).toHaveBeenCalledWith({
       wallet: 'main',
@@ -398,7 +400,8 @@ describe('setup', () => {
 
   it('owner mode creates as before when OMS holds no trading key', async () => {
     const out = await run(['setup', '--broadcast']);
-    expect(m.findTradingKeyWallet).toHaveBeenCalledTimes(1);
+    // The shared label, then this install's own older one.
+    expect(m.findTradingKeyWallet).toHaveBeenCalledTimes(2);
     expect(m.restoreFromOms).not.toHaveBeenCalled();
     expect(m.setupAccount).toHaveBeenCalledWith('main');
     expect(out).toMatchObject({ ok: true, created: true });
@@ -553,6 +556,65 @@ describe('setup', () => {
       );
       expect(m.recoverOtherKey).not.toHaveBeenCalled();
       expect((await run(['setup', '--dry-run', '--new'])).steps[0]).toBe('create trading key');
+    });
+  });
+
+  describe('an account found at sign-in that this install cannot use yet', () => {
+    const EXISTING = {
+      address: '0x00000000000000000000000000000000000000A1',
+      account: '0xACCOUNT',
+      pusd: '4.2',
+      positions: 2,
+      at: 'x'
+    };
+    const sessionPointer = () =>
+      saveOmsWalletPointer('main', {
+        walletAddress: '0xC2F4cAfe89AE7e1bcB86dd3f141C0a3adCEB6C17',
+        loginMethod: 'email',
+        createdAt: 'x',
+        access: 'session'
+      } as never);
+
+    it('setup makes no second account and says one more sign-in uses it', async () => {
+      await sessionPointer();
+      writeExistingAccount('main', EXISTING);
+      for (const flag of ['--broadcast', '--dry-run']) {
+        const out = await run(['setup', flag]);
+        expect(out).toMatchObject({
+          ok: false,
+          code: 'sign_in_required',
+          error:
+            'You already have a Polymarket account with $4.20 and 2 open positions. Sign in once more to use it here.',
+          command: 'polygon-agent wallet login --owner',
+          existingAccount: { address: EXISTING.address, pusd: '4.2', positions: 2 }
+        });
+      }
+      expect(m.setupAccount).not.toHaveBeenCalled();
+    });
+
+    it('setup --new makes a separate account anyway', async () => {
+      await sessionPointer();
+      writeExistingAccount('main', EXISTING);
+      const out = await run(['setup', '--broadcast', '--new']);
+      expect(out).toMatchObject({ ok: true, created: true });
+      expect(readExistingAccount('main')).toBeNull();
+    });
+
+    it('status shows the account and the sign-in command', async () => {
+      await sessionPointer();
+      writeExistingAccount('main', EXISTING);
+      const out = await run(['status']);
+      expect(out).toMatchObject({
+        ok: true,
+        setUp: false,
+        existingAccount: {
+          address: EXISTING.address,
+          message:
+            'You already have a Polymarket account with $4.20 and 2 open positions. Sign in once more to use it here.',
+          command: 'polygon-agent wallet login --owner'
+        },
+        next: 'polygon-agent wallet login --owner'
+      });
     });
   });
 

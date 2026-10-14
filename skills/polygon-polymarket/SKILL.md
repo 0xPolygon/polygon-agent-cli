@@ -40,34 +40,33 @@ If `status.otherTradingKeys` is non-empty, those are other installs' keys or an 
 
 ### Key backup and recovery
 
-The trading key lives on this machine, and only it can move funds out of the Polymarket wallet. So the CLI backs it up to the user's OMS account as one extra imported wallet, labelled `polymarket-trading-key:<install name>`. Each install has its own. The local copy stays, because trading signs with it. An extra wallet in the user's OMS account list is expected. All of this happens under the hood: it's documented here for you, not for the user (see Talking to the user).
+The trading key controls the user's Polymarket account, and only it can move funds out. Each user has one key, backed up to their OMS account as one extra imported wallet labelled `polymarket-trading-key:agent`, so the same account follows them to every install. Keys labelled `polymarket-trading-key:<install name>` are older ones, from before the shared label; they are still found. The local copy stays, because trading signs with it. An extra wallet in the user's OMS account list is expected. All of this happens under the hood: it's documented here for you, not for the user (see Talking to the user).
 
-When the backup happens:
+Every sign-in checks this automatically: `wallet login --owner`, and every confirmed owner request in session mode (connect, allowance, renew, withdraw, access), by browser page or emailed code. The outcome is in the result's `polymarket` field. It never fails the sign-in.
 
-- Owner mode: `wallet login --owner` backs it up as soon as the sign-in succeeds (the login output shows `polymarket`), whether it is a fresh login or one that was already signed in. `setup --broadcast` imports the key with the existing sign-in too, so rerun it on an account that predates the backup. The result has `backup: { backedUp: true, omsWalletId, imported }`. If it fails, the result has `backup.backedUp: false` with an `error` and the setup itself still succeeds. With the key present but no owner sign-in, the result has `backup: { backedUp: false, hint: 'agent wallet login --owner' }`. With the key missing and no sign-in, `setup` refuses with `not_set_up`, because OMS can't be checked for a backup. Run `agent wallet login --owner` and rerun it.
-- Session mode: every confirmed owner request (connect, allowance, renew, withdraw, access) backs it up with the owner sign-in it already has, whether that sign-in was a browser page or an emailed code. It creates the key first if there is none. Connecting needs no extra step, and the owner request never fails because of it. The outcome is in the request's `polymarket` field (`backedUp`, or `backedUp: false` with an `error`).
+- The key is on this machine: it is backed up (`backedUp: true`). It is created first if this install has no account and OMS holds none.
+- The key isn't on this machine and OMS holds the account's key: the CLI finds it by the local records, then the shared label, then this install's older label, then the one other backed-up key whose account holds pUSD, open positions, or a funded legacy proxy.
+  - Owner mode: the account is restored and OMS signs as the key (`restored: true`). Nothing else to do.
+  - Session mode: this install can't sign as that key once the sign-in ends, so nothing is made over the account. The result has `existingAccount` with `message` and `command`. Tell the user the `message` as it is ("You already have a Polymarket account with $4.20 and 2 open positions. Sign in once more to use it here."), and run the `command` (`wallet login --owner`) once they agree. On a session-mode install that starts one more sign-in by the same method as before (a page or an emailed code: show it, then `wallet confirm`). Once confirmed, the install stays signed in and uses the account (`action: "owner"`, `polymarket.restored: true`). Don't explain allowances or modes unless the user asks.
+  - If the account's key holds nothing, a session-mode install gets its own key under the shared label instead.
+- Local records name a key OMS doesn't hold: nothing changes and no key is made (`backedUp: false` with an `error`).
+
+A key is never replaced, and no second account is made over one that holds anything.
+
+`setup` follows the same rules:
+
+- Owner mode with no local key restores the account from OMS (`restored: true`, `signer: "oms"`). Its dry run lists `restore the trading key from OMS`, or `restore the backed-up trading key that holds funds or positions, or create one if none does` when only other installs' keys exist. Several funded keys, or one it couldn't read, fail with `ambiguous_trading_key` and list them in `details.tradingKeys`. Then ask the user which to restore and run `setup --broadcast --from <address>`. `--new` makes a separate account even when another key holds funds: only when the user asks for one.
+- Session mode, after a sign-in found the account (`status` shows `existingAccount`): `setup` fails with `sign_in_required`, the same `message` and `command`. `--new` makes a separate account anyway, only when the user asks for one.
+- Session mode with the key gone and the account restored earlier: trading commands fail with `sign_in_required` and the same `command`.
 
 `status` shows two fields about this:
 
 | Field | Meaning |
 | --- | --- |
-| `signer` | `local`: the key file is on this machine. `oms`: it is gone and OMS signs as the backed-up key. Status, trading, redeem and withdraw all keep working. This is owner mode only. In session mode with the key gone, commands fail with `not_set_up` until the next owner approval recovers it. |
+| `signer` | `local`: the key file is on this machine. `oms`: it isn't, and OMS signs as the backed-up key (owner mode). Status, trading, redeem and withdraw all keep working. |
 | `backup` | `{ backedUp: true, omsWalletId }` once the key is in OMS. `{ backedUp: false }` if not. |
 
-A wiped machine loses nothing. The backup is found by its label when the user reinstalls with the same `--name` (see setup.md), and by what it holds when the name differs (a new machine or VM).
-
-- Owner mode: run `setup --broadcast`. It restores the account from OMS and never makes a new key over it (`restored: true`, `signer: "oms"`). Its dry run lists `restore the trading key from OMS` instead of `create trading key` when OMS holds this install's key.
-- Owner mode, under another install name: with no key of its own, `setup --broadcast` checks every other backed-up trading key, read only, and restores the one whose account holds pUSD, open positions, or a funded legacy proxy. It makes a new key only when none holds anything. Several funded keys, or one it couldn't read, fail with `ambiguous_trading_key` and list them in `details.tradingKeys`. Then ask the user which to restore and run `setup --broadcast --from <address>`. `--new` makes a new account even when another install's key holds funds: use it for a second install the user wants kept separate. The dry run lists `restore the backed-up trading key that holds funds or positions, or create one if none does`.
-- Session mode: the next confirmed owner request (any sign-in) recovers it. It withdraws all pUSD from the old account to the agent wallet (under $2 it stays there, since the bridge would not pay it out; the old key stays in OMS), archives the old records under `polymarket/<wallet>/previous-<timestamp>/`, then creates a new key and backs it up. Run `setup --broadcast` afterwards to deploy the new account. If local records name the lost key and OMS holds no backup of it, nothing is changed and no new key is made. With no local records and no OMS key for this install name, the step makes no key when OMS holds other installs' trading keys (it returns them as `otherTradingKeys` with a hint to run `setup --broadcast`, which picks in owner mode). With none, it creates a new key and backs it up.
-
-The recovery never replaces a key that still controls something. It then stops with `backedUp: false` and an `error`, and the old key stays in use:
-
-- No local records say what kind of account the key had, and its legacy proxy holds funds. This stops before any sweep, so the result has no `recovered`. The hint is "Run wallet logout, then agent wallet login --owner to use it through OMS."
-- The rest stop after the sweep. The pUSD has already moved to the agent wallet and `recovered` reports it.
-  - The old account still holds open positions (`positionsLeft`), or they couldn't be read (`positionsError`). The hint is "Positions remain in the old Polymarket account. Sell or redeem them from an owner install (wallet logout, then agent wallet login --owner, then polymarket setup --broadcast restores the account), then the next owner approval finishes the recovery."
-  - A deposit to the old account is still being credited (`pendingDeposit`). The hint is "Retry after it settles. The next owner approval retries this."
-  - The account is a recorded legacy proxy and the proxy still holds funds (`legacyProxy`), since withdraw moves only pUSD. The hint is "Run wallet logout, then agent wallet login --owner to use it through OMS."
-  - Any other failure after the sweep has the hint "The next owner approval retries this."
+Older installs may have archived accounts under `polymarket/<wallet>/previous-<timestamp>/`, from when a lost key was replaced. Each sign-in moves any pUSD still left in those to the agent wallet (`sweptPrevious`).
 
 `status.otherTradingKeys` lists backed-up keys this install doesn't track (owner mode only), such as another install's key or one from before a reinstall. `polymarket recover <address> --broadcast` moves that account's pUSD to the agent wallet. It refuses addresses that are not Polymarket trading keys in the OMS account and this install's own key. It leaves open positions in place, and a dry run lists them. Don't recover a key another install is still using: it would move that install's trading cash to the main wallet, and that install could no longer trade with it until it deposits again.
 
@@ -159,7 +158,7 @@ agent polymarket buy <ref> <outcome> <usd> [--max-price <0-1>] [--price <0-1> [-
 - If the estimate is already above `--max-price`, the command fails with `price_guard` (`details.estimatedPrice`) and posts nothing. The venue enforces `--max-price` again at fill time.
 - Dry run output: `orderType`, `estimatedPrice`, `estimatedShares`.
 - Limit buy: `--price` rests an order at that price. Add `--expires <minutes>` (at least 3) to make it expire. `--expires` only works with `--price`. On a market order it is `invalid_input`. `--price` cannot be combined with `--max-price` (`invalid_input`).
-- Not enough pUSD fails with `insufficient_pusd`. The hint is a `deposit` command.
+- A bid over the balance fails at once with `insufficient_pusd`: the message has the balance and the shortfall (`details.balanceUsd`, `details.shortfallUsd`), and the hint deposits the shortfall (at least $2). A deposit often lands a little under what was sent, so offer to bid the balance instead. With a deposit still being credited it fails with `bridge_pending`.
 - Broadcast output: `orderId`, `status`, `filledUsd`, `filledShares`, `txHashes`.
 - A refusal from the exchange is `order_rejected`, with the exchange's code in `details.venueCode`.
 
@@ -210,9 +209,10 @@ agent polymarket pnl [--interval 1d|1w|1m|max]            # valueUsd, realized, 
 | `not_set_up` | No Polymarket account for this wallet. Run `agent polymarket setup --wallet <name> --broadcast`. |
 | `ambiguous_trading_key` | `setup` found several backed-up keys holding funds, or one it couldn't read, and made nothing. Ask the user which of `details.tradingKeys` to restore, then `setup --broadcast --from <address>`, or `--new` for a separate account. |
 | `below_bridge_minimum` | Deposit or withdrawal is under $2. Use $2 or more. To withdraw a smaller balance, keep it in Polymarket until it reaches $2. |
-| `insufficient_pusd` | Not enough pUSD in the Polymarket wallet. Deposit more, or lower the amount. |
+| `insufficient_pusd` | Not enough pUSD in the Polymarket wallet. For a buy, the message gives the balance and the shortfall: offer to bid the balance, or deposit the `hint` amount. Never wait for more to arrive. |
+| `sign_in_required` | The user's Polymarket account exists, and this install needs one more sign-in to use it. Tell the user the `message`, then run the `command` when they agree. |
 | `insufficient_shares` | You hold fewer shares than asked, or none. Check `positions`. |
-| `bridge_pending` | An earlier deposit is not credited yet. Run `status`. Do not retry the deposit. |
+| `bridge_pending` | An earlier deposit is not credited yet. Run `status`. Do not retry the deposit. A buy that needs it says so: wait for the credit, or bid what is there. |
 | `region_blocked` | Polymarket is not available from this region. `setup`, `deposit`, `withdraw`, `buy`, `sell` and `redeem` fail. Stop. |
 | `region_close_only` | This region can only close positions. Use `sell`, `cancel`, `redeem` or `withdraw`. |
 | `price_guard` | The estimated fill is worse than `--max-price` or `--min-price`. Check `details.estimatedPrice`, then loosen the guard, use a limit order, or skip. |
@@ -238,4 +238,4 @@ General codes you will also see: `invalid_input` (bad amount or flags, including
 
 ## Legacy
 
-Accounts already on disk as a legacy Polymarket proxy keep working: `status` shows them, and `withdraw all --broadcast` drains the proxy's pUSD to the agent wallet. `withdraw` needs a builder key, so run `agent polymarket setup --wallet <name> --broadcast` first if `status` says it is missing. USDC.e left in a legacy proxy is not moved by `withdraw`. The CLI no longer imports a private key (the old `import-key` and `set-key` commands are gone). To use a legacy key through OMS, run `agent wallet logout`, then `agent wallet login --owner`. The old names `clob-buy`, `proxy-wallet` and `approve` still work as hidden aliases for one release.
+Accounts already on disk as a legacy Polymarket proxy keep working: `status` shows them, and `withdraw all --broadcast` drains the proxy's pUSD to the agent wallet. `withdraw` needs a builder key, so run `agent polymarket setup --wallet <name> --broadcast` first if `status` says it is missing. USDC.e left in a legacy proxy is not moved by `withdraw`. The CLI no longer imports a private key (the old `import-key` and `set-key` commands are gone). To use a legacy key through OMS, run `agent wallet login --owner`. The old names `clob-buy`, `proxy-wallet` and `approve` still work as hidden aliases for one release.

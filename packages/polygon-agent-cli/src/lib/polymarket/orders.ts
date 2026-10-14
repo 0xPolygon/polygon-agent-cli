@@ -4,6 +4,8 @@
 import { CliError } from '../errors.ts';
 import { getTradingClient, pusdBalance } from './account.ts';
 import { formatUnits6, parseShares, parseUsd } from './amounts.ts';
+import { BRIDGE_MIN_DEPOSIT_UNITS } from './bridge.ts';
+import { loadPending } from './deposits.ts';
 import { PolymarketError } from './gamma.ts';
 import { assertCanOpen, assertCanTrade, checkRegion } from './region.ts';
 import { resolveOutcome } from './resolve.ts';
@@ -77,6 +79,37 @@ export function normalizeOrderResponse(res: any, side: 'BUY' | 'SELL'): Record<s
 
 const floor2 = (n: number) => Math.floor(n * 100) / 100;
 
+// A bid larger than the balance fails at once with what to do, never waits. A deposit still
+// being credited is said first; otherwise the user can bid what is there, or deposit the
+// shortfall (at least the bridge minimum). A deposit often lands a little under what was sent.
+function shortOfFunds(p: { wallet: string; held: bigint; units: bigint }): CliError {
+  const balanceUsd = formatUnits6(p.held);
+  const bidUsd = formatUnits6(p.units);
+  const shortfall = p.units - p.held;
+  const depositUnits = shortfall > BRIDGE_MIN_DEPOSIT_UNITS ? shortfall : BRIDGE_MIN_DEPOSIT_UNITS;
+  const pending = loadPending(p.wallet);
+  const details = {
+    balanceUsd,
+    bidUsd,
+    shortfallUsd: formatUnits6(shortfall),
+    ...(pending ? { pendingDepositUsd: formatUnits6(BigInt(pending.amountUnits)) } : {})
+  };
+  if (pending) {
+    return new CliError({
+      code: 'bridge_pending',
+      message: `The Polymarket account holds $${balanceUsd}, and a $${details.pendingDepositUsd} deposit is still being credited. The $${bidUsd} bid needs it.`,
+      hint: `Run agent polymarket status in a minute. Or bid $${balanceUsd} now.`,
+      details
+    });
+  }
+  return new CliError({
+    code: 'insufficient_pusd',
+    message: `The Polymarket account holds $${balanceUsd}, $${details.shortfallUsd} short of the $${bidUsd} bid. Bid $${balanceUsd} or less, or deposit more.`,
+    hint: `agent polymarket deposit ${formatUnits6(depositUnits)} --wallet ${p.wallet} --broadcast`,
+    details
+  });
+}
+
 export async function buy(req: BuyRequest): Promise<Record<string, unknown>> {
   checkPrice('--max-price', req.maxPrice);
   checkPrice('--price', req.limitPrice);
@@ -102,13 +135,7 @@ export async function buy(req: BuyRequest): Promise<Record<string, unknown>> {
       );
     }
     const held = await pusdBalance(req.wallet);
-    if (held < units) {
-      throw new CliError({
-        code: 'insufficient_pusd',
-        message: `The Polymarket wallet holds $${formatUnits6(held)} pUSD; the order needs $${usd}.`,
-        hint: `agent polymarket deposit ${usd} --wallet ${req.wallet} --broadcast`
-      });
-    }
+    if (held < units) throw shortOfFunds({ wallet: req.wallet, held, units });
     const base = { market: r.market.slug, outcome: r.label, assetId: r.assetId, amountUsd: usd };
     if (req.limitPrice !== undefined) {
       const size = floor2(Number(usd) / req.limitPrice);

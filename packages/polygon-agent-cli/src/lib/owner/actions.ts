@@ -20,13 +20,19 @@ import { makeFeeSelector } from '../oms-tx.ts';
 import { polymarketOwnerStep } from '../polymarket/owner-step.ts';
 import { resetLedger } from '../session/ledger.ts';
 import { planSummary, toGrants } from '../session/plan.ts';
-import { racClient, readRacRecord, retireParkedRacs, retireRac } from '../session/rac.ts';
+import {
+  parkedRacSlots,
+  racClient,
+  readRacRecord,
+  retireParkedRacs,
+  retireRac
+} from '../session/rac.ts';
 import { commitRenewal } from '../session/renewal.ts';
 import { invalidateSessions } from '../session/sessions.ts';
-import { readApprovedPlan, writeApprovedPlan } from '../session/state.ts';
+import { readApprovedPlan, removeSessionState, writeApprovedPlan } from '../session/state.ts';
 import { chainLabel, findSupportedToken } from '../session/tokens.ts';
 import { probeSponsorship } from '../session/transfer.ts';
-import { saveOmsWalletPointer } from '../storage.ts';
+import { loadOmsWalletPointer, saveOmsWalletPointer } from '../storage.ts';
 import { formatUnits, getExplorerUrl, resolveNetwork } from '../utils.ts';
 
 interface ApprovedChain {
@@ -564,6 +570,31 @@ async function access(params: {
   };
 }
 
+// The sign-in is kept as this install's own (confirmOwnerRequest leaves it live). Its session
+// keys are revoked while the owner is signed in, then the session records go and the pointer
+// says owner. If a revoke fails nothing local changes, and the sign-in is revoked instead.
+async function keepSignedIn(params: { context: OwnerContext; wallet: string; now: Date }) {
+  const { owner, walletAddress, request } = params.context;
+  const records = (['rac', 'rac-next', ...parkedRacSlots(params.wallet)] as const)
+    .map((slot) => readRacRecord({ wallet: params.wallet, slot }))
+    .filter((record) => record !== null);
+  for (const record of records) {
+    if (Date.parse(record.expiresAt) <= params.now.getTime()) continue;
+    await owner.wallet.revokeAccess({ credentialId: record.credentialId });
+  }
+  removeSessionState(params.wallet);
+  const pointer = await loadOmsWalletPointer(params.wallet);
+  await saveOmsWalletPointer(params.wallet, {
+    walletAddress,
+    loginMethod: request.method === 'email' ? 'email' : (pointer?.loginMethod ?? 'email'),
+    createdAt: params.now.toISOString(),
+    ...(pointer?.installName ? { installName: pointer.installName } : {}),
+    ...(pointer?.email ? { email: pointer.email } : {}),
+    ...(request.method === 'email' ? { email: request.email } : {})
+  });
+  return { signedIn: true, walletAddress, revokedSessionKeys: records.length };
+}
+
 async function runAction(params: {
   context: OwnerContext;
   wallet: string;
@@ -581,6 +612,8 @@ async function runAction(params: {
       return { action: 'withdraw', ...(await withdraw({ ...params, action })) };
     case 'access':
       return { action: 'access', ...(await access({ ...params, revoke: action.revoke })) };
+    case 'owner':
+      return { action: 'owner', ...(await keepSignedIn(params)) };
   }
 }
 
@@ -602,7 +635,9 @@ export async function runOwnerAction(params: {
   const polymarket = await polymarketOwnerStep({
     wallet: params.wallet,
     owner: params.context.owner.wallet,
-    mainAddress: params.context.walletAddress
+    mainAddress: params.context.walletAddress,
+    // A kept sign-in stays: the account can be used through OMS from now on.
+    signsWithOms: params.context.request.action.kind === 'owner'
   }).catch((error: unknown) => ({
     backedUp: false,
     error: error instanceof Error ? error.message : String(error)

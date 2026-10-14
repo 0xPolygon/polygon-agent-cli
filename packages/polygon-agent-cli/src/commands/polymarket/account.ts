@@ -2,9 +2,6 @@
 
 import type { CommandModule } from 'yargs';
 
-import type { OtherKeyRecovery } from '../../lib/polymarket/account.ts';
-import type { OmsWalletLike } from '../../lib/polymarket/oms-key.ts';
-
 import { CliError } from '../../lib/errors.ts';
 import { resolveBroadcast, withWriteFlags } from '../../lib/mode.ts';
 import { getOmsClient } from '../../lib/oms-client.ts';
@@ -27,10 +24,18 @@ import {
 import { formatUnits6 } from '../../lib/polymarket/amounts.ts';
 import { loadPending } from '../../lib/polymarket/deposits.ts';
 import {
+  clearExistingAccount,
+  existingAccountMessage,
+  findAccountKey,
+  readExistingAccount,
+  untrackedTradingKeys
+} from '../../lib/polymarket/find-key.ts';
+import {
   backupTradingKey,
   findTradingKeyWallet,
   installTradingKeyReference,
-  listTradingKeyWallets,
+  SHARED_TRADING_KEY_REFERENCE,
+  signInAgainCommand,
   TRADING_KEY_REFERENCE
 } from '../../lib/polymarket/oms-key.ts';
 import { assertCanTrade, checkRegion } from '../../lib/polymarket/region.ts';
@@ -59,29 +64,6 @@ type SetupArgs = {
 };
 type RestoreOpts = { from?: string; new?: boolean };
 
-const sameAddress = (a: string | undefined, b: string | undefined): boolean =>
-  !!a && !!b && a.toLowerCase() === b.toLowerCase();
-
-// Backed-up trading keys this machine doesn't use: other installs', or a lost install's.
-async function untrackedTradingKeys(
-  w: OmsWalletLike
-): Promise<Array<{ id: string; address: string; reference: string }>> {
-  const mine = localTradingKeyAddresses();
-  return (await listTradingKeyWallets(w)).filter((x) => !mine.has(x.address.toLowerCase()));
-}
-
-// Anything a new account would leave behind: pUSD, open positions, a funded legacy proxy, or
-// a read that failed (then the key can't be shown to be empty).
-function holdsSomething(r: OtherKeyRecovery): boolean {
-  return (
-    Number(r.pusd) > 0 ||
-    !!r.legacyProxy ||
-    !!r.legacyProxyError ||
-    !Array.isArray(r.positionsLeft) ||
-    r.positionsLeft.length > 0
-  );
-}
-
 const NOT_SIGNED_IN = { backedUp: false, hint: 'agent wallet login --owner' };
 
 // Owner mode: the pointer isn't a session-only grant. Session mode backs up via owner requests.
@@ -105,7 +87,7 @@ async function backUpInOwnerMode(wallet: string): Promise<Record<string, unknown
   let result: Record<string, unknown>;
   try {
     const key = await ensureTradingKey(wallet);
-    const res = await backupTradingKey(w, key, installTradingKeyReference());
+    const res = await backupTradingKey(w, key, SHARED_TRADING_KEY_REFERENCE);
     writeBackup(wallet, {
       omsWalletId: res.omsWalletId,
       address: res.address,
@@ -130,7 +112,7 @@ async function backUpInOwnerMode(wallet: string): Promise<Record<string, unknown
 
 // Owner mode with the local key missing: OMS may hold it (a wiped machine, or a key moved
 // aside). Then the account is restored and signed through OMS; a new key is never made over
-// it. Returns null only when a new key is safe (see restoreTarget), so setup may create one.
+// it. Returns null only when a new key is safe (see findAccountKey), so setup may create one.
 async function restoreInOwnerMode(
   wallet: string,
   opts: RestoreOpts
@@ -148,7 +130,7 @@ async function restoreInOwnerMode(
   let failure: unknown;
   let mainWalletError: string | undefined;
   try {
-    const found = await restoreTarget(wallet, w, opts);
+    const found = await findAccountKey(wallet, w, opts);
     if (found) restored = await restoreFromOms({ wallet, owner: w, target: found });
   } catch (error) {
     failure = error;
@@ -174,83 +156,6 @@ async function restoreInOwnerMode(
   };
 }
 
-// Which backed-up key setup restores, in order: the one the local records name; the one
-// --from names; this install's own label; otherwise the only other backed-up key that holds
-// funds or positions (a reinstall under another name, or a new machine). Null means a new
-// key is safe: --new, or no backed-up key holds anything.
-async function restoreTarget(
-  wallet: string,
-  w: OmsWalletLike,
-  opts: RestoreOpts
-): Promise<{ id: string; address: string } | null> {
-  const known = loadAccount(wallet)?.signer ?? readBackup(wallet)?.address;
-  if (known) {
-    if (opts.from && !sameAddress(opts.from, known)) {
-      throw new CliError({
-        code: 'invalid_input',
-        message: `This install's records name trading key ${known}, not ${opts.from}.`
-      });
-    }
-    return findTradingKeyWallet(w, { address: known });
-  }
-  if (opts.from) {
-    const target = (await listTradingKeyWallets(w)).find((x) => sameAddress(x.address, opts.from));
-    if (!target) {
-      throw new CliError({
-        code: 'invalid_input',
-        message: `OMS holds no Polymarket trading key with address ${opts.from}.`,
-        hint: 'agent polymarket status lists them under otherTradingKeys'
-      });
-    }
-    return target;
-  }
-  const own = await findTradingKeyWallet(w, { reference: installTradingKeyReference() });
-  if (own || opts.new) return own;
-  return fundedOtherKey(w);
-}
-
-// Probes each untracked backed-up key's account read-only, one at a time (the OMS signer is
-// not reentrant). One that holds something is restored; several need --from.
-async function fundedOtherKey(w: OmsWalletLike): Promise<{ id: string; address: string } | null> {
-  const funded: Array<
-    { id: string; address: string; reference: string } & Record<string, unknown>
-  > = [];
-  for (const key of await untrackedTradingKeys(w)) {
-    try {
-      const r = await recoverOtherKey({
-        owner: w,
-        target: key,
-        mainAddress: w.walletAddress as string,
-        broadcast: false
-      });
-      if (!holdsSomething(r)) continue;
-      funded.push({
-        ...key,
-        account: r.account,
-        pusd: r.pusd,
-        positions: Array.isArray(r.positionsLeft) ? r.positionsLeft.length : null
-      });
-    } catch (error) {
-      funded.push({ ...key, error: error instanceof Error ? error.message : String(error) });
-    }
-  }
-  if (funded.length === 1 && funded[0].error === undefined) {
-    return { id: funded[0].id, address: funded[0].address };
-  }
-  if (funded.length === 0) return null;
-  throw new CliError({
-    code: 'ambiguous_trading_key',
-    message:
-      funded.length === 1
-        ? `Couldn't read the account of backed-up trading key ${funded[0].address}, so setup won't make a new one over it.`
-        : `${funded.length} backed-up Polymarket trading keys hold funds or positions.`,
-    hint: 'Pick one with: agent polymarket setup --broadcast --from <address>, or make a new account with --new',
-    details: {
-      tradingKeys: funded.map(({ id: _id, ...rest }) => rest)
-    }
-  });
-}
-
 // Dry run, owner mode, no local key: the restore step `setup --broadcast` would run instead of
 // creating a key, if any. Read-only: listWallets only, no wallet switch, no signing (the
 // funds check on other installs' keys runs on broadcast). Signed out, or on any error, it is
@@ -260,18 +165,31 @@ async function plannedRestoreStep(wallet: string, opts: RestoreOpts): Promise<st
   const w = getOmsClient(wallet).wallet;
   if (!w.walletAddress) return null;
   try {
-    const known = loadAccount(wallet)?.signer ?? readBackup(wallet)?.address;
-    const address = known ?? opts.from;
-    const found = await findTradingKeyWallet(
-      w,
-      address ? { address } : { reference: installTradingKeyReference() }
-    );
-    if (found) return RESTORE_STEP;
-    if (address || opts.new) return null;
+    const known = loadAccount(wallet)?.signer ?? readBackup(wallet)?.address ?? opts.from;
+    if (known) return (await findTradingKeyWallet(w, { address: known })) ? RESTORE_STEP : null;
+    if (opts.new) return null;
+    for (const reference of [SHARED_TRADING_KEY_REFERENCE, installTradingKeyReference()]) {
+      if (await findTradingKeyWallet(w, { reference })) return RESTORE_STEP;
+    }
     return (await untrackedTradingKeys(w)).length > 0 ? DETECT_STEP : null;
   } catch {
     return null;
   }
+}
+
+// An install that found the user's account at sign-in but can't sign for it (see the owner
+// step) never makes a second one: one more sign-in uses it. --new makes a separate account.
+async function refuseOverExistingAccount(argv: SetupArgs): Promise<void> {
+  if (argv.new || hasLocalKey(argv.wallet) || (await isOwnerMode(argv.wallet))) return;
+  const existing = readExistingAccount(argv.wallet);
+  if (!existing) return;
+  const { at: _at, ...shown } = existing;
+  throw new CliError({
+    code: 'sign_in_required',
+    message: existingAccountMessage(existing),
+    command: signInAgainCommand(argv.wallet),
+    details: { existingAccount: shown }
+  });
 }
 
 async function handleSetup(argv: SetupArgs): Promise<void> {
@@ -279,6 +197,7 @@ async function handleSetup(argv: SetupArgs): Promise<void> {
     const broadcast = resolveBroadcast(argv);
     await omsAddress(argv.wallet);
     assertCanTrade(await checkRegion());
+    await refuseOverExistingAccount(argv);
     if (!broadcast) {
       const { exists, account } = planSetup(argv.wallet);
       // The legacy approvals are only listed when an existing account lacks them.
@@ -316,11 +235,13 @@ async function handleSetup(argv: SetupArgs): Promise<void> {
     if ((await isOwnerMode(argv.wallet)) && !hasLocalKey(argv.wallet)) {
       const restored = await restoreInOwnerMode(argv.wallet, argv);
       if (restored) {
+        clearExistingAccount(argv.wallet);
         ok(restored);
         return;
       }
     }
     const { account, created, approvalsSet } = await setupAccount(argv.wallet);
+    clearExistingAccount(argv.wallet);
     const backup = (await isOwnerMode(argv.wallet))
       ? await backUpInOwnerMode(argv.wallet)
       : backupSummary(argv.wallet);
@@ -384,6 +305,17 @@ async function handleStatus(argv: { wallet: string }): Promise<void> {
   try {
     const account = loadAccount(argv.wallet);
     if (!account) {
+      const existing = hasLocalKey(argv.wallet) ? null : readExistingAccount(argv.wallet);
+      if (existing) {
+        const { at: _at, ...shown } = existing;
+        const command = signInAgainCommand(argv.wallet);
+        ok({
+          setUp: false,
+          existingAccount: { ...shown, message: existingAccountMessage(existing), command },
+          next: command
+        });
+        return;
+      }
       ok({
         setUp: false,
         ...(await otherKeysField(argv.wallet)),
