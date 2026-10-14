@@ -1,3 +1,4 @@
+import { Check } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import type { ShippingAddress } from './credentials-api.js';
@@ -42,6 +43,8 @@ export function CredentialsTab({
   const [address, setAddress] = useState<ShippingAddress>(EMPTY_ADDRESS);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Shown on the button for a moment after a save, so the click visibly lands.
+  const [justSaved, setJustSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -64,6 +67,12 @@ export function CredentialsTab({
     };
   }, [token]);
 
+  useEffect(() => {
+    if (!justSaved) return;
+    const t = setTimeout(() => setJustSaved(false), 2000);
+    return () => clearTimeout(t);
+  }, [justSaved]);
+
   if (load === 'expired') return <SignInFirst />;
 
   const save = async () => {
@@ -71,8 +80,14 @@ export function CredentialsTab({
     setSaving(true);
     setError(null);
     try {
-      setAddress(await saveAddress(token, address));
+      // Keep "Saving…" up long enough to read; the request is often instant.
+      const [next] = await Promise.all([
+        saveAddress(token, address),
+        new Promise((r) => setTimeout(r, 600))
+      ]);
+      setAddress(next);
       setSaved(true);
+      setJustSaved(true);
       onSaved('Address saved');
     } catch (err) {
       if (err instanceof CredentialsError && err.status === 401) setLoad('expired');
@@ -126,6 +141,7 @@ export function CredentialsTab({
                     onChange={(e) => {
                       const v = e.target.value;
                       setSaved(false);
+                      setJustSaved(false);
                       setAddress((a) => ({ ...a, [f.key]: v }));
                     }}
                     className="h-11 border border-[var(--slate-300)] rounded-xl px-3.5 text-[15px] bg-white outline-none focus:border-[var(--purple-500)] focus:ring-2 focus:ring-[var(--purple-200)]"
@@ -135,8 +151,21 @@ export function CredentialsTab({
             </div>
             {error && <span className="text-sm text-[var(--red-700)]">{error}</span>}
             <div className="flex justify-end">
-              <button type="submit" disabled={saving} className="btn btn-primary btn-lg">
-                {saving ? 'Saving…' : 'Save address'}
+              <button
+                type="submit"
+                disabled={saving || justSaved}
+                className="btn btn-primary btn-lg"
+              >
+                {saving ? (
+                  'Saving…'
+                ) : justSaved ? (
+                  <span className="flex items-center gap-2">
+                    <Check className="w-[18px] h-[18px]" />
+                    Address saved
+                  </span>
+                ) : (
+                  'Save address'
+                )}
               </button>
             </div>
           </form>
