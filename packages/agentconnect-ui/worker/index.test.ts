@@ -4,10 +4,11 @@ import type { Env } from './index.ts';
 
 import { issueCertificate, resetJwksCache } from './agent-auth.ts';
 import { AgentCard, resetAgentCardTokenCache } from './agentcard.ts';
-import { handleApi, handleSessionApi } from './index.ts';
+import { handleAgentsApi, handleApi, handleConnectApi, handleSessionApi } from './index.ts';
 import { issueSession, SESSION_COOKIE } from './owner-session.ts';
+import { OwnerSignIn } from './owner-signin.ts';
 import { decideApproval } from './services.ts';
-import { CredentialStore } from './store.ts';
+import { CredentialStore, SealedKv } from './store.ts';
 import {
   AGENT,
   AUDIENCE,
@@ -692,5 +693,171 @@ describe('/api/credentials/buy', () => {
     expect((await call(t, {})).status).toBe(400);
     expect((await call(t, { confirm: '0123456789abcdef' })).status).toBe(400);
     expect((await setLimit(t, -1)).status).toBe(400);
+  });
+});
+
+describe('connecting an agent (consent)', () => {
+  const ORIGIN = 'https://agentconnect.test';
+  const authRequest = {
+    responseType: 'code',
+    clientId: 'cli_1',
+    redirectUri: 'http://localhost:9999/callback',
+    scope: ['wallet'],
+    state: 'st_1',
+    codeChallenge: 'x',
+    codeChallengeMethod: 'S256'
+  };
+  const cookie = async () =>
+    `${SESSION_COOKIE}=${await issueSession({ wallet: WALLET, email: 'owner@example.com' }, SECRET)}`;
+
+  function setup() {
+    const oauthKv = fakeKv();
+    const completed: unknown[] = [];
+    const revoked: [string, string][] = [];
+    const grants = [
+      {
+        id: 'g1',
+        clientId: 'cli_1',
+        userId: WALLET,
+        scope: ['wallet'],
+        metadata: { clientName: 'Claude Code' },
+        createdAt: 100
+      },
+      {
+        id: 'g2',
+        clientId: 'cli_2',
+        userId: WALLET,
+        scope: ['wallet'],
+        metadata: {},
+        createdAt: 200
+      }
+    ];
+    const provider = {
+      completeAuthorization: async (o: unknown) => {
+        completed.push(o);
+        return { redirectTo: 'http://localhost:9999/callback?code=abc&state=st_1' };
+      },
+      listUserGrants: async (userId: string) => ({
+        items: grants.filter((g) => g.userId === userId)
+      }),
+      revokeGrant: async (id: string, userId: string) => {
+        revoked.push([id, userId]);
+      }
+    };
+    const e = env({
+      OAUTH_KV: oauthKv.kv,
+      OAUTH_PROVIDER: provider as unknown as Env['OAUTH_PROVIDER']
+    });
+    const signIn = new OwnerSignIn(new SealedKv(oauthKv.kv, 'test-credentials-key'), 'pk_test');
+    return { e, signIn, completed, revoked };
+  }
+  const call = (
+    e: Env,
+    method: string,
+    path: string,
+    opts: { cookie?: string; body?: unknown } = {}
+  ) =>
+    handleConnectApi(
+      new Request(`${ORIGIN}${path}`, {
+        method,
+        headers: {
+          ...(opts.cookie ? { Cookie: opts.cookie } : {}),
+          ...(opts.body ? { 'Content-Type': 'application/json', Origin: ORIGIN } : {})
+        },
+        body: opts.body ? JSON.stringify(opts.body) : undefined
+      }),
+      e,
+      new URL(`${ORIGIN}${path}`).pathname
+    );
+
+  it('asks a signed-out owner to sign in', async () => {
+    const { e, signIn } = setup();
+    const c = await signIn.create({ authRequest: authRequest as never, clientName: 'Claude Code' });
+    const res = await call(e, 'GET', `/api/connect?c=${c}`);
+    expect(await res.json()).toEqual({ clientName: 'Claude Code', signedIn: false });
+  });
+
+  it('refuses to allow before sign-in', async () => {
+    const { e, signIn, completed } = setup();
+    const c = await signIn.create({ authRequest: authRequest as never, clientName: 'Claude Code' });
+    const res = await call(e, 'POST', '/api/connect/decide', { body: { c, allow: true } });
+    expect(res.status).toBe(400);
+    expect(completed).toHaveLength(0);
+  });
+
+  it('skips sign-in for an owner signed in on the site, showing the auto-pay limit', async () => {
+    const { e, signIn, completed } = setup();
+    const c = await signIn.create({ authRequest: authRequest as never, clientName: 'Claude Code' });
+    const res = await call(e, 'GET', `/api/connect?c=${c}`, { cookie: await cookie() });
+    expect(await res.json()).toEqual({
+      clientName: 'Claude Code',
+      signedIn: true,
+      email: 'owner@example.com',
+      autoPayLimitCents: 2500
+    });
+    const allow = await call(e, 'POST', '/api/connect/decide', { body: { c, allow: true } });
+    expect(await allow.json()).toEqual({
+      redirectTo: 'http://localhost:9999/callback?code=abc&state=st_1'
+    });
+    expect(completed[0]).toMatchObject({ userId: WALLET, props: { wallet: WALLET } });
+  });
+
+  it("sends the agent back with access_denied on Don't allow", async () => {
+    const { e, signIn, completed } = setup();
+    const c = await signIn.create({ authRequest: authRequest as never, clientName: 'Claude Code' });
+    await call(e, 'GET', `/api/connect?c=${c}`, { cookie: await cookie() });
+    const res = await call(e, 'POST', '/api/connect/decide', { body: { c, allow: false } });
+    const { redirectTo } = (await res.json()) as { redirectTo: string };
+    const back = new URL(redirectTo);
+    expect(back.origin + back.pathname).toBe('http://localhost:9999/callback');
+    expect(back.searchParams.get('error')).toBe('access_denied');
+    expect(back.searchParams.get('state')).toBe('st_1');
+    expect(completed).toHaveLength(0);
+  });
+
+  it('lists connected agents for the signed-in owner, newest first, and disconnects one', async () => {
+    const { e, revoked } = setup();
+    const c = await cookie();
+    const list = await handleAgentsApi(
+      new Request(`${ORIGIN}/api/agents`, { headers: { Cookie: c } }),
+      e,
+      '/api/agents'
+    );
+    expect(await list.json()).toEqual({
+      agents: [
+        { id: 'g2', name: 'An agent', connectedAt: 200 },
+        { id: 'g1', name: 'Claude Code', connectedAt: 100 }
+      ]
+    });
+    const del = await handleAgentsApi(
+      new Request(`${ORIGIN}/api/agents/g1`, {
+        method: 'DELETE',
+        headers: { Cookie: c, Origin: ORIGIN }
+      }),
+      e,
+      '/api/agents/g1'
+    );
+    expect(del.status).toBe(200);
+    expect(revoked).toEqual([['g1', WALLET]]);
+  });
+
+  it('keeps the agent list from agents and other sites', async () => {
+    const { e, revoked } = setup();
+    const withToken = await handleAgentsApi(
+      new Request(`${ORIGIN}/api/agents`, { headers: { Authorization: `Agent ${await token()}` } }),
+      e,
+      '/api/agents'
+    );
+    expect(withToken.status).toBe(401);
+    const crossSite = await handleAgentsApi(
+      new Request(`${ORIGIN}/api/agents/g1`, {
+        method: 'DELETE',
+        headers: { Cookie: await cookie(), Origin: 'https://evil.test' }
+      }),
+      e,
+      '/api/agents/g1'
+    );
+    expect(crossSite.status).toBe(401);
+    expect(revoked).toHaveLength(0);
   });
 });

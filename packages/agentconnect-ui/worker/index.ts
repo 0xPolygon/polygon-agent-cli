@@ -127,21 +127,40 @@ export function parseBuy(body: unknown): { ask: string; conversationId?: string 
 }
 
 /**
- * The connect page's sign-in steps. On success the grant is issued and the
- * page is sent back to the MCP client with its code.
+ * The connect page, like a card wallet's agent consent screen: the owner signs
+ * in (or is already signed in on this site), sees what the agent will be able
+ * to do, and allows or denies. Allowing issues the grant; either way the page
+ * goes back to the agent.
  */
 export async function handleConnectApi(req: Request, env: Env, path: string): Promise<Response> {
   const signIn = ownerSignIn(env);
-  if (!signIn || !env.OAUTH_PROVIDER) {
+  if (!signIn || !env.OAUTH_PROVIDER || !env.AGENT_CERT_SECRET) {
     return fail(503, 'mcp_unavailable', 'Connecting agents is not configured on this deployment');
   }
+  // What the consent screen shows once the owner is known.
+  const consent = async (who: { wallet: string; email: string | null }) => {
+    const db = store(env);
+    const limit = db ? (await getSettings(db, who.wallet)).autoPayLimitCents : null;
+    return { signedIn: true, email: who.email, autoPayLimitCents: limit };
+  };
   try {
     if (path === '/api/connect' && req.method === 'GET') {
       const id = new URL(req.url).searchParams.get('c') ?? '';
       const pending = await signIn.load(id);
       if (!pending.authRequest)
         throw new ValidationError('This link is not for connecting an agent.');
-      return json({ clientName: pending.clientName });
+      const base = { clientName: pending.clientName };
+      if (pending.signedIn) return json({ ...base, ...(await consent(pending.signedIn)) });
+      // Already signed in on this site: straight to the consent screen.
+      const token = readSessionCookie(req);
+      const who = token
+        ? await verifySession(token, env.AGENT_CERT_SECRET).catch(() => null)
+        : null;
+      if (who) {
+        await signIn.markSignedIn(id, who);
+        return json({ ...base, ...(await consent(who)) });
+      }
+      return json({ ...base, signedIn: false });
     }
     if (req.method !== 'POST') return fail(405, 'method_not_allowed', 'Use POST');
     const body = (await readBody(req)) as Record<string, unknown>;
@@ -151,34 +170,54 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
       if (typeof v !== 'string' || !v.trim()) throw new ValidationError(`${k} is required`);
       return v.trim();
     };
-    const finish = async (who: { wallet: string; email: string | null }) => {
-      const pending = await signIn.load(id);
-      if (!pending.authRequest)
-        throw new ValidationError('This link is not for connecting an agent.');
-      const props: McpProps = { wallet: who.wallet, email: who.email };
-      const { redirectTo } = await env.OAUTH_PROVIDER!.completeAuthorization({
-        request: pending.authRequest,
-        userId: who.wallet,
-        metadata: { clientName: pending.clientName, email: who.email },
-        scope: pending.authRequest.scope,
-        props
+    // Signed in: remember who, keep them signed in on the site, show consent.
+    const signedIn = async (who: { wallet: string; email: string | null }) => {
+      await signIn.markSignedIn(id, who);
+      return new Response(JSON.stringify(await consent(who)), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+          'Set-Cookie': sessionCookie(req, await issueSession(who, env.AGENT_CERT_SECRET!))
+        }
       });
-      await signIn.forget(id);
-      return json({ redirectTo });
     };
     if (path === '/api/connect/email/start') {
       await signIn.startEmail(id, str('email'));
       return json({ sent: true });
     }
     if (path === '/api/connect/email/finish') {
-      return finish(await signIn.finishEmail(id, str('code')));
+      return signedIn(await signIn.finishEmail(id, str('code')));
     }
     if (path === '/api/connect/google/start') {
       const url = await signIn.startGoogle(id, `${new URL(req.url).origin}/login`);
       return json({ url });
     }
     if (path === '/api/connect/google/finish') {
-      return finish(await signIn.finishGoogle(id, str('callbackUrl')));
+      return signedIn(await signIn.finishGoogle(id, str('callbackUrl')));
+    }
+    if (path === '/api/connect/decide') {
+      const pending = await signIn.load(id);
+      if (!pending.authRequest)
+        throw new ValidationError('This link is not for connecting an agent.');
+      if (!pending.signedIn) throw new ValidationError('Sign in first.');
+      const who = pending.signedIn;
+      await signIn.forget(id);
+      if (body.allow !== true) {
+        const back = new URL(pending.authRequest.redirectUri);
+        back.searchParams.set('error', 'access_denied');
+        back.searchParams.set('error_description', 'The owner did not allow access');
+        if (pending.authRequest.state) back.searchParams.set('state', pending.authRequest.state);
+        return json({ redirectTo: back.toString() });
+      }
+      const props: McpProps = { wallet: who.wallet, email: who.email };
+      const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
+        request: pending.authRequest,
+        userId: who.wallet,
+        metadata: { clientName: pending.clientName, email: who.email },
+        scope: pending.authRequest.scope,
+        props
+      });
+      return json({ redirectTo });
     }
     return fail(404, 'not_found', 'No such endpoint');
   } catch (err) {
@@ -193,6 +232,44 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
         'That sign-in did not work. Check the code and try again.'
       );
     }
+    return fail(500, 'internal_error', 'Something went wrong');
+  }
+}
+
+/**
+ * Agents connected to the wallet (MCP grants), for the dashboard's Settings.
+ * Only the owner signed in on this site may list or disconnect them.
+ */
+export async function handleAgentsApi(req: Request, env: Env, path: string): Promise<Response> {
+  if (!env.OAUTH_PROVIDER || !env.AGENT_CERT_SECRET) {
+    return fail(503, 'mcp_unavailable', 'Connecting agents is not configured on this deployment');
+  }
+  try {
+    const owner = await sessionIdentity(req, env.AGENT_CERT_SECRET);
+    if (!owner) return fail(401, 'unauthorized', 'Sign in to see connected agents');
+    if (path === '/api/agents' && req.method === 'GET') {
+      const agents = [];
+      let cursor: string | undefined;
+      do {
+        const page = await env.OAUTH_PROVIDER.listUserGrants(owner.wallet, { cursor });
+        for (const g of page.items) {
+          const meta = (g.metadata ?? {}) as { clientName?: string };
+          agents.push({ id: g.id, name: meta.clientName || 'An agent', connectedAt: g.createdAt });
+        }
+        cursor = page.cursor;
+      } while (cursor);
+      agents.sort((a, b) => b.connectedAt - a.connectedAt);
+      return json({ agents });
+    }
+    const m = /^\/api\/agents\/([^/]+)$/.exec(path);
+    if (m && req.method === 'DELETE') {
+      await env.OAUTH_PROVIDER.revokeGrant(decodeURIComponent(m[1]), owner.wallet);
+      return json({ disconnected: true });
+    }
+    return fail(404, 'not_found', 'No such endpoint');
+  } catch (err) {
+    if (err instanceof AuthError) return fail(401, err.code, err.message);
+    console.error('[agents]', err);
     return fail(500, 'internal_error', 'Something went wrong');
   }
 }
@@ -509,6 +586,8 @@ const app = {
       return handleConnectApi(request, env, url.pathname);
     if (url.pathname.startsWith('/api/approve'))
       return handleApproveApi(request, env, url.pathname);
+    if (url.pathname === '/api/agents' || url.pathname.startsWith('/api/agents/'))
+      return handleAgentsApi(request, env, url.pathname);
     if (url.pathname === '/api/session' || url.pathname.startsWith('/api/session/'))
       return handleSessionApi(request, env, url.pathname);
     if (url.pathname.startsWith('/api/')) return handleApi(request, env, url.pathname);

@@ -25,6 +25,7 @@ import { fetchActivity, fetchHoldings } from '../indexer';
 import { SKILL_URL } from './agents.js';
 import { AutoPayPanel } from './AutoPay.js';
 import { CardsPanel } from './CardsPanel.js';
+import { ConnectedAgents } from './ConnectedAgents.js';
 import { accountEmail, SESSION_AUTH, takeLinkToken } from './credentials-api.js';
 import { CredentialsTab } from './Credentials.js';
 import { fetchPolygonRates, fetchVaultBalances, fetchVaults } from './earn.js';
@@ -277,6 +278,7 @@ export function Dashboard({
             {tab === 'credentials' && <CredentialsTab token={auth} onSaved={flash} />}
             {tab === 'activity' && <ActivityTab activity={activity} />}
             {tab === 'settings' && <AutoPayPanel token={auth} />}
+            {tab === 'settings' && owner && <ConnectedAgents />}
             {tab === 'settings' && <SettingsTab address={walletAddress} ctx={ctx} />}
             {tab === 'settings' && owner && (
               <button
