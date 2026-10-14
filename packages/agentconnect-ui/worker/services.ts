@@ -471,8 +471,10 @@ export async function startCardSession(db: CredentialStore, cards: AgentCard, wa
     session = await cards.createVaultSession(latest);
   } catch (err) {
     // A passkey-only vault user has no phone or email for the sign-in code.
-    // An open session still lets them pick "Unlock with your passkey".
-    if (!(latest && err instanceof AgentCardError && err.code === 'contact_missing')) throw err;
+    // An open session still lets them pick "Unlock with your passkey". A user
+    // from the other mode (sandbox vs live) is unknown here: start fresh too.
+    const fresh = ['contact_missing', 'connection_not_found'];
+    if (!(latest && err instanceof AgentCardError && fresh.includes(err.code))) throw err;
     session = await cards.createVaultSession(null);
     returning = false;
   }
