@@ -2,13 +2,8 @@ import { ArrowDownLeft, Target, Zap } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { LogoBadge } from '../App.js';
-import { FundingScreen } from '../components/FundingScreen.js';
-import { fetchHoldings } from '../indexer.js';
-import { SKILL_URL } from './agents.js';
 import { finishEmail, finishGoogle, startEmail, startGoogle } from './signin.js';
-import { AmountChips, CopyButton, IconTile, useCopy } from './ui.js';
-
-const INSTALL = 'npx skills add https://github.com/0xPolygon/polygon-agent-cli';
+import { IconTile } from './ui.js';
 
 // An illustration of the dashboard, not the visitor's data.
 const PREVIEW_ROWS = [
@@ -21,20 +16,6 @@ const PREVIEW_ROWS = [
   { icon: Zap, title: 'Paid for 14 web searches', kind: 'Pay per use', amount: '-$0.28' },
   { icon: ArrowDownLeft, title: 'Received 50 USDC', kind: 'Deposit', amount: '+$50.00' }
 ];
-
-function StepBars({ step }: { step: number }) {
-  return (
-    <div className="flex gap-1.5">
-      {[0, 1, 2].map((i) => (
-        <div
-          key={i}
-          className="flex-1 h-1 rounded"
-          style={{ background: i <= step ? 'var(--purple-500)' : 'var(--slate-200)' }}
-        />
-      ))}
-    </div>
-  );
-}
 
 function Heading({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -176,108 +157,11 @@ function SignIn({
   );
 }
 
-function AddMoney({ onAdd, onSkip }: { onAdd: (amount: number) => void; onSkip: () => void }) {
-  const [amount, setAmount] = useState(50);
-  return (
-    <div className="flex flex-col gap-6">
-      <Heading title="Add money">
-        Your balance is held in digital dollars. Withdraw to your card or bank anytime.
-      </Heading>
-      <AmountChips values={[25, 50, 100, 200]} value={amount} onPick={setAmount} />
-      <div className="flex flex-col gap-2.5">
-        <button
-          type="button"
-          onClick={() => onAdd(amount)}
-          className="btn btn-primary btn-lg w-full h-12"
-        >
-          Add ${amount}
-        </button>
-        <button
-          type="button"
-          onClick={onSkip}
-          className="btn btn-ghost btn-lg w-full h-11 text-[var(--slate-500)]"
-        >
-          Skip for now
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function ConnectAgent() {
-  const [limit, setLimit] = useState(200);
-  const [copied, copy] = useCopy();
-  const prompt = `Read ${SKILL_URL} and connect my Polygon agent wallet with a $${limit} spending limit.`;
-  return (
-    <div className="flex flex-col gap-6">
-      <Heading title="Connect your agent">
-        Set a spending limit, then paste this into any agent you use.
-      </Heading>
-
-      <div className="flex flex-col gap-2.5">
-        <span className="text-sm font-medium text-[var(--slate-600)]">Spending limit</span>
-        <AmountChips values={[50, 100, 200, 500]} value={limit} onPick={setLimit} />
-        <span className="text-[13px] text-[var(--slate-500)]">
-          Your agent asks you to approve it with the same sign-in. Change it anytime in Settings.
-        </span>
-      </div>
-
-      <div className="border border-[var(--slate-200)] rounded-2xl bg-white p-4 flex flex-col gap-3">
-        <code className="oms-mono text-[13px] leading-normal text-[var(--slate-600)] break-all">
-          {prompt}
-        </code>
-        <CopyButton
-          copied={copied === 'setup'}
-          onClick={() => copy('setup', prompt)}
-          label="Copy"
-          className="w-full h-11"
-        />
-      </div>
-
-      <div className="flex flex-col gap-2">
-        <span className="text-[13px] text-[var(--slate-500)]">
-          Or install the skill, then ask your agent to set up a Polygon agent wallet.
-        </span>
-        <button
-          type="button"
-          onClick={() => copy('install', INSTALL)}
-          className="flex items-center gap-2 bg-white border border-[var(--slate-200)] hover:border-[var(--slate-400)] rounded-xl px-3 py-2.5 cursor-pointer text-left"
-        >
-          <code className="oms-mono flex-1 min-w-0 text-[13px] break-all">{INSTALL}</code>
-          <span className="text-[13px] font-bold text-[var(--slate-500)] flex-shrink-0">
-            {copied === 'install' ? 'Copied' : 'Copy'}
-          </span>
-        </button>
-      </div>
-
-      <a href="/" className="btn btn-primary btn-lg w-full h-12">
-        Go to my wallet
-      </a>
-    </div>
-  );
-}
-
 /**
- * Shown when the page is opened without a wallet: sign in, add money, connect
- * an agent. `finishing` is set on the Google return to `/login`.
+ * Shown when the page is opened without a wallet: sign in, then straight to the
+ * dashboard. `finishing` is set on the Google return to `/login`.
  */
 export function Onboarding({ finishing = false }: { finishing?: boolean }) {
-  const [wallet, setWallet] = useState<string | null>(null);
-  const [step, setStep] = useState(0);
-  const [funding, setFunding] = useState<number | null>(null);
-
-  // A wallet that already holds money has done this before: straight to it.
-  const signedIn = async (address: string) => {
-    const holdings = await fetchHoldings(address).catch(() => []);
-    if (holdings.some((h) => h.usd > 0)) {
-      window.location.assign('/');
-      return;
-    }
-    window.history.replaceState(null, '', '/');
-    setWallet(address);
-    setStep(1);
-  };
-
   return (
     <div className="min-h-[100dvh] flex flex-col bg-[var(--slate-50)] text-[var(--slate-900)]">
       <div className="h-16 flex items-center px-6 bg-white border-b border-[var(--slate-200)]">
@@ -285,10 +169,7 @@ export function Onboarding({ finishing = false }: { finishing?: boolean }) {
       </div>
       <div className="flex-1 grid md:grid-cols-2 gap-12 max-w-[1120px] w-full mx-auto px-5 pt-7 pb-10 md:px-10 md:py-12 items-center">
         <div className="flex flex-col gap-7 max-w-[460px] w-full min-w-0">
-          <StepBars step={step} />
-          {step === 0 && <SignIn finishing={finishing} onSignedIn={signedIn} />}
-          {step === 1 && wallet && <AddMoney onAdd={setFunding} onSkip={() => setStep(2)} />}
-          {step === 2 && wallet && <ConnectAgent />}
+          <SignIn finishing={finishing} onSignedIn={() => window.location.assign('/')} />
         </div>
 
         <div className="hidden md:flex bg-white border border-[var(--slate-200)] rounded-3xl p-7 flex-col gap-5">
@@ -323,25 +204,6 @@ export function Onboarding({ finishing = false }: { finishing?: boolean }) {
           </div>
         </div>
       </div>
-
-      {funding !== null && wallet && (
-        <div
-          className="fixed inset-0 z-50 flex justify-center overflow-y-auto overflow-x-hidden px-4 py-6 bg-[rgba(2,0,5,0.2)]"
-          onClick={() => setFunding(null)}
-        >
-          <div className="w-full max-w-sm my-auto" onClick={(e) => e.stopPropagation()}>
-            <FundingScreen
-              walletAddress={wallet}
-              chainId={137}
-              amount={String(funding)}
-              onSkip={() => {
-                setFunding(null);
-                setStep(2);
-              }}
-            />
-          </div>
-        </div>
-      )}
     </div>
   );
 }
