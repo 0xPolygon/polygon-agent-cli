@@ -28,9 +28,11 @@ export interface Approval {
 export interface WalletRecord {
   address?: ShippingAddress | null;
   // AgentCard vault users this wallet has linked (a returning user may come
-  // back as a new one), and the add-a-card session in flight (so a wallet can
-  // only finish its own session).
+  // back as a new one), and its recent add-a-card sessions (so a wallet can
+  // only finish its own, and a second link doesn't strand the first).
   agentcardUsers?: string[];
+  agentcardSessions?: string[];
+  /** @deprecated The single session kept before `agentcardSessions`. */
   agentcardSession?: string;
   // Tokens that act as the vault user with the card, for purchases. Taken
   // once from a linked add-a-card session; the refresh token rotates.
@@ -50,6 +52,11 @@ const enc = new TextEncoder();
 const dec = new TextDecoder();
 
 const keyName = (wallet: string) => `wallet:${wallet.toLowerCase()}`;
+// Keyed by a hash so the KV listing doesn't show owners' emails.
+async function ownerKey(email: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', enc.encode(email.trim().toLowerCase()));
+  return `owner:${b64urlEncode(new Uint8Array(digest))}`;
+}
 
 /**
  * JSON values in Workers KV, sealed with AES-GCM. The KV key is the additional
@@ -113,6 +120,19 @@ export class CredentialStore {
 
   async approvalWallet(id: string): Promise<string | null> {
     return /^apr_[0-9a-f]{24}$/.test(id) ? this.sealed.get<string>(`approval:${id}`) : null;
+  }
+
+  /**
+   * The agent wallet an owner's verified email linked last. OMS gives each
+   * sign-in method its own wallet, so a dashboard sign-in by email code can
+   * land on a different wallet than the agent's Google one; this ties them.
+   */
+  async linkOwner(email: string, wallet: string): Promise<void> {
+    await this.sealed.put(await ownerKey(email), wallet.toLowerCase());
+  }
+
+  async ownerWallet(email: string): Promise<string | null> {
+    return this.sealed.get<string>(await ownerKey(email));
   }
 
   /** Read, change, and write back the wallet's record. */

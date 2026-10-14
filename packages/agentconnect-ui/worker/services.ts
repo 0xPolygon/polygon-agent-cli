@@ -3,7 +3,7 @@
 
 import type { BuyTurn } from './agentcard.ts';
 import type { Env } from './index.ts';
-import type { Approval } from './store.ts';
+import type { Approval, WalletRecord } from './store.ts';
 
 import { AgentCard, AgentCardError } from './agentcard.ts';
 import { ValidationError } from './shipping.ts';
@@ -462,6 +462,13 @@ export async function listWalletCards(db: CredentialStore, cards: AgentCard, wal
     .map(cardView);
 }
 
+// Add-a-card links stay usable side by side (the dashboard and an agent can
+// each open one); only the most recent few are kept.
+const SESSIONS_KEPT = 5;
+
+const cardSessions = (r: WalletRecord): string[] =>
+  r.agentcardSessions ?? (r.agentcardSession ? [r.agentcardSession] : []);
+
 /** A single-use add-a-card link for the wallet. */
 export async function startCardSession(db: CredentialStore, cards: AgentCard, wallet: string) {
   const latest = (await db.get(wallet)).agentcardUsers?.at(-1) ?? null;
@@ -478,7 +485,10 @@ export async function startCardSession(db: CredentialStore, cards: AgentCard, wa
     session = await cards.createVaultSession(null);
     returning = false;
   }
-  await db.update(wallet, (r) => ({ ...r, agentcardSession: session.id }));
+  await db.update(wallet, (r) => ({
+    ...r,
+    agentcardSessions: [...cardSessions(r), session.id].slice(-SESSIONS_KEPT)
+  }));
   return {
     sessionId: session.id,
     url: session.url,
@@ -501,7 +511,7 @@ export async function pollCardSession(
   id: string
 ) {
   const record = await db.get(wallet);
-  if (!id || record.agentcardSession !== id) return null;
+  if (!id || !cardSessions(record).includes(id)) return null;
   const session = await cards.getVaultSession(id);
   const user = session.user_id;
   if (user && !(record.agentcardUsers ?? []).includes(user)) {

@@ -11,7 +11,7 @@ import type { AgentIdentity, OmsIdTokenConfig } from './agent-auth.ts';
 import type { McpProps } from './mcp.ts';
 
 import { AuthError, issueCertificate, verifyAccessToken, verifyEnrollToken } from './agent-auth.ts';
-import { AgentCardError } from './agentcard.ts';
+import { AgentCardError, agentCardFailure } from './agentcard.ts';
 import { handleMcp } from './mcp.ts';
 import {
   issueSession,
@@ -344,7 +344,8 @@ export async function handleApproveApi(req: Request, env: Env, path: string): Pr
     if (err instanceof ValidationError) return fail(400, 'invalid_request', err.message);
     if (err instanceof AgentCardError) {
       console.error('[approve agentcard]', err.status, err.code, err.message);
-      return fail(502, 'upstream_error', 'The card service is unavailable. Try again shortly.');
+      const f = agentCardFailure(err);
+      return fail(f.status, f.code, f.message);
     }
     console.error('[approve]', err);
     const message = err instanceof Error ? err.message : '';
@@ -393,8 +394,11 @@ export async function handleSessionApi(req: Request, env: Env, path: string): Pr
       if (typeof v !== 'string' || !v.trim()) throw new ValidationError(`${k} is required`);
       return v.trim();
     };
-    const finish = async (id: string, who: { wallet: string; email: string | null }) => {
+    const finish = async (id: string, signedIn: { wallet: string; email: string | null }) => {
       await signIn.forget(id);
+      // The owner's agent wallet, when an agent linked under this email.
+      const linked = signedIn.email ? await store(env)?.ownerWallet(signedIn.email) : null;
+      const who = linked ? { ...signedIn, wallet: linked } : signedIn;
       return new Response(JSON.stringify(who), {
         headers: {
           'Content-Type': 'application/json',
@@ -473,6 +477,8 @@ export async function handleApi(req: Request, env: Env, path: string): Promise<R
       if (typeof body?.idToken !== 'string') throw new ValidationError('idToken is required');
       const claims = await verifyEnrollToken(body.idToken, idTokenConfig(env));
       const cert = await issueCertificate(claims, env.AGENT_CERT_SECRET);
+      // So the owner's dashboard sign-in opens this wallet, whichever way they sign in.
+      if (claims.email) await store(env)?.linkOwner(claims.email, claims.wallet);
       return json({ ...cert, wallet: claims.wallet, agentKey: claims.agentKey });
     }
 
@@ -574,9 +580,8 @@ export async function handleApi(req: Request, env: Env, path: string): Promise<R
     if (err instanceof ValidationError) return fail(400, 'invalid_request', err.message);
     if (err instanceof AgentCardError) {
       console.error('[agentcard]', err.status, err.code, err.message);
-      if (err.status === 429)
-        return fail(429, 'rate_limited', 'Too many card requests. Try again in a minute.');
-      return fail(502, 'upstream_error', 'The card service is unavailable. Try again shortly.');
+      const f = agentCardFailure(err);
+      return fail(f.status, f.code, f.message);
     }
     console.error('[api]', err);
     return fail(500, 'internal_error', 'Something went wrong');

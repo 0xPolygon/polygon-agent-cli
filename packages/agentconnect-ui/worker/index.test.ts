@@ -204,7 +204,10 @@ beforeEach(async () => {
   });
   issuer = iss;
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 let issuer: Awaited<ReturnType<typeof makeIssuer>>;
 
@@ -238,6 +241,17 @@ describe('POST /api/agent/enroll', () => {
     const body = (await res.json()) as { certificate: string; wallet: string };
     expect(body.wallet).toBe(WALLET);
     expect(body.certificate).toMatch(/^c1\./);
+  });
+
+  it("links the owner's verified email to the agent wallet", async () => {
+    const idToken = await issuer.sign(issuer.enrollClaims());
+    await handleApi(
+      req('POST', '/api/agent/enroll', { body: { idToken } }),
+      env(),
+      '/api/agent/enroll'
+    );
+    const db = new CredentialStore(kv.kv, 'test-credentials-key');
+    expect(await db.ownerWallet('Owner@Example.com')).toBe(WALLET);
   });
 
   it('refuses a bad token', async () => {
@@ -371,6 +385,22 @@ describe('signed in on the site (session cookie)', () => {
     const old = await issueSession({ wallet: WALLET, email: null }, SECRET, 1_000);
     const res = await handleApi(withCookie('GET', `${SESSION_COOKIE}=${old}`), env(), path);
     expect(res.status).toBe(401);
+  });
+
+  it("signs the owner in to their agent's wallet, whichever wallet the sign-in made", async () => {
+    await new CredentialStore(kv.kv, 'test-credentials-key').linkOwner('owner@example.com', WALLET);
+    const other = '0x' + '1'.repeat(40);
+    vi.spyOn(OwnerSignIn.prototype, 'finishEmail').mockResolvedValue({
+      wallet: other,
+      email: 'owner@example.com'
+    });
+    vi.spyOn(OwnerSignIn.prototype, 'forget').mockResolvedValue();
+    const res = await handleSessionApi(
+      req('POST', '/api/session/email/finish', { body: { c: 'c1', code: '123456' } }),
+      env({ OAUTH_KV: fakeKv().kv }),
+      '/api/session/email/finish'
+    );
+    expect(await res.json()).toEqual({ wallet: WALLET, email: 'owner@example.com' });
   });
 
   it('GET /api/session names the wallet; DELETE clears the cookie', async () => {
