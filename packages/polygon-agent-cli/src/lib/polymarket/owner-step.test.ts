@@ -17,7 +17,8 @@ vi.mock('./account.ts', async (o) => ({
 }));
 
 const { privateKeyToAccount } = await import('viem/accounts');
-const { accountDir, accountFile, readBackup, hasLocalKey } = await import('./account.ts');
+const { accountDir, accountFile, readBackup, hasLocalKey, writeBackup } =
+  await import('./account.ts');
 const { polymarketOwnerStep } = await import('./owner-step.ts');
 const { installTradingKeyReference, tradingKeyReference } = await import('./oms-key.ts');
 
@@ -38,13 +39,15 @@ function fakeOwner() {
     useWallet: vi.fn(async ({ walletId }: { walletId: string }) => {
       w.walletAddress = wallets.find((x) => x.id === walletId)?.address as string;
     }),
-    importWallet: vi.fn(async ({ privateKey }: { privateKey: `0x${string}` }) => {
-      const address = privateKeyToAccount(privateKey).address;
-      const wallet = { id: 'w-imported', address, keyOrigin: 'imported' };
-      wallets.push(wallet);
-      w.walletAddress = address;
-      return { wallet };
-    }),
+    importWallet: vi.fn(
+      async ({ privateKey, reference }: { privateKey: `0x${string}`; reference?: string }) => {
+        const address = privateKeyToAccount(privateKey).address;
+        const wallet = { id: 'w-imported', address, keyOrigin: 'imported', reference };
+        wallets.push(wallet);
+        w.walletAddress = address;
+        return { wallet };
+      }
+    ),
     signTypedData: vi.fn(),
     signMessage: vi.fn()
   };
@@ -159,9 +162,9 @@ describe('polymarketOwnerStep', () => {
 
   it('puts a failed final main-wallet select in mainWalletError after a good backup', async () => {
     const owner = fakeOwner();
-    owner.importWallet.mockImplementationOnce(async ({ privateKey }) => {
+    owner.importWallet.mockImplementationOnce(async ({ privateKey, reference }) => {
       const address = privateKeyToAccount(privateKey).address;
-      const w = { id: 'w-imported', address, keyOrigin: 'imported' };
+      const w = { id: 'w-imported', address, keyOrigin: 'imported', reference };
       (await owner.listWallets()).push(w);
       owner.walletAddress = MAIN;
       owner.listWallets.mockRejectedValue(new Error('boom'));
@@ -243,7 +246,7 @@ describe('polymarketOwnerStep', () => {
   });
 
   describe('two installs on one OMS account', () => {
-    it("a new install with no local key makes its own and leaves the other install's key alone", async () => {
+    it("a new install with no local key defers to setup when another install's key exists", async () => {
       const owner = fakeOwner();
       (await owner.listWallets()).push({
         id: 'w-a',
@@ -252,14 +255,22 @@ describe('polymarketOwnerStep', () => {
         reference: THEIRS
       });
       const out = await polymarketOwnerStep({ wallet, owner: owner as never, mainAddress: MAIN });
-      expect(out).toEqual({ backedUp: true, omsWalletId: 'w-imported', created: true });
+      // A key made here would stop setup restoring the other one, so none is made or touched.
+      expect(out).toEqual({
+        backedUp: false,
+        otherTradingKeys: [
+          { address: '0x00000000000000000000000000000000000000A0', reference: THEIRS }
+        ],
+        hint: expect.stringContaining('polymarket setup --broadcast')
+      });
       expect(recoverAccount).not.toHaveBeenCalled();
       expect(sweepOldKey).not.toHaveBeenCalled();
-      expect(owner.importWallet).toHaveBeenCalledWith(expect.objectContaining({ reference: OURS }));
+      expect(owner.importWallet).not.toHaveBeenCalled();
+      expect(hasLocalKey(wallet)).toBe(false);
       expect(owner.useWallet).not.toHaveBeenCalledWith({ walletId: 'w-a' });
     });
 
-    it("a bare-prefix key with no local record is not taken as this install's", async () => {
+    it("a bare-prefix key with no local record is not recovered as this install's", async () => {
       const owner = fakeOwner();
       (await owner.listWallets()).push({
         id: 'w-bare',
@@ -268,9 +279,28 @@ describe('polymarketOwnerStep', () => {
         reference: 'polymarket-trading-key'
       });
       const out = await polymarketOwnerStep({ wallet, owner: owner as never, mainAddress: MAIN });
-      expect(out).toMatchObject({ backedUp: true, created: true });
+      expect(out).toMatchObject({
+        backedUp: false,
+        otherTradingKeys: [{ reference: 'polymarket-trading-key' }]
+      });
       expect(recoverAccount).not.toHaveBeenCalled();
       expect(sweepOldKey).not.toHaveBeenCalled();
+      expect(owner.importWallet).not.toHaveBeenCalled();
+    });
+
+    it('still makes its own key when the only other key is one this machine uses', async () => {
+      const owner = fakeOwner();
+      const address = '0x00000000000000000000000000000000000000A4';
+      (await owner.listWallets()).push({
+        id: 'w-a',
+        address,
+        keyOrigin: 'imported',
+        reference: THEIRS
+      });
+      // Another wallet name on this machine records that key, so it isn't a lost one.
+      writeBackup(`w${n++}`, { omsWalletId: 'w-a', address, at: 'x' });
+      const out = await polymarketOwnerStep({ wallet, owner: owner as never, mainAddress: MAIN });
+      expect(out).toMatchObject({ backedUp: true, created: true });
     });
   });
 

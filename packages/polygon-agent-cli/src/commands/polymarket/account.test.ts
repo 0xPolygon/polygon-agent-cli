@@ -414,6 +414,148 @@ describe('setup', () => {
     expect(m.ensureMainWallet).toHaveBeenCalledWith('main');
   });
 
+  describe("another install's backed-up keys", () => {
+    const A = {
+      id: 'w-a',
+      address: '0x00000000000000000000000000000000000000A1',
+      reference: 'polymarket-trading-key:laptop'
+    };
+    const B = {
+      id: 'w-b',
+      address: '0x00000000000000000000000000000000000000B1',
+      reference: 'polymarket-trading-key:old-vm'
+    };
+    const imported = (...keys: Array<typeof A>) =>
+      keys.map((k) => ({ ...k, keyOrigin: 'imported' }));
+    const probe = (pusd: string, positions: unknown[] = []) => ({
+      address: 'x',
+      account: WALLET,
+      pusd,
+      positionsLeft: positions
+    });
+    const RESTORED = {
+      account: { kind: 'deposit-wallet', signer: A.address, wallet: WALLET, createdAt: 'x' },
+      approvalsSet: false,
+      backup: { omsWalletId: A.id, address: A.address, at: 'x', kind: 'deposit-wallet' }
+    };
+
+    beforeEach(() => {
+      m.restoreFromOms.mockResolvedValue(RESTORED);
+    });
+
+    it('restores the one key that holds funds or positions instead of making a key', async () => {
+      m.omsWallet.listWallets.mockResolvedValue(imported(A, B));
+      m.recoverOtherKey.mockImplementation(async ({ target }: { target: { id: string } }) =>
+        target.id === A.id ? probe('0', [{ title: 'Q' }]) : probe('0')
+      );
+      const out = await run(['setup', '--broadcast']);
+      expect(m.recoverOtherKey).toHaveBeenCalledWith(expect.objectContaining({ broadcast: false }));
+      expect(m.recoverOtherKey).not.toHaveBeenCalledWith(
+        expect.objectContaining({ broadcast: true })
+      );
+      expect(m.restoreFromOms).toHaveBeenCalledWith({
+        wallet: 'main',
+        owner: m.omsWallet,
+        target: expect.objectContaining({ id: A.id, address: A.address })
+      });
+      expect(out).toMatchObject({
+        ok: true,
+        restored: true,
+        signer: 'oms',
+        account: { signer: A.address }
+      });
+      expect(m.setupAccount).not.toHaveBeenCalled();
+      expect(m.ensureTradingKey).not.toHaveBeenCalled();
+      expect(m.ensureMainWallet).toHaveBeenCalledWith('main');
+    });
+
+    it('makes a new key when no other key holds anything', async () => {
+      m.omsWallet.listWallets.mockResolvedValue(imported(A, B));
+      m.recoverOtherKey.mockResolvedValue(probe('0'));
+      const out = await run(['setup', '--broadcast']);
+      expect(m.recoverOtherKey).toHaveBeenCalledTimes(2);
+      expect(m.restoreFromOms).not.toHaveBeenCalled();
+      expect(out).toMatchObject({ ok: true, created: true });
+    });
+
+    it('refuses to pick between several funded keys and makes nothing', async () => {
+      m.omsWallet.listWallets.mockResolvedValue(imported(A, B));
+      m.recoverOtherKey.mockResolvedValue(probe('3.5'));
+      const out = await run(['setup', '--broadcast']);
+      expect(out).toMatchObject({
+        ok: false,
+        code: 'ambiguous_trading_key',
+        hint: expect.stringContaining('--from <address>')
+      });
+      expect(JSON.stringify(out)).toContain(A.address);
+      expect(JSON.stringify(out)).toContain(B.address);
+      expect(m.restoreFromOms).not.toHaveBeenCalled();
+      expect(m.setupAccount).not.toHaveBeenCalled();
+      expect(m.ensureTradingKey).not.toHaveBeenCalled();
+    });
+
+    it("won't make a key over one whose account it couldn't read", async () => {
+      m.omsWallet.listWallets.mockResolvedValue(imported(A));
+      m.recoverOtherKey.mockRejectedValue(new Error('data api down'));
+      const out = await run(['setup', '--broadcast']);
+      expect(out).toMatchObject({ ok: false, code: 'ambiguous_trading_key' });
+      expect(JSON.stringify(out)).toContain('data api down');
+      expect(m.setupAccount).not.toHaveBeenCalled();
+    });
+
+    it('--from restores that key without probing the others', async () => {
+      m.omsWallet.listWallets.mockResolvedValue(imported(A, B));
+      const out = await run(['setup', '--broadcast', '--from', A.address.toLowerCase()]);
+      expect(m.recoverOtherKey).not.toHaveBeenCalled();
+      expect(m.restoreFromOms).toHaveBeenCalledWith(
+        expect.objectContaining({ target: expect.objectContaining({ id: A.id }) })
+      );
+      expect(out).toMatchObject({ ok: true, restored: true });
+    });
+
+    it('--from refuses an address OMS holds no trading key for', async () => {
+      m.omsWallet.listWallets.mockResolvedValue(imported(A));
+      const out = await run([
+        'setup',
+        '--broadcast',
+        '--from',
+        '0x00000000000000000000000000000000000000C1'
+      ]);
+      expect(out).toMatchObject({ ok: false, code: 'invalid_input' });
+      expect(m.restoreFromOms).not.toHaveBeenCalled();
+      expect(m.setupAccount).not.toHaveBeenCalled();
+    });
+
+    it('--from refuses when this install already has its own key', async () => {
+      m.localKey = true;
+      const out = await run(['setup', '--broadcast', '--from', A.address]);
+      expect(out).toMatchObject({
+        ok: false,
+        code: 'invalid_input',
+        hint: expect.stringContaining('polymarket recover')
+      });
+      expect(m.setupAccount).not.toHaveBeenCalled();
+    });
+
+    it('--new makes a new account without probing', async () => {
+      m.omsWallet.listWallets.mockResolvedValue(imported(A));
+      const out = await run(['setup', '--broadcast', '--new']);
+      expect(m.recoverOtherKey).not.toHaveBeenCalled();
+      expect(m.restoreFromOms).not.toHaveBeenCalled();
+      expect(out).toMatchObject({ ok: true, created: true });
+    });
+
+    it('dry run names the detection step and probes nothing', async () => {
+      m.omsWallet.listWallets.mockResolvedValue(imported(A));
+      const out = await run(['setup', '--dry-run']);
+      expect(out.steps[0]).toBe(
+        'restore the backed-up trading key that holds funds or positions, or create one if none does'
+      );
+      expect(m.recoverOtherKey).not.toHaveBeenCalled();
+      expect((await run(['setup', '--dry-run', '--new'])).steps[0]).toBe('create trading key');
+    });
+  });
+
   it('session mode does not try OMS and reports the recorded backup', async () => {
     await saveOmsWalletPointer('main', {
       walletAddress: '0xC2F4cAfe89AE7e1bcB86dd3f141C0a3adCEB6C17',

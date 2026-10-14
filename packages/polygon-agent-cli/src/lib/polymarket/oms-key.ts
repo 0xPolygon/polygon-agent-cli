@@ -133,6 +133,21 @@ export async function findTradingKeyWallet(
   return match ? { id: match.id, address: match.address } : null;
 }
 
+// Every imported wallet labelled as a Polymarket trading key, by any install (and the bare
+// prefix from before references were per install), oldest first.
+export async function listTradingKeyWallets(
+  w: Pick<OmsWalletLike, 'listWallets'>
+): Promise<Array<{ id: string; address: string; reference: string }>> {
+  return (await w.listWallets())
+    .filter(
+      (x) =>
+        x.keyOrigin === 'imported' &&
+        typeof x.reference === 'string' &&
+        x.reference.startsWith(TRADING_KEY_REFERENCE)
+    )
+    .map((x) => ({ id: x.id, address: x.address, reference: x.reference as string }));
+}
+
 export function backupTradingKey(
   w: OmsWalletLike,
   privateKey: `0x${string}`,
