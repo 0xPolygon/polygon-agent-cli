@@ -97,6 +97,7 @@ agent polymarket deposit 25 --broadcast
 
 - In session mode the dry run adds an `allowance` object (`usd`, `allowanceUsd`, `spentUsd`) so you can see the impact.
 - Output on broadcast: `txHash`, `credited`, `amountUsd`, and `pusdBalance` when credited. `credited: false` means the bridge is still working. Run `status` later.
+- If your platform stops commands sooner than the 5-minute wait, allow 6 minutes, or pass `--no-wait` and run `status` later.
 - A deposit that was sent but not yet credited makes a rerun fail with `bridge_pending` (`details.txHash`). Check `status` before doing anything else.
 - If the bridge reports the earlier deposit as FAILED, the error is `upstream_error` with a hint to https://recovery.polymarket.com.
 - If the agent wallet holds less USDC than the amount, the error is `insufficient_balance` with a `swap` hint. The same code, with a hint to fund the wallet, means it can't pay the relayer fee. Nothing was sent in either case.
