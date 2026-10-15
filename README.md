@@ -12,7 +12,9 @@ You're probably looking for the CLI. Head to the package for full documentation:
 
 **[`packages/polygon-agent-cli/`](packages/polygon-agent-cli/)** — `@polygonlabs/agent-cli` on npm
 
-Install on your agent:
+Personal assistants (Muse, OpenClaw, Hermes, Claude Code, Codex, Cursor): give the assistant https://agents.polygon.technology/setup.md and ask it to set up your wallet.
+
+Install as a skill:
 
 ```bash
 npx skills add https://github.com/0xPolygon/polygon-agent-cli

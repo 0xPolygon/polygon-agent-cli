@@ -42,7 +42,17 @@ Polygon Agent CLI gives AI agents everything they need to operate onchain:
 
 ## Quickstart
 
-### Recommended: Install on your agent
+### Personal assistants (Muse, OpenClaw, Hermes, Claude Code, Codex, Cursor)
+
+Give your assistant this link and ask it to set up your wallet:
+
+```
+https://agents.polygon.technology/setup.md
+```
+
+It installs the CLI into the assistant's workspace with one skill, `polygon-agent-wallet`, and connects your wallet with a spending allowance you approve by signing in. That skill opens the others (Polymarket, swaps and yield, x402 services, the full CLI reference) from the installed CLI when a task needs them.
+
+### Install as a skill
 
 Install the Polygon Agent CLI as a skill your agent can use — works with Claude Code, Codex, Openclaw, and any agent harness that supports the skills protocol:
 
@@ -74,13 +84,15 @@ pnpm polygon-agent --help
 Once installed via skills or npm, run the following. If running from source, run `agent` commands via `pnpm polygon-agent` from the root of the repository (e.g., `pnpm polygon-agent setup --name "MyAgent"`).
 
 ```bash
-# 1. Log in to your embedded wallet in the browser
+# 1. Connect your wallet
 agent wallet login
-# Prints a login page URL and opens it in a browser. Choose Google or email
-# on the page; once you finish, the embedded wallet is created or unlocked.
-# This works whether the browser is on this machine or elsewhere, so there
-# is no separate remote mode to enable. Use --local for the older loopback
-# flow, which needs the browser on this same machine.
+# Session mode: you sign in once (an emailed code, or the login page in a
+# browser) to approve a spending allowance for this install, by default
+# $1000 over 30 days (--allowance, --days). The agent spends only within it,
+# and your sign-in isn't kept. Anything beyond it asks you to sign in again.
+#
+# agent wallet login --owner keeps the full owner sign-in instead (about a
+# week, no allowance limit), for a machine you control.
 #
 # No setup step needed: the CLI ships a default OMS Builder publishable key,
 # and login automatically provisions your own Builder project + access key
@@ -98,7 +110,17 @@ agent swap --from USDC --to USDT --amount 5
 agent register --name "MyAgent" --broadcast
 ```
 
-> Write commands preview by default — omit `--broadcast` to dry-run, or run `agent mode auto` once to always broadcast (`--dry-run` still previews any single command). See [`SKILL.md`](https://github.com/0xPolygon/polygon-agent-cli/blob/main/skills/polygon-agent-cli/SKILL.md) for the full agent-consumable reference.
+> Write commands preview by default — omit `--broadcast` to dry-run, or run `agent mode auto` once to always broadcast (`--dry-run` still previews any single command). The skills live in [`skills/`](https://github.com/0xPolygon/polygon-agent-cli/tree/main/skills) and ship inside the CLI package:
+
+| Skill | For |
+| ----- | --- |
+| `polygon-agent-wallet` | The one an assistant install loads: connecting, the allowance, funding, payments, and when to open the others |
+| `polygon-polymarket` | Polymarket trading |
+| `polygon-defi` | Swaps, bridges and yield |
+| `polygon-discovery` | x402 paid services |
+| `polygon-agent-cli` | Every command and flag |
+
+`agent skills show <name>` prints any of them.
 
 ### Workspace installs
 
@@ -127,11 +149,11 @@ The CLI is built on three pillars to enable end to end onchain payments with you
 
 | Capability  | What it does                                                                                | CLI command                     |
 | ----------- | ------------------------------------------------------------------------------------------- | ------------------------------- |
-| **Wallets** | browser-login embedded smart wallets (Account Abstraction), chain-agnostic address           | `wallet login`, `wallet list`   |
+| **Wallets** | embedded smart wallets (Account Abstraction), chain-agnostic address, with a spending allowance per install | `wallet login`, `wallet status` |
 | **RPCs**    | Load balanced RPCs cross-chain for onchain interactions and node queries                    | Used internally by all commands |
 | **Indexer** | Token balance queries and transaction history across ERC-20/721/1155                        | `balances`                      |
 
-Wallets are created and unlocked via browser login (Google or email). The embedded wallet can call any contract and spend any amount it holds; there is no contract whitelist or per-token spend limit. The wallet address is the same across every supported chain, and sessions last about a week before you re-run `wallet login`.
+Wallets are created and unlocked by signing in with an emailed code or on the login page (Google or email). By default an install connects in session mode: it holds its own key, limited to the allowance the owner approved, and the owner's sign-in isn't kept. Owner mode (`wallet login --owner`) keeps the full sign-in for about a week, with no spend limit. The wallet address is the same across every supported chain.
 
 ### Swap, Bridge & Deposit
 
@@ -166,26 +188,12 @@ The CLI ships with agent-friendly documentation designed to be consumed directly
 
 | Distribution                                | How to install                                              |
 | ------------------------------------------- | ----------------------------------------------------------- |
-| **Skills** (Claude Code, Codex, Openclaw, etc.) — recommended | `npx skills add https://github.com/0xPolygon/polygon-agent-cli` |
+| **Personal assistants** — recommended | Give the assistant `https://agents.polygon.technology/setup.md` |
+| **Skills** (Claude Code, Codex, Openclaw, etc.) | `npx skills add https://github.com/0xPolygon/polygon-agent-cli` |
 
 Once installed, the agent receives the full skill context — including wallet setup, token operations, and ERC-8004 registration, and can execute autonomously.
 
 See [`SKILL.md`](https://github.com/0xPolygon/polygon-agent-cli/blob/main/skills/polygon-agent-cli/SKILL.md) for the full agent-consumable reference.
-
-### Workspace installs
-
-For assistants that keep a workspace folder across restarts, the CLI can live inside it instead of being installed globally:
-
-```bash
-npm install --ignore-scripts --prefix <workspace>/.polygon-agent/cli @polygonlabs/agent-cli@latest
-node <workspace>/.polygon-agent/cli/node_modules/@polygonlabs/agent-cli/dist/index.js \
-  workspace init --root <workspace>/.polygon-agent [--skills-dir <dir>] [--name <install name>]
-```
-
-`workspace init` writes a wrapper at `<workspace>/.polygon-agent/bin/polygon-agent` that runs the CLI with its state in `<workspace>/.polygon-agent/state/`, a `.gitignore` that keeps the folder out of git, and `state/install.json`. Run everything through the wrapper. It is safe to re-run.
-
-- `skills show <name>` prints a bundled skill; `skills install [name] --dir <dir>` writes it to `<dir>/<name>/SKILL.md`. Through the wrapper, both add the wrapper's path to the skill.
-- `update` installs the latest CLI into the workspace and refreshes it. Outside a workspace install, it prints the global npm command.
 
 ---
 
@@ -194,7 +202,9 @@ node <workspace>/.polygon-agent/cli/node_modules/@polygonlabs/agent-cli/dist/ind
 ### Setup & Wallets
 
 ```bash
-agent wallet login [--name <n>] [--local] [--no-fund] [--force]  # Log in from the browser (choose Google or email on the login page); auto-provisions Builder credentials
+agent wallet login [--allowance <usd>] [--days <n>] [--email <email>] [--name <n>]  # Session mode: approve an allowance by emailed code or login page
+agent wallet login --owner [--local] [--no-fund] [--force] [--name <n>]  # Owner mode: keep the full sign-in (about a week)
+agent wallet status [--name <n>]           # Connected? Mode, allowance left
 agent setup --oms-publishable-key <key>  # Advanced: point at your own OMS Builder project instead of the default
 agent wallet logout [--name <n>]           # Log out of a wallet
 agent wallet list                          # Show all wallets
@@ -280,8 +290,9 @@ No environment variables are required. The CLI ships a default OMS Builder publi
 
 ## Security
 
-- **No keys to manage.** The embedded wallet is unlocked via browser login (Google or email); there are no private keys exposed to the agent's context. Credentials are stored in `~/.polygon-agent/`.
-- **Sessions expire.** Wallet sessions last about a week, after which you re-run `wallet login`.
+- **No keys to manage.** The embedded wallet is unlocked by signing in (emailed code, or Google or email on the login page); no private keys are exposed to the agent's context. Credentials are stored encrypted in `~/.polygon-agent/`.
+- **Spending is capped.** In session mode the agent spends only within the allowance the owner approved. Raising it, withdrawing to an outside address, or managing access needs a new sign-in.
+- **Sessions expire.** An allowance lasts its period (30 days by default); an owner sign-in lasts about a week. Then re-run `wallet login`.
 
 ---
 
