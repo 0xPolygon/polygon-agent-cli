@@ -18,7 +18,13 @@ holds the credential on disk.
 
 Static assets: ABI JSON in `contracts/` is published with the CLI package (it is in
 `package.json` `files`); Claude skills live in the root `skills/` tree (one directory per
-skill) and are distributed via `npx skills add` and agentconnect, not via npm.
+skill) and are distributed via `npx skills add`, agentconnect and the plugins, not via npm.
+
+Plugins: the repo is a plugin marketplace for Claude Code (`.claude-plugin/marketplace.json`),
+Codex (`.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json`) and Cursor
+(`.cursor-plugin/marketplace.json`). Each points at `plugins/polygon-agent/`, whose `skills` and
+`assets` are symlinks to the root folders, so a skill edit needs no plugin change. The manifests
+carry no `version`, so installs update with each commit. Check with `claude plugin validate .`.
 
 ## Development
 

@@ -1,0 +1,23 @@
+{
+  "name": "polygon-agent",
+  "description": "An agent wallet your assistant can spend from within a limit you approve: balances, prices and watches, swaps and bridges, Polymarket, and x402 paid services, through the polygon-agent CLI.",
+  "author": { "name": "Polygon Labs", "url": "https://agents.polygon.technology" },
+  "homepage": "https://agents.polygon.technology",
+  "repository": "https://github.com/0xPolygon/polygon-agent-cli",
+  "license": "MIT",
+  "keywords": ["polygon", "wallet", "payments", "stablecoins", "polymarket", "x402"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Polygon Agent",
+    "shortDescription": "An agent wallet with a spending limit you approve",
+    "longDescription": "An agent wallet your assistant can spend from within a limit you approve: balances, prices and watches, swaps and bridges, Polymarket, and x402 paid services, through the polygon-agent CLI.",
+    "developerName": "Polygon Labs",
+    "category": "Finance",
+    "capabilities": [],
+    "websiteURL": "https://agents.polygon.technology",
+    "defaultPrompt": ["Set up my Polygon agent wallet"],
+    "screenshots": [],
+    "composerIcon": "./assets/polygon.svg",
+    "logo": "./assets/polygon.svg"
+  }
+}
