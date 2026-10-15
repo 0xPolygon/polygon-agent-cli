@@ -120,7 +120,7 @@ Read the amount the way the user said it, and sell what the wallet actually hold
 "$POLYGON_AGENT" send-token --symbol USDC --to <address> --amount 5 --chain polygon --broadcast
 ```
 
-**Paid services (x402).** The service catalog and request formats are in https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/polygon-discovery/SKILL.md; read it before the first call. Always cap the price at what the catalog lists:
+**Paid services (x402).** The service catalog and request formats are in the discovery skill: run `"$POLYGON_AGENT" skills show polygon-discovery` and read it before the first call. Always cap the price at what the catalog lists:
 
 ```sh
 "$POLYGON_AGENT" x402-pay --url <url> --method POST --body '<json>' --max-usd 0.05 --broadcast
@@ -205,8 +205,9 @@ Every owner sign-in backs up the Polymarket trading key (the output shows it as 
 
 ## More detail
 
-The reference skills cover every command and flag. They're written for the CLI's owner mode, so ignore their install and login steps.
+This skill is the only one installed. The others ship with the CLI: print one with `"$POLYGON_AGENT" skills show <name>` when a task needs it. Each matches this install's CLI version, and none needs a download. The reference skills are written for the CLI's owner mode, so ignore their install and login steps.
 
-- Swaps, bridges and yield: https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/polygon-defi/SKILL.md
-- x402 services: https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/polygon-discovery/SKILL.md
-- All commands: https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/polygon-agent-cli/SKILL.md
+- `polygon-polymarket`: Polymarket (see Polymarket above)
+- `polygon-defi`: swaps, bridges and yield
+- `polygon-discovery`: x402 services
+- `polygon-agent-cli`: every command and flag
