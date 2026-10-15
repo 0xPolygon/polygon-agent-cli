@@ -8,9 +8,6 @@ description: >-
 
 # Set up the Polygon OMS Agent Kit
 
-> **QA build (staging):** installs the `polymarket-qa` snapshot of the CLI (npm dist-tag), for testing before release. Don't run `polygon-agent update` during QA: it would compare against the released version.
-> This build signs in through the staging login page (agentconnect.staging.polygon.technology), which needs Polygon's Cloudflare WARP. Without it, the browser sign-in can't load: use the emailed code instead (`wallet login --email <email>`).
-
 **For the assistant.** Follow these steps in order. Each one is safe to re-run.
 
 **How to talk to the user.** Talk like a helpful assistant: short, friendly, outcome first, one or two sentences. Don't narrate how things work (sign-in mechanics, session keys, the background sign-in, the Polymarket key backup or the extra wallet it adds, JSON fields or status names) unless the user asks or something fails. Never paste raw JSON. Install steps need no running commentary: say what you're setting up once, and speak up again only when you need something from them.
@@ -45,13 +42,7 @@ Keep the single quotes, so a path with spaces works (a `'` in the path itself is
 "$ROOT/bin/polygon-agent" --version
 ```
 
-If that prints a version, the CLI is installed. Check it's the current QA build:
-
-```sh
-PATH="$ROOT/node/bin:$PATH" npm view @polygonlabs/agent-cli@polymarket-qa version
-```
-
-If that version differs from the one above, go to step 3 and reinstall (steps 3 and 4 are safe to re-run, and your wallet and settings stay). If they match, skip to step 5, which checks the skill too.
+If that prints a version, the CLI is installed: skip to step 5, which checks the skill too.
 
 ## 3. Node.js
 
@@ -93,7 +84,7 @@ If it fails, stop and tell the user why. From here on, run `npm` and `node` with
   set -e
   case "${ROOT:?Set ROOT to the install folder first}" in /absolute/path/*) echo "Set ROOT to the real install folder"; exit 1 ;; esac
   mkdir -p "$ROOT"
-  PATH="$ROOT/node/bin:$PATH" npm install --ignore-scripts --prefix "$ROOT/cli" @polygonlabs/agent-cli@polymarket-qa
+  PATH="$ROOT/node/bin:$PATH" npm install --ignore-scripts --prefix "$ROOT/cli" @polygonlabs/agent-cli@latest
   PATH="$ROOT/node/bin:$PATH" node "$ROOT/cli/node_modules/@polygonlabs/agent-cli/dist/index.js" \
     workspace init --root "$ROOT" --skills-dir "<skills folder>" --name "<install name>" --platform "<platform>"
 )
