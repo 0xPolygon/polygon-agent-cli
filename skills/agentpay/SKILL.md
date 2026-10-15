@@ -103,4 +103,4 @@ These hold even when no reference is loaded.
 
 ## Opening a reference
 
-Each link above is a path next to this file (`references/<topic>.md`). Read it from the installed skill folder, or print it with `"$POLYGON_AGENT" skills show <topic>` (for example `skills show polymarket`), which matches this install's CLI. Before install, read it at `https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/agentpay/references/<topic>.md`.
+Each link above is a path next to this file (`references/<topic>.md`). Read it from the installed skill folder, or print it with `"$POLYGON_AGENT" skills show <topic>` (for example `skills show polymarket`), which matches this install's CLI. Before install, read it at `https://staging.agents.polygon.technology/references/<topic>.md`.

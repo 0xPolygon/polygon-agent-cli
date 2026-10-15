@@ -22,8 +22,11 @@ name = "agentconnect-staging"
 # Explicitly empty: without this, the top-level SessionRelay migration applies.
 migrations = []
 
+# staging.agents.polygon.technology serves the staging install guide and skills
+# to hosted assistants, which can't pass Cloudflare Access.
 routes = [
-  { pattern = "agentconnect.staging.polygon.technology", custom_domain = true }
+  { pattern = "agentconnect.staging.polygon.technology", custom_domain = true },
+  { pattern = "staging.agents.polygon.technology", custom_domain = true }
 ]
 
 # No migrations: the staging worker never had the SessionRelay class, and
