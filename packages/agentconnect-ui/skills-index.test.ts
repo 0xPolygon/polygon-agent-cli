@@ -38,9 +38,9 @@ describe('skill index', () => {
     expect(index.skills.map((s) => [s.name, s.url])).toEqual([
       ['polygon-oms-setup', '/setup.md'],
       ['polygon-agent-cli', '/polygon-agent-cli/SKILL.md'],
+      ['polygon-agent-wallet', '/polygon-agent-wallet/SKILL.md'],
       ['polygon-defi', '/polygon-defi/SKILL.md'],
       ['polygon-discovery', '/polygon-discovery/SKILL.md'],
-      ['polygon-oms-wallet', '/polygon-oms-wallet/SKILL.md'],
       ['polymarket-skill', '/polygon-polymarket/SKILL.md']
     ]);
     for (const entry of index.skills) {

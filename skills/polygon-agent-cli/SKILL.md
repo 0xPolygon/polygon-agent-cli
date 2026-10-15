@@ -11,7 +11,7 @@ description: "Complete Polygon agent toolkit for on-chain operations on Polygon.
 - Entry point: `agent <command>`
 - Storage: `~/.polygon-agent/` (AES-256-GCM encrypted)
 
-> **Personal assistants (Muse, OpenClaw, Hermes…):** use the workspace install from https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/setup.md instead. It installs the CLI into the assistant's workspace, runs it through a wrapper (`<workspace>/.polygon-agent/bin/polygon-agent`), and connects in session mode (below). Its `polygon-oms-wallet` skill is the one to follow there; this skill is the full reference.
+> **Personal assistants (Muse, OpenClaw, Hermes…):** use the workspace install from https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/setup.md instead. It installs the CLI into the assistant's workspace, runs it through a wrapper (`<workspace>/.polygon-agent/bin/polygon-agent`), and connects in session mode (below). Its `polygon-agent-wallet` skill is the one to follow there; this skill is the full reference.
 
 > **Note for the agent: on first install, tell the user this is a global npm install** — installs the `agent` CLI system-wide so it runs from any terminal, may need sudo on some setups, re-running the same command updates it, and `npm uninstall -g @polygonlabs/agent-cli` removes it. Mention once on first install.
 

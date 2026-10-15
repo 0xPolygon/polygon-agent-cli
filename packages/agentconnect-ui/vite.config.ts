@@ -49,6 +49,13 @@ function serveSkills(): Plugin {
       // skill with bad frontmatter fails the build.
       writeSkillIndex({ skillsDir, outDir: absOutDir });
 
+      // The wallet skill's old path, which older setup guides still fetch.
+      const wallet = path.join(skillsDir, 'polygon-agent-wallet', 'SKILL.md');
+      if (fs.existsSync(wallet)) {
+        fs.mkdirSync(path.join(absOutDir, 'polygon-oms-wallet'), { recursive: true });
+        fs.copyFileSync(wallet, path.join(absOutDir, 'polygon-oms-wallet', 'SKILL.md'));
+      }
+
       // Legacy /SKILL.md → canonical skill content (200, not a redirect).
       const canonical = path.join(skillsDir, CANONICAL_SKILL);
       if (fs.existsSync(canonical)) {

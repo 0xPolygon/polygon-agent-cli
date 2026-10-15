@@ -10,6 +10,7 @@ import {
   ASSISTANT_SKILL,
   initWorkspace,
   installSkill,
+  LEGACY_ASSISTANT_SKILL,
   readInstallRecord,
   readSkill,
   renderSkill,
@@ -21,7 +22,7 @@ function tmpDir(prefix: string): string {
 }
 
 const SKILL =
-  '---\nname: polygon-oms-wallet\ndescription: test\n---\n\n# Wallet\n\nRun `polygon-agent wallet status`.\n';
+  '---\nname: polygon-agent-wallet\ndescription: test\n---\n\n# Wallet\n\nRun `polygon-agent wallet status`.\n';
 
 // A bundled-skills folder holding the assistant skill.
 function skillSource(): string {
@@ -66,7 +67,7 @@ describe('initWorkspace', () => {
     const skillPath = path.join(skillsDir, ASSISTANT_SKILL, 'SKILL.md');
     expect(result.skill).toEqual({ name: ASSISTANT_SKILL, installed: true, path: skillPath });
     const installed = fs.readFileSync(skillPath, 'utf8');
-    expect(installed.startsWith('---\nname: polygon-oms-wallet\n')).toBe(true);
+    expect(installed.startsWith('---\nname: polygon-agent-wallet\n')).toBe(true);
     expect(installed).toContain(`\`${result.wrapper}\``);
     expect(readInstallRecord(result.state)).toMatchObject({ skillsDir, skillPath });
   });
@@ -265,7 +266,7 @@ describe('skills', () => {
   it('renders the CLI note after the frontmatter', () => {
     const rendered = renderSkill({ markdown: SKILL, wrapper: '/w/bin/polygon-agent' });
     const [, frontmatter, body] = rendered.split('---\n');
-    expect(frontmatter).toBe('name: polygon-oms-wallet\ndescription: test\n');
+    expect(frontmatter).toBe('name: polygon-agent-wallet\ndescription: test\n');
     expect(body.startsWith("\n> **This install's CLI:** `/w/bin/polygon-agent`.")).toBe(true);
     expect(body).toContain('# Wallet');
   });
@@ -302,7 +303,7 @@ describe('skills', () => {
     expect(fs.readdirSync(cwd)).toEqual([]);
   });
 
-  it("renders the repo's polygon-oms-wallet skill for a wrapper", () => {
+  it("renders the repo's polygon-agent-wallet skill for a wrapper", () => {
     const repoSkills = path.resolve(import.meta.dirname, '..', '..', '..', '..', 'skills');
     const markdown = readSkill({ sourceDir: repoSkills, name: ASSISTANT_SKILL });
     expect(markdown).not.toBeNull();
@@ -310,7 +311,7 @@ describe('skills', () => {
     const rendered = renderSkill({ markdown: markdown ?? '', wrapper });
     const lines = rendered.split('\n').filter((l) => l.startsWith('POLYGON_AGENT='));
     expect(lines).toEqual([`POLYGON_AGENT=${shellQuote(wrapper)}`]);
-    expect(rendered).toMatch(/^---\nname: polygon-oms-wallet\n/);
+    expect(rendered).toMatch(/^---\nname: polygon-agent-wallet\n/);
     expect(rendered).toContain(`> **This install's CLI:** \`${wrapper}\``);
   });
 
@@ -327,6 +328,39 @@ describe('skills', () => {
     const skillsDir = tmpDir('pa-skills-');
     const file = installSkill({ sourceDir: skillSource(), name: ASSISTANT_SKILL, skillsDir });
     expect(fs.readFileSync(file, 'utf8')).toBe(SKILL);
+  });
+
+  it('installs the wallet skill under its new name when asked by the old one', () => {
+    const skillsDir = tmpDir('pa-skills-');
+    const file = installSkill({
+      sourceDir: skillSource(),
+      name: LEGACY_ASSISTANT_SKILL,
+      skillsDir
+    });
+    expect(file).toBe(path.join(skillsDir, ASSISTANT_SKILL, 'SKILL.md'));
+    expect(readSkill({ sourceDir: skillSource(), name: LEGACY_ASSISTANT_SKILL })).toBe(SKILL);
+  });
+
+  it('removes the wallet skill installed under its old name, and nothing else', () => {
+    const skillsDir = tmpDir('pa-skills-');
+    const legacy = path.join(skillsDir, LEGACY_ASSISTANT_SKILL);
+    fs.mkdirSync(legacy);
+    fs.writeFileSync(
+      path.join(legacy, 'SKILL.md'),
+      `---\nname: ${LEGACY_ASSISTANT_SKILL}\ndescription: old\n---\n`
+    );
+    installSkill({ sourceDir: skillSource(), name: ASSISTANT_SKILL, skillsDir });
+    expect(fs.existsSync(legacy)).toBe(false);
+
+    // A folder holding anything else isn't ours to delete.
+    fs.mkdirSync(legacy);
+    fs.writeFileSync(
+      path.join(legacy, 'SKILL.md'),
+      `---\nname: ${LEGACY_ASSISTANT_SKILL}\ndescription: old\n---\n`
+    );
+    fs.writeFileSync(path.join(legacy, 'notes.md'), 'mine');
+    installSkill({ sourceDir: skillSource(), name: ASSISTANT_SKILL, skillsDir });
+    expect(fs.existsSync(path.join(legacy, 'notes.md'))).toBe(true);
   });
 
   it('rejects names that escape the skills folder', () => {

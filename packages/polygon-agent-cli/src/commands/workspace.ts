@@ -139,7 +139,7 @@ const installCommand: CommandModule<object, InstallArgs> = {
       });
       // Remember where the assistant skill lives, so `update` refreshes it.
       const record = root ? readInstallRecord(STORAGE_ROOT) : null;
-      if (record && argv.name === ASSISTANT_SKILL) {
+      if (record && path.basename(path.dirname(file)) === ASSISTANT_SKILL) {
         writeInstallRecord({
           state: STORAGE_ROOT,
           record: {
