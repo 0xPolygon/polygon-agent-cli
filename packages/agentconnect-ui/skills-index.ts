@@ -1,7 +1,7 @@
 // The skill index served at /.well-known/agent-skills/index.json, so agents
 // that discover skills by index find ours (Agent Skills discovery, schema
 // 0.2.0: https://github.com/cloudflare/agent-skills-discovery-rfc). It lists
-// setup.md and every skills/<name>/SKILL.md, each by the path it's served at
+// a setup.md (when the repo has one) and every skills/<name>/SKILL.md, each by the path it's served at
 // and the SHA-256 of its bytes. Names come from the frontmatter (the
 // Polymarket skill's differs from its folder).
 

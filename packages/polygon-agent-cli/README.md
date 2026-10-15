@@ -50,7 +50,7 @@ Give your assistant this link and ask it to set up your wallet:
 https://agents.polygon.technology/setup.md
 ```
 
-It installs the CLI into the assistant's workspace with one skill, `polygon-agent-wallet`, and connects your wallet with a spending allowance you approve by signing in. That skill opens the others (Polymarket, swaps and yield, x402 services, the full CLI reference) from the installed CLI when a task needs them.
+That page is the AgentPay skill. It installs the CLI into the assistant's workspace with the same skill, matched to the CLI's version, and connects your wallet with a spending allowance you approve by signing in. The skill is a short index: each use case (Polymarket, trading, yield, price watches, x402 services, the full CLI reference) is a reference it opens only when a task needs it.
 
 ### Install as a skill
 
@@ -110,17 +110,7 @@ agent swap --from USDC --to USDT --amount 5
 agent register --name "MyAgent" --broadcast
 ```
 
-> Write commands preview by default — omit `--broadcast` to dry-run, or run `agent mode auto` once to always broadcast (`--dry-run` still previews any single command). The skills live in [`skills/`](https://github.com/0xPolygon/polygon-agent-cli/tree/main/skills) and ship inside the CLI package:
-
-| Skill | For |
-| ----- | --- |
-| `polygon-agent-wallet` | The one an assistant install loads: connecting, the allowance, funding, payments, and when to open the others |
-| `polygon-polymarket` | Polymarket trading |
-| `polygon-defi` | Swaps, bridges and yield |
-| `polygon-discovery` | x402 paid services |
-| `polygon-agent-cli` | Every command and flag |
-
-`agent skills show <name>` prints any of them.
+> Write commands preview by default — omit `--broadcast` to dry-run, or run `agent mode auto` once to always broadcast (`--dry-run` still previews any single command). The skill lives in [`skills/agentpay/`](https://github.com/0xPolygon/polygon-agent-cli/tree/main/skills/agentpay) and ships inside the CLI package: `SKILL.md` is the index, and `references/` holds one file per use case (`connect`, `wallet`, `trade`, `earn`, `watches`, `polymarket`, `paid-services`, `identity`, `platforms`, `developer`, `cli-reference`, `troubleshooting`). `agent skills show agentpay` prints the index and `agent skills show <topic>` prints a reference. The old skill names (`polygon-agent-wallet`, `polygon-polymarket`, `polygon-defi`, `polygon-discovery`, `polygon-agent-cli`) still work there.
 
 ### Workspace installs
 

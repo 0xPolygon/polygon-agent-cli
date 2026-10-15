@@ -103,7 +103,8 @@ interface ShowArgs {
 
 const showCommand: CommandModule<object, ShowArgs> = {
   command: 'show <name>',
-  describe: 'Print a bundled skill (rendered for this install when run through its wrapper)',
+  describe:
+    'Print a bundled skill, or an AgentPay reference by topic (rendered for this install when run through its wrapper)',
   builder: (y) => y.positional('name', { type: 'string', demandOption: true }),
   handler: (argv) => {
     const sourceDir = bundledSkillsDir();

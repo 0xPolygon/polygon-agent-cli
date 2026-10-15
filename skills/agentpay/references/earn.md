@@ -1,56 +1,8 @@
----
-name: polygon-defi
-description: Swap, bridge, and deposit on Polygon using the Polygon Agent CLI. Covers same-chain token swaps, cross-chain bridging, yield deposits into Aave v3 and Morpho vaults, and withdrawals from those positions. Write commands preview by default; add --broadcast (or enable `agent mode auto`) to execute.
----
+# Earn: yield deposits and withdrawals
 
-# Swap, Bridge & Deposit
+**When to use:** the user wants to earn on their money: find a yield pool, deposit into Aave or a Morpho / ERC-4626 vault, or withdraw from one. For swaps and bridges, read [trade](trade.md).
 
-## Session Prerequisites
-
-**Before any DeFi operation, the wallet must be connected.** Check with `agent wallet status`.
-
-**Assistant installs** (session mode, set up from https://agents.polygon.technology/setup.md) connect with bare `agent wallet login`. The CLI picks a sign-in page or an emailed code; follow its output (`waiting`, then `--wait`; or `email_required` and `code_sent`). Swaps and bridges work within the allowance. Yield `deposit` and `withdraw` need the wallet owner and fail with `owner_required` in session mode. Tell the user, and don't look for a way around it.
-
-**Developers running the CLI directly** can sign in as the owner instead:
-
-```bash
-agent wallet login --owner
-```
-
-This opens the agentconnect login page in the browser; choose Google or email, and once you sign in the embedded wallet is created or unlocked. This works whether the browser is local or remote, so no extra flags are needed on headless hosts. In owner mode the wallet can call any contract and spend any amount it holds, with no contract whitelist and no per-token spend limit, so deposits, swaps, and withdrawals need no special setup. The wallet address is the same across all chains. Owner sessions last about a week; if calls start failing with an expired-session error, re-run `wallet login --owner`.
-
----
-
-## Swap Tokens (Same-Chain)
-
-```bash
-# Dry-run — shows route and output amount
-agent swap --from USDC --to USDT --amount 5
-
-# Execute
-agent swap --from USDC --to USDT --amount 5 --broadcast
-
-# Custom slippage (default 0.5%)
-agent swap --from USDC --to USDT --amount 5 --slippage 0.005 --broadcast
-
-# Buy an exact amount: receive 10 POL, paying what the quote asks
-# (quote first; then execute the quote with --intent <id> --broadcast)
-agent swap --from USDC --to POL --to-amount 10
-```
-
-## Bridge Tokens (Cross-Chain)
-
-```bash
-# Bridge USDC from Polygon to Arbitrum
-agent swap --from USDC --to USDC --amount 0.5 --to-chain arbitrum --broadcast
-
-# Bridge to other supported chains
-agent swap --from USDC --to USDC --amount 1 --to-chain optimism --broadcast
-agent swap --from USDC --to USDC --amount 1 --to-chain base --broadcast
-agent swap --from USDC --to USDC --amount 1 --to-chain mainnet --broadcast
-```
-
-Valid `--to-chain` values: `polygon`, `amoy`, `mainnet`, `arbitrum`, `optimism`, `base`.
+**Before you start:** yield `deposit`, `withdraw` and `call` need the wallet owner. An allowance install (the assistant default) fails with `owner_required`: tell the user, and don't look for a way around it. You can still look up pools and rates for them. A developer can use owner mode (`agent wallet login --owner`, see [developer](developer.md)). Commands below are written `agent …`: run them as `"$POLYGON_AGENT" …`.
 
 ## Query Earn Pools
 

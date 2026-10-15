@@ -26,8 +26,8 @@ import { FundingScreen, parseFundAmount } from './components/FundingScreen.js';
 import { fetchTotalUsdBalance } from './indexer';
 import { LoginPage } from './login/LoginPage.js';
 
-const SKILL_URL = 'https://agentconnect.polygon.technology/polygon-agent-cli/SKILL.md';
-const POLYMARKET_SKILL_URL = 'https://agentconnect.polygon.technology/polygon-polymarket/SKILL.md';
+// The AgentPay skill: one entry point that routes to every use case.
+const SKILL_URL = 'https://agents.polygon.technology/setup.md';
 // x402 services catalog skill: Services/Search prompts point the agent here so it
 // knows which service routes to call (not the agentconnect/CLI skill).
 const AGENTIC_SERVICES_SKILL_URL = 'https://agent-discovery.polygon.org/SKILL.md';
@@ -79,8 +79,7 @@ const SECTIONS: { name: string; skillUrl: string; items: UseCase[] }[] = [
         label: 'Make a bet on Polymarket',
         display:
           'Make a bet on Polymarket: find a market, check the odds, and buy a position with a price limit.',
-        icon: Target,
-        skillUrl: POLYMARKET_SKILL_URL
+        icon: Target
       },
       {
         label: 'Bridge assets cross-chain',
