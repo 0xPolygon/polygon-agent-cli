@@ -75,7 +75,7 @@ If it fails, stop and tell the user why. From here on, run `npm` and `node` with
   set -e
   case "${ROOT:?Set ROOT to the install folder first}" in /absolute/path/*) echo "Set ROOT to the real install folder"; exit 1 ;; esac
   mkdir -p "$ROOT"
-  PATH="$ROOT/node/bin:$PATH" npm install --ignore-scripts --prefix "$ROOT/cli" @polygonlabs/agent-cli@latest
+  PATH="$ROOT/node/bin:$PATH" npm install --ignore-scripts --prefix "$ROOT/cli" @polygonlabs/agent-cli@agentpay-qa
   PATH="$ROOT/node/bin:$PATH" node "$ROOT/cli/node_modules/@polygonlabs/agent-cli/dist/index.js" \
     workspace init --root "$ROOT" --skills-dir "<skills folder>" --name "<install name>" --platform "<platform>"
 )
