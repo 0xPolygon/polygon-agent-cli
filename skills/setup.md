@@ -1,12 +1,12 @@
 ---
 name: polygon-oms-setup
 description: >-
-  One-time setup of the Polygon OMS Agent Kit: installs the polygon-agent CLI
+  One-time setup of the Polygon Agent Wallet: installs the polygon-agent CLI
   and the polygon-agent-wallet skill into the assistant's workspace, then connects
   the user's wallet with a spending allowance they approve by signing in.
 ---
 
-# Set up the Polygon OMS Agent Kit
+# Set up the Polygon Agent Wallet
 
 **For the assistant.** Follow these steps in order. Each one is safe to re-run. Whenever you hand the conversation back to the user, end with a question or with exactly what they should do next. Never stop on a status report.
 
@@ -159,7 +159,7 @@ Run `"$ROOT/bin/polygon-agent" wallet status` again. If it shows no `holdings` a
 
 ## 9. Watches
 
-Check whether your platform can run a recurring task (a Muse scheduled task, OpenClaw cron, a Hermes cron job, cron on a computer). You don't need one yet, and there's nothing to tell the user now. Hermes cron jobs only run while the Hermes gateway is running (`hermes gateway start`); if it isn't, tell the user. When the user creates their first price watch, the skill explains how to schedule its check, and what to say if you can't.
+Check whether your platform can run a recurring task (a Muse scheduled task, OpenClaw cron, a Hermes cron job, cron on a computer). You don't need one yet, and there's nothing to tell the user now. When the user creates their first price watch, the skill explains how to schedule its check (including that Hermes cron jobs need the Hermes gateway running) and what to say if you can't.
 
 ## 10. Next steps
 
