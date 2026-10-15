@@ -9,7 +9,7 @@ description: Swap, bridge, and deposit on Polygon using the Polygon Agent CLI. C
 
 **Before any DeFi operation, the wallet must be connected.** Check with `agent wallet status`.
 
-**Assistant installs** (session mode, set up from https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/setup.md) connect with bare `agent wallet login`. The CLI picks a sign-in page or an emailed code; follow its output (`waiting`, then `--wait`; or `email_required` and `code_sent`). Swaps and bridges work within the allowance. Yield `deposit` and `withdraw` need the wallet owner and fail with `owner_required` in session mode. Tell the user, and don't look for a way around it.
+**Assistant installs** (session mode, set up from https://agents.polygon.technology/setup.md) connect with bare `agent wallet login`. The CLI picks a sign-in page or an emailed code; follow its output (`waiting`, then `--wait`; or `email_required` and `code_sent`). Swaps and bridges work within the allowance. Yield `deposit` and `withdraw` need the wallet owner and fail with `owner_required` in session mode. Tell the user, and don't look for a way around it.
 
 **Developers running the CLI directly** can sign in as the owner instead:
 
