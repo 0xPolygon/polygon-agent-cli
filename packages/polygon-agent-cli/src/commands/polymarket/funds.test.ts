@@ -150,7 +150,7 @@ describe('deposit', () => {
     m.bridgeStatus.mockResolvedValueOnce({ transactions: [{ status: 'FAILED' }] });
     const out = await run(['deposit', '5', '--broadcast']);
     expect(out).toMatchObject({ ok: false, code: 'upstream_error' });
-    expect(String(out.hint)).toMatch(/recovery\.polymarket\.com/);
+    expect(String(out.hint)).toContain('recovery.polymarket.com');
     expect(out).toMatchObject({ txHash: '0xOLD', bridgeStatus: 'FAILED' });
     expect(loadPending('main')).toBeNull();
     expect(m.runTx).not.toHaveBeenCalled();
