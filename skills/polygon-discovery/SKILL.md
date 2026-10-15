@@ -30,7 +30,7 @@ agent wallet status      # is a wallet connected? (session mode: allowance left)
 agent wallet list        # owner mode: is a wallet configured?
 ```
 
-Installed for a personal assistant (session mode, see https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/setup.md)? Payments come out of the allowance; connect with bare `wallet login` (step 1 below).
+Installed for a personal assistant (session mode, see https://agents.polygon.technology/setup.md)? Payments come out of the allowance; connect with bare `wallet login` (step 1 below).
 
 If no wallet is listed, set one up:
 
