@@ -114,7 +114,7 @@ describe('update', () => {
   it('installs beside the CLI, swaps it in, and re-runs the new CLI’s workspace init', async () => {
     vi.stubEnv('SEQUENCE_PROJECT_ACCESS_KEY', 'secret');
     vi.stubEnv('OMS_PUBLISHABLE_KEY', 'secret');
-    const skill = { name: 'polygon-oms-wallet', installed: true, path: '/skills/x/SKILL.md' };
+    const skill = { name: 'polygon-agent-wallet', installed: true, path: '/skills/x/SKILL.md' };
     mocks.spawnSync
       .mockImplementationOnce(npmInstalls('new'))
       .mockImplementationOnce(initPrints({ version: '0.15.0', skill }));
@@ -157,7 +157,7 @@ describe('update', () => {
     mocks.spawnSync
       .mockImplementationOnce(npmInstalls('new'))
       .mockImplementationOnce(
-        initPrints({ version: '0.15.0', skill: { name: 'polygon-oms-wallet', installed: false } })
+        initPrints({ version: '0.15.0', skill: { name: 'polygon-agent-wallet', installed: false } })
       );
     await update();
     const [file, args] = mocks.spawnSync.mock.calls[0];
@@ -170,7 +170,7 @@ describe('update', () => {
     mocks.spawnSync
       .mockImplementationOnce(npmInstalls('new'))
       .mockImplementationOnce(
-        initPrints({ version: '0.14.0', skill: { name: 'polygon-oms-wallet', installed: false } })
+        initPrints({ version: '0.14.0', skill: { name: 'polygon-agent-wallet', installed: false } })
       );
     expect(await update()).toMatchObject({ ok: true, updated: false, to: '0.14.0' });
     expect(mocks.spawnSync.mock.calls[0][1]).toContain('@polygonlabs/agent-cli@latest');
@@ -221,7 +221,7 @@ describe('update concurrency', () => {
   });
 
   it('two overlapping updates leave exactly one working CLI', async () => {
-    const skill = { name: 'polygon-oms-wallet', installed: false };
+    const skill = { name: 'polygon-agent-wallet', installed: false };
     let second: Promise<unknown> | undefined;
     mocks.spawnSync.mockImplementation((file: string, args: string[]) => {
       if (args.includes('install')) {

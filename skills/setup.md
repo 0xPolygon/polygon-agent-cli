@@ -2,7 +2,7 @@
 name: polygon-oms-setup
 description: >-
   One-time setup of the Polygon OMS Agent Kit: installs the polygon-agent CLI
-  and the polygon-oms-wallet skill into the assistant's workspace, then connects
+  and the polygon-agent-wallet skill into the assistant's workspace, then connects
   the user's wallet with a spending allowance they approve by signing in.
 ---
 
@@ -103,7 +103,7 @@ If it fails, stop and tell the user why. From here on, run `npm` and `node` with
 - `--skills-dir` is the skills folder from step 1. Leave it out if your platform has none.
 - `--name` is what the wallet owner sees in their list of installs with access, like "OpenClaw on laptop". It defaults to the host name. Reuse the same name when you reinstall, because the Polymarket key backup is labelled with it, and recovery finds the key by that label.
 - `--platform` is your own platform: `muse`, `openclaw`, `hermes`, `claude-code`, `cursor`, `codex` or `other`. Pass the one you are; a platform not listed passes `other`. The CLI uses it to pick the sign-in method. An emailed code is the default. The browser is used only for a local coding agent (`claude-code`, `cursor`, `codex`) on a desktop, or a person typing in a terminal.
-- `workspace init` writes the wrapper `$ROOT/bin/polygon-agent` (the only command you'll use from now on), the state folder and a `.gitignore`, so workspace backups never pick it up. It also installs the `polygon-oms-wallet` skill, already pointed at the wrapper.
+- `workspace init` writes the wrapper `$ROOT/bin/polygon-agent` (the only command you'll use from now on), the state folder and a `.gitignore`, so workspace backups never pick it up. It also installs the `polygon-agent-wallet` skill, already pointed at the wrapper.
 
 Go on to step 5.
 
@@ -118,9 +118,9 @@ If you came here from step 2 (already installed), refresh the install first. Thi
 Then:
 
 - If the output of `workspace init` says `skill.installed: false` and your platform has a skills folder, run it again with `--skills-dir "<skills folder>"`. If its hint says this CLI version doesn't include the skill, run `"$ROOT/bin/polygon-agent" update` (it refreshes the install too).
-- If there's still no skill installed, print it and save it with your platform's own skill tool: `"$ROOT/bin/polygon-agent" skills show polygon-oms-wallet`. Or use `npx skills add 0xPolygon/polygon-agent-cli -s polygon-oms-wallet -g -y -a <agent>`, where `<agent>` is `claude-code`, `codex`, `cursor`, `openclaw` or `hermes-agent`. That copy doesn't know the wrapper's path, so tell it: `$ROOT/bin/polygon-agent`.
+- If there's still no skill installed, print it and save it with your platform's own skill tool: `"$ROOT/bin/polygon-agent" skills show polygon-agent-wallet`. Or use `npx skills add 0xPolygon/polygon-agent-cli -s polygon-agent-wallet -g -y -a <agent>`, where `<agent>` is `claude-code`, `codex`, `cursor`, `openclaw` or `hermes-agent`. That copy doesn't know the wrapper's path, so tell it: `$ROOT/bin/polygon-agent`.
 
-- Read the skill now (`<skills folder>/polygon-oms-wallet/SKILL.md`, or the printed one), even if it was installed before. Follow its rules for the rest of this conversation, starting with the steps below.
+- Read the skill now (`<skills folder>/polygon-agent-wallet/SKILL.md`, or the printed one), even if it was installed before. Follow its rules for the rest of this conversation, starting with the steps below.
 
 ## 6. Status
 

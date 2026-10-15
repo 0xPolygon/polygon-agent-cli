@@ -1,5 +1,5 @@
 ---
-name: polygon-oms-wallet
+name: polygon-agent-wallet
 description: >-
   The user's agent wallet (a Polygon crypto wallet): balances, token prices and price watches,
   buying, selling, swapping and bridging tokens, and paying for x402 services,

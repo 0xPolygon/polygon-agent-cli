@@ -18,7 +18,12 @@ import { shellQuote } from './shell.ts';
 import { cliPackageRoot } from './version.ts';
 
 // The assistant skill workspace init installs.
-export const ASSISTANT_SKILL = 'polygon-oms-wallet';
+export const ASSISTANT_SKILL = 'polygon-agent-wallet';
+// Its name before 0.15. Older skills and setup guides still ask for it.
+export const LEGACY_ASSISTANT_SKILL = 'polygon-oms-wallet';
+
+const canonicalSkillName = (name: string): string =>
+  name === LEGACY_ASSISTANT_SKILL ? ASSISTANT_SKILL : name;
 
 // Run it by its own path: a symlink to it elsewhere would resolve ROOT wrongly.
 export const WRAPPER_SCRIPT = `#!/bin/sh
@@ -146,7 +151,10 @@ export function listSkills(sourceDir: string | null): string[] {
 export function readSkill(params: { sourceDir: string | null; name: string }): string | null {
   if (!params.sourceDir || !SKILL_NAME.test(params.name)) return null;
   try {
-    return fs.readFileSync(path.join(params.sourceDir, params.name, 'SKILL.md'), 'utf8');
+    return fs.readFileSync(
+      path.join(params.sourceDir, canonicalSkillName(params.name), 'SKILL.md'),
+      'utf8'
+    );
   } catch {
     return null;
   }
@@ -174,6 +182,20 @@ export function renderSkill(params: { markdown: string; wrapper: string }): stri
   return `${markdown.slice(0, end)}\n${note}${markdown.slice(end).replace(/^\r?\n/, '')}`;
 }
 
+// Removes the assistant skill installed under its old name, so the assistant
+// doesn't load both. Only a folder holding nothing but that skill's SKILL.md.
+function removeLegacySkill(skillsDir: string): void {
+  const dir = path.join(skillsDir, LEGACY_ASSISTANT_SKILL);
+  try {
+    if (fs.readdirSync(dir).join() !== 'SKILL.md') return;
+    const markdown = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
+    if (!markdown.startsWith(`---\nname: ${LEGACY_ASSISTANT_SKILL}\n`)) return;
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch {
+    // not there, or not ours
+  }
+}
+
 // Writes <skillsDir>/<name>/SKILL.md, rendered for the wrapper when there is one.
 export function installSkill(params: {
   sourceDir: string | null;
@@ -181,15 +203,18 @@ export function installSkill(params: {
   skillsDir: string;
   wrapper?: string;
 }): string {
-  const markdown = readSkill({ sourceDir: params.sourceDir, name: params.name });
+  const name = canonicalSkillName(params.name);
+  const markdown = readSkill({ sourceDir: params.sourceDir, name });
   if (markdown === null) {
     throw new Error(`Skill not found: ${params.name}`);
   }
   const content = params.wrapper ? renderSkill({ markdown, wrapper: params.wrapper }) : markdown;
-  const dir = path.join(path.resolve(params.skillsDir), params.name);
+  const skillsDir = path.resolve(params.skillsDir);
+  const dir = path.join(skillsDir, name);
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, 'SKILL.md');
   writeFileAtomic({ file, content, mode: 0o644 });
+  if (name === ASSISTANT_SKILL) removeLegacySkill(skillsDir);
   return file;
 }
 
