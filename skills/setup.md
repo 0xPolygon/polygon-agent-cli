@@ -45,13 +45,7 @@ Keep the single quotes, so a path with spaces works (a `'` in the path itself is
 "$ROOT/bin/polygon-agent" --version
 ```
 
-If that prints a version, the CLI is installed. Check it's the current QA build:
-
-```sh
-PATH="$ROOT/node/bin:$PATH" npm view @polygonlabs/agent-cli@polymarket-qa version
-```
-
-If that version differs from the one above, go to step 3 and reinstall (steps 3 and 4 are safe to re-run, and your wallet and settings stay). If they match, skip to step 5, which checks the skill too.
+If that prints a version, the CLI is installed: skip to step 5, which checks the skill too.
 
 ## 3. Node.js
 
