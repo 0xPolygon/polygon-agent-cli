@@ -20,6 +20,13 @@ Install as a skill:
 npx skills add https://github.com/0xPolygon/polygon-agent-cli
 ```
 
+Or install the plugin, which bundles the same skills:
+
+- Claude Code: `/plugin install polygon-agent --marketplace 0xPolygon/polygon-agent-cli`
+- Codex and Cursor: add this repository (`0xPolygon/polygon-agent-cli`) as a plugin marketplace, then install `polygon-agent`
+
+The manifests live at the repo root (`.claude-plugin/`, `.codex-plugin/`, `.cursor-plugin/`, `.agents/plugins/`) and point at [`plugins/polygon-agent/`](plugins/polygon-agent/), whose `skills/` and `assets/` link back to the root folders.
+
 Or install the CLI directly:
 
 ```bash

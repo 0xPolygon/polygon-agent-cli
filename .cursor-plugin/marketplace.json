@@ -1,0 +1,14 @@
+{
+  "name": "polygon-agent-cli",
+  "owner": { "name": "Polygon Labs" },
+  "metadata": { "description": "Polygon agent wallet skills for coding agents" },
+  "plugins": [
+    {
+      "name": "polygon-agent",
+      "source": "plugins/polygon-agent",
+      "description": "An agent wallet your assistant can spend from within a limit you approve: balances, prices and watches, swaps and bridges, Polymarket, and x402 paid services, through the polygon-agent CLI.",
+      "category": "finance",
+      "tags": ["polygon", "wallet", "payments", "stablecoins", "polymarket", "x402"]
+    }
+  ]
+}

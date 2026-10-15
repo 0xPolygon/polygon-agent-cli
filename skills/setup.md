@@ -8,7 +8,7 @@ description: >-
 
 # Set up the Polygon OMS Agent Kit
 
-**For the assistant.** Follow these steps in order. Each one is safe to re-run.
+**For the assistant.** Follow these steps in order. Each one is safe to re-run. Whenever you hand the conversation back to the user, end with a question or with exactly what they should do next. Never stop on a status report.
 
 **How to talk to the user.** Talk like a helpful assistant: short, friendly, outcome first, one or two sentences. Don't narrate how things work (sign-in mechanics, session keys, the background sign-in, the Polymarket key backup or the extra wallet it adds, JSON fields or status names) unless the user asks or something fails. Never paste raw JSON. Install steps need no running commentary: say what you're setting up once, and speak up again only when you need something from them.
 
@@ -22,19 +22,19 @@ Install into the folder your platform keeps across restarts:
 |---|---|---|
 | Muse | the VM's persistent workspace folder | the workspace's skills folder |
 | OpenClaw | `~/.openclaw/workspace` | `~/.openclaw/workspace/skills` |
-| Hermes | `~/.hermes` | `~/.hermes/skills` |
+| Hermes | `$HERMES_HOME` (`~/.hermes` if it's not set) | `$HERMES_HOME/skills` |
 | Claude Code | `$HOME` | `~/.claude/skills` |
 | Codex | `$HOME` | `~/.codex/skills` |
 | Cursor | `$HOME` | `~/.cursor/skills` |
 | A computer, anything else | `$HOME` | your platform's skills folder, if it has one |
 
-If you're not sure which folder survives a restart, ask the user. Use absolute paths throughout (expand `~`). The install goes in `<workspace>/.polygon-agent`; below it's `$ROOT`:
+If you're not sure which folder survives a restart, ask the user. Use absolute paths throughout (expand `~` and variables like `$HERMES_HOME`). The install goes in `<workspace>/.polygon-agent`; below it's `$ROOT`:
 
 ```sh
-ROOT='/absolute/path/to/workspace/.polygon-agent'
+export ROOT='/absolute/path/to/workspace/.polygon-agent'
 ```
 
-Keep the single quotes, so a path with spaces works (a `'` in the path itself is written `'\''`). Run each code block below as one command. Shell variables don't carry over between commands on every platform; if they don't on yours, start each block with this `ROOT=` line. The blocks that write files stop if `ROOT` isn't set, or still holds the example path.
+Keep the single quotes, so a path with spaces works (a `'` in the path itself is written `'\''`). Run each code block below as one command. Some platforms keep exported variables from one command to the next and some don't; if `ROOT` is empty in a later step, start each block with this `export ROOT=` line. The blocks that write files stop if `ROOT` isn't set, or still holds the example path. Steps 3 and 4 download and install, which can take a few minutes: if your platform limits how long a command may run, allow up to 10 minutes for them.
 
 ## 2. Already installed?
 
@@ -109,7 +109,7 @@ If you came here from step 2 (already installed), refresh the install first. Thi
 Then:
 
 - If the output of `workspace init` says `skill.installed: false` and your platform has a skills folder, run it again with `--skills-dir "<skills folder>"`. If its hint says this CLI version doesn't include the skill, run `"$ROOT/bin/polygon-agent" update` (it refreshes the install too).
-- If there's still no skill installed, print it and save it with your platform's own skill tool: `"$ROOT/bin/polygon-agent" skills show polygon-agent-wallet`. Or use `npx skills add 0xPolygon/polygon-agent-cli -s polygon-agent-wallet -g -y -a <agent>`, where `<agent>` is `claude-code`, `codex`, `cursor`, `openclaw` or `hermes-agent`. That copy doesn't know the wrapper's path, so tell it: `$ROOT/bin/polygon-agent`.
+- If there's still no skill installed, print it and save it with your platform's own skill tool: `"$ROOT/bin/polygon-agent" skills show polygon-agent-wallet`. Or use `npx skills add 0xPolygon/polygon-agent-cli -s polygon-agent-wallet -g -y --copy -a <agent>`, where `<agent>` is `claude-code`, `codex`, `cursor`, `openclaw` or `hermes-agent`. That copy doesn't know the wrapper's path, so tell it: `$ROOT/bin/polygon-agent`.
 
 - Read the skill now (`<skills folder>/polygon-agent-wallet/SKILL.md`, or the printed one), even if it was installed before. Follow its rules for the rest of this conversation, starting with the steps below.
 
@@ -124,11 +124,13 @@ Check these in order:
 1. `mode` is `"owner"`: this install has full owner access, with no spending limit. Tell the user briefly and offer to switch to a limit: `"$ROOT/bin/polygon-agent" wallet logout`, then step 7.
 2. `pendingRequest` is there. If its `method` is `browser`, a sign-in page is waiting at `pendingRequest.url` for what `pendingRequest.approves` says: ask the user to finish it there, then run `pendingRequest.next`. Otherwise a code was already sent to `pendingRequest.email`: ask the user for it and run `pendingRequest.next` with it. Don't start another unless it expired.
 3. `connected` is `true`: skip to step 8.
-4. Otherwise, connect (step 7).
+4. Otherwise, go straight on to step 7 in the same reply.
 
 ## 7. Connect
 
-1. Ask how much you may spend, for example: "How much should I be able to spend on my own? I suggest up to **$1,000** over the next **30 days**."
+Don't leave the user with a status report after the install. Say it worked, explain signing in a sentence or two, and ask. For example: "Your agent wallet is installed. Next, sign in so I can use it: signing in approves a spending limit for me, nothing more, and your sign-in itself is never kept here. Would you like to sign in now?" If they'd rather wait, tell them to just say "sign in to my agent wallet" when they're ready.
+
+1. Once they say yes, ask how much you may spend, for example: "How much should I be able to spend on my own? I suggest up to **$1,000** over the next **30 days**."
 2. Start the connection. Don't ask for an email yet: the CLI picks the method (a browser page, or a code sent by email) and tells you what it needs.
 
    ```sh
@@ -157,7 +159,7 @@ Run `"$ROOT/bin/polygon-agent" wallet status` again. If it shows no `holdings` a
 
 ## 9. Watches
 
-Check whether your platform can run a recurring task (a Muse scheduled task, OpenClaw cron, a Hermes cronjob, cron on a computer). You don't need one yet, and there's nothing to tell the user now. When the user creates their first price watch, the skill explains how to schedule its check, and what to say if you can't.
+Check whether your platform can run a recurring task (a Muse scheduled task, OpenClaw cron, a Hermes cron job, cron on a computer). You don't need one yet, and there's nothing to tell the user now. Hermes cron jobs only run while the Hermes gateway is running (`hermes gateway start`); if it isn't, tell the user. When the user creates their first price watch, the skill explains how to schedule its check, and what to say if you can't.
 
 ## 10. Next steps
 
