@@ -10,6 +10,8 @@ import { defineConfig } from 'vitest/config';
 // Node >=20 either way, so lowering the transform target has no effect on
 // behavior.
 export default defineConfig({
+  // Tests that stub HOME must never reach a developer's real state folder.
+  test: { env: { POLYGON_AGENT_HOME: '' } },
   esbuild: {
     target: 'es2023',
     tsconfigRaw: { compilerOptions: { target: 'es2023' } }

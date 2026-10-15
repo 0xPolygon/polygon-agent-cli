@@ -3,6 +3,8 @@
 // drives the actual SDK auth so keys and the PKCE verifier never leave the
 // machine. Pure orchestration over injected deps so it is unit-testable.
 
+import type { LoginContext } from './owner/pending.ts';
+
 export type LoginAction =
   | { type: 'google' }
   | { type: 'oidc-callback'; callbackUrl: string }
@@ -15,12 +17,12 @@ export type LoginStatus =
   | { status: 'auth-url'; url: string }
   | { status: 'otp-sent' }
   | { status: 'otp-invalid'; attemptsLeft?: number }
-  | { status: 'done'; walletAddress: string }
+  | { status: 'done'; walletAddress: string; funding?: { url: string } }
   | { status: 'error'; message: string };
 
 export interface BrowserLoginDeps {
   relay: {
-    registerSession(session: string): Promise<void>;
+    registerSession(session: string, context?: LoginContext): Promise<void>;
     nextAction(session: string): Promise<LoginAction | null>;
     setStatus(session: string, status: LoginStatus): Promise<void>;
   };
@@ -39,6 +41,8 @@ export interface BrowserLoginDeps {
       walletSelection: 'automatic';
     }): Promise<{ walletAddress: string }>;
   };
+  // After sign-in, make the user's main (non-imported) wallet the active one and return it.
+  selectMainWallet(): Promise<{ address: string }>;
   // The SDK's opaque Google provider value (OmsRelayOidcProviders.google), injected
   // so this file stays SDK-agnostic and unit tests can fake it with a sentinel.
   oidcProviderGoogle: unknown;
@@ -53,6 +57,13 @@ export interface BrowserLoginOpts {
   uiBase: string;
   timeoutMs: number;
   pollIntervalMs?: number;
+  // A pairing session already registered with the relay (an owner request
+  // registers it when it starts). Given, it is used as is and not registered
+  // again; otherwise a new one comes from deps.randomSessionId.
+  session?: string;
+  // The error when nobody signs in before timeoutMs. Defaults to the owner
+  // mode text (re-run, or the loopback flow).
+  timeoutMessage?: string;
 }
 
 const MAX_OTP_ATTEMPTS = 3;
@@ -63,11 +74,11 @@ export async function runBrowserLogin(
 ): Promise<{ walletAddress: string; loginMethod: 'google' | 'email' }> {
   const { relay, wallet } = deps;
   const interval = opts.pollIntervalMs ?? 2000;
-  const session = deps.randomSessionId();
+  const session = opts.session ?? deps.randomSessionId();
   const pageUrl = `${opts.uiBase}/login#${session}`;
   const deadline = deps.now() + opts.timeoutMs;
 
-  await relay.registerSession(session);
+  if (opts.session === undefined) await relay.registerSession(session);
   await deps.announce(pageUrl);
 
   const runActionLoop = async (): Promise<{
@@ -105,12 +116,13 @@ export async function runBrowserLogin(
       }
 
       if (action.type === 'oidc-callback') {
-        const result = await wallet.completeOidcRedirectAuth({
+        await wallet.completeOidcRedirectAuth({
           callbackUrl: action.callbackUrl,
           walletSelection: 'automatic'
         });
-        await relay.setStatus(session, { status: 'done', walletAddress: result.walletAddress });
-        return { walletAddress: result.walletAddress, loginMethod: 'google' };
+        const main = await deps.selectMainWallet();
+        await relay.setStatus(session, { status: 'done', walletAddress: main.address });
+        return { walletAddress: main.address, loginMethod: 'google' };
       }
 
       if (action.type === 'email') {
@@ -122,12 +134,7 @@ export async function runBrowserLogin(
 
       // action.type === 'otp'
       try {
-        const result = await wallet.completeEmailAuth({
-          code: action.code,
-          walletSelection: 'automatic'
-        });
-        await relay.setStatus(session, { status: 'done', walletAddress: result.walletAddress });
-        return { walletAddress: result.walletAddress, loginMethod: 'email' };
+        await wallet.completeEmailAuth({ code: action.code, walletSelection: 'automatic' });
       } catch {
         otpFailures += 1;
         if (otpFailures >= MAX_OTP_ATTEMPTS) {
@@ -137,10 +144,17 @@ export async function runBrowserLogin(
           status: 'otp-invalid',
           attemptsLeft: MAX_OTP_ATTEMPTS - otpFailures
         });
+        continue;
       }
+      const main = await deps.selectMainWallet();
+      await relay.setStatus(session, { status: 'done', walletAddress: main.address });
+      return { walletAddress: main.address, loginMethod: 'email' };
     }
 
-    throw new Error('Timed out waiting for browser login. Re-run, or use `wallet login --local`.');
+    throw new Error(
+      opts.timeoutMessage ??
+        'Timed out waiting for browser login. Re-run, or use `wallet login --owner --local`.'
+    );
   };
 
   try {

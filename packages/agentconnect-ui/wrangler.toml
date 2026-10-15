@@ -19,20 +19,24 @@ deleted_classes = ["SessionRelay"]
 
 [env.staging]
 name = "agentconnect-staging"
+# Explicitly empty: without this, the top-level SessionRelay migration applies.
+migrations = []
 
 routes = [
   { pattern = "agentconnect.staging.polygon.technology", custom_domain = true }
 ]
 
-[[env.staging.migrations]]
-tag = "v2"
-deleted_classes = ["SessionRelay"]
+# No migrations: the staging worker never had the SessionRelay class, and
+# Cloudflare refuses to delete a class that doesn't exist.
 
 [env.production]
 name = "agentconnect-production"
 
+# agents.polygon.technology serves the assistant install guide (/setup.md)
+# and the skills from the same assets.
 routes = [
-  { pattern = "agentconnect.polygon.technology", custom_domain = true }
+  { pattern = "agentconnect.polygon.technology", custom_domain = true },
+  { pattern = "agents.polygon.technology", custom_domain = true }
 ]
 
 [[env.production.migrations]]

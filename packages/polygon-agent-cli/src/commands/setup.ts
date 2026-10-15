@@ -1,11 +1,19 @@
 import type { CommandModule } from 'yargs';
 
+import path from 'node:path';
+
 import { ethers } from 'ethers';
 import React from 'react';
 
 import { getAuthToken, createProject, getDefaultAccessKey } from '../lib/builder-api.ts';
+import { bigintReplacer, failureJson } from '../lib/errors.ts';
 import { generateEthAuthProof } from '../lib/ethauth.ts';
-import { saveBuilderConfig, loadBuilderConfig, saveOmsConfig } from '../lib/storage.ts';
+import {
+  saveBuilderConfig,
+  loadBuilderConfig,
+  saveOmsConfig,
+  STORAGE_ROOT
+} from '../lib/storage.ts';
 import { generateAgentName } from '../lib/utils.ts';
 import { isTTY, inkRender } from '../ui/render.js';
 import { SetupUI } from './setup-ui.js';
@@ -55,7 +63,7 @@ export const setupCommand: CommandModule<object, SetupArgs> = {
           JSON.stringify(
             {
               ok: true,
-              message: 'OMS credentials saved to ~/.polygon-agent/builder.json'
+              message: `OMS credentials saved to ${path.join(STORAGE_ROOT, 'builder.json')}`
             },
             null,
             2
@@ -112,25 +120,14 @@ export const setupCommand: CommandModule<object, SetupArgs> = {
               accessKey,
               projectId: project.id,
               projectName: project.name,
-              message:
-                'Builder configured successfully. Credentials saved to ~/.polygon-agent/builder.json (encrypted)'
+              message: `Builder configured successfully. Credentials saved to ${path.join(STORAGE_ROOT, 'builder.json')} (encrypted)`
             },
             null,
             2
           )
         );
       } catch (error) {
-        console.error(
-          JSON.stringify(
-            {
-              ok: false,
-              error: (error as Error).message,
-              stack: (error as Error).stack
-            },
-            null,
-            2
-          )
-        );
+        console.error(JSON.stringify(failureJson(error), bigintReplacer, 2));
         process.exit(1);
       }
     } else {

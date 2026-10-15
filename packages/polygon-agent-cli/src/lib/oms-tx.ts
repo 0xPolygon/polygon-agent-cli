@@ -5,11 +5,15 @@
 // existing command call sites need only swap which implementation they call (via
 // the runTx dispatch). Internally maps onto oms.wallet.sendTransaction.
 
-import type { FeeOptionWithBalance } from '@polygonlabs/oms-wallet';
+import type { FeeOptionSelection, FeeOptionWithBalance } from '@polygonlabs/oms-wallet';
 
 import { findNetworkById, isOMSWalletError, TransactionMode } from '@polygonlabs/oms-wallet';
 
+import { CliError } from './errors.ts';
+import { fundingInfo } from './funding.ts';
 import { getOmsClient } from './oms-client.ts';
+import { selectMainWallet } from './polymarket/oms-key.ts';
+import { loadOmsWalletPointer } from './storage.ts';
 
 export interface OmsTxTransaction {
   to: `0x${string}` | string;
@@ -23,6 +27,8 @@ export interface OmsTxParams {
   transactions: OmsTxTransaction[];
   broadcast: boolean;
   preferNativeFee?: boolean;
+  // Don't execute after this time (ms since epoch), e.g. a trade quote's expiry.
+  notAfter?: number;
 }
 
 export interface OmsTxResult {
@@ -36,8 +42,14 @@ const USDC_POLYGON = '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359';
 
 // Build a selectFeeOption callback mirroring the legacy fee logic:
 // prefer native gas if requested, else prefer USDC, always gated on affordability.
-function makeFeeSelector(preferNativeFee: boolean) {
-  return (opts: FeeOptionWithBalance[]) => {
+// Sponsored transactions call it with an empty list (oms-wallet >= 0.3); returning
+// undefined lets them proceed with no fee.
+export function makeFeeSelector(
+  preferNativeFee: boolean,
+  funding?: { walletAddress: string; chainId: number }
+) {
+  return (opts: FeeOptionWithBalance[]): FeeOptionSelection | undefined => {
+    if (opts.length === 0) return undefined;
     const usable = opts.filter(
       (o) => o.availableRaw != null && BigInt(o.availableRaw) >= BigInt(o.feeOption.value)
     );
@@ -56,19 +68,47 @@ function makeFeeSelector(preferNativeFee: boolean) {
         usable[0];
     }
     if (!pick) {
-      throw new Error(
-        'Unable to pay gas: wallet has no native token and no usable fee token. ' +
-          'Fund with POL (agent fund), or hold USDC for fees.'
-      );
+      // Raised before executing, so nothing was sent (insufficient_balance is in
+      // NOTHING_SENT_CODES).
+      throw new CliError({
+        code: 'insufficient_balance',
+        message: 'Unable to pay gas: wallet has no native token and no usable fee token.',
+        hint: 'Fund with POL (agent fund), or hold USDC for fees.',
+        ...(funding ? { details: { funding: fundingInfo(funding) } } : {})
+      });
     }
-    return { token: pick.feeOption.token.symbol };
+    // The SDK's selection carries the option's index, so two options with the
+    // same symbol can't be confused.
+    return pick.selection;
   };
+}
+
+// A persisted session can be left on an imported wallet (the Polymarket trading key), for
+// `--owner` only for an owner-mode wallet whose session expired; anything else
+// (no wallet, session mode, missing session) reconnects with plain `wallet login`.
+export async function sessionLoginMessage(walletName: string, code: string): Promise<string> {
+  const pointer = await loadOmsWalletPointer(walletName).catch(() => undefined);
+  const owner = !!pointer && pointer.access !== 'session' && code === 'OMS_SESSION_EXPIRED';
+  return (
+    `Session expired or missing for wallet '${walletName}'. ` +
+    `Run: agent wallet login${owner ? ' --owner' : ''}`
+  );
+}
+
+// example by a crashed process. Before sending, put it back on the wallet the pointer names.
+export async function ensureMainWallet(walletName: string): Promise<void> {
+  const pointer = await loadOmsWalletPointer(walletName);
+  if (!pointer || pointer.access === 'session') return;
+  const w = getOmsClient(walletName).wallet;
+  if (w.walletAddress?.toLowerCase() === pointer.walletAddress.toLowerCase()) return;
+  await selectMainWallet(w, { expectedAddress: pointer.walletAddress });
 }
 
 export async function runOmsTx(params: OmsTxParams): Promise<OmsTxResult> {
   const { walletName, chainId, transactions, broadcast, preferNativeFee = false } = params;
 
   const oms = getOmsClient(walletName);
+  if (oms.wallet.walletAddress) await ensureMainWallet(walletName);
   const walletAddress = oms.wallet.walletAddress;
   if (!walletAddress) {
     throw new Error(`No active session for wallet '${walletName}'. Run: agent wallet login`);
@@ -94,10 +134,26 @@ export async function runOmsTx(params: OmsTxParams): Promise<OmsTxResult> {
     return { walletAddress, dryRun: true };
   }
 
+  // A deadline only makes sense for one transaction: with several, an expiry
+  // after the first executed would wrongly read as "nothing was sent".
+  if (params.notAfter !== undefined && transactions.length !== 1) {
+    throw new Error('notAfter needs exactly one transaction');
+  }
+
   const network = findNetworkById(chainId);
   if (!network) throw new Error(`Unsupported chainId for OMS: ${chainId}`);
 
-  const selectFeeOption = makeFeeSelector(preferNativeFee);
+  // The SDK calls the fee selector after preparing and right before executing
+  // (sponsored or not), so a deadline checked there is checked last.
+  const feeSelector = makeFeeSelector(preferNativeFee, { walletAddress, chainId });
+  let expired = false;
+  const selectFeeOption: typeof feeSelector = (options) => {
+    if (params.notAfter !== undefined && Date.now() > params.notAfter) {
+      expired = true;
+      throw new Error('past notAfter before executing');
+    }
+    return feeSelector(options);
+  };
 
   // OMS sendTransaction takes a single tx. For multi-tx bundles (only `deposit`
   // sends 2: approve + supply) we submit sequentially. NON-ATOMIC: if the second
@@ -117,13 +173,22 @@ export async function runOmsTx(params: OmsTxParams): Promise<OmsTxResult> {
       });
       lastTxHash = res.txnHash ?? lastTxHash;
     } catch (e) {
+      // The SDK wraps whatever the fee selector throws; keep our own refusal intact.
+      if (e instanceof CliError) throw e;
+      const cause = (e as { cause?: unknown })?.cause;
+      if (cause instanceof CliError) throw cause;
+      if (expired) {
+        throw new CliError({
+          code: 'quote_expired',
+          message: 'The quote expired while preparing the transaction; nothing was sent.',
+          hint: 'Quote again.'
+        });
+      }
       if (
         isOMSWalletError(e) &&
         (e.code === 'OMS_SESSION_EXPIRED' || e.code === 'OMS_SESSION_MISSING')
       ) {
-        throw new Error(
-          `Session expired or missing for wallet '${walletName}'. ` + `Run: agent wallet login`
-        );
+        throw new Error(await sessionLoginMessage(walletName, e.code));
       }
       throw e;
     }

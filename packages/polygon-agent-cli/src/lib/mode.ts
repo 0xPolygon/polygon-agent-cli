@@ -6,27 +6,11 @@
 
 import type { Argv } from 'yargs';
 
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-
-import { ensureStorageDir } from './storage.ts';
+import { readConfig, updateConfig } from './config.ts';
 
 export type TxMode = 'auto' | 'dry-run';
 
 const TX_MODES: TxMode[] = ['auto', 'dry-run'];
-
-function configPath(): string {
-  return path.join(os.homedir(), '.polygon-agent', 'config.json');
-}
-
-function readConfig(): Record<string, unknown> {
-  try {
-    return JSON.parse(fs.readFileSync(configPath(), 'utf8'));
-  } catch {
-    return {};
-  }
-}
 
 export function loadTxMode(): TxMode {
   const mode = readConfig().mode;
@@ -38,10 +22,7 @@ export function isTxModeSet(): boolean {
 }
 
 export function saveTxMode(mode: TxMode): void {
-  ensureStorageDir();
-  const data = readConfig();
-  data.mode = mode;
-  fs.writeFileSync(configPath(), JSON.stringify(data, null, 2), { mode: 0o600 });
+  updateConfig({ mode });
 }
 
 // Precedence: --dry-run > --broadcast/--no-broadcast > persisted mode.

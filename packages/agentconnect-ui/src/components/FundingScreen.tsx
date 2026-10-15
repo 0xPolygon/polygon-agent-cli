@@ -5,6 +5,8 @@ import { trailsApiKey } from '../config';
 interface FundingScreenProps {
   walletAddress: string;
   chainId: number;
+  // Target amount in USDC on Polygon, from the `amount` link parameter.
+  amount?: string;
   onSkip: () => void;
 }
 
@@ -64,7 +66,13 @@ const trailsTheme: Record<string, string> = {
   '--trails-list-hover-bg': '#f5f6fb'
 };
 
-export function FundingScreen({ walletAddress, chainId, onSkip }: FundingScreenProps) {
+// The `amount` link parameter as a positive decimal string, or undefined.
+export function parseFundAmount(raw: string | null | undefined): string | undefined {
+  if (!raw || !/^\d+(\.\d+)?$/.test(raw)) return undefined;
+  return Number(raw) > 0 ? raw : undefined;
+}
+
+export function FundingScreen({ walletAddress, chainId, amount, onSkip }: FundingScreenProps) {
   return (
     <div className="w-full max-w-sm animate-scale-in">
       {/* Card */}
@@ -72,7 +80,7 @@ export function FundingScreen({ walletAddress, chainId, onSkip }: FundingScreenP
         className="w-full bg-white rounded-3xl border border-[#c8cfe1] overflow-hidden"
         style={{ boxShadow: '0 2px 8px rgba(20,22,53,0.06), 0 16px 48px rgba(20,22,53,0.08)' }}
       >
-        <div className="px-6 pt-7 pb-6 flex flex-col gap-5">
+        <div className="px-4 pt-6 pb-5 sm:px-6 sm:pt-7 sm:pb-6 flex flex-col gap-5 min-w-0">
           {/* Headline + subtext */}
           <div>
             <h2 className="text-[#141635] font-bold text-lg leading-snug mb-1">
@@ -83,37 +91,43 @@ export function FundingScreen({ walletAddress, chainId, onSkip }: FundingScreenP
             </p>
           </div>
 
-          <Fund
-            apiKey={trailsApiKey}
-            theme="light"
-            customCss={trailsTheme}
-            to={{
-              recipient: walletAddress,
-              currency: USDC_POLYGON,
-              chain: chainId
-            }}
-            buttonText="Add Funds to Agent"
-            hideSwap={true}
-            onramp={{
-              mesh: {
-                environment: 'production'
-              }
-            }}
-            onDestinationConfirmation={({ txHash, chainId: confirmChainId, sessionId }) => {
-              console.log('onDestinationConfirmation:', {
-                txHash,
-                chainId: confirmChainId,
-                sessionId
-              });
-              setTimeout(onSkip, 3000);
-            }}
-          />
+          {/* Keep the Trails widget inside the card width on narrow screens. */}
+          <div className="w-full min-w-0 max-w-full [&>*]:max-w-full">
+            <Fund
+              apiKey={trailsApiKey}
+              theme="light"
+              customCss={trailsTheme}
+              to={{
+                recipient: walletAddress,
+                token: USDC_POLYGON,
+                chain: chainId
+              }}
+              // The widget's destination amount (toAmount) is not in the Fund prop types, but
+              // Fund passes unknown props through to it.
+              {...(amount ? { toAmount: amount } : {})}
+              buttonText="Add Funds to Agent"
+              hideSwap={true}
+              onramp={{
+                mesh: {
+                  environment: 'production'
+                }
+              }}
+              onDestinationConfirmation={({ txHash, chainId: confirmChainId, sessionId }) => {
+                console.log('onDestinationConfirmation:', {
+                  txHash,
+                  chainId: confirmChainId,
+                  sessionId
+                });
+                setTimeout(onSkip, 3000);
+              }}
+            />
+          </div>
         </div>
       </div>
 
       <button
         onClick={onSkip}
-        className="mt-4 w-full text-sm text-[#929eba] hover:text-[#64708f] font-medium transition-colors cursor-pointer border-0 bg-transparent py-1"
+        className="mt-2 sm:mt-4 w-full min-h-11 text-sm text-[#929eba] hover:text-[#64708f] font-medium transition-colors cursor-pointer border-0 bg-transparent py-1"
       >
         Skip for now
       </button>

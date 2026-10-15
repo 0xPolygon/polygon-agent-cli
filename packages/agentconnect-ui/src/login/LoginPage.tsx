@@ -4,7 +4,7 @@ import type { LoginAction, MachineEvent, MachineState, RelayStatus } from './mac
 
 import { LogoBadge } from '../App.js';
 import { oidcRelayUrl } from '../config';
-import { initialState, reduce } from './machine.js';
+import { LOGIN_LINE, initialState, reduce } from './machine.js';
 import { getSessionId, isRelayReturn } from './returnUrl.js';
 
 // Poll fast while waiting on the CLI (returning from the provider, checking a
@@ -140,6 +140,8 @@ export function LoginPage() {
   // without another click; the success card shows briefly, then we move on.
   useEffect(() => {
     if (state.kind !== 'success') return;
+    // With a funding link to offer, stay put so it can be used.
+    if (state.funding) return;
     const target = dashboardUrl(state.walletAddress);
     const timer = setTimeout(() => window.location.assign(target), 1800);
     return () => clearTimeout(timer);
@@ -186,11 +188,12 @@ export function LoginPage() {
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-[#f5f6fb] flex flex-col items-center justify-center px-4">
-      <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[99999]">
+    <div className="min-h-screen bg-[#f5f6fb] flex flex-col items-center justify-center px-4 py-6">
+      {/* In the page flow on phones so it never covers the card; pinned on larger screens. */}
+      <div className="mb-6 sm:mb-0 sm:fixed sm:top-6 sm:left-1/2 sm:-translate-x-1/2 z-[99999]">
         <LogoBadge />
       </div>
-      <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-[0_2px_8px_rgba(20,22,53,0.06)] border border-[#e3e7f2]">
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 sm:p-8 shadow-[0_2px_8px_rgba(20,22,53,0.06)] border border-[#e3e7f2]">
         {children}
       </div>
     </div>
@@ -202,6 +205,7 @@ function renderState(state: MachineState, session: string, dispatch: (e: Machine
     case 'method':
       return (
         <MethodChoice
+          line={LOGIN_LINE}
           onGoogle={() => {
             void postAction(session, { type: 'google' }).then((ok) => {
               if (ok) dispatch({ type: 'choose-google' });
@@ -220,7 +224,7 @@ function renderState(state: MachineState, session: string, dispatch: (e: Machine
           {state.url && (
             <a
               href={state.url}
-              className="mt-6 inline-block text-sm text-[#64708f] hover:text-[#141635] underline"
+              className="mt-3 inline-block py-3 text-sm text-[#64708f] hover:text-[#141635] underline"
             >
               Not redirected? Continue with Google
             </a>
@@ -260,13 +264,24 @@ function renderState(state: MachineState, session: string, dispatch: (e: Machine
           <h1 className="text-xl font-semibold text-[#141635]">You're signed in</h1>
           <p className="mt-2 text-sm text-[#64708f] break-all">Wallet {state.walletAddress}</p>
           <p className="mt-2 text-sm text-[#64708f]">
-            Your terminal session is ready. Taking you to your dashboard.
+            {state.funding
+              ? 'Your terminal session is ready. Your agent wallet is empty.'
+              : 'Your terminal session is ready. Taking you to your dashboard.'}
           </p>
+          {state.funding && (
+            <a
+              href={state.funding.url}
+              className="mt-6 inline-block rounded-xl bg-[#141635] px-5 py-3 text-sm font-medium text-white hover:bg-[#1e2155]"
+            >
+              Add funds
+            </a>
+          )}
+          <br />
           <a
             href={dashboardUrl(state.walletAddress)}
-            className="mt-6 inline-block text-sm text-[#64708f] hover:text-[#141635] underline"
+            className="mt-3 inline-block py-3 text-sm text-[#64708f] hover:text-[#141635] underline"
           >
-            Not redirected? Open your dashboard
+            {state.funding ? 'Open your dashboard' : 'Not redirected? Open your dashboard'}
           </a>
         </div>
       );
@@ -317,15 +332,21 @@ function GoogleLogo() {
   );
 }
 
-function MethodChoice({ onGoogle, onEmail }: { onGoogle: () => void; onEmail: () => void }) {
+function MethodChoice({
+  line,
+  onGoogle,
+  onEmail
+}: {
+  line: string;
+  onGoogle: () => void;
+  onEmail: () => void;
+}) {
   return (
     <div>
       <h1 className="text-xl font-semibold text-[#141635] text-center">
         Sign in to your agent wallet
       </h1>
-      <p className="mt-2 text-sm text-[#64708f] text-center">
-        This connects to your agent in your terminal.
-      </p>
+      <p className="mt-2 text-sm text-[#64708f] text-center">{line}</p>
       <button
         onClick={onGoogle}
         className="mt-6 w-full rounded-xl bg-[#141635] px-5 py-3 text-sm font-medium text-white hover:bg-[#1e2155] flex items-center justify-center gap-2.5"
@@ -368,7 +389,7 @@ function EmailForm({
         value={email}
         onChange={(e) => setEmail(e.target.value)}
         placeholder="you@example.com"
-        className="mt-6 w-full rounded-xl border border-[#c8cfe1] px-4 py-3 text-sm text-[#141635] outline-none focus:border-[#141635]"
+        className="mt-6 w-full rounded-xl border border-[#c8cfe1] px-4 py-3 text-base sm:text-sm text-[#141635] outline-none focus:border-[#141635]"
       />
       <button
         type="submit"
@@ -379,7 +400,7 @@ function EmailForm({
       <button
         type="button"
         onClick={onBack}
-        className="mt-3 w-full text-sm text-[#64708f] hover:text-[#141635]"
+        className="mt-3 w-full min-h-11 text-sm text-[#64708f] hover:text-[#141635]"
       >
         Back
       </button>

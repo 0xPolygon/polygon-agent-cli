@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
 import * as esbuild from 'esbuild';
 
 // Bundle the CLI with agent-shared inlined. All other node_modules packages
@@ -29,4 +32,16 @@ await esbuild.build({
   ]
 });
 
-console.log('Build complete: dist/index.js');
+// Bundle the repo's skills (skills/<name>/SKILL.md) into dist/skills/, for
+// `skills show|install` and `workspace init`.
+const skillsSrc = path.resolve('..', '..', 'skills');
+const skillsOut = path.join('dist', 'skills');
+fs.rmSync(skillsOut, { recursive: true, force: true });
+for (const entry of fs.readdirSync(skillsSrc, { withFileTypes: true })) {
+  const skill = path.join(skillsSrc, entry.name, 'SKILL.md');
+  if (!entry.isDirectory() || !fs.existsSync(skill)) continue;
+  fs.mkdirSync(path.join(skillsOut, entry.name), { recursive: true });
+  fs.copyFileSync(skill, path.join(skillsOut, entry.name, 'SKILL.md'));
+}
+
+console.log('Build complete: dist/index.js, dist/skills/');

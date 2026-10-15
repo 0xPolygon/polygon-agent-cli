@@ -26,12 +26,15 @@ signs the exact payment, and retries automatically.
 Every call spends USDC from a funded Polygon wallet. Before running `x402-pay`:
 
 ```bash
-agent wallet list        # is a wallet configured?
+agent wallet status      # is a wallet connected? (session mode: allowance left)
+agent wallet list        # owner mode: is a wallet configured?
 ```
+
+Installed for a personal assistant (session mode, see https://agents.polygon.technology/setup.md)? Payments come out of the allowance; connect with bare `wallet login` (step 1 below).
 
 If no wallet is listed, set one up:
 
-1. `agent wallet login`: opens the agentconnect login page in the browser; sign in with Google or email (works on headless hosts too, no extra flags needed). No setup step is needed first: keys are defaulted, and login auto-provisions Builder credentials.
+1. `agent wallet login`: follow its output (a sign-in page, or an emailed code). Developers who want the full owner sign-in can use `agent wallet login --owner`, which opens the login page (Google or email; works on headless hosts too). No setup step is needed first: keys are defaulted, and login auto-provisions Builder credentials.
 2. `agent wallet address`: get the address, then fund it (`agent fund`)
 3. `agent balances`: confirm USDC is available on Polygon (chain 137) before calling any x402 endpoint
 
@@ -71,6 +74,20 @@ agent x402-pay \
 ```
 
 Chain and token are auto-detected from the `402` response — no manual config.
+
+`x402-pay` previews the payment by default (dry-run mode) and pays nothing: add
+`--broadcast` to pay, or set `agent mode auto`. A preview shows the price first.
+
+### Price limits
+
+Always pass `--max-usd` with the price you expect from the catalog: a service asking more is refused and nothing is paid (`x402_price_exceeds_max`).
+
+```bash
+agent x402-pay --url "https://agent-discovery.polygon.org/api/proxy/exa/search" \
+  --wallet main --method POST --body '{"query": "polygon"}' --max-usd 0.001 --broadcast
+```
+
+Without `--max-usd`, a price over the per-call limit ($1 by default) fails with `confirmation_required`: ask the user, and rerun with `--yes` only if they agree. Total x402 spending is capped at $10 over a rolling 24 hours by default (`daily_limit_exceeded`).
 
 ---
 

@@ -1,13 +1,50 @@
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import type { ChainId, NetworkMetadata } from '@0xsequence/network';
 // eslint-disable-next-line perfectionist/sort-imports -- type + value import from same module
 import { networks } from '@0xsequence/network';
 
+import { STORAGE_ROOT } from './storage.ts';
+
+// The folders holding wallet keys: this install's state, and a global
+// install's. Their files are never read into an argument (an injected
+// assistant could otherwise post them anywhere with x402-pay --body @file).
+// Folders are compared by device and inode, not by name, so a different
+// spelling (a case-insensitive filesystem, a symlinked folder) can't slip by.
+function inStateFolder(file: string): boolean {
+  const id = (p: string) => {
+    try {
+      const stat = fs.statSync(p);
+      return `${stat.dev}:${stat.ino}`;
+    } catch {
+      return null;
+    }
+  };
+  const stateIds = new Set(
+    [STORAGE_ROOT, path.join(os.homedir(), '.polygon-agent')].map(id).filter((v) => v !== null)
+  );
+  let target: string;
+  try {
+    target = fs.realpathSync(file);
+  } catch {
+    target = path.resolve(file);
+  }
+  for (let dir = path.dirname(target); ; dir = path.dirname(dir)) {
+    const dirId = id(dir);
+    if (dirId !== null && stateIds.has(dirId)) return true;
+    if (path.dirname(dir) === dir) return false;
+  }
+}
+
 /** Read a CLI arg value, supporting @filename coercion */
 export function fileCoerce(val: string): string {
   if (typeof val === 'string' && val.startsWith('@')) {
     const filePath = val.slice(1);
+    if (inStateFolder(filePath)) {
+      throw new Error(`Refusing to read ${filePath}: it's in the CLI's state folder.`);
+    }
     try {
       return fs.readFileSync(filePath, 'utf8').trim();
     } catch (err) {

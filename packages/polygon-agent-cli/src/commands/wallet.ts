@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 
 import React from 'react';
 
-import type { OmsRelayOidcProvider } from '@polygonlabs/oms-wallet';
+import type { OMSWallet, OmsRelayOidcProvider } from '@polygonlabs/oms-wallet';
 
 import { OmsRelayOidcProviders } from '@polygonlabs/oms-wallet';
 
@@ -12,11 +12,17 @@ import type { TxMode } from '../lib/mode.ts';
 import type { OmsLoginMethod } from '../lib/storage.ts';
 
 import { runBrowserLogin } from '../lib/browser-login.ts';
-import { ensureBuilderAccessKey, makeDefaultProvisionDeps } from '../lib/builder-provision.ts';
+import { provisionBuilderOnce } from '../lib/builder-provision.ts';
+import { CliError, jsonFail } from '../lib/errors.ts';
+import { dashboardInfo } from '../lib/funding.ts';
+import { isWalletFunded } from '../lib/indexer.ts';
 import { makeLoginRelay } from '../lib/login-relay-client.ts';
 import { isTxModeSet, loadTxMode, saveTxMode } from '../lib/mode.ts';
 import { startOidcCallbackServer } from '../lib/oidc-callback-server.ts';
 import { getOmsClient, loginUiBaseUrl, oidcRelayBaseUrl } from '../lib/oms-client.ts';
+import { ensureMainWallet } from '../lib/oms-tx.ts';
+import { selectMainWallet } from '../lib/polymarket/oms-key.ts';
+import { polymarketOwnerStep } from '../lib/polymarket/owner-step.ts';
 import {
   listWallets,
   deleteWallet,
@@ -26,6 +32,17 @@ import {
 } from '../lib/storage.ts';
 import { isTTY, inkRender } from '../ui/render.js';
 import { showFunding } from './operations.ts';
+import {
+  accessCommandModule,
+  allowanceCommandModule,
+  confirmCommandModule,
+  handleKeepSignedIn,
+  handleLoginWait,
+  handleSessionLogin,
+  logoutSessionWallet,
+  statusCommandModule,
+  withdrawCommandModule
+} from './wallet-session.ts';
 import { WalletListUI, WalletAddressUI } from './wallet-ui.js';
 
 // Compact JSON output for AI agent consumers (single line, no stack traces)
@@ -57,9 +74,11 @@ async function maybeAskTxMode(): Promise<TxMode | null> {
   }
 }
 
-// --- Subcommand: wallet login (Google OIDC browser flow — the only login) ---
+// --- Subcommand: wallet login ---
 interface LoginArgs {
   name: string;
+  owner: boolean;
+  wait: boolean;
   provider: string;
   port: number;
   timeout: number;
@@ -68,6 +87,10 @@ interface LoginArgs {
   local: boolean;
   remote: boolean;
   relayUrl?: string;
+  email?: string;
+  allowance?: number;
+  days?: number;
+  chains?: string;
 }
 
 // Print the auth URL (copy-paste fallback) and try to open it in a browser.
@@ -108,23 +131,62 @@ async function obtainLoopbackCallbackUrl(
   }
 }
 
+// Session mode (connect with an allowance) unless --owner.
 async function handleLogin(argv: LoginArgs): Promise<void> {
+  if (argv.owner) return handleOwnerLogin(argv);
+  if (argv.local || argv.remote) {
+    jsonFail(
+      new CliError({
+        code: 'invalid_input',
+        message: '--local and --remote only work with --owner.'
+      })
+    );
+  }
+  // The session browser path uses the relay too: the request registers its
+  // page there, and the waiter (which inherits the environment) polls it.
+  if (argv.relayUrl) process.env.POLYGON_AGENT_OIDC_RELAY = argv.relayUrl.replace(/\/+$/, '');
+  if (argv.wait) return handleLoginWait(argv);
+  return handleSessionLogin(argv);
+}
+
+// --owner: sign in from the browser and keep the owner session on disk.
+async function handleOwnerLogin(argv: LoginArgs): Promise<void> {
+  // A session-mode install keeps its next sign-in instead, by the same method it signs in with.
+  if ((await loadOmsWalletPointer(argv.name))?.access === 'session') {
+    return handleKeepSignedIn({ name: argv.name, email: argv.email });
+  }
   try {
+    await refuseSessionWallet({ name: argv.name, action: 'login' });
     const oms = getOmsClient(argv.name);
     // Zero-setup onboarding: give this agent its own Builder project + access
     // key (indexer and Trails quota). Best-effort: a failure never fails the
-    // login; re-running `wallet login` retries it, no fresh browser auth needed.
+    // login; re-running `wallet login --owner` retries it, no fresh browser auth needed.
     async function provisionBuilder(walletAddress: string): Promise<boolean> {
-      const provision = await ensureBuilderAccessKey(walletAddress, makeDefaultProvisionDeps());
+      const provision = await provisionBuilderOnce({ walletAddress }).catch((error: unknown) => ({
+        provisioned: false,
+        reason: String(error)
+      }));
       const ok = provision.provisioned || provision.reason === 'existing';
       if (!ok) {
         process.stderr.write(
           `Note: Builder provisioning failed (${provision.reason}). ` +
-            'Indexer and Trails calls fall back to shared defaults; re-run `wallet login` to retry.\n'
+            'Indexer and Trails calls fall back to shared defaults; re-run `wallet login --owner` to retry.\n'
         );
       }
       return ok;
     }
+
+    // The owner is signed in: back up the Polymarket trading key too. Never throws.
+    const backUpPolymarket = (mainAddress: string) =>
+      polymarketOwnerStep({
+        wallet: argv.name,
+        owner: oms.wallet,
+        mainAddress,
+        signsWithOms: true
+      }).catch((error: unknown) => ({
+        backedUp: false,
+        error: error instanceof Error ? error.message : String(error)
+      }));
 
     // Short-circuit if already logged in (the SDK restores the session from
     // storage on construction). Starting a new auth would clearSession(), so
@@ -132,7 +194,10 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
     // a transient failure during the original login must be repairable by
     // re-running `wallet login` without forcing a fresh browser auth.
     if (!argv.force && oms.wallet.walletAddress) {
+      // A crashed process may have left the session on an imported wallet.
+      await ensureMainWallet(argv.name);
       const builderProvisioned = await provisionBuilder(oms.wallet.walletAddress);
+      const polymarket = await backUpPolymarket(oms.wallet.walletAddress);
       const txMode = await maybeAskTxMode();
       jsonOut({
         ok: true,
@@ -140,6 +205,12 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
         walletAddress: oms.wallet.walletAddress,
         alreadyLoggedIn: true,
         builderProvisioned,
+        polymarket,
+        // The wallet's agentconnect page, for the assistant to send after login.
+        dashboard: dashboardInfo({
+          walletAddress: oms.wallet.walletAddress,
+          funded: await isWalletFunded(argv.name, oms.wallet.walletAddress, 137)
+        }),
         txMode: txMode ?? loadTxMode(),
         ...(txMode === null ? { modePrompt: MODE_PROMPT } : {})
       });
@@ -148,6 +219,11 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
 
     let walletAddress: string;
     let loginMethod: OmsLoginMethod;
+    // Automatic wallet selection can land on an imported wallet (the Polymarket key); the
+    // pointer must always hold the user's main wallet.
+    const selectMain = async () => ({
+      address: await selectLoginWallet({ oms, name: argv.name, force: argv.force })
+    });
 
     if (argv.local) {
       if (argv.provider !== 'google') {
@@ -163,7 +239,7 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
       if (!result) {
         throw new Error('OIDC login did not complete: no wallet result returned.');
       }
-      walletAddress = result.walletAddress;
+      walletAddress = (await selectMain()).address;
       loginMethod = 'google';
     } else {
       if (argv.remote) {
@@ -189,6 +265,7 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
             startEmailAuth: (p) => oms.wallet.startEmailAuth(p),
             completeEmailAuth: (p) => oms.wallet.completeEmailAuth(p)
           },
+          selectMainWallet: selectMain,
           oidcProviderGoogle: OmsRelayOidcProviders.google,
           announce: announceAuthUrl,
           sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -213,6 +290,9 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
 
     const builderProvisioned = await provisionBuilder(walletAddress);
 
+    const polymarket = await backUpPolymarket(walletAddress);
+    // One funded check, for the dashboard link and the funding panel.
+    const funded = await isWalletFunded(argv.name, walletAddress, 137);
     const txMode = await maybeAskTxMode();
     jsonOut({
       ok: true,
@@ -220,18 +300,60 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
       walletAddress,
       loginMethod,
       builderProvisioned,
+      polymarket,
+      dashboard: dashboardInfo({ walletAddress, funded }),
       txMode: txMode ?? loadTxMode(),
       ...(txMode === null ? { modePrompt: MODE_PROMPT } : {})
     });
 
-    // Funding: the login page's success screen already directs the user onward,
-    // so the browser flow only prints the panel; --local keeps opening the page.
+    // Funding: print the panel only. Nothing opens on its own: the login page's
+    // success screen has an "Add funds" button, and the assistant sends the link.
     if (argv.fund !== false) {
-      await showFunding(argv.name, walletAddress, 137, { openBrowser: argv.local });
+      await showFunding(argv.name, walletAddress, 137, { funded });
     }
   } catch (error) {
-    jsonOut({ ok: false, error: (error as Error).message });
-    process.exit(1);
+    jsonFail(error);
+  }
+}
+
+// A session-mode wallet's access lives on OMS: dropping or replacing it locally
+// would leave its session key live. Only logout (which revokes it) may.
+async function refuseSessionWallet(params: { name: string; action: string }): Promise<void> {
+  const pointer = await loadOmsWalletPointer(params.name);
+  if (pointer?.access === 'session') {
+    throw new CliError({
+      code: 'invalid_input',
+      message: `Wallet '${params.name}' is connected in session mode; '${params.action}' would leave its access live.`,
+      command: `polygon-agent wallet logout${params.name === 'main' ? '' : ` --name ${params.name}`}`
+    });
+  }
+}
+
+// After a login: pick the main wallet of the account that signed in. Signing in to a different
+// account than this install's pointer is refused (and signed out again) unless --force.
+export async function selectLoginWallet(params: {
+  oms: Pick<OMSWallet, 'wallet'>;
+  name: string;
+  force: boolean;
+}): Promise<string> {
+  const { oms, name, force } = params;
+  const pointer = await loadOmsWalletPointer(name);
+  try {
+    const main = await selectMainWallet(oms.wallet, {
+      expectedAddress: force ? undefined : pointer?.walletAddress
+    });
+    return main.address;
+  } catch (error) {
+    if (!force && pointer && error instanceof CliError && error.code === 'not_connected') {
+      const signedIn = oms.wallet.walletAddress;
+      await oms.wallet.signOut().catch(() => undefined);
+      throw new CliError({
+        code: 'invalid_input',
+        message: `That login is for ${signedIn ?? 'a different account'}, not this install's wallet ${pointer.walletAddress}.`,
+        hint: 'Run wallet logout first, or pass --force to replace this wallet.'
+      });
+    }
+    throw error;
   }
 }
 
@@ -243,6 +365,12 @@ interface LogoutArgs {
 async function handleLogout(argv: LogoutArgs): Promise<void> {
   const name = argv.name;
   try {
+    const pointer = await loadOmsWalletPointer(name);
+    if (pointer?.access === 'session') {
+      const result = await logoutSessionWallet(name);
+      jsonOut({ ok: true, walletName: name, loggedOut: true, ...result });
+      return;
+    }
     try {
       const oms = getOmsClient(name);
       await oms.wallet.signOut();
@@ -252,8 +380,7 @@ async function handleLogout(argv: LogoutArgs): Promise<void> {
     await deleteOmsWallet(name);
     jsonOut({ ok: true, walletName: name, loggedOut: true });
   } catch (error) {
-    jsonOut({ ok: false, error: (error as Error).message });
-    process.exit(1);
+    jsonFail(error);
   }
 }
 
@@ -340,6 +467,7 @@ async function handleRemove(argv: RemoveArgs): Promise<void> {
   const name = argv.name;
 
   try {
+    await refuseSessionWallet({ name, action: 'remove' });
     // Remove OMS session state (storage + credential key) if present, plus the
     // wallet pointer file.
     await deleteOmsWallet(name);
@@ -351,22 +479,52 @@ async function handleRemove(argv: RemoveArgs): Promise<void> {
 
     jsonOut({ ok: true, walletName: name });
   } catch (error) {
-    jsonOut({ ok: false, error: (error as Error).message });
-    process.exit(1);
+    jsonFail(error);
   }
 }
 
 // --- Main wallet command ---
 export const walletCommand: CommandModule = {
   command: 'wallet',
-  describe: 'Manage wallets (login, logout, list, address, remove)',
+  describe:
+    'Manage wallets (login, confirm, status, allowance, withdraw, access, logout, list, address, remove)',
   builder: (yargs) =>
     yargs
       .command({
         command: 'login',
-        describe: 'Log in from the browser (choose Google or email on the login page)',
+        describe:
+          'Connect this install with a spending allowance (session mode); --owner signs in from the browser as the owner',
         builder: (y) =>
           y
+            .option('owner', {
+              type: 'boolean',
+              default: false,
+              describe: 'Owner mode: sign in from the browser and keep the full owner session'
+            })
+            .option('wait', {
+              type: 'boolean',
+              default: false,
+              describe:
+                'Session mode: wait for the browser sign-in to finish (up to 90 seconds per run)'
+            })
+            .option('email', {
+              type: 'string',
+              describe:
+                "Session mode: the owner's email; a code is sent to it (then run wallet confirm)"
+            })
+            .option('allowance', {
+              type: 'number',
+              describe: 'Session mode: USD the agent may spend (default 1000)'
+            })
+            .option('days', {
+              type: 'number',
+              describe: 'Session mode: allowance period in days, 1–30 (default 30)'
+            })
+            .option('chains', {
+              type: 'string',
+              describe:
+                'Session mode: chains to cover, comma-separated (default Polygon, Base, and chains holding covered tokens)'
+            })
             .option('name', {
               type: 'string',
               default: 'main',
@@ -375,27 +533,29 @@ export const walletCommand: CommandModule = {
             .option('provider', {
               type: 'string',
               default: 'google',
-              describe: 'OIDC provider for --local (the browser flow picks the method on the page)'
+              describe:
+                'Owner mode: OIDC provider for --local (the browser flow picks the method on the page)'
             })
             .option('port', {
               type: 'number',
               default: 8765,
-              describe: 'Localhost callback port for the --local loopback flow; default 8765'
+              describe:
+                'Owner mode: localhost callback port for the --local loopback flow; default 8765'
             })
             .option('timeout', {
               type: 'number',
               default: 600,
-              describe: 'Seconds to wait for the browser login before giving up'
+              describe: 'Owner mode: seconds to wait for the browser login before giving up'
             })
             .option('force', {
               type: 'boolean',
               default: false,
-              describe: 'Re-login even if a session already exists'
+              describe: 'Owner mode: re-login even if a session already exists'
             })
             .option('fund', {
               type: 'boolean',
               default: true,
-              describe: 'Show the funding step after login (use --no-fund to skip)'
+              describe: 'Owner mode: show the funding step after login (use --no-fund to skip)'
             })
             .option('remote', {
               type: 'boolean',
@@ -406,7 +566,7 @@ export const walletCommand: CommandModule = {
               type: 'boolean',
               default: false,
               describe:
-                'Legacy loopback flow: raw Google URL + localhost callback (browser must be on this machine)'
+                'Owner mode: legacy loopback flow, raw Google URL + localhost callback (browser must be on this machine)'
             })
             .option('relay-url', {
               type: 'string',
@@ -416,7 +576,8 @@ export const walletCommand: CommandModule = {
       })
       .command({
         command: 'logout',
-        describe: 'Log out and clear the local OMS V3 session',
+        describe:
+          "Log out: in session mode, revoke this install's access; in owner mode, clear the local session",
         builder: (y) =>
           y.option('name', {
             type: 'string',
@@ -452,6 +613,11 @@ export const walletCommand: CommandModule = {
           }),
         handler: (argv) => handleRemove(argv as unknown as RemoveArgs)
       })
+      .command(confirmCommandModule)
+      .command(statusCommandModule)
+      .command(allowanceCommandModule)
+      .command(withdrawCommandModule)
+      .command(accessCommandModule)
       .demandCommand(1, '')
       .showHelpOnFail(true),
   handler: () => {}

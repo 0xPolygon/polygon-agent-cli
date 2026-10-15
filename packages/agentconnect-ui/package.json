@@ -20,7 +20,7 @@
     "deploy:production": "npx -y wrangler@4 deploy --env production"
   },
   "dependencies": {
-    "0xtrails": "^0.14.0",
+    "0xtrails": "^0.18.6",
     "@0xsequence/wallet-primitives": "3.0.0-beta.16",
     "lucide-react": "^0.564.0",
     "react": "^18.3.1",
@@ -35,6 +35,7 @@
     "@vitejs/plugin-react": "^4.3.1",
     "typescript": "^5",
     "vite": "^5.4.0",
-    "vitest": "^3.0.0"
+    "vitest": "^3.0.0",
+    "yaml": "^2.8.2"
   }
 }

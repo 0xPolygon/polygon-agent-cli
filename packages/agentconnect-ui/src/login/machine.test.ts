@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { MachineState } from './machine.ts';
 
-import { initialState, reduce } from './machine.ts';
+import { LOGIN_LINE, initialState, reduce } from './machine.ts';
 
 describe('login machine', () => {
   it('google: method -> google-wait -> success', () => {
@@ -139,5 +139,11 @@ describe('login machine', () => {
     expect(reduce(initialState, { type: 'submit-email', email: 'a@b.co' })).toEqual({
       kind: 'method'
     });
+  });
+});
+
+describe('LOGIN_LINE', () => {
+  it('is the plain login line', () => {
+    expect(LOGIN_LINE).toBe('Login to your agent');
   });
 });
