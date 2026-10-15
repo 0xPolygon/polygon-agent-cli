@@ -26,7 +26,7 @@ title and a `**When to use:**` line; only the index has frontmatter. `src/lib/sk
 (CLI package) enforces this, and that every reference is linked from the index. The CLI bundles
 the folder (`scripts/build.mjs`), `workspace init` installs it with its references, and
 `skills show <topic>` prints a reference (old skill names map to topics). The agentconnect site
-serves the index at `/setup.md`, `/SKILL.md`, `/agentpay/SKILL.md` and every older skill URL, and
+serves the index at `/skill.md` (the URL assistants are given), `/SKILL.md`, `/setup.md`, `/agentpay/SKILL.md` and every older skill URL, and
 the references at `/references/` too (`vite.config.ts`). Also distributed via `npx skills add`
 and the plugins, not via npm on its own.
 

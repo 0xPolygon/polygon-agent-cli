@@ -47,7 +47,7 @@ Polygon Agent CLI gives AI agents everything they need to operate onchain:
 Give your assistant this link and ask it to set up your wallet:
 
 ```
-https://agents.polygon.technology/setup.md
+https://agents.polygon.technology/skill.md
 ```
 
 That page is the AgentPay skill. It installs the CLI into the assistant's workspace with the same skill, matched to the CLI's version, and connects your wallet with a spending allowance you approve by signing in. The skill is a short index: each use case (Polymarket, trading, yield, price watches, x402 services, the full CLI reference) is a reference it opens only when a task needs it.
@@ -178,7 +178,7 @@ The CLI ships with agent-friendly documentation designed to be consumed directly
 
 | Distribution                                | How to install                                              |
 | ------------------------------------------- | ----------------------------------------------------------- |
-| **Personal assistants** — recommended | Give the assistant `https://agents.polygon.technology/setup.md` |
+| **Personal assistants** — recommended | Give the assistant `https://agents.polygon.technology/skill.md` |
 | **Skills** (Claude Code, Codex, Openclaw, etc.) | `npx skills add https://github.com/0xPolygon/polygon-agent-cli` |
 
 Once installed, the agent receives the full skill context — including wallet setup, token operations, and ERC-8004 registration, and can execute autonomously.

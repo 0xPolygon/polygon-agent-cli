@@ -35,7 +35,7 @@ name = "agentconnect-production"
 # and wrangler now refuses to delete a class that doesn't exist.
 migrations = []
 
-# agents.polygon.technology serves the assistant install guide (/setup.md)
+# agents.polygon.technology serves the assistant install guide (/skill.md)
 # and the skills from the same assets.
 routes = [
   { pattern = "agentconnect.polygon.technology", custom_domain = true },

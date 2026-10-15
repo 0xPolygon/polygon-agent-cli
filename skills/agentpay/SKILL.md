@@ -83,7 +83,7 @@ The path we want every new user to take, one step at a time, each in its referen
 1. **Install** ([install](references/install.md)), with no running commentary. Say once what you're setting up: "I'll set up an agent wallet I can spend from within a limit you approve. It stays yours."
 2. **Sign in** ([connect](references/connect.md)). Ask "Would you like to sign in now?", suggest **$1,000 over 30 days**, and finish with the wallet address and the dashboard link.
 3. **Fund** ([wallet](references/wallet.md)). Send the dashboard link; suggest USDC on Polygon.
-4. **First action.** Do what they asked. If they haven't asked anything, offer two or three, for example: "What are the odds on <event>?" or "Put $5 on it on Polymarket", "Tell me if ETH drops below $3,000", "Buy $20 of ETH", "Search the web with a paid service".
+4. **First action**, in the same reply as the sign-in result: never end on "you're connected". Do what they asked. If they haven't asked anything, offer two or three, for example: "What are the odds on <event>?" or "Put $5 on it on Polymarket", "Tell me if ETH drops below $3,000", "Buy $20 of ETH", "Search the web with a paid service".
 
 ## Rules
 

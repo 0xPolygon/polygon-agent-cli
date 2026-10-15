@@ -41,7 +41,8 @@ Don't just report that the wallet isn't connected: explain signing in a sentence
    On any other error, follow its `hint` and `command`.
 4. Tell the user the result in one short line, for example: "You're connected. I can spend up to $1,000 over the next 30 days." Take the amount and period from `allowance` in the output. If anything is in `failed` or there are `warnings`, say briefly that part of the setup needs a retry, without naming chains, and run the hinted command. Talk about the allowance as a dollar amount and period only. Don't mention chains or tokens.
 5. Give the address: end your message with "Your agent wallet address is:" and send the full address as the next message, with nothing else in it. Never shorten it. (If your platform sends only one message per reply, put it alone on its own line.)
-6. Then send: "You can see your wallet and add funds here: <dashboard.url>", with `dashboard.url` from the output, sent in full. Then go on to funding ([wallet](wallet.md)), or straight to the user's request if the wallet already holds funds.
+6. Then send: "You can see your wallet and add funds here: <dashboard.url>", with `dashboard.url` from the output, sent in full.
+7. Don't stop there. In the same reply, go on to what's next: the user's request if they made one (funding first if it costs money and the wallet is empty, see [wallet](wallet.md)), or, if they haven't asked for anything, two or three things to try, as in the index's first run, ending with a question. This holds when the sign-in finishes on a later turn too, after they paste a code or a `next` returns.
 
 ## Raising the limit
 
