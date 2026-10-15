@@ -1,12 +1,12 @@
 ---
 name: polygon-oms-setup
 description: >-
-  One-time setup of the Polygon OMS Agent Kit: installs the polygon-agent CLI
+  One-time setup of the Polygon Agent Wallet: installs the polygon-agent CLI
   and the polygon-agent-wallet skill into the assistant's workspace, then connects
   the user's wallet with a spending allowance they approve by signing in.
 ---
 
-# Set up the Polygon OMS Agent Kit
+# Set up the Polygon Agent Wallet
 
 **For the assistant.** Follow these steps in order. Each one is safe to re-run. Whenever you hand the conversation back to the user, end with a question or with exactly what they should do next. Never stop on a status report.
 
