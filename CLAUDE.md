@@ -32,7 +32,7 @@ and the plugins, not via npm on its own.
 
 Plugins: the repo is a plugin marketplace for Claude Code (`.claude-plugin/marketplace.json`),
 Codex (`.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json`) and Cursor
-(`.cursor-plugin/marketplace.json`). Each points at `plugins/polygon-agent/`, whose `skills` and
+(`.cursor-plugin/marketplace.json`). Each points at `plugins/agentpay/`, whose `skills` and
 `assets` are symlinks to the root folders, so a skill edit needs no plugin change. The manifests
 carry no `version`, so installs update with each commit. Check with `claude plugin validate .`.
 
