@@ -31,7 +31,18 @@ import { CredentialsTab } from './Credentials.js';
 import { fetchPolygonRates, fetchVaultBalances, fetchVaults } from './earn.js';
 import { fetchPositions, fetchPredictionCash } from './markets.js';
 import { signOut } from './signin.js';
-import { ActivityTab, EarnTab, MarketsTab, OverviewTab, SettingsTab, WalletTab } from './tabs.js';
+import {
+  ActivityTab,
+  AskAgent,
+  EarnTab,
+  MarketsTab,
+  OVERVIEW_PROMPTS,
+  OverviewTab,
+  SettingsTab,
+  SHOPPING_PROMPTS,
+  WALLET_PROMPTS,
+  WalletTab
+} from './tabs.js';
 import { AgentPromptBox, AmountChips, Modal, Toast, useCopy, usd } from './ui.js';
 
 type Tab = 'overview' | 'wallet' | 'markets' | 'earn' | 'credentials' | 'activity' | 'settings';
@@ -249,6 +260,9 @@ export function Dashboard({
                 onWithdraw={openWithdraw}
               />
             )}
+            {tab === 'overview' && (
+              <AskAgent ctx={ctx} id="o" prompts={OVERVIEW_PROMPTS} title="Try with your agent" />
+            )}
             {tab === 'wallet' && (
               <WalletTab
                 address={walletAddress}
@@ -258,6 +272,7 @@ export function Dashboard({
                 cards={<CardsPanel token={auth} onSignIn={signIn} onSaved={flash} />}
               />
             )}
+            {tab === 'wallet' && <AskAgent ctx={ctx} id="w" prompts={WALLET_PROMPTS} />}
             {tab === 'markets' && (
               <MarketsTab
                 positions={positions}
@@ -276,6 +291,9 @@ export function Dashboard({
               />
             )}
             {tab === 'credentials' && <CredentialsTab token={auth} onSaved={flash} />}
+            {tab === 'credentials' && (
+              <AskAgent ctx={ctx} id="c" prompts={SHOPPING_PROMPTS} title="Shop with your agent" />
+            )}
             {tab === 'activity' && <ActivityTab activity={activity} />}
             {tab === 'settings' && <AutoPayPanel token={auth} />}
             {tab === 'settings' && owner && <ConnectedAgents />}

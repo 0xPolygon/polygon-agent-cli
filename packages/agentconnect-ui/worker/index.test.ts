@@ -667,6 +667,24 @@ describe('/api/credentials/buy', () => {
     expect(await status.json()).toMatchObject({ status: 'awaiting_passkey' });
   });
 
+  it('places an approved cart once, even when Approve is pressed twice at once', async () => {
+    const t = await token();
+    await connect(t);
+    await setLimit(t, 500);
+    const { approvalId } = (await (await call(t, { ask: 'a bag of coffee' })).json()) as {
+      approvalId: string;
+    };
+    const db = new CredentialStore(kv.kv, 'test-credentials-key');
+    const cards = new AgentCard({ clientId: 'client', clientSecret: 'acs_secret' });
+    const [first, second] = await Promise.all([
+      decideApproval(db, cards, approvalId, WALLET, true),
+      decideApproval(db, cards, approvalId, WALLET, true)
+    ]);
+    expect(first).toEqual(second);
+    // One search, one confirm: the cart was placed once.
+    expect(agentcard.buys.filter((b) => b.body.confirm)).toHaveLength(1);
+  });
+
   it('records a declined approval and places nothing', async () => {
     const t = await token();
     await connect(t);

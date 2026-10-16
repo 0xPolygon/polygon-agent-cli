@@ -41,6 +41,7 @@ const inputClass =
 const DONE: Record<string, string> = {
   approved: 'Approved. Your agent is finishing the purchase.',
   placed: 'Approved. The order is placed.',
+  placing: 'Approved. Your order is being placed.',
   awaiting_passkey: 'Approved. Confirm with your passkey to pay.',
   declined: 'Declined. Nothing was charged.',
   failed: "The purchase didn't go through, and nothing was charged."

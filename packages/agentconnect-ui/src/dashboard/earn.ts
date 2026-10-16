@@ -1,6 +1,8 @@
 // Earn vaults: Morpho stablecoin vaults on Katana from the Trails Yield API,
-// presented as three tiers. The tiers are assigned live by size: the largest
-// open vault is Prime (the most established), then Frontier, then Advanced.
+// presented as up to three tiers, assigned live. Size stands in for risk: the
+// largest open vault is Prime (the most established). Each next tier is the
+// largest smaller vault that pays clearly more than the tier before it, so
+// taking on more risk always earns more; a vault that doesn't is never offered.
 
 import { trailsApiKey } from '../config';
 
@@ -12,6 +14,8 @@ const TRAILS = 'https://trails-api.sequence.app/rpc/Trails';
 // to be offered.
 const MIN_TVL_USD = 10_000;
 const MIN_APY = 0.1;
+// How much more a riskier tier must pay than the one before it, in points a year.
+const MIN_STEP_APY = 0.5;
 // Stablecoins the CLI can deposit on Katana. They carry a "vb" prefix there
 // (vbUSDC); show the plain name.
 const STABLES = new Set(['USDC', 'USDT']);
@@ -70,9 +74,12 @@ interface RawMarket {
 
 const plainSymbol = (s: string) => s.replace(/^vb/i, '').toUpperCase();
 
-/** The three tiers' vaults, largest first. Fewer than three when Katana has fewer that qualify. */
+/**
+ * The tiers' vaults, largest first, each paying more than the one before.
+ * Fewer than three when Katana has fewer that qualify.
+ */
 export function pickVaults(markets: RawMarket[]): Vault[] {
-  return markets
+  const candidates = markets
     .map((m) => ({
       m,
       token: m.inputTokens?.[0],
@@ -90,8 +97,15 @@ export function pickVaults(markets: RawMarket[]): Vault[] {
         tvl >= MIN_TVL_USD &&
         apy >= MIN_APY
     )
-    .sort((a, b) => b.tvl - a.tvl)
-    .slice(0, TIERS.length)
+    .sort((a, b) => b.tvl - a.tvl);
+  return candidates
+    .reduce<typeof candidates>((ladder, v) => {
+      const last = ladder.at(-1);
+      if (ladder.length < TIERS.length && (!last || v.apy >= last.apy + MIN_STEP_APY)) {
+        ladder.push(v);
+      }
+      return ladder;
+    }, [])
     .map(({ m, token, tvl, apy }, i) => ({
       tier: TIERS[i],
       marketId: m.id,

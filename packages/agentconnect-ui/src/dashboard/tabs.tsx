@@ -449,6 +449,65 @@ export function WalletTab({
 
 // ── Markets ──
 
+/**
+ * "Ask your agent": prompts for what this page shows, each copied with the
+ * skill link so it works pasted into any agent.
+ */
+export function AskAgent({
+  ctx,
+  id,
+  prompts,
+  title = 'Ask your agent'
+}: {
+  ctx: AgentContext;
+  id: string;
+  prompts: string[];
+  title?: string;
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      <SectionTitle>{title}</SectionTitle>
+      <RowList>
+        {prompts.map((t, i) => (
+          <div key={t} className="flex items-center gap-3.5 py-3.5">
+            <span className="flex-1 min-w-0">
+              <CommandLine text={t} />
+            </span>
+            <CopyButton
+              size="md"
+              label="Copy"
+              copied={ctx.copied === `${id}${i}`}
+              onClick={() => ctx.copy(`${id}${i}`, buildPrompt(t, SKILL_URL))}
+              className="flex-shrink-0"
+            />
+          </div>
+        ))}
+      </RowList>
+    </div>
+  );
+}
+
+export const OVERVIEW_PROMPTS = [
+  'what are the odds on the next Fed rate decision on Polymarket?',
+  'buy a 24-pack of AA batteries from Amazon, shipped to my saved address.',
+  'keep $300 available to spend and move anything above that into the Prime earn vault on Katana.',
+  'tell me if ETH drops below $3,000.'
+];
+
+export const WALLET_PROMPTS = [
+  'show what my agent wallet holds and what each token is worth.',
+  'swap $10 of USDC for ETH on Polygon. Show me the quote first.',
+  'bridge $20 of USDC from Polygon to Base using the cheapest route.',
+  "send 5 USDC to an address I'll give you. Read it back to me before sending."
+];
+
+export const SHOPPING_PROMPTS = [
+  'buy a 24-pack of AA batteries from Amazon, shipped to my saved address.',
+  'find a phone charger under $20 at Best Buy and show me the options before buying.',
+  'add a card to my agent wallet so you can pay for things.',
+  'show the shipping address and cards my agent wallet has saved.'
+];
+
 const MARKET_PROMPTS = [
   'show the five most traded Polymarket markets today, with their current odds.',
   'show my open Polymarket positions and how much each has moved.',
@@ -590,25 +649,7 @@ export function MarketsTab({
         )}
       </div>
 
-      <div className="flex flex-col gap-3">
-        <SectionTitle>Ask your agent</SectionTitle>
-        <RowList>
-          {MARKET_PROMPTS.map((t, i) => (
-            <div key={t} className="flex items-center gap-3.5 py-3.5">
-              <span className="flex-1 min-w-0">
-                <CommandLine text={t} />
-              </span>
-              <CopyButton
-                size="md"
-                label="Copy"
-                copied={ctx.copied === `m${i}`}
-                onClick={() => ctx.copy(`m${i}`, buildPrompt(t, SKILL_URL))}
-                className="flex-shrink-0"
-              />
-            </div>
-          ))}
-        </RowList>
-      </div>
+      <AskAgent ctx={ctx} id="m" prompts={MARKET_PROMPTS} />
     </div>
   );
 }
