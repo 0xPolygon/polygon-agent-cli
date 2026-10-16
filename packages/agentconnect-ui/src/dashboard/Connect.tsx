@@ -34,6 +34,8 @@ interface Consent {
   autoPayLimitCents: number | null;
   // This agent asks the user to approve every purchase before paying.
   confirmsEachPurchase: boolean;
+  // The agent runs on this machine; once allowed, the dashboard opens in front.
+  localAgent: boolean;
 }
 
 const dollars = (cents: number) => `$${(cents / 100).toFixed(cents % 100 ? 2 : 0)}`;
@@ -126,7 +128,8 @@ export function Connect({ finishing = false }: { finishing?: boolean }) {
           setConsent({
             email: d.email ?? null,
             autoPayLimitCents: d.autoPayLimitCents ?? null,
-            confirmsEachPurchase: d.confirmsEachPurchase === true
+            confirmsEachPurchase: d.confirmsEachPurchase === true,
+            localAgent: d.localAgent === true
           });
         }
       })
@@ -135,14 +138,33 @@ export function Connect({ finishing = false }: { finishing?: boolean }) {
     // Runs once, on load.
   }, []);
 
-  const decide = (allow: boolean) =>
-    run(async () => {
-      const { redirectTo } = await post<{ redirectTo: string }>('/api/connect/decide', {
-        c: id,
-        allow
-      });
-      window.location.assign(redirectTo);
+  const decide = (allow: boolean) => {
+    // A local agent's own page only says it's done, so the dashboard comes
+    // next. A new tab has to open now, while the click still allows one.
+    const local = allow && consent?.localAgent === true;
+    const home = local ? window.open('', '_blank') : null;
+    return run(async () => {
+      try {
+        const { redirectTo } = await post<{ redirectTo: string }>('/api/connect/decide', {
+          c: id,
+          allow
+        });
+        if (!local || redirectTo.startsWith('http')) {
+          // This tab hands the agent its sign-in, behind the dashboard.
+          home?.location.assign('/');
+          window.location.assign(redirectTo);
+          return;
+        }
+        // An app link opens the agent and leaves this page here: go home.
+        home?.close();
+        window.location.assign(redirectTo);
+        setTimeout(() => window.location.assign('/'), 1500);
+      } catch (e) {
+        home?.close();
+        throw e;
+      }
     });
+  };
 
   const name = client ?? 'Your agent';
 

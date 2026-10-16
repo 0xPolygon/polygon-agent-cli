@@ -85,6 +85,22 @@ const DEFAULT_JWKS = 'https://api.polygon.technology/v1/WaasPublic/GetJWKS';
 // The OMS project behind the CLI's default publishable key.
 const DEFAULT_AUDIENCES = 'prj_01kqfw9zaykks';
 
+// An agent on the owner's own machine gets its sign-in on localhost (Claude
+// Code, Codex) or through an app link (Cursor), where nothing more happens. A
+// hosted one (claude.ai, Muse) carries on from its own page.
+export function isLocalAgent(url: string): boolean {
+  try {
+    const { protocol, hostname } = new URL(url);
+    if (protocol === 'https:') return false;
+    if (protocol !== 'http:') return true;
+    return (
+      hostname === 'localhost' || hostname === '[::1]' || /^127\.\d+\.\d+\.\d+$/.test(hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -147,14 +163,19 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
   }
   const profileOf = (clientId: string) => profileForClient(env.MCP_CLIENT_PROFILES, clientId);
   // What the consent screen shows once the owner is known.
-  const consent = async (who: { wallet: string; email: string | null }, clientId: string) => {
+  const consent = async (
+    who: { wallet: string; email: string | null },
+    request: { clientId: string; redirectUri: string } | undefined
+  ) => {
     const db = store(env);
     const limit = db ? (await getSettings(db, who.wallet)).autoPayLimitCents : null;
     return {
       signedIn: true,
       email: who.email,
       autoPayLimitCents: limit,
-      confirmsEachPurchase: policyOf(profileOf(clientId)).confirmEachPurchase
+      confirmsEachPurchase: policyOf(profileOf(request?.clientId ?? '')).confirmEachPurchase,
+      // On the owner's own machine: after allowing, the dashboard opens in front.
+      localAgent: isLocalAgent(request?.redirectUri ?? '')
     };
   };
   try {
@@ -164,9 +185,8 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
       if (!pending.authRequest)
         throw new ValidationError('This link is not for connecting an agent.');
       const base = { clientName: pending.clientName };
-      const clientId = pending.authRequest.clientId;
       if (pending.signedIn) {
-        return json({ ...base, ...(await consent(pending.signedIn, clientId)) });
+        return json({ ...base, ...(await consent(pending.signedIn, pending.authRequest)) });
       }
       // Already signed in on this site: straight to the consent screen.
       const token = readSessionCookie(req);
@@ -175,7 +195,7 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
         : null;
       if (who) {
         await signIn.markSignedIn(id, who);
-        return json({ ...base, ...(await consent(who, clientId)) });
+        return json({ ...base, ...(await consent(who, pending.authRequest)) });
       }
       return json({ ...base, signedIn: false });
     }
@@ -190,8 +210,8 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
     // Signed in: remember who, keep them signed in on the site, show consent.
     const signedIn = async (who: { wallet: string; email: string | null }) => {
       await signIn.markSignedIn(id, who);
-      const clientId = (await signIn.load(id)).authRequest?.clientId ?? '';
-      return new Response(JSON.stringify(await consent(who, clientId)), {
+      const request = (await signIn.load(id)).authRequest;
+      return new Response(JSON.stringify(await consent(who, request)), {
         headers: {
           'Content-Type': 'application/json',
           'Cache-Control': 'no-store',
