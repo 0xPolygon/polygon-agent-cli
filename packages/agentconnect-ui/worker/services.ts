@@ -141,7 +141,7 @@ function once<T>(key: string, run: () => Promise<T>): Promise<T> {
 }
 
 // Purchases at or under this pay without asking unless the owner sets another limit.
-export const DEFAULT_AUTO_PAY_CENTS = 2500;
+export const DEFAULT_AUTO_PAY_CENTS = 10_000;
 const MAX_APPROVALS = 50;
 
 const limitOf = (r: { autoPayLimitCents?: number }) =>

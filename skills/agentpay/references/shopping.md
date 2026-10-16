@@ -26,7 +26,7 @@ agent credentials cards wait --session <id>   # waits until the card is saved, t
 
 ## Buying
 
-The owner sets an auto-pay limit (dashboard Settings, $25 by default). At or under it you pay without asking; over it, they approve. Never ask for a card number.
+The owner sets an auto-pay limit (dashboard Settings, $100 by default). At or under it you pay without asking; over it, they approve. Never ask for a card number.
 
 ```bash
 agent buy "a 12 oz bag of whole bean coffee from Amazon"   # → ordered, or pending_approval with approvalUrl

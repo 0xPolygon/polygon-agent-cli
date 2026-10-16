@@ -9,6 +9,7 @@ import {
   handleAgentsApi,
   handleApi,
   handleConnectApi,
+  isLocalAgent,
   limitRegistration,
   handleSessionApi
 } from './index.ts';
@@ -864,8 +865,9 @@ describe('connecting an agent (consent)', () => {
       clientName: 'Claude Code',
       signedIn: true,
       email: 'owner@example.com',
-      autoPayLimitCents: 2500,
-      confirmsEachPurchase: false
+      autoPayLimitCents: 10_000,
+      confirmsEachPurchase: false,
+      localAgent: true
     });
     const allow = await call(e, 'POST', '/api/connect/decide', { body: { c, allow: true } });
     expect(await allow.json()).toEqual({
@@ -989,5 +991,17 @@ describe('MCP client registration', () => {
     expect(await limitRegistration(register('1.1.1.1', 'GET'), e)).toBeNull();
     const token = new Request('https://agentconnect.test/oauth/token', { method: 'POST' });
     expect(await limitRegistration(token, e)).toBeNull();
+  });
+});
+
+describe('isLocalAgent', () => {
+  it('is true for a callback on this machine or an app link', () => {
+    expect(isLocalAgent('http://localhost:9999/callback')).toBe(true);
+    expect(isLocalAgent('http://127.0.0.1:53682/cb')).toBe(true);
+    expect(isLocalAgent('http://[::1]:8080/cb')).toBe(true);
+    expect(isLocalAgent('cursor://anysphere.cursor-retrieval/oauth/callback')).toBe(true);
+    expect(isLocalAgent('https://claude.ai/api/mcp/auth_callback')).toBe(false);
+    expect(isLocalAgent('http://localhost.evil.com/cb')).toBe(false);
+    expect(isLocalAgent('not a url')).toBe(false);
   });
 });
