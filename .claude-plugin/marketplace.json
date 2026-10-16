@@ -13,8 +13,8 @@
       "homepage": "https://agents.polygon.technology",
       "repository": "https://github.com/0xPolygon/polygon-agent-cli",
       "license": "MIT",
-      "category": "finance",
-      "keywords": ["polygon", "wallet", "payments", "stablecoins", "polymarket", "x402"]
+      "category": "payments",
+      "keywords": ["polygon", "wallet", "payments", "stablecoins", "polymarket", "prediction-markets", "x402"]
     }
   ]
 }

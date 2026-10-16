@@ -6,7 +6,7 @@
       "name": "polygon-agent",
       "source": { "source": "local", "path": "./plugins/polygon-agent" },
       "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
-      "category": "Finance"
+      "category": "Payments"
     }
   ]
 }
