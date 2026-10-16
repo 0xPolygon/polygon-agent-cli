@@ -183,7 +183,7 @@ The CLI ships with agent-friendly documentation designed to be consumed directly
 
 Once installed, the agent receives the full skill context — including wallet setup, token operations, and ERC-8004 registration, and can execute autonomously.
 
-See [`SKILL.md`](https://github.com/0xPolygon/polygon-agent-cli/blob/main/skills/polygon-agent-cli/SKILL.md) for the full agent-consumable reference.
+See the AgentPay skill ([`skills/agentpay/`](https://github.com/0xPolygon/polygon-agent-cli/tree/main/skills/agentpay)) for the agent-facing guide; every command is in its [CLI reference](https://github.com/0xPolygon/polygon-agent-cli/blob/main/skills/agentpay/references/cli-reference.md).
 
 ---
 
@@ -247,7 +247,7 @@ agent polymarket redeem --all --broadcast
 agent polymarket withdraw all --broadcast  # back to the OMS wallet as USDC
 ```
 
-Markets are named by conditionId, market slug, or event slug plus outcome name (`"Bob"`, `"Bob no"`). Write commands preview unless you pass `--broadcast`. See `skills/polygon-polymarket/SKILL.md` for the full guide.
+Markets are named by conditionId, market slug, or event slug plus outcome name (`"Bob"`, `"Bob no"`). Write commands preview unless you pass `--broadcast`. See `skills/agentpay/references/polymarket.md` for the full guide.
 
 Polymarket commands run on Node 22 and 24. `@polymarket/client` declares Node 24 in `engines`, so `npm install` on Node 22 may print an `EBADENGINE` warning. It is safe to ignore.
 

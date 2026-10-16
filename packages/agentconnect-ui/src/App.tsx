@@ -1,538 +1,41 @@
+import './oms.css';
 import './App.css';
 
-import type { ElementType } from 'react';
-
-import {
-  ArrowLeftRight,
-  Check,
-  Copy,
-  Cpu,
-  Database,
-  FileText,
-  Globe,
-  Inbox,
-  Newspaper,
-  Plus,
-  Search,
-  Send,
-  Server,
-  Sparkles,
-  Target,
-  TrendingUp
-} from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
-import { FundingScreen, parseFundAmount } from './components/FundingScreen.js';
-import { fetchTotalUsdBalance } from './indexer';
+import type { Session } from './dashboard/signin.js';
+
+import { parseFundAmount } from './components/FundingScreen.js';
+import { Approve, isApproveReturn } from './dashboard/Approve.js';
+import { Connect, isConnectReturn } from './dashboard/Connect.js';
+import { Dashboard } from './dashboard/Dashboard.js';
+import { Onboarding } from './dashboard/Onboarding.js';
+import { currentSession, isWebSigninReturn } from './dashboard/signin.js';
 import { LoginPage } from './login/LoginPage.js';
+import { isRelayReturn } from './login/returnUrl.js';
 
-// The AgentPay skill: one entry point that routes to every use case.
-const SKILL_URL = 'https://agents.polygon.technology/skill.md';
-// x402 services catalog skill: Services/Search prompts point the agent here so it
-// knows which service routes to call (not the agentconnect/CLI skill).
-const AGENTIC_SERVICES_SKILL_URL = 'https://agent-discovery.polygon.org/SKILL.md';
-
-const AGENTS: {
-  id: string;
-  label: string;
-  color: string;
-  terminalPrefix: string;
-  buildCommand: (display: string, skillUrl: string) => string;
-}[] = [
-  {
-    id: 'claude',
-    label: 'Claude',
-    color: '#D97706',
-    terminalPrefix: 'claude',
-    buildCommand: (display, skillUrl) => `claude "Read ${skillUrl} and ${display}"`
-  },
-  {
-    id: 'codex',
-    label: 'Codex',
-    color: '#10A37F',
-    terminalPrefix: 'codex',
-    buildCommand: (display, skillUrl) => `codex "Read ${skillUrl} and ${display}"`
-  },
-  {
-    id: 'openclaw',
-    label: 'Openclaw',
-    color: '#8B5CF6',
-    terminalPrefix: 'clawhub',
-    buildCommand: (display, skillUrl) => `npx clawhub@latest run "Read ${skillUrl} and ${display}"`
-  },
-  {
-    id: 'hermes',
-    label: 'Hermes',
-    color: '#EC4899',
-    terminalPrefix: 'hermes',
-    buildCommand: (display, skillUrl) => `hermes "Read ${skillUrl} and ${display}"`
-  }
-];
-
-type UseCase = { label: string; display: string; icon: ElementType; skillUrl?: string };
-const SECTIONS: { name: string; skillUrl: string; items: UseCase[] }[] = [
-  {
-    name: 'DeFi & Polymarket',
-    skillUrl: SKILL_URL,
-    items: [
-      {
-        label: 'Make a bet on Polymarket',
-        display:
-          'Make a bet on Polymarket: find a market, check the odds, and buy a position with a price limit.',
-        icon: Target
-      },
-      {
-        label: 'Bridge assets cross-chain',
-        display:
-          'Bridge some USDC from Polygon to Base using the cheapest available route. Confirm the arrival and report the final balance on both chains.',
-        icon: ArrowLeftRight
-      },
-      {
-        label: 'Automate yield strategies',
-        display:
-          'Deposit USDC into the highest-yield active lending vault on Polygon and report the APY and pool address. Then set up a daily cron job to automatically re-evaluate and deposit into the best vault each morning.',
-        icon: TrendingUp
-      }
-    ]
-  },
-  {
-    name: 'Services',
-    skillUrl: AGENTIC_SERVICES_SKILL_URL,
-    items: [
-      {
-        label: 'Query any chain',
-        display:
-          'Use QuickNode RPC over x402 to query on-chain data across 60+ chains with no API key. Get the latest Polygon block number and an account balance.',
-        icon: Server
-      },
-      {
-        label: 'Wallet & token analytics',
-        display:
-          "Use Allium over x402 to pull a wallet's balances, PnL, transaction history, and token prices across chains.",
-        icon: Database
-      },
-      {
-        label: 'Give your agent an inbox',
-        display:
-          'Create an email inbox for your agent with AgentMail over x402, then send, receive, and read messages.',
-        icon: Inbox
-      },
-      {
-        label: 'Run LLM inference',
-        display:
-          'Run inference over x402 with Meta Llama on NVIDIA NIM: Llama 3.3 70B for chat and Llama 3.2 90B Vision for images.',
-        icon: Cpu
-      },
-      {
-        label: 'Send an email',
-        display: 'Send a transactional email programmatically via Resend over x402.',
-        icon: Send
-      }
-    ]
-  },
-  {
-    name: 'Search',
-    skillUrl: AGENTIC_SERVICES_SKILL_URL,
-    items: [
-      {
-        label: 'Scrape a webpage',
-        display: 'Scrape any webpage with Firecrawl over x402 and get clean, LLM-ready markdown.',
-        icon: FileText
-      },
-      {
-        label: 'Google search',
-        display: 'Run a Google search via SearchAPI over x402 and get structured JSON results.',
-        icon: Search
-      },
-      {
-        label: 'Cloud browser',
-        display:
-          'Spin up a cloud browser session with Browserbase over x402 for web automation and agent browsing.',
-        icon: Globe
-      },
-      {
-        label: 'AI web search',
-        display:
-          'Run an AI-native web search with Exa over x402 to get contextually relevant sources and highlights.',
-        icon: Sparkles
-      },
-      {
-        label: 'Top headlines',
-        display: 'Get top news headlines by country, category, or keyword via NewsAPI over x402.',
-        icon: Newspaper
-      }
-    ]
-  }
-];
+const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
 // Shared logo header used on every screen.
 export function LogoBadge() {
   return (
-    <div className="flex items-center gap-2.5 flex-shrink-0">
-      <img src="/polygon-logo-full.webp" alt="Polygon" className="h-6 sm:h-7 w-auto" />
-      <span className="font-mono text-xs bg-[#141635] text-white px-2 py-0.5 rounded-md tracking-tight whitespace-nowrap">
+    <div className="flex items-center gap-2 flex-shrink-0">
+      <img src="/logo-mark.svg" alt="" className="w-[26px] h-[26px]" />
+      <span className="font-bold text-[19px] text-[var(--slate-900)]">polygon</span>
+      <span className="oms-mono text-[11px] bg-[var(--slate-900)] text-white px-[7px] py-[3px] rounded-md whitespace-nowrap">
         &gt;_ agent
       </span>
     </div>
   );
 }
 
-// ── Dashboard: balance header, use-case picker + terminal, learn-more cards ──
-function Dashboard({
-  walletAddress,
-  chainId,
-  initialFundOpen,
-  fundAmount
-}: {
-  walletAddress: string;
-  chainId: number;
-  initialFundOpen: boolean;
-  fundAmount?: string;
-}) {
-  const [totalUsd, setTotalUsd] = useState<number | null>(null);
-  const [selectedSection, setSelectedSection] = useState(0);
-  const [selectedUseCase, setSelectedUseCase] = useState(0);
-  const [selectedAgent, setSelectedAgent] = useState<string>('claude');
-  const [copied, setCopied] = useState(false);
-  const [addrCopied, setAddrCopied] = useState(false);
-  const [fundOpen, setFundOpen] = useState(initialFundOpen);
-
-  const items = SECTIONS[selectedSection].items;
-
+// Who is signed in here; undefined while asking.
+function useSession(): Session | null | undefined {
+  const [session, setSession] = useState<Session | null | undefined>(undefined);
   useEffect(() => {
-    let active = true;
-    setTotalUsd(null);
-    fetchTotalUsdBalance(walletAddress, chainId)
-      .then((v) => {
-        if (active) setTotalUsd(v);
-      })
-      .catch(() => {
-        if (active) setTotalUsd(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [walletAddress, chainId]);
-
-  const shortAddr = `${walletAddress.slice(0, 6)}..${walletAddress.slice(-4)}`;
-
-  const copyAddress = () => {
-    void navigator.clipboard.writeText(walletAddress).then(() => {
-      setAddrCopied(true);
-      setTimeout(() => setAddrCopied(false), 1500);
-    });
-  };
-
-  return (
-    <div className="min-h-screen bg-[#f5f6fb]">
-      {/* Nav */}
-      <nav className="bg-white border-b border-[#c8cfe1] px-4 sm:px-6 py-3 sm:py-3.5 flex items-center justify-between gap-3">
-        <LogoBadge />
-        <button
-          type="button"
-          title="Copy address"
-          onClick={copyAddress}
-          className="hidden sm:flex items-center gap-2 flex-shrink-0 bg-[#f5f6fb] hover:bg-[#eef0f8] border border-[#c8cfe1] rounded-full px-3 py-1.5 transition-colors cursor-pointer"
-        >
-          <div className="w-5 h-5 rounded-full bg-gradient-to-br from-[#7c3aed] to-[#a78bfa] flex-shrink-0" />
-          <span className="font-mono text-sm text-[#141635]">
-            {addrCopied ? 'Copied' : shortAddr}
-          </span>
-        </button>
-      </nav>
-
-      <main className="max-w-4xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-        {/* Balance row */}
-        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-8">
-          <div className="min-w-0">
-            <div className="text-4xl sm:text-5xl font-bold text-[#141635] mb-2 leading-none break-all">
-              {totalUsd === null ? (
-                <span className="text-[#c8cfe1]">$0.00</span>
-              ) : (
-                `$${totalUsd.toLocaleString('en-US', {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2
-                })}`
-              )}
-            </div>
-            <div className="flex items-center gap-2 mt-2 min-w-0">
-              <div className="w-2 h-2 rounded-full bg-[#7c3aed] flex-shrink-0" />
-              <span className="font-mono text-sm sm:text-xs text-[#64708f] break-all min-w-0">
-                {walletAddress}
-              </span>
-              <button
-                type="button"
-                title="Copy address"
-                aria-label="Copy address"
-                onClick={copyAddress}
-                className="flex items-center justify-center flex-shrink-0 w-11 h-11 sm:w-7 sm:h-7 -my-2 sm:my-0 rounded-lg text-[#929eba] hover:text-[#141635] hover:bg-[#eef0f8] transition-colors cursor-pointer border-0 bg-transparent"
-              >
-                {addrCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-              </button>
-            </div>
-          </div>
-          <button
-            onClick={() => setFundOpen(true)}
-            className="btn-press flex items-center justify-center gap-2 w-full sm:w-auto min-h-11 flex-shrink-0 bg-[#141635] hover:bg-[#1e2155] text-white font-bold px-5 py-2.5 rounded-xl transition-colors cursor-pointer border-0 text-sm"
-          >
-            <Plus className="w-4 h-4" />
-            Add funds
-          </button>
-        </div>
-
-        {/* Section header */}
-        <div className="flex items-center gap-3 mb-4">
-          <h2 className="text-base font-bold text-[#141635]">Use your wallet with agents</h2>
-        </div>
-
-        {/* Section nav bar */}
-        <div className="flex flex-wrap items-center gap-1.5 mb-4">
-          {SECTIONS.map((section, i) => (
-            <button
-              key={section.name}
-              onClick={() => {
-                setSelectedSection(i);
-                setSelectedUseCase(0);
-              }}
-              className={`min-h-11 sm:min-h-0 px-4 sm:px-3.5 py-1.5 rounded-full text-sm sm:text-xs font-bold transition-all cursor-pointer border ${
-                i === selectedSection
-                  ? 'bg-[#141635] text-white border-transparent'
-                  : 'bg-white text-[#64708f] border-[#c8cfe1] hover:border-[#929eba]'
-              }`}
-            >
-              {section.name}
-            </button>
-          ))}
-        </div>
-
-        {/* Use cases + terminal */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-0 bg-white rounded-3xl border border-[#c8cfe1] overflow-hidden mb-4">
-          {/* Left: use cases (stacked above the terminal on small screens) */}
-          <div className="p-3 sm:p-5 border-b md:border-b-0 md:border-r border-[#c8cfe1] min-w-0">
-            <div className="space-y-1">
-              {items.map((uc, i) => {
-                const Icon = uc.icon;
-                return (
-                  <button
-                    key={uc.label}
-                    onClick={() => setSelectedUseCase(i)}
-                    className={`w-full min-h-11 flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-left cursor-pointer transition-colors ${
-                      i === selectedUseCase
-                        ? 'bg-[#f5f6fb] text-[#141635] font-bold'
-                        : 'text-[#64708f] hover:bg-[#f9f9fd] font-medium'
-                    }`}
-                  >
-                    <Icon className="w-3.5 h-3.5 flex-shrink-0 text-[#7c3aed]" />
-                    {uc.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Right: terminal */}
-          <div className="p-4 sm:p-5 flex flex-col min-w-0">
-            <pre className="text-sm sm:text-xs leading-relaxed flex-1 text-[#64708f] whitespace-pre-wrap break-words font-mono">
-              <span
-                className="font-semibold"
-                style={{ color: AGENTS.find((a) => a.id === selectedAgent)?.color }}
-              >
-                {AGENTS.find((a) => a.id === selectedAgent)?.terminalPrefix}
-              </span>
-              {' "'}
-              {items[selectedUseCase].display}"
-            </pre>
-            <div className="mt-3 pt-3 border-t border-[#c8cfe1]">
-              {/* Agent selector chips */}
-              <div className="flex flex-wrap items-center gap-1.5 mb-3">
-                <span className="text-sm sm:text-xs text-[#64708f] mr-0.5">Run with</span>
-                {AGENTS.map((agent) => (
-                  <button
-                    key={agent.id}
-                    onClick={() => setSelectedAgent(agent.id)}
-                    className={`flex items-center gap-1 min-h-11 sm:min-h-0 px-3 sm:px-2.5 py-1 rounded-full text-sm sm:text-xs font-bold transition-all cursor-pointer border ${
-                      selectedAgent === agent.id
-                        ? 'text-white border-transparent'
-                        : 'bg-white text-[#64708f] border-[#c8cfe1] hover:border-[#929eba]'
-                    }`}
-                    style={
-                      selectedAgent === agent.id
-                        ? { background: agent.color, borderColor: agent.color }
-                        : {}
-                    }
-                  >
-                    <span
-                      className="w-1.5 h-1.5 rounded-full"
-                      style={{
-                        background:
-                          selectedAgent === agent.id ? 'rgba(255,255,255,0.7)' : agent.color
-                      }}
-                    />
-                    {agent.label}
-                  </button>
-                ))}
-              </div>
-              <button
-                onClick={() => {
-                  const agent = AGENTS.find((a) => a.id === selectedAgent)!;
-                  void navigator.clipboard
-                    .writeText(
-                      agent.buildCommand(
-                        items[selectedUseCase].display,
-                        items[selectedUseCase].skillUrl ?? SECTIONS[selectedSection].skillUrl
-                      )
-                    )
-                    .then(() => {
-                      setCopied(true);
-                      setTimeout(() => setCopied(false), 2000);
-                    });
-                }}
-                className="w-full min-h-11 flex items-center justify-center gap-2 border border-[#c8cfe1] rounded-xl py-2.5 text-sm text-[#141635] font-bold hover:bg-[#f5f6fb] hover:border-[#929eba] transition-all cursor-pointer bg-white"
-              >
-                <Copy className="w-4 h-4" />
-                {copied ? 'Copied!' : 'Copy to your terminal'}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Learn more */}
-        <h3 className="text-base font-bold text-[#141635] mb-3 mt-8">Learn more</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-6">
-          {[
-            {
-              title: 'Github',
-              desc: 'Browse the source code, open issues, and contribute to the Polygon Agent CLI.',
-              href: 'https://github.com/0xPolygon/polygon-agent-cli'
-            },
-            {
-              title: 'Docs',
-              desc: 'Full CLI reference, quickstart guide, and architecture docs to get your agent onchain fast.',
-              href: 'https://docs.polygon.technology/payment-services/agentic-payments/polygon-agent-cli'
-            },
-            {
-              title: 'Add your Service for Agents',
-              desc: 'List your API as an x402 service that agents can discover and pay for per call.',
-              href: 'https://agent-discovery.polygon.org/discover'
-            }
-          ].map((card) => (
-            <a
-              key={card.title}
-              href={card.href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="bg-white rounded-3xl border border-[#c8cfe1] p-5 sm:p-6 no-underline block min-w-0 hover:border-[#929eba] transition-all group"
-              style={{ boxShadow: '0 1px 4px rgba(20,22,53,0.04)' }}
-            >
-              <div className="flex items-start justify-between mb-3">
-                <span className="text-base font-bold text-[#141635]">{card.title}</span>
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  className="text-[#929eba] mt-0.5 flex-shrink-0"
-                >
-                  <path
-                    d="M7 17L17 7M17 7H7M17 7V17"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </div>
-              <p className="text-sm text-[#64708f] leading-relaxed font-medium">{card.desc}</p>
-            </a>
-          ))}
-        </div>
-
-        <div className="text-center py-4 text-sm sm:text-xs text-[#929eba] font-medium">
-          Powered by Polygon
-        </div>
-      </main>
-
-      {fundOpen && (
-        <div
-          className="fixed inset-0 z-[100000] flex justify-center overflow-y-auto overflow-x-hidden px-4 py-6 bg-[#141635]/40 backdrop-blur-sm"
-          onClick={() => setFundOpen(false)}
-        >
-          <div className="w-full max-w-sm my-auto" onClick={(e) => e.stopPropagation()}>
-            <FundingScreen
-              walletAddress={walletAddress}
-              chainId={chainId}
-              amount={fundAmount}
-              onSkip={() => setFundOpen(false)}
-            />
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// One copyable command/prompt row, styled like the dashboard's terminal chips.
-function CopyRow({ label, command }: { label: string; command: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <div>
-      <div className="text-sm sm:text-xs font-bold text-[#141635] mb-1.5">{label}</div>
-      <button
-        type="button"
-        onClick={() => {
-          void navigator.clipboard.writeText(command).then(() => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-          });
-        }}
-        className="w-full min-h-11 flex items-center gap-2 bg-[#f5f6fb] hover:bg-[#eef0f8] border border-[#c8cfe1] hover:border-[#929eba] rounded-xl px-3 py-2.5 transition-all cursor-pointer text-left group"
-      >
-        <code className="flex-1 min-w-0 font-mono text-sm sm:text-xs text-[#141635] break-all">
-          {command}
-        </code>
-        <span className="flex items-center gap-1 text-sm sm:text-xs font-bold text-[#64708f] group-hover:text-[#141635] flex-shrink-0">
-          <Copy className="w-3.5 h-3.5" />
-          {copied ? 'Copied' : 'Copy'}
-        </span>
-      </button>
-    </div>
-  );
-}
-
-// ── Get-started screen shown when opened without a wallet param ──
-// (i.e. someone browsed to the dashboard directly instead of deep-linking
-// from the CLI). Points them at installing the skill and prompting their agent.
-function GetStartedNotice() {
-  return (
-    <div className="min-h-screen bg-[#f5f6fb] flex flex-col items-center justify-center px-4 py-6">
-      {/* In the page flow on phones so it never covers the card; pinned on larger screens. */}
-      <div className="mb-6 sm:mb-0 sm:fixed sm:top-6 sm:left-1/2 sm:-translate-x-1/2 z-[99999]">
-        <LogoBadge />
-      </div>
-      <div
-        className="w-full max-w-md bg-white rounded-3xl border border-[#c8cfe1] px-5 py-6 sm:px-8 sm:py-8 flex flex-col gap-5"
-        style={{ boxShadow: '0 2px 8px rgba(20,22,53,0.06), 0 16px 48px rgba(20,22,53,0.08)' }}
-      >
-        <div className="flex flex-col items-center gap-2 text-center">
-          <div className="w-10 h-10 rounded-xl bg-[#141635] flex items-center justify-center">
-            <Sparkles className="w-5 h-5 text-white" />
-          </div>
-          <h1 className="text-lg font-bold text-[#141635]">Set up a Polygon Agent</h1>
-          <p className="text-sm text-[#64708f] leading-relaxed font-medium">
-            Give your AI agent its own wallet, tokens, swaps, and on-chain identity. Two steps:
-          </p>
-        </div>
-        <CopyRow
-          label="1. Install the skill"
-          command="npx skills add https://github.com/0xPolygon/polygon-agent-cli"
-        />
-        <CopyRow label="2. Prompt your agent" command="set up a Polygon Agent for me" />
-        <p className="text-sm sm:text-xs text-[#929eba] leading-relaxed font-medium text-center">
-          Works with Claude Code, Codex, Openclaw, and any skills-compatible agent.
-        </p>
-      </div>
-    </div>
-  );
+    void currentSession().then(setSession);
+  }, []);
+  return session;
 }
 
 // ── Main App ──
@@ -540,23 +43,68 @@ function App() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const walletAddress = params.get('wallet') || '';
   const chainId = Number(params.get('chain') || '137');
+  // The Polymarket trading account, when the CLI knows it; positions live there.
+  const pm = params.get('pm') ?? '';
+
+  if (window.location.pathname === '/connect') {
+    return <Connect />;
+  }
+
+  if (window.location.pathname === '/approve') {
+    return <Approve />;
+  }
 
   if (window.location.pathname === '/login') {
+    // Google sign-ins started here (connecting an agent, onboarding) come back
+    // to /login too.
+    if (isConnectReturn() && isRelayReturn(window.location.search)) {
+      return <Connect finishing />;
+    }
+    if (isApproveReturn() && isRelayReturn(window.location.search)) {
+      return <Approve finishing />;
+    }
+    if (isWebSigninReturn() && isRelayReturn(window.location.search)) {
+      return <Onboarding finishing />;
+    }
     return <LoginPage />;
   }
 
-  if (!walletAddress) {
-    return <GetStartedNotice />;
+  return <Home walletAddress={walletAddress} chainId={chainId} pm={pm} params={params} />;
+}
+
+// The site itself: the dashboard for whoever is signed in (or the wallet an
+// agent's link names), else sign-in and onboarding.
+function Home({
+  walletAddress,
+  chainId,
+  pm,
+  params
+}: {
+  walletAddress: string;
+  chainId: number;
+  pm: string;
+  params: URLSearchParams;
+}) {
+  const session = useSession();
+  if (session === undefined) {
+    return <div className="min-h-[100dvh] bg-[var(--slate-50)]" />;
+  }
+
+  const wallet = walletAddress || session?.wallet;
+  if (!wallet) {
+    return <Onboarding />;
   }
 
   // `?view=fund` (the CLI's `fund` deep link) opens the dashboard with the
   // funding widget already popped up, rather than a separate page.
   return (
     <Dashboard
-      walletAddress={walletAddress}
+      walletAddress={wallet}
       chainId={chainId}
+      polymarketAddress={ADDRESS.test(pm) ? pm : undefined}
       initialFundOpen={params.get('view') === 'fund'}
       fundAmount={parseFundAmount(params.get('amount'))}
+      session={session}
     />
   );
 }

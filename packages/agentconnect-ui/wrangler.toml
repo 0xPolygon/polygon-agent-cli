@@ -5,12 +5,33 @@ preview_urls = false
 send_metrics = false
 placement = { mode = "smart" }
 
-main = "worker.mjs"
+main = "worker/index.ts"
 
 [assets]
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+# The credentials API and the MCP server's OAuth routes are handled by the
+# worker, never the SPA fallback.
+run_worker_first = [
+  "/api/*",
+  "/mcp",
+  "/authorize",
+  "/oauth/*",
+  "/.well-known/oauth-authorization-server",
+  "/.well-known/oauth-protected-resource",
+  "/.well-known/oauth-protected-resource/*"
+]
+
+# Credentials API. Secrets come from the GitHub environment and are uploaded
+# with each deploy (see .github/workflows/deploy-agentconnect-ui.yml):
+#   AGENT_CERT_SECRET  random 32+ bytes; signs agent certificates
+#   CREDENTIALS_KEY    random 32+ bytes; seals saved details in KV
+#   AGENTCARD_CLIENT_ID / AGENTCARD_CLIENT_SECRET  AgentCard client credentials (cards)
+#   INDEXER_ACCESS_KEY the dashboard's indexer key; balances for the MCP server
+# Saved details live in the CREDENTIALS KV namespace. Without it, or without
+# CREDENTIALS_KEY, the address endpoints answer 503. The MCP server needs the
+# OAUTH_KV namespace too; without it /mcp is not served.
 
 # Drop the old SessionRelay Durable Object carried over from connector-ui.
 [[migrations]]
@@ -32,6 +53,21 @@ routes = [
 # No migrations: the staging worker never had the SessionRelay class, and
 # Cloudflare refuses to delete a class that doesn't exist.
 
+# No id: wrangler creates the namespace on the first deploy.
+[[env.staging.kv_namespaces]]
+binding = "CREDENTIALS"
+
+# MCP: the OAuth provider's clients, grants, and tokens, plus pending sign-ins.
+[[env.staging.kv_namespaces]]
+binding = "OAUTH_KV"
+
+# MCP client registration (/oauth/register) is open to any app: at most 10 a
+# minute from one address. namespace_id is any number unique to this account.
+[[env.staging.ratelimits]]
+name = "REGISTER_LIMITER"
+namespace_id = "4101"
+simple = { limit = 10, period = 60 }
+
 [env.production]
 name = "agentconnect-production"
 # Explicitly empty, as for staging: the SessionRelay class was deleted long ago,
@@ -44,3 +80,8 @@ routes = [
   { pattern = "agentconnect.polygon.technology", custom_domain = true },
   { pattern = "agents.polygon.technology", custom_domain = true }
 ]
+
+[[env.production.ratelimits]]
+name = "REGISTER_LIMITER"
+namespace_id = "4102"
+simple = { limit = 10, period = 60 }

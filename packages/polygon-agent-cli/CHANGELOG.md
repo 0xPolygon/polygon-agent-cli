@@ -1,5 +1,15 @@
 # Change Log
 
+## 0.16.0
+
+### Minor Changes
+
+- 64c4104: One skill, AgentPay, the user's own agent for payments on the Open Money Stack (OMS). The six skill files are now `skills/agentpay/`: a short `SKILL.md` index (check the install, then `wallet status` first, then route the request) and a reference per use case under `references/`, loaded only when a task needs it. `workspace init` installs `agentpay` with its references and removes the `polygon-agent-wallet` and `polygon-oms-wallet` folders it wrote before. `skills show <topic>` prints a reference, and the old skill names still work there. The site serves the index at `/skill.md`, now the link assistants are given, and at `/SKILL.md`, `/setup.md` and every older skill URL, and the references at `/references/`.
+
+### Patch Changes
+
+- 3bbd8dd: `workspace init --platform grok`: Grok Bot signs in with an emailed code, like the other chat assistants, even though its sandbox runs commands in a terminal.
+
 ## 0.15.2
 
 ### Patch Changes

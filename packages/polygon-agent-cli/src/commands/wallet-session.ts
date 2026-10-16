@@ -13,6 +13,7 @@ import type { OwnerContext } from '../lib/owner/requests.ts';
 import type { Plan, PlanToken } from '../lib/session/plan.ts';
 
 import { provisionBuilderOnce } from '../lib/builder-provision.ts';
+import { enrollAgent, LINK_TOKEN_TTL_SECONDS, mintAccessToken } from '../lib/credentials/agent.ts';
 import {
   CliError,
   bigintReplacer,
@@ -23,6 +24,7 @@ import {
 } from '../lib/errors.ts';
 import { dashboardInfo, fundingUrl } from '../lib/funding.ts';
 import { isWalletFunded } from '../lib/indexer.ts';
+import { getOmsClient } from '../lib/oms-client.ts';
 import { runOwnerAction } from '../lib/owner/actions.ts';
 import { deletePending, loadPending } from '../lib/owner/pending.ts';
 import {
@@ -259,7 +261,12 @@ function starterMethod(params: {
 
 // What the login page shows about the request.
 function loginContext(action: OwnerAction): LoginContext {
-  const purpose = action.kind === 'allowance-set' ? 'allowance' : action.kind;
+  const purpose =
+    action.kind === 'allowance-set'
+      ? 'allowance'
+      : action.kind === 'link-credentials'
+        ? 'owner'
+        : action.kind;
   const plan = 'plan' in action ? action.plan : undefined;
   return {
     purpose,
@@ -544,7 +551,15 @@ async function confirmedJson(
       };
     }
     // The wallet's page, for the assistant to send. Nothing opens on its own.
-    result = { ...result, dashboard: dashboardInfo({ walletAddress: address, funded }) };
+    result = {
+      ...result,
+      dashboard: dashboardInfo({
+        walletAddress: address,
+        funded,
+        polymarketAddress: loadAccount(wallet)?.wallet,
+        credentialsToken: await mintAccessToken(wallet, LINK_TOKEN_TTL_SECONDS)
+      })
+    };
   }
   return { ok: !failedOutright, walletName: wallet, ...result };
 }
@@ -770,6 +785,8 @@ function pendingApproves(action: OwnerAction): string {
       return action.revoke
         ? `Revoke access for ${action.revoke.credentialId}${action.revoke.sessionId ? ` (session ${action.revoke.sessionId})` : ''}.`
         : 'List every install and sign-in with access to the wallet.';
+    case 'link-credentials':
+      return LINK_CREDENTIALS_SUMMARY;
     case 'owner':
       return 'Keep this install signed in to your wallet, so it can use your Polymarket account.';
   }
@@ -839,7 +856,12 @@ function polymarketStatus(wallet: string): Record<string, unknown> {
 
 // The wallet's agentconnect page: the fund view while it's empty.
 async function walletDashboard(wallet: string, walletAddress: string): Promise<{ url: string }> {
-  return dashboardInfo({ walletAddress, funded: await isWalletFunded(wallet, walletAddress, 137) });
+  return dashboardInfo({
+    walletAddress,
+    funded: await isWalletFunded(wallet, walletAddress, 137),
+    polymarketAddress: loadAccount(wallet)?.wallet,
+    credentialsToken: await mintAccessToken(wallet, LINK_TOKEN_TTL_SECONDS)
+  });
 }
 
 export async function sessionReport(params: {
@@ -947,7 +969,9 @@ export async function sessionReport(params: {
     // From the balances read above; unreadable balances keep the dashboard view.
     dashboard: dashboardInfo({
       walletAddress: pointer.walletAddress,
-      funded: balances ? holdsAnythingOn(balances, 137) : true
+      funded: balances ? holdsAnythingOn(balances, 137) : true,
+      polymarketAddress: loadAccount(wallet)?.wallet,
+      credentialsToken: await mintAccessToken(wallet, LINK_TOKEN_TTL_SECONDS)
     }),
     email: pointer.email,
     installName: pointer.installName,
@@ -1339,6 +1363,71 @@ export const accessCommandModule: CommandModule<object, AccessArgs> = {
             ? `Revoke ${revoke.sessionId ? `session ${revoke.sessionId} of ` : ''}credential ${revoke.credentialId}, then list access.`
             : 'List every install and sign-in with access to the wallet.'
         }
+      });
+    } catch (error) {
+      jsonFail(error);
+    }
+  }
+};
+
+// --- wallet link-credentials ---
+
+export const LINK_CREDENTIALS_SUMMARY =
+  'Link this install so it can save and use your shipping address and cards.';
+
+interface LinkCredentialsArgs {
+  name: string;
+  email?: string;
+}
+
+export const linkCredentialsCommandModule: CommandModule<object, LinkCredentialsArgs> = {
+  command: 'link-credentials',
+  describe:
+    'Link this install for saved credentials (shipping address, cards); the owner approves it with one sign-in',
+  builder: (y) =>
+    y.option('name', { type: 'string', default: 'main', describe: 'Wallet name' }).option('email', {
+      type: 'string',
+      describe: "The owner's email, for a sign-in with an emailed code"
+    }),
+  handler: async (argv) => {
+    try {
+      const wallet = argv.name;
+      const pointer = await loadOmsWalletPointer(wallet);
+      // Owner mode: the owner is already signed in here, so link right away.
+      if (pointer && pointer.access !== 'session') {
+        const owner = getOmsClient(wallet).wallet;
+        if (!owner.walletAddress) {
+          throw new CliError({
+            code: 'not_connected',
+            message: `Wallet '${wallet}' is signed out.`,
+            command: `polygon-agent wallet login --owner${nameFlag(wallet)}`
+          });
+        }
+        const credentials = await enrollAgent({
+          wallet,
+          owner,
+          walletAddress: owner.walletAddress,
+          force: true
+        });
+        jsonOut({ ok: credentials.enrolled, walletName: wallet, credentials });
+        if (!credentials.enrolled) process.exit(1);
+        return;
+      }
+      await requireSessionWallet(wallet);
+      const { method, emailCommand } = starterMethod({
+        wallet,
+        command: 'link-credentials',
+        flags: {},
+        email: argv.email,
+        ownerEmail: pointer?.email
+      });
+      await settleWaiters(wallet);
+      await startRequest({
+        wallet,
+        method,
+        emailCommand,
+        action: { kind: 'link-credentials' },
+        shown: { summary: LINK_CREDENTIALS_SUMMARY }
       });
     } catch (error) {
       jsonFail(error);
