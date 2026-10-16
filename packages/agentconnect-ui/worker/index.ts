@@ -21,6 +21,7 @@ import {
   readSessionCookie
 } from './owner-session.ts';
 import { OwnerSignIn } from './owner-signin.ts';
+import { policyOf, profileForClient } from './profiles.ts';
 import {
   agentCard,
   approvalForPage,
@@ -60,6 +61,8 @@ export interface Env {
   INDEXER_ACCESS_KEY?: string;
   // OMS project the MCP sign-in uses; defaults to the CLI's.
   OMS_PUBLISHABLE_KEY?: string;
+  // MCP clients with their own rules: JSON, OAuth client id to profile (profiles.ts).
+  MCP_CLIENT_PROFILES?: string;
 }
 
 const DEFAULT_PUBLISHABLE_KEY = 'pk_sdbx_01kqfw9zaykks_01kwvkkzs5e2wb6rfas2y2njm8';
@@ -137,11 +140,17 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
   if (!signIn || !env.OAUTH_PROVIDER || !env.AGENT_CERT_SECRET) {
     return fail(503, 'mcp_unavailable', 'Connecting agents is not configured on this deployment');
   }
+  const profileOf = (clientId: string) => profileForClient(env.MCP_CLIENT_PROFILES, clientId);
   // What the consent screen shows once the owner is known.
-  const consent = async (who: { wallet: string; email: string | null }) => {
+  const consent = async (who: { wallet: string; email: string | null }, clientId: string) => {
     const db = store(env);
     const limit = db ? (await getSettings(db, who.wallet)).autoPayLimitCents : null;
-    return { signedIn: true, email: who.email, autoPayLimitCents: limit };
+    return {
+      signedIn: true,
+      email: who.email,
+      autoPayLimitCents: limit,
+      confirmsEachPurchase: policyOf(profileOf(clientId)).confirmEachPurchase
+    };
   };
   try {
     if (path === '/api/connect' && req.method === 'GET') {
@@ -150,7 +159,10 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
       if (!pending.authRequest)
         throw new ValidationError('This link is not for connecting an agent.');
       const base = { clientName: pending.clientName };
-      if (pending.signedIn) return json({ ...base, ...(await consent(pending.signedIn)) });
+      const clientId = pending.authRequest.clientId;
+      if (pending.signedIn) {
+        return json({ ...base, ...(await consent(pending.signedIn, clientId)) });
+      }
       // Already signed in on this site: straight to the consent screen.
       const token = readSessionCookie(req);
       const who = token
@@ -158,7 +170,7 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
         : null;
       if (who) {
         await signIn.markSignedIn(id, who);
-        return json({ ...base, ...(await consent(who)) });
+        return json({ ...base, ...(await consent(who, clientId)) });
       }
       return json({ ...base, signedIn: false });
     }
@@ -173,7 +185,8 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
     // Signed in: remember who, keep them signed in on the site, show consent.
     const signedIn = async (who: { wallet: string; email: string | null }) => {
       await signIn.markSignedIn(id, who);
-      return new Response(JSON.stringify(await consent(who)), {
+      const clientId = (await signIn.load(id)).authRequest?.clientId ?? '';
+      return new Response(JSON.stringify(await consent(who, clientId)), {
         headers: {
           'Content-Type': 'application/json',
           'Cache-Control': 'no-store',
@@ -209,11 +222,13 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
         if (pending.authRequest.state) back.searchParams.set('state', pending.authRequest.state);
         return json({ redirectTo: back.toString() });
       }
-      const props: McpProps = { wallet: who.wallet, email: who.email };
+      // The profile is fixed for this connection's life.
+      const profile = profileOf(pending.authRequest.clientId);
+      const props: McpProps = { wallet: who.wallet, email: who.email, profile };
       const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
         request: pending.authRequest,
         userId: who.wallet,
-        metadata: { clientName: pending.clientName, email: who.email },
+        metadata: { clientName: pending.clientName, email: who.email, profile },
         scope: pending.authRequest.scope,
         props
       });

@@ -25,6 +25,22 @@ export interface Approval {
   decidedAt?: string;
 }
 
+// A priced cart shown to the user before anything is charged (clients whose
+// profile confirms each purchase). Confirming must name the same total.
+export interface Quote {
+  id: string;
+  merchant: string;
+  totalCents: number;
+  items: { name: string; qty: number; priceCents?: number }[];
+  conversationId: string;
+  hash: string;
+  createdAt: string;
+  expiresAt: string;
+  // Set once confirmed, so a repeated confirm returns the outcome instead of paying twice.
+  confirmedAt?: string;
+  result?: Record<string, unknown> | null;
+}
+
 export interface WalletRecord {
   address?: ShippingAddress | null;
   // AgentCard vault users this wallet has linked (a returning user may come
@@ -39,6 +55,7 @@ export interface WalletRecord {
   // Purchases at or under this pay without asking; over it, the owner approves.
   autoPayLimitCents?: number;
   approvals?: Approval[];
+  quotes?: Quote[];
   agentcardConnection?: {
     userId: string;
     accessToken: string;

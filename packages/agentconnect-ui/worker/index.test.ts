@@ -829,13 +829,28 @@ describe('connecting an agent (consent)', () => {
       clientName: 'Claude Code',
       signedIn: true,
       email: 'owner@example.com',
-      autoPayLimitCents: 2500
+      autoPayLimitCents: 2500,
+      confirmsEachPurchase: false
     });
     const allow = await call(e, 'POST', '/api/connect/decide', { body: { c, allow: true } });
     expect(await allow.json()).toEqual({
       redirectTo: 'http://localhost:9999/callback?code=abc&state=st_1'
     });
-    expect(completed[0]).toMatchObject({ userId: WALLET, props: { wallet: WALLET } });
+    expect(completed[0]).toMatchObject({
+      userId: WALLET,
+      props: { wallet: WALLET, profile: 'standard' },
+      metadata: { profile: 'standard' }
+    });
+  });
+
+  it('gives a client mapped to a profile that profile, for the life of the connection', async () => {
+    const { e, signIn, completed } = setup();
+    e.MCP_CLIENT_PROFILES = JSON.stringify({ cli_1: 'muse' });
+    const c = await signIn.create({ authRequest: authRequest as never, clientName: 'Muse' });
+    const res = await call(e, 'GET', `/api/connect?c=${c}`, { cookie: await cookie() });
+    expect(await res.json()).toMatchObject({ confirmsEachPurchase: true });
+    await call(e, 'POST', '/api/connect/decide', { body: { c, allow: true } });
+    expect(completed[0]).toMatchObject({ props: { profile: 'muse' } });
   });
 
   it("sends the agent back with access_denied on Don't allow", async () => {

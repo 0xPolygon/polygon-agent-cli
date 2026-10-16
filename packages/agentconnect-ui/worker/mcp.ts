@@ -5,15 +5,21 @@
 // It covers what needs no wallet signature: balances, the saved address and
 // cards, and buying with the saved card (each purchase approved with the
 // owner's passkey). Moving tokens stays with the CLI, which holds the keys.
+//
+// What a connection sees depends on its profile (profiles.ts): which tools,
+// and whether buy pays at once or returns a quote for confirm_purchase.
 
 import type { Env } from './index.ts';
+import type { Profile, ProfilePolicy } from './profiles.ts';
 
 import { AgentCardError, agentCardFailure } from './agentcard.ts';
+import { policyOf } from './profiles.ts';
 import {
   agentCard,
   approvalStatus,
   authorizeCheckout,
   buyTurn,
+  confirmQuote,
   parseCheckout,
   listWalletCards,
   pollCardSession,
@@ -25,12 +31,14 @@ import { parseAddress, ValidationError } from './shipping.ts';
 export interface McpProps {
   wallet: string;
   email: string | null;
+  // Set when the owner allowed the connection; absent on older connections.
+  profile?: Profile;
 }
 
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const SERVER = { name: 'polygon-agent-wallet', title: 'Polygon agent wallet', version: '1.0.0' };
 
-const INSTRUCTIONS = `The owner's Polygon agent wallet: what it holds, their saved shipping address, and paying with the card they saved securely. Never ask the owner for a card number.
+const STANDARD_INSTRUCTIONS = `The owner's Polygon agent wallet: what it holds, their saved shipping address, and paying with the card they saved securely. Never ask the owner for a card number.
 
 When something needs paying for, the owner has set an auto-pay limit. At or under it you pay without asking. Over it, you get an approval_url: send it to the owner on its own line, then call payment_status with the approval_id. It waits for their decision, so keep calling it until the status settles, and tell them the outcome.
 
@@ -39,6 +47,16 @@ Buying from a store that takes orders directly (Amazon, Walmart, Target, Best Bu
 Paying at any other store's checkout in your browser (Kernel or Browserbase with card checkout support): call authorize_checkout with the store and the checkout total first. Once it says approved, fill shipping from get_shipping_address, enter a placeholder card (4242 4242 4242 4242, any future expiry, any CVC), and submit; the saved card pays. Confirm the order on the store's page before reporting it, and never retry a payment on your own.
 
 No card saved yet: buy answers with the add-card link (or call add_card). Never repeat the shipping address outside a purchase. Sending, swapping, or predicting with the wallet's funds needs the Polygon agent CLI (npx skills add https://github.com/0xPolygon/polygon-agent-cli).`;
+
+// For clients that confirm each purchase with the user: nothing is charged
+// until the user approves the quoted total.
+const CONFIRM_INSTRUCTIONS = `The owner's Polygon agent wallet: what it holds, their saved shipping address, and paying with the card they saved securely. Never ask the owner for a card number.
+
+Buying from a store that takes orders directly (Amazon, Walmart, Target, Best Buy, DoorDash, and more): call buy with what they want. It answers questions on the same conversation_id, then returns a quote: the store, items, fees, total in USD, where it ships, and when the quote expires. Nothing is charged yet. Show the user the full quote and ask them to approve that exact total. Once they do, call confirm_purchase with the quote_id and the total_cents shown. If the price changed or the quote expired, get a new quote and ask again.
+
+If the total is over the owner's auto-pay limit, confirm_purchase returns an approval_url: send it to the owner on its own line, then call payment_status with the approval_id until the status settles. Report an order only once its status says it was placed, with the order id. Never confirm a quote twice.
+
+No card saved yet: buy answers with the add-card link (or call add_card). Never repeat the shipping address outside a purchase.`;
 
 const ADDRESS_PROPS = {
   name: { type: 'string', description: 'Recipient full name' },
@@ -161,8 +179,40 @@ const TOOLS = [
       required: ['approval_id']
     },
     annotations: { readOnlyHint: true }
+  },
+  {
+    name: 'confirm_purchase',
+    title: 'Confirm a purchase',
+    description:
+      "Pay for a quote from buy, once the user approved its total. Pass the quote_id and the total_cents they approved; a different total is refused. Under the owner's auto-pay limit the order is placed with the saved card; over it the answer is pending_approval with approval_url and approval_id. A quote pays at most once.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        quote_id: { type: 'string', description: 'The quote_id from buy' },
+        total_cents: {
+          type: 'integer',
+          description: 'The total the user approved, in cents, exactly as quoted'
+        }
+      },
+      required: ['quote_id', 'total_cents']
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true }
   }
 ];
+
+// buy for clients that confirm each purchase: it only ever returns a quote.
+const QUOTE_BUY = {
+  description:
+    'Find something at a store that takes orders directly (Amazon, Walmart, Target, Best Buy, DoorDash, and more) and price it, shipped to the saved address: returns a quote with the items, fees, total in USD and a quote_id. Nothing is charged; pay with confirm_purchase once the user approves the total. Answer questions with another call on the same conversation_id. A turn can take up to two minutes.',
+  annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true }
+};
+
+/** The tools a connection's profile allows, as it sees them. */
+function toolsFor(policy: ProfilePolicy) {
+  return TOOLS.filter((t) => policy.tools.includes(t.name)).map((t) =>
+    t.name === 'buy' && policy.confirmEachPurchase ? { ...t, ...QUOTE_BUY } : t
+  );
+}
 
 type Rpc = { jsonrpc: '2.0'; id?: string | number | null; method: string; params?: unknown };
 
@@ -253,7 +303,25 @@ async function callTool(
         throw new ValidationError('ask is required: what to buy, or the answer to a question.');
       const conversationId =
         typeof args.conversation_id === 'string' ? args.conversation_id : undefined;
-      return buyTurn(need(), needCards(), props.wallet, { ask, conversationId }, origin);
+      return buyTurn(need(), needCards(), props.wallet, { ask, conversationId }, origin, {
+        confirmEachPurchase: policyOf(props.profile).confirmEachPurchase
+      });
+    }
+    case 'confirm_purchase': {
+      const quoteId = typeof args.quote_id === 'string' ? args.quote_id : '';
+      if (!quoteId) throw new ValidationError('quote_id is required: the quote_id from buy.');
+      if (!Number.isInteger(args.total_cents)) {
+        throw new ValidationError(
+          'total_cents is required: the total the user approved, in cents.'
+        );
+      }
+      return confirmQuote(
+        need(),
+        needCards(),
+        props.wallet,
+        { quoteId, totalCents: args.total_cents as number },
+        origin
+      );
     }
     case 'authorize_checkout':
       return authorizeCheckout(
@@ -285,6 +353,7 @@ async function callTool(
 }
 
 async function handleMessage(env: Env, props: McpProps, msg: Rpc, origin: string) {
+  const policy = policyOf(props.profile);
   switch (msg.method) {
     case 'initialize': {
       const asked = (msg.params as { protocolVersion?: string } | undefined)?.protocolVersion;
@@ -292,22 +361,23 @@ async function handleMessage(env: Env, props: McpProps, msg: Rpc, origin: string
         protocolVersion: asked && PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0],
         capabilities: { tools: { listChanged: false } },
         serverInfo: SERVER,
-        instructions: INSTRUCTIONS
+        instructions: policy.confirmEachPurchase ? CONFIRM_INSTRUCTIONS : STANDARD_INSTRUCTIONS
       });
     }
     case 'ping':
       return rpcResult(msg.id, {});
     case 'tools/list':
-      return rpcResult(msg.id, { tools: TOOLS });
+      return rpcResult(msg.id, { tools: toolsFor(policy) });
     case 'tools/call': {
       const p = (msg.params ?? {}) as { name?: string; arguments?: Record<string, unknown> };
-      if (!TOOLS.some((t) => t.name === p.name)) {
+      // Checked here too, not only in the list: a hidden tool can't be called by name.
+      if (!p.name || !policy.tools.includes(p.name)) {
         return rpcError(msg.id, -32602, `Unknown tool: ${p.name}`);
       }
       try {
         return rpcResult(
           msg.id,
-          toolText(await callTool(env, props, p.name!, p.arguments ?? {}, origin))
+          toolText(await callTool(env, props, p.name, p.arguments ?? {}, origin))
         );
       } catch (err) {
         if (err instanceof ValidationError) return rpcResult(msg.id, toolText(err.message, true));

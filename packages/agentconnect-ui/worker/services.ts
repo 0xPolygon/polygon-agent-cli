@@ -3,7 +3,7 @@
 
 import type { BuyTurn } from './agentcard.ts';
 import type { Env } from './index.ts';
-import type { Approval, WalletRecord } from './store.ts';
+import type { Approval, Quote, WalletRecord } from './store.ts';
 
 import { AgentCard, AgentCardError } from './agentcard.ts';
 import { ValidationError } from './shipping.ts';
@@ -208,18 +208,122 @@ async function confirmCart(
   return turn;
 }
 
+type PricedCart = {
+  conversationId: string;
+  hash: string;
+  merchant: string;
+  totalCents: number;
+  items: Approval['items'];
+};
+
+const pricedCart = (conversationId: string, cart: NonNullable<BuyTurn['cart']>): PricedCart => ({
+  conversationId,
+  hash: cart.hash,
+  merchant: cart.merchant_name ?? cart.merchant,
+  totalCents: cart.totalCents,
+  items: cart.items.map((i) => ({ name: i.name, qty: i.qty, priceCents: i.priceCents }))
+});
+
+/**
+ * Pay for a priced cart: at or under the owner's auto-pay limit right away with
+ * the saved card; over it, the owner approves on the approval page first.
+ */
+async function settleCart(
+  db: CredentialStore,
+  cards: AgentCard,
+  token: string,
+  wallet: string,
+  cart: PricedCart,
+  base: Record<string, unknown>,
+  origin: string
+) {
+  const record = await db.get(wallet);
+  const delivery = record.address ? { delivery_address: deliveryAddress(record.address) } : {};
+  if (cart.totalCents <= limitOf(record)) {
+    const placed = await confirmCart(cards, token, {
+      conversation_id: cart.conversationId,
+      confirm: cart.hash,
+      ...delivery
+    });
+    return { ...turnView(placed), autoPay: true };
+  }
+  const approval = await createApproval(db, wallet, {
+    kind: 'cart',
+    merchant: cart.merchant,
+    merchantUrl: null,
+    totalCents: cart.totalCents,
+    items: cart.items,
+    conversationId: cart.conversationId,
+    hash: cart.hash
+  });
+  return {
+    ...base,
+    status: 'pending_approval',
+    approvalId: approval.id,
+    approvalUrl: approvalUrl(origin, approval.id),
+    limitCents: limitOf(record)
+  };
+}
+
+// A quote stays good for this long; after that, buy prices it again.
+const QUOTE_TTL_MS = 15 * 60_000;
+const MAX_QUOTES = 20;
+
+/** Keep a priced cart for the user to approve, and show it. Nothing is charged. */
+async function quoteCart(
+  db: CredentialStore,
+  wallet: string,
+  turn: BuyTurn,
+  cart: NonNullable<BuyTurn['cart']>
+) {
+  const now = Date.now();
+  const quote: Quote = {
+    ...pricedCart(turn.conversation_id, cart),
+    id: randomId('qt'),
+    createdAt: new Date(now).toISOString(),
+    expiresAt: new Date(now + QUOTE_TTL_MS).toISOString()
+  };
+  const record = await db.update(wallet, (r) => ({
+    ...r,
+    quotes: [...(r.quotes ?? []).filter((q) => Date.parse(q.expiresAt) > now), quote].slice(
+      -MAX_QUOTES
+    )
+  }));
+  const ship = record.address;
+  return {
+    conversationId: turn.conversation_id,
+    status: 'quote',
+    reply: turn.reply ? neutral(turn.reply) : null,
+    quoteId: quote.id,
+    merchant: quote.merchant,
+    items: quote.items,
+    serviceFeesCents: cart.serviceFeesCents ?? 0,
+    tipCents: cart.tipCents ?? 0,
+    totalCents: quote.totalCents,
+    currency: 'USD',
+    shipTo: ship ? `${ship.name}, ${ship.city}, ${ship.state}` : null,
+    paysWith: 'the saved card',
+    expiresAt: quote.expiresAt,
+    needsOwnerApproval: quote.totalCents > limitOf(record)
+  };
+}
+
 /**
  * Buy something for the owner. AgentCard finds it and builds a cart shipped to
  * the saved address; a cart at or under the owner's auto-pay limit is placed
  * right away with the saved card, and one over it waits for the owner on the
  * approval page. Questions come back as `needs_input` to answer with `ask`.
+ *
+ * With `confirmEachPurchase` (clients whose profile asks the user every time),
+ * a priced cart comes back as a quote instead, and only confirmQuote pays.
  */
 export async function buyTurn(
   db: CredentialStore,
   cards: AgentCard,
   wallet: string,
   input: { ask: string; conversationId?: string },
-  origin: string
+  origin: string,
+  opts: { confirmEachPurchase?: boolean } = {}
 ) {
   const token = await userToken(db, cards, wallet);
   // No card in the vault for purchases yet: answer with the link that adds one.
@@ -233,31 +337,93 @@ export async function buyTurn(
   });
   const cart = turn.cart;
   if (!cart?.hash || turn.status !== 'needs_input' || turn.decline_code) return turnView(turn);
+  if (opts.confirmEachPurchase) return quoteCart(db, wallet, turn, cart);
+  return settleCart(
+    db,
+    cards,
+    token,
+    wallet,
+    pricedCart(turn.conversation_id, cart),
+    turnView(turn),
+    origin
+  );
+}
 
-  if (cart.totalCents <= limitOf(record)) {
-    const placed = await confirmCart(cards, token, {
-      conversation_id: turn.conversation_id,
-      confirm: cart.hash,
-      ...delivery
-    });
-    return { ...turnView(placed), autoPay: true };
+/**
+ * Pay for a quote the user approved. The total must match the quote, so a
+ * changed price needs a new quote and a new approval. A quote pays at most
+ * once: confirming it again returns what happened the first time. Over the
+ * owner's auto-pay limit, the owner still approves on the approval page.
+ */
+export async function confirmQuote(
+  db: CredentialStore,
+  cards: AgentCard,
+  wallet: string,
+  input: { quoteId: string; totalCents: number },
+  origin: string
+) {
+  const quote = ((await db.get(wallet)).quotes ?? []).find((q) => q.id === input.quoteId);
+  if (!quote) throw new ValidationError('No such quote for this wallet. Get a new one with buy.');
+  if (quote.confirmedAt)
+    return { ...(quote.result ?? {}), quoteId: quote.id, alreadyConfirmed: true };
+  if (Date.parse(quote.expiresAt) <= Date.now()) {
+    throw new ValidationError(
+      'This quote expired. Get a new one with buy, and show the user its total again.'
+    );
   }
-  const approval = await createApproval(db, wallet, {
-    kind: 'cart',
-    merchant: cart.merchant_name ?? cart.merchant,
-    merchantUrl: null,
-    totalCents: cart.totalCents,
-    items: cart.items.map((i) => ({ name: i.name, qty: i.qty, priceCents: i.priceCents })),
-    conversationId: turn.conversation_id,
-    hash: cart.hash
-  });
-  return {
-    ...turnView(turn),
-    status: 'pending_approval',
-    approvalId: approval.id,
-    approvalUrl: approvalUrl(origin, approval.id),
-    limitCents: limitOf(record)
-  };
+  if (input.totalCents !== quote.totalCents) {
+    throw new ValidationError(
+      `total_cents does not match this quote (${quote.totalCents}). Show the user the quote's total and ask them again.`
+    );
+  }
+  const token = await userToken(db, cards, wallet);
+  if (!token) return addCardTurn(await startCardSession(db, cards, wallet));
+
+  // Claim the quote before paying, so a repeated call can't pay twice.
+  let claimed = false;
+  await db.update(wallet, (r) => ({
+    ...r,
+    quotes: (r.quotes ?? []).map((q) => {
+      if (q.id !== quote.id || q.confirmedAt) return q;
+      claimed = true;
+      return { ...q, confirmedAt: new Date().toISOString() };
+    })
+  }));
+  if (!claimed) return { quoteId: quote.id, alreadyConfirmed: true };
+
+  let result: Record<string, unknown>;
+  try {
+    result = await settleCart(
+      db,
+      cards,
+      token,
+      wallet,
+      quote,
+      { conversationId: quote.conversationId },
+      origin
+    );
+  } catch (err) {
+    // The store may or may not have taken the order: never pay this quote again.
+    await setQuoteResult(db, wallet, quote.id, {
+      status: 'unknown',
+      message: 'The order may not have gone through. Check before buying again.'
+    });
+    throw err;
+  }
+  await setQuoteResult(db, wallet, quote.id, result);
+  return { ...result, quoteId: quote.id };
+}
+
+async function setQuoteResult(
+  db: CredentialStore,
+  wallet: string,
+  id: string,
+  result: Record<string, unknown>
+) {
+  await db.update(wallet, (r) => ({
+    ...r,
+    quotes: (r.quotes ?? []).map((q) => (q.id === id ? { ...q, result } : q))
+  }));
 }
 
 /**

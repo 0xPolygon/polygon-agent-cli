@@ -32,19 +32,24 @@ const inputClass =
 interface Consent {
   email: string | null;
   autoPayLimitCents: number | null;
+  // This agent asks the user to approve every purchase before paying.
+  confirmsEachPurchase: boolean;
 }
 
 const dollars = (cents: number) => `$${(cents / 100).toFixed(cents % 100 ? 2 : 0)}`;
 
 // What the agent gets, in the owner's words. Moving money stays with the CLI.
-function permissions(limitCents: number | null) {
+function permissions(limitCents: number | null, confirmsEachPurchase: boolean) {
   return [
     { icon: Eye, text: 'See your balance and what you hold' },
     { icon: MapPin, text: 'Use your saved address and cards at checkout' },
     {
       icon: ShoppingBag,
-      text:
-        limitCents === null
+      text: confirmsEachPurchase
+        ? limitCents === null || limitCents === 0
+          ? 'Buy for you once you approve the total. You also approve every purchase here'
+          : `Buy for you once you approve the total. Over ${dollars(limitCents)}, you also approve here`
+        : limitCents === null
           ? 'Buy for you. Bigger purchases wait for your approval'
           : limitCents === 0
             ? 'Buy for you. Every purchase waits for your approval'
@@ -118,7 +123,11 @@ export function Connect({ finishing = false }: { finishing?: boolean }) {
         if (!r.ok) throw new Error(d.message ?? 'This connect link expired.');
         setClient(d.clientName ?? 'Your agent');
         if (d.signedIn) {
-          setConsent({ email: d.email ?? null, autoPayLimitCents: d.autoPayLimitCents ?? null });
+          setConsent({
+            email: d.email ?? null,
+            autoPayLimitCents: d.autoPayLimitCents ?? null,
+            confirmsEachPurchase: d.confirmsEachPurchase === true
+          });
         }
       })
       .catch((e: Error) => setError(e.message))
@@ -157,7 +166,7 @@ export function Connect({ finishing = false }: { finishing?: boolean }) {
                 )}
               </div>
               <div className="bg-white border border-[var(--slate-200)] rounded-2xl px-4 py-1">
-                {permissions(consent.autoPayLimitCents).map((p) => (
+                {permissions(consent.autoPayLimitCents, consent.confirmsEachPurchase).map((p) => (
                   <div
                     key={p.text}
                     className="flex items-center gap-3 py-3.5 text-[15px] border-b last:border-b-0 border-[var(--slate-100)]"
