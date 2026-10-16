@@ -12,7 +12,8 @@
 | Claude Code | `$HOME` | `~/.claude/skills` | `claude-code` |
 | Codex | `$HOME` | `~/.codex/skills` | `codex` |
 | Cursor | `$HOME` | `~/.cursor/skills` | `cursor` |
-| Grok Bot, a computer, anything else | `$HOME`, or the folder your platform keeps across restarts | your platform's skills folder, if it has one | `other` |
+| Grok Bot | `$HOME`, or the folder it keeps across restarts | its skills folder, if it has one | `grok` |
+| A computer, anything else | `$HOME`, or the folder your platform keeps across restarts | your platform's skills folder, if it has one | `other` |
 
 If you're not sure which folder survives a restart, ask the user.
 
@@ -21,9 +22,9 @@ If you're not sure which folder survives a restart, ask the user.
 The CLI picks the method; you don't. First match wins:
 
 1. `POLYGON_AGENT_SIGNIN=browser` or `email` forces one.
-2. A chat platform (`muse`, `openclaw`, `hermes`, from `workspace init --platform`) gets an emailed code. So does CI, an SSH session, a container, or Linux with no display.
+2. A chat platform (`muse`, `openclaw`, `hermes`, `grok`, from `workspace init --platform`) gets an emailed code. So does CI, an SSH session, a container, or Linux with no display.
 3. An interactive terminal, or a local coding agent (`claude-code`, `cursor`, `codex`; with no recorded platform, `CLAUDECODE=1` counts as `claude-code`) on a desktop, gets a browser page.
-4. Anything else, including hosted assistants like Grok Bot, gets an emailed code.
+4. Anything else gets an emailed code.
 
 ## Recurring tasks (for watches)
 

@@ -16,6 +16,7 @@ Install into the folder your platform keeps across restarts:
 | Claude Code | `$HOME` | `~/.claude/skills` |
 | Codex | `$HOME` | `~/.codex/skills` |
 | Cursor | `$HOME` | `~/.cursor/skills` |
+| Grok Bot | `$HOME`, or the folder it keeps across restarts | its skills folder, if it has one |
 | A computer, anything else | `$HOME` | your platform's skills folder, if it has one |
 
 If you're not sure which folder survives a restart, ask the user. Use absolute paths throughout (expand `~` and variables like `$HERMES_HOME`). The install goes in `<workspace>/.polygon-agent`; below it's `$ROOT`:
@@ -83,7 +84,7 @@ If it fails, stop and tell the user why. From here on, run `npm` and `node` with
 - `--ignore-scripts`: nothing the CLI needs runs an install script, and none should run beside the wallet's keys.
 - `--skills-dir` is the skills folder from step 1. Leave it out if your platform has none.
 - `--name` is what the wallet owner sees in their list of installs with access, like "OpenClaw on laptop". It defaults to the host name. Reuse the same name when you reinstall, because the Polymarket key backup is labelled with it, and recovery finds the key by that label.
-- `--platform` is your own platform: `muse`, `openclaw`, `hermes`, `claude-code`, `cursor`, `codex` or `other`. Pass the one you are; a platform not listed passes `other`. The CLI uses it to pick the sign-in method (see [platforms](platforms.md)).
+- `--platform` is your own platform: `muse`, `openclaw`, `hermes`, `grok`, `claude-code`, `cursor`, `codex` or `other`. Pass the one you are; a platform not listed passes `other`. The CLI uses it to pick the sign-in method (see [platforms](platforms.md)).
 - `workspace init` writes the wrapper `$ROOT/bin/polygon-agent` (the only command you'll use from now on), the state folder and a `.gitignore`, so workspace backups never pick it up. It also installs the `agentpay` skill with its references, already pointed at the wrapper.
 
 ## 5. The skill

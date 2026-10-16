@@ -18,7 +18,7 @@
 Don't just report that the wallet isn't connected: explain signing in a sentence or two and ask. For example: "Next, sign in so I can use your agent wallet: signing in approves a spending limit for me, nothing more, and your sign-in itself is never kept here. Would you like to sign in now?" Right after an install, open with "Your agent wallet is installed." If they'd rather wait, tell them to just say "sign in to my agent wallet" when they're ready.
 
 1. Once they say yes, ask how much you may spend, suggesting **$1,000 over 30 days**: "How much should I be able to spend on my own? I suggest up to $1,000 over the next 30 days." A plain yes means $1,000 for 30 days. If they ask how it works: the sign-in lets the CLI act as them just long enough to approve a limited key for this install, then signs out; only that key is kept, never their sign-in.
-2. Start the connection. Don't ask for an email yet: the CLI picks the method (a browser page, or a code sent by email) and tells you what it needs.
+2. Start the connection. Don't ask for an email yet, and don't say how they'll sign in (a page or an emailed code) until the CLI's output tells you: it picks the method and says what it needs. If the user already gave you their email, pass `--email <email>`, so the code goes there.
 
    ```sh
    "$POLYGON_AGENT" wallet login --allowance <usd> --days <days>

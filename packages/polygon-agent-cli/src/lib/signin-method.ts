@@ -19,7 +19,9 @@ export interface PickInput {
   stdinTTY: boolean;
 }
 
-const EMAIL_PLATFORMS: readonly Platform[] = ['muse', 'openclaw', 'hermes'];
+// Chat assistants: the user is in a chat, often on a phone, even when the
+// assistant's own sandbox runs commands in a terminal.
+const EMAIL_PLATFORMS: readonly Platform[] = ['muse', 'openclaw', 'hermes', 'grok'];
 // Local coding agents: they run on the user's desktop, next to a browser.
 const DESKTOP_PLATFORMS: readonly Platform[] = ['claude-code', 'cursor', 'codex'];
 

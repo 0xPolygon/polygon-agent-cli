@@ -50,6 +50,7 @@ export const PLATFORMS = [
   'muse',
   'openclaw',
   'hermes',
+  'grok',
   'claude-code',
   'cursor',
   'codex',
