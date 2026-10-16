@@ -14,20 +14,27 @@ const pkgDir = path.dirname(fileURLToPath(import.meta.url));
 const skillsDir = path.resolve(pkgDir, '../../skills');
 
 // Copy the repo's agent skill tree into the build output so the deployed
-// Cloudflare worker serves them as static assets at /polygon-agent-cli/SKILL.md,
-// /polygon-defi/SKILL.md, etc. — the URLs the dashboard and the skills
-// themselves reference. Without this the skills are only reachable from the
-// retired connector-ui deployment.
+// Cloudflare worker serves it as static assets: the AgentPay skill at
+// /agentpay/SKILL.md with its references at /agentpay/references/<topic>.md.
 //
-// setup.md (the one-time install guide) is copied with them, to /setup.md.
-//
-// Also alias the canonical skill to the legacy root /SKILL.md. The repo no
-// longer has a root skills/SKILL.md (removed to stop `npx skills add` offering
-// two near-identical skills), but external docs and older installs still fetch
-// the bare /SKILL.md — without this alias that path hits the SPA fallback and
-// returns index.html instead of markdown. This is a deploy-only copy, so it
-// does not put a second SKILL.md back into the repo skills/ tree.
-const CANONICAL_SKILL = path.join('polygon-agent-cli', 'SKILL.md');
+// The AgentPay skill is the one entry point, so it is also served at /skill.md
+// (what assistants are given), at /SKILL.md and /setup.md, and at every older
+// skill URL (200, not a redirect: some agents don't follow redirects for
+// markdown). Its references are also served at /references/<topic>.md, where its
+// relative links resolve when it's read from one of the root copies. These are deploy-only
+// copies: the repo's skills/ tree keeps one skill, so `npx skills add` offers one.
+const ENTRY_SKILL = 'agentpay';
+const ENTRY_ALIASES = [
+  'skill.md',
+  'setup.md',
+  'SKILL.md',
+  'polygon-agent-wallet/SKILL.md',
+  'polygon-oms-wallet/SKILL.md',
+  'polygon-agent-cli/SKILL.md',
+  'polygon-defi/SKILL.md',
+  'polygon-discovery/SKILL.md',
+  'polygon-polymarket/SKILL.md'
+];
 
 function serveSkills(): Plugin {
   let absOutDir = path.resolve(pkgDir, 'dist');
@@ -38,33 +45,23 @@ function serveSkills(): Plugin {
       absOutDir = path.resolve(cfg.root, cfg.build.outDir);
     },
     closeBundle() {
-      if (!fs.existsSync(skillsDir)) {
-        console.warn(`[serve-skills] skills dir not found at ${skillsDir}; nothing copied`);
-        return;
-      }
       // Mirror skills/* into dist/* (dist already holds the built SPA; the
-      // skill tree only adds .md files under new paths, no collisions).
+      // skill tree only adds .md files under new paths, no collisions). A
+      // missing or broken skill fails the build: the site serves the install guide.
       fs.cpSync(skillsDir, absOutDir, { recursive: true });
-      // /.well-known/agent-skills/index.json, from the skills' frontmatter. A
-      // skill with bad frontmatter fails the build.
+      // /.well-known/agent-skills/index.json, from the skills' frontmatter.
       writeSkillIndex({ skillsDir, outDir: absOutDir });
 
-      // The wallet skill's old path, which older setup guides still fetch.
-      const wallet = path.join(skillsDir, 'polygon-agent-wallet', 'SKILL.md');
-      if (fs.existsSync(wallet)) {
-        fs.mkdirSync(path.join(absOutDir, 'polygon-oms-wallet'), { recursive: true });
-        fs.copyFileSync(wallet, path.join(absOutDir, 'polygon-oms-wallet', 'SKILL.md'));
+      const entry = path.join(skillsDir, ENTRY_SKILL, 'SKILL.md');
+      for (const alias of ENTRY_ALIASES) {
+        fs.mkdirSync(path.dirname(path.join(absOutDir, alias)), { recursive: true });
+        fs.copyFileSync(entry, path.join(absOutDir, alias));
       }
-
-      // Legacy /SKILL.md → canonical skill content (200, not a redirect).
-      const canonical = path.join(skillsDir, CANONICAL_SKILL);
-      if (fs.existsSync(canonical)) {
-        fs.copyFileSync(canonical, path.join(absOutDir, 'SKILL.md'));
-      } else {
-        console.warn(
-          `[serve-skills] canonical skill missing at ${canonical}; /SKILL.md not aliased`
-        );
-      }
+      fs.cpSync(
+        path.join(skillsDir, ENTRY_SKILL, 'references'),
+        path.join(absOutDir, 'references'),
+        { recursive: true }
+      );
     }
   };
 }

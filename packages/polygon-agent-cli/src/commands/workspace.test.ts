@@ -114,7 +114,7 @@ describe('update', () => {
   it('installs beside the CLI, swaps it in, and re-runs the new CLI’s workspace init', async () => {
     vi.stubEnv('SEQUENCE_PROJECT_ACCESS_KEY', 'secret');
     vi.stubEnv('OMS_PUBLISHABLE_KEY', 'secret');
-    const skill = { name: 'polygon-agent-wallet', installed: true, path: '/skills/x/SKILL.md' };
+    const skill = { name: 'agentpay', installed: true, path: '/skills/x/SKILL.md' };
     mocks.spawnSync
       .mockImplementationOnce(npmInstalls('new'))
       .mockImplementationOnce(initPrints({ version: '0.15.0', skill }));
@@ -157,7 +157,7 @@ describe('update', () => {
     mocks.spawnSync
       .mockImplementationOnce(npmInstalls('new'))
       .mockImplementationOnce(
-        initPrints({ version: '0.15.0', skill: { name: 'polygon-agent-wallet', installed: false } })
+        initPrints({ version: '0.15.0', skill: { name: 'agentpay', installed: false } })
       );
     await update();
     const [file, args] = mocks.spawnSync.mock.calls[0];
@@ -170,7 +170,7 @@ describe('update', () => {
     mocks.spawnSync
       .mockImplementationOnce(npmInstalls('new'))
       .mockImplementationOnce(
-        initPrints({ version: '0.14.0', skill: { name: 'polygon-agent-wallet', installed: false } })
+        initPrints({ version: '0.14.0', skill: { name: 'agentpay', installed: false } })
       );
     expect(await update()).toMatchObject({ ok: true, updated: false, to: '0.14.0' });
     expect(mocks.spawnSync.mock.calls[0][1]).toContain('@polygonlabs/agent-cli@latest');
@@ -221,7 +221,7 @@ describe('update concurrency', () => {
   });
 
   it('two overlapping updates leave exactly one working CLI', async () => {
-    const skill = { name: 'polygon-agent-wallet', installed: false };
+    const skill = { name: 'agentpay', installed: false };
     let second: Promise<unknown> | undefined;
     mocks.spawnSync.mockImplementation((file: string, args: string[]) => {
       if (args.includes('install')) {
@@ -261,16 +261,17 @@ describe('skills install', () => {
 
   it('writes a bundled skill, rendered for the workspace wrapper', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-skills-'));
-    await install({ name: 'polygon-agent-cli', dir });
-    const file = path.join(dir, 'polygon-agent-cli', 'SKILL.md');
+    await install({ name: 'agentpay', dir });
+    const file = path.join(dir, 'agentpay', 'SKILL.md');
     expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0][0]))).toEqual({
       ok: true,
-      skill: 'polygon-agent-cli',
+      skill: 'agentpay',
       path: file
     });
     expect(fs.readFileSync(file, 'utf8')).toContain(
       `\`${path.join(root, 'bin', 'polygon-agent')}\``
     );
+    expect(fs.existsSync(path.join(dir, 'agentpay', 'references', 'connect.md'))).toBe(true);
   });
 });
 

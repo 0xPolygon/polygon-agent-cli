@@ -12,7 +12,7 @@ You're probably looking for the CLI. Head to the package for full documentation:
 
 **[`packages/polygon-agent-cli/`](packages/polygon-agent-cli/)** — `@polygonlabs/agent-cli` on npm
 
-Personal assistants (Muse, OpenClaw, Hermes, Claude Code, Codex, Cursor): give the assistant https://agents.polygon.technology/setup.md and ask it to set up your wallet.
+Personal assistants (Muse, OpenClaw, Hermes, Grok Bot, Claude Code, Codex, Cursor): give the assistant https://agents.polygon.technology/skill.md and ask it to set up your wallet. That page is the AgentPay skill ([`skills/agentpay/`](skills/agentpay/)), your own agent for payments on the Open Money Stack (OMS): a short index that installs the CLI, checks the wallet's status, and opens a reference for each use case only when it's needed.
 
 Install as a skill:
 
@@ -20,12 +20,12 @@ Install as a skill:
 npx skills add https://github.com/0xPolygon/polygon-agent-cli
 ```
 
-Or install the plugin, which bundles the same skills:
+Or install the plugin, which bundles the same skill:
 
-- Claude Code: `/plugin install polygon-agent --marketplace 0xPolygon/polygon-agent-cli`
-- Codex and Cursor: add this repository (`0xPolygon/polygon-agent-cli`) as a plugin marketplace, then install `polygon-agent`
+- Claude Code: `/plugin marketplace add 0xPolygon/polygon-agent-cli`, then `/plugin install agentpay@polygon-agent-cli`
+- Codex and Cursor: add this repository (`0xPolygon/polygon-agent-cli`) as a plugin marketplace, then install `agentpay`
 
-The manifests live at the repo root (`.claude-plugin/`, `.codex-plugin/`, `.cursor-plugin/`, `.agents/plugins/`) and point at [`plugins/polygon-agent/`](plugins/polygon-agent/), whose `skills/` and `assets/` link back to the root folders.
+The manifests live at the repo root (`.claude-plugin/`, `.codex-plugin/`, `.cursor-plugin/`, `.agents/plugins/`) and point at [`plugins/agentpay/`](plugins/agentpay/), whose `skills/` and `assets/` link back to the root folders.
 
 Or install the CLI directly:
 

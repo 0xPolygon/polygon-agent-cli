@@ -1,9 +1,12 @@
----
-name: polymarket-skill
-description: Trade Polymarket prediction markets with the Polygon Agent CLI. Set up a Polymarket account, deposit USDC from the agent wallet, find markets, buy and sell outcomes by name (for example "Bob" or "Bob no") with price guards, redeem winners, and withdraw back to the agent wallet. All commands print JSON. Write commands are dry-run unless you pass --broadcast.
----
+# Polymarket
 
-# Polymarket skill
+**When to use:** the user asks about Polymarket: odds or prices on an event, a bet, their positions, open orders, winnings, or moving money in or out of Polymarket.
+
+**Before you start:** `"$POLYGON_AGENT" wallet status` shows `connected: true` ([connect](connect.md)). Commands below are written `agent polymarket …`: run them as `"$POLYGON_AGENT" polymarket …`.
+
+**How it works with the allowance.** Polymarket works in session mode. `polymarket setup` and `deposit` run with the allowance: a deposit is a plain USDC transfer, so it counts against the allowance. The Polymarket wallet is controlled by this install's own trading key, so trades and withdrawals back to the agent wallet are not limited by the allowance. First time: `polymarket status`, then `setup --broadcast` (no code needed, no POL), then `deposit <usd> --broadcast` (min $2, counts against the allowance), then trade.
+
+**The trading key backup.** Every owner sign-in backs up the Polymarket trading key (the sign-in output shows it as `polymarket`). This happens under the hood: don't mention it unless the user asks or the backup failed in a way that needs them. When `polymarket` has `existingAccount`, tell the user its `message` and run its `command` once they agree. Details are in Key backup and recovery below.
 
 Every command is `agent polymarket <command>`. Output is JSON on stdout, and failures are JSON on stderr with a `code`, a `hint`, and sometimes a `command` to run next. Write commands (`setup`, `deposit`, `withdraw`, `buy`, `sell`, `cancel`, `redeem`) preview by default. Add `--broadcast` to execute. The account, money, trading and portfolio commands take `--wallet <name>` (default `main`), the agent wallet that owns the Polymarket account. The discovery commands (`markets`, `event`, `market`, `book`, `history`) don't take it.
 

@@ -1,18 +1,28 @@
 {
   "name": "polygon-agent-cli",
   "owner": { "name": "Polygon Labs" },
-  "metadata": { "description": "Polygon agent wallet skills for coding agents" },
+  "metadata": {
+    "description": "AgentPay: your own agent for payments on the Open Money Stack"
+  },
   "plugins": [
     {
-      "name": "polygon-agent",
-      "source": "./plugins/polygon-agent",
-      "description": "An agent wallet your assistant can spend from within a limit you approve: balances, prices and watches, swaps and bridges, Polymarket, and x402 paid services, through the polygon-agent CLI.",
+      "name": "agentpay",
+      "source": "./plugins/agentpay",
+      "description": "AgentPay, your own agent for payments on the Open Money Stack (OMS), spending only within a limit you approve: balances, prices and watches, swaps and bridges, Polymarket, and x402 paid services, through the polygon-agent CLI.",
       "author": { "name": "Polygon Labs" },
       "homepage": "https://agents.polygon.technology",
       "repository": "https://github.com/0xPolygon/polygon-agent-cli",
       "license": "MIT",
-      "category": "finance",
-      "keywords": ["polygon", "wallet", "payments", "stablecoins", "polymarket", "x402"]
+      "category": "payments",
+      "keywords": [
+        "polygon",
+        "wallet",
+        "payments",
+        "stablecoins",
+        "polymarket",
+        "prediction-markets",
+        "x402"
+      ]
     }
   ]
 }

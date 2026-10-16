@@ -1,12 +1,12 @@
 {
   "name": "polygon-agent-plugins",
-  "interface": { "displayName": "Polygon Agent" },
+  "interface": { "displayName": "AgentPay" },
   "plugins": [
     {
-      "name": "polygon-agent",
-      "source": { "source": "local", "path": "./plugins/polygon-agent" },
+      "name": "agentpay",
+      "source": { "source": "local", "path": "./plugins/agentpay" },
       "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
-      "category": "Finance"
+      "category": "Payments"
     }
   ]
 }
