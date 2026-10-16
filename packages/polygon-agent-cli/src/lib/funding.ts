@@ -1,15 +1,15 @@
 // The wallet funding page (Trails on-ramp + swap): the agentconnect dashboard
-// (same host as the login page), which reads ?wallet&chain&view&amount.
-// POLYGON_AGENT_FUNDING_UI overrides per environment.
+// (the site that keeps saved details, so its link signs the agent in there),
+// which reads ?wallet&chain&view&amount. POLYGON_AGENT_FUNDING_UI overrides.
 
-import { loginUiBaseUrl } from './oms-client.ts';
+import { credentialsBaseUrl } from './oms-client.ts';
 
 // The Polymarket bridge's minimum, and so the smallest amount worth asking for.
 export const MIN_FUNDING_USD = 2;
 
 export function fundingUiBase(): string {
   const v = process.env.POLYGON_AGENT_FUNDING_UI;
-  return v ? v.replace(/\/+$/, '') : loginUiBaseUrl();
+  return v ? v.replace(/\/+$/, '') : credentialsBaseUrl();
 }
 
 export type FundingView = 'fund' | 'dashboard';

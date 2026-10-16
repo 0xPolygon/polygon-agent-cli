@@ -685,6 +685,22 @@ describe('/api/credentials/buy', () => {
     expect(agentcard.buys.filter((b) => b.body.confirm)).toHaveLength(1);
   });
 
+  it('leaves the cart alone when another worker already claimed the decision', async () => {
+    const t = await token();
+    await connect(t);
+    await setLimit(t, 500);
+    const { approvalId } = (await (await call(t, { ask: 'a bag of coffee' })).json()) as {
+      approvalId: string;
+    };
+    const db = new CredentialStore(kv.kv, 'test-credentials-key');
+    const cards = new AgentCard({ clientId: 'client', clientSecret: 'acs_secret' });
+    const taken = { claim: async () => false };
+    expect(await decideApproval(db, cards, approvalId, WALLET, true, taken)).toEqual({
+      status: 'pending'
+    });
+    expect(agentcard.buys.filter((b) => b.body.confirm)).toHaveLength(0);
+  });
+
   it('records a declined approval and places nothing', async () => {
     const t = await token();
     await connect(t);

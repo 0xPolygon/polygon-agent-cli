@@ -55,6 +55,7 @@ vi.mock('../lib/oms-client.ts', () => ({
     }
   }),
   loginUiBaseUrl: () => 'https://ui.test',
+  credentialsBaseUrl: () => 'https://ui.test',
   oidcRelayBaseUrl: () => 'https://relay.test'
 }));
 vi.mock('../lib/login-relay-client.ts', () => ({ makeLoginRelay: () => ({}) }));
