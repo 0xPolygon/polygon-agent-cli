@@ -71,6 +71,8 @@ export function loginUiBaseUrl(): string {
  * can run on different deployments.
  */
 export function credentialsBaseUrl(): string {
-  const v = process.env.POLYGON_AGENT_CREDENTIALS_URL;
+  // QA build: saved details and buying on staging. Not for main.
+  const v =
+    process.env.POLYGON_AGENT_CREDENTIALS_URL ?? 'https://staging.agents.polygon.technology';
   return v ? v.replace(/\/+$/, '') : loginUiBaseUrl();
 }
