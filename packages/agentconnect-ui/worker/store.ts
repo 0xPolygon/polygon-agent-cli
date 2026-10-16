@@ -18,7 +18,15 @@ export interface Approval {
   items: { name: string; qty: number; priceCents?: number }[];
   conversationId: string | null;
   hash: string | null;
-  status: 'pending' | 'approved' | 'declined' | 'placed' | 'failed' | 'awaiting_passkey';
+  // `placing`: approved, and the worker is placing the cart right now.
+  status:
+    | 'pending'
+    | 'placing'
+    | 'approved'
+    | 'declined'
+    | 'placed'
+    | 'failed'
+    | 'awaiting_passkey';
   // Set once the cart was confirmed: what the store and AgentCard said.
   result?: Record<string, unknown> | null;
   createdAt: string;

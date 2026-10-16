@@ -18,9 +18,9 @@ const market = (
 });
 
 describe('pickVaults', () => {
-  it('assigns Prime, Frontier, and Advanced by size', () => {
+  it('assigns Prime, Frontier, and Advanced largest first', () => {
     const vaults = pickVaults([
-      market('a', 12_500, 0.0161),
+      market('a', 12_500, 0.0961),
       market('b', 3_100_000, 0.021),
       market('c', 562_000, 0.0771)
     ]);
@@ -48,8 +48,28 @@ describe('pickVaults', () => {
 
   it('keeps at most three', () => {
     const vaults = pickVaults(
-      ['a', 'b', 'c', 'd'].map((id, i) => market(id, 100_000 * (i + 1), 0.02))
+      ['a', 'b', 'c', 'd'].map((id, i) => market(id, 100_000 * (4 - i), 0.02 + 0.01 * i))
     );
-    expect(vaults.map((v) => v.marketId)).toEqual(['d', 'c', 'b']);
+    expect(vaults.map((v) => v.marketId)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('never offers a riskier tier that pays less than a safer one', () => {
+    // Today's Katana: the smallest vault pays less than the middle one.
+    const vaults = pickVaults([
+      market('prime', 3_066_894, 0.0191),
+      market('frontier', 574_891, 0.0794),
+      market('small', 12_511, 0.0474),
+      market('tiny-but-high', 11_000, 0.095)
+    ]);
+    expect(vaults.map((v) => [v.tier.name, v.marketId])).toEqual([
+      ['Prime', 'prime'],
+      ['Frontier', 'frontier'],
+      ['Advanced', 'tiny-but-high']
+    ]);
+  });
+
+  it('needs a clear step up in rate, not a rounding difference', () => {
+    const vaults = pickVaults([market('a', 1_000_000, 0.03), market('b', 500_000, 0.032)]);
+    expect(vaults.map((v) => v.marketId)).toEqual(['a']);
   });
 });

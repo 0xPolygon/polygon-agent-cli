@@ -126,6 +126,19 @@ const addCardTurn = (session: { url?: string; sessionId: string }) => ({
   }
 });
 
+// Paying is claimed in the wallet record first, but KV has no atomic write, so a
+// claim can't stop two requests that read at the same moment. Requests that
+// reach the same worker (a double click usually does) share the first one's
+// outcome instead of paying again.
+const inFlight = new Map<string, Promise<unknown>>();
+function once<T>(key: string, run: () => Promise<T>): Promise<T> {
+  const running = inFlight.get(key) as Promise<T> | undefined;
+  if (running) return running;
+  const started = run().finally(() => inFlight.delete(key));
+  inFlight.set(key, started);
+  return started;
+}
+
 // Purchases at or under this pay without asking unless the owner sets another limit.
 export const DEFAULT_AUTO_PAY_CENTS = 2500;
 const MAX_APPROVALS = 50;
@@ -355,7 +368,19 @@ export async function buyTurn(
  * once: confirming it again returns what happened the first time. Over the
  * owner's auto-pay limit, the owner still approves on the approval page.
  */
-export async function confirmQuote(
+export function confirmQuote(
+  db: CredentialStore,
+  cards: AgentCard,
+  wallet: string,
+  input: { quoteId: string; totalCents: number },
+  origin: string
+) {
+  return once(`quote:${wallet.toLowerCase()}:${input.quoteId}:${input.totalCents}`, () =>
+    confirmQuoteNow(db, cards, wallet, input, origin)
+  );
+}
+
+async function confirmQuoteNow(
   db: CredentialStore,
   cards: AgentCard,
   wallet: string,
@@ -495,7 +520,8 @@ export async function approvalStatus(
         return approvalView({ ...a, status: 'placed', result }, origin);
       }
     }
-    const settled = a.status !== 'pending' && a.status !== 'awaiting_passkey';
+    const settled =
+      a.status !== 'pending' && a.status !== 'placing' && a.status !== 'awaiting_passkey';
     if (settled || Date.now() >= until) return approvalView(a, origin);
     await new Promise((r) => setTimeout(r, 2000));
   }
@@ -526,7 +552,18 @@ export async function approvalForPage(db: CredentialStore, id: string) {
  * it with the saved card; AgentCard may still ask for their passkey, and then
  * `passkeyUrl` is where to send them.
  */
-export async function decideApproval(
+export function decideApproval(
+  db: CredentialStore,
+  cards: AgentCard,
+  id: string,
+  signedInWallet: string,
+  approve: boolean
+): Promise<{ status: Approval['status']; passkeyUrl?: string | null }> {
+  const decide = () => decideApprovalNow(db, cards, id, signedInWallet, approve);
+  return approve ? once(`approval:${id}:${signedInWallet.toLowerCase()}`, decide) : decide();
+}
+
+async function decideApprovalNow(
   db: CredentialStore,
   cards: AgentCard,
   id: string,
@@ -550,6 +587,18 @@ export async function decideApproval(
     await setApproval(db, wallet, id, { status: 'approved', decidedAt });
     return { status: 'approved' };
   }
+  // Claim the approval before placing the cart (up to 90 seconds), so a second
+  // Approve (a double click, a retried request) can't place it again.
+  let claimed = false;
+  await db.update(wallet, (r) => ({
+    ...r,
+    approvals: (r.approvals ?? []).map((x) => {
+      if (x.id !== id || x.status !== 'pending') return x;
+      claimed = true;
+      return { ...x, status: 'placing', decidedAt };
+    })
+  }));
+  if (!claimed) return { status: (await approvalForPage(db, id))?.approval.status ?? 'placing' };
   const token = await userToken(db, cards, wallet);
   if (!token || !a.conversationId || !a.hash) {
     await setApproval(db, wallet, id, {
