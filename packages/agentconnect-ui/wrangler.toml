@@ -40,8 +40,9 @@ deleted_classes = ["SessionRelay"]
 
 [env.staging]
 name = "agentconnect-staging"
-# Explicitly empty: without this, the top-level SessionRelay migration applies.
-migrations = []
+# Its own list: the top-level SessionRelay migration must not apply here. v3
+# adds the per-wallet payment lock (worker/wallet-lock.ts).
+migrations = [{ tag = "v3", new_sqlite_classes = ["WalletLock"] }]
 
 # staging.agents.polygon.technology serves the staging install guide and skills
 # to hosted assistants, which can't pass Cloudflare Access.
@@ -61,6 +62,12 @@ binding = "CREDENTIALS"
 [[env.staging.kv_namespaces]]
 binding = "OAUTH_KV"
 
+# One Durable Object per wallet, so a payment is claimed once. No route reaches
+# it: only this worker, through the binding.
+[[env.staging.durable_objects.bindings]]
+name = "WALLET_LOCK"
+class_name = "WalletLock"
+
 # MCP client registration (/oauth/register) is open to any app: at most 10 a
 # minute from one address. namespace_id is any number unique to this account.
 [[env.staging.ratelimits]]
@@ -70,9 +77,9 @@ simple = { limit = 10, period = 60 }
 
 [env.production]
 name = "agentconnect-production"
-# Explicitly empty, as for staging: the SessionRelay class was deleted long ago,
+# Its own list, as for staging: the SessionRelay class was deleted long ago,
 # and wrangler now refuses to delete a class that doesn't exist.
-migrations = []
+migrations = [{ tag = "v3", new_sqlite_classes = ["WalletLock"] }]
 
 # agents.polygon.technology serves the assistant install guide (/skill.md)
 # and the skills from the same assets.
@@ -85,3 +92,7 @@ routes = [
 name = "REGISTER_LIMITER"
 namespace_id = "4102"
 simple = { limit = 10, period = 60 }
+
+[[env.production.durable_objects.bindings]]
+name = "WALLET_LOCK"
+class_name = "WalletLock"

@@ -39,6 +39,7 @@ import {
 } from './services.ts';
 import { parseAddress, ValidationError } from './shipping.ts';
 import { SealedKv } from './store.ts';
+import { walletLock } from './wallet-lock.ts';
 
 export interface Env {
   ASSETS: Fetcher;
@@ -63,6 +64,8 @@ export interface Env {
   OMS_PUBLISHABLE_KEY?: string;
   // MCP clients with their own rules: JSON, OAuth client id to profile (profiles.ts).
   MCP_CLIENT_PROFILES?: string;
+  // One Durable Object per wallet: atomic payment claims (wallet-lock.ts).
+  WALLET_LOCK?: DurableObjectNamespace;
   // Caps MCP client registrations per address (wrangler.toml ratelimits).
   REGISTER_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
 }
@@ -351,7 +354,8 @@ export async function handleApproveApi(req: Request, env: Env, path: string): Pr
         cards,
         pending.approvalId,
         pending.signedIn.wallet,
-        body.approve === true
+        body.approve === true,
+        walletLock(env, pending.signedIn.wallet)
       );
       await signIn.forget(id);
       return json(result);
@@ -682,6 +686,9 @@ export async function limitRegistration(request: Request, env: Env): Promise<Res
     { status: 429, headers: { 'Retry-After': '60', 'Cache-Control': 'no-store' } }
   );
 }
+
+// The Durable Object class wrangler binds as WALLET_LOCK.
+export { WalletLock } from './wallet-lock.ts';
 
 // Cloudflare Workers require a default export. Without the OAuth store the
 // site still runs; /mcp answers 404.

@@ -18,7 +18,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { z } from 'zod';
 
 import { CliError } from '../errors.ts';
-import { loginUiBaseUrl } from '../oms-client.ts';
+import { credentialsBaseUrl } from '../oms-client.ts';
 import { decrypt, encrypt, STORAGE_ROOT } from '../storage.ts';
 
 export const ENROLL_PURPOSE = 'agentconnect-enroll';
@@ -68,7 +68,7 @@ function agentAccount(wallet: string, create: boolean) {
 // Certificates are only good at the deployment that issued them (staging,
 // production, a local worker), so each host gets its own file.
 function certFile(wallet: string): string {
-  const host = new URL(loginUiBaseUrl()).host.replace(/[^\w.-]/g, '_');
+  const host = new URL(credentialsBaseUrl()).host.replace(/[^\w.-]/g, '_');
   return path.join(dir(wallet), `certificate.${host}.json`);
 }
 
@@ -129,7 +129,7 @@ export async function enrollAgent(p: {
       ttlSeconds: 120,
       customClaims: { agent_key: account.address, purpose: ENROLL_PURPOSE }
     });
-    const res = await (p.fetchImpl ?? fetch)(`${loginUiBaseUrl()}/api/agent/enroll`, {
+    const res = await (p.fetchImpl ?? fetch)(`${credentialsBaseUrl()}/api/agent/enroll`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ idToken })
@@ -209,7 +209,7 @@ export async function credentialsApi<T>(
 ): Promise<T> {
   const token = await mintAccessToken(wallet, API_TOKEN_TTL_SECONDS);
   if (!token) throw notEnrolledError(wallet);
-  const res = await fetchImpl(`${loginUiBaseUrl()}${apiPath}`, {
+  const res = await fetchImpl(`${credentialsBaseUrl()}${apiPath}`, {
     method,
     headers: {
       Authorization: `Agent ${token}`,

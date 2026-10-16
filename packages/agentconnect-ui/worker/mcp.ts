@@ -27,6 +27,7 @@ import {
   store
 } from './services.ts';
 import { parseAddress, ValidationError } from './shipping.ts';
+import { walletLock } from './wallet-lock.ts';
 
 export interface McpProps {
   wallet: string;
@@ -320,7 +321,8 @@ async function callTool(
         needCards(),
         props.wallet,
         { quoteId, totalCents: args.total_cents as number },
-        origin
+        origin,
+        walletLock(env, props.wallet)
       );
     }
     case 'authorize_checkout':

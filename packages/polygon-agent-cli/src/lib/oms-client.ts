@@ -63,3 +63,16 @@ export function loginUiBaseUrl(): string {
   const v = process.env.POLYGON_AGENT_LOGIN_UI;
   return v ? v.replace(/\/+$/, '') : DEFAULT_LOGIN_UI;
 }
+
+/**
+ * Base URL of the agentconnect site that keeps saved details (address, cards,
+ * buying) and shows the dashboard: the login page's site unless
+ * POLYGON_AGENT_CREDENTIALS_URL says otherwise, so sign-in and saved details
+ * can run on different deployments.
+ */
+export function credentialsBaseUrl(): string {
+  // QA build: saved details and buying on staging. Not for main.
+  const v =
+    process.env.POLYGON_AGENT_CREDENTIALS_URL ?? 'https://staging.agents.polygon.technology';
+  return v ? v.replace(/\/+$/, '') : loginUiBaseUrl();
+}

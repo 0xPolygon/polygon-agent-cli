@@ -4,6 +4,7 @@
 import type { BuyTurn } from './agentcard.ts';
 import type { Env } from './index.ts';
 import type { Approval, Quote, WalletRecord } from './store.ts';
+import type { PaymentLock } from './wallet-lock.ts';
 
 import { AgentCard, AgentCardError } from './agentcard.ts';
 import { ValidationError } from './shipping.ts';
@@ -373,10 +374,11 @@ export function confirmQuote(
   cards: AgentCard,
   wallet: string,
   input: { quoteId: string; totalCents: number },
-  origin: string
+  origin: string,
+  lock: PaymentLock | null = null
 ) {
   return once(`quote:${wallet.toLowerCase()}:${input.quoteId}:${input.totalCents}`, () =>
-    confirmQuoteNow(db, cards, wallet, input, origin)
+    confirmQuoteNow(db, cards, wallet, input, origin, lock)
   );
 }
 
@@ -385,7 +387,8 @@ async function confirmQuoteNow(
   cards: AgentCard,
   wallet: string,
   input: { quoteId: string; totalCents: number },
-  origin: string
+  origin: string,
+  lock: PaymentLock | null
 ) {
   const quote = ((await db.get(wallet)).quotes ?? []).find((q) => q.id === input.quoteId);
   if (!quote) throw new ValidationError('No such quote for this wallet. Get a new one with buy.');
@@ -404,6 +407,11 @@ async function confirmQuoteNow(
   const token = await userToken(db, cards, wallet);
   if (!token) return addCardTurn(await startCardSession(db, cards, wallet));
 
+  // The wallet's lock makes the claim atomic; the record's claim below covers
+  // deployments without one.
+  if (lock && !(await lock.claim(`quote:${quote.id}`))) {
+    return { quoteId: quote.id, alreadyConfirmed: true };
+  }
   // Claim the quote before paying, so a repeated call can't pay twice.
   let claimed = false;
   await db.update(wallet, (r) => ({
@@ -557,9 +565,10 @@ export function decideApproval(
   cards: AgentCard,
   id: string,
   signedInWallet: string,
-  approve: boolean
+  approve: boolean,
+  lock: PaymentLock | null = null
 ): Promise<{ status: Approval['status']; passkeyUrl?: string | null }> {
-  const decide = () => decideApprovalNow(db, cards, id, signedInWallet, approve);
+  const decide = () => decideApprovalNow(db, cards, id, signedInWallet, approve, lock);
   return approve ? once(`approval:${id}:${signedInWallet.toLowerCase()}`, decide) : decide();
 }
 
@@ -568,7 +577,8 @@ async function decideApprovalNow(
   cards: AgentCard,
   id: string,
   signedInWallet: string,
-  approve: boolean
+  approve: boolean,
+  lock: PaymentLock | null
 ): Promise<{ status: Approval['status']; passkeyUrl?: string | null }> {
   const found = await approvalForPage(db, id);
   if (!found || found.wallet.toLowerCase() !== signedInWallet.toLowerCase()) {
@@ -578,6 +588,11 @@ async function decideApprovalNow(
   }
   const { wallet, approval: a } = found;
   if (a.status !== 'pending') return { status: a.status };
+  // The first decision wins, approve or decline: the wallet's lock makes that
+  // atomic. Later ones get where the approval stands.
+  if (lock && !(await lock.claim(`approval:${id}`))) {
+    return { status: (await approvalForPage(db, id))?.approval.status ?? 'placing' };
+  }
   const decidedAt = new Date().toISOString();
   if (!approve) {
     await setApproval(db, wallet, id, { status: 'declined', decidedAt });
