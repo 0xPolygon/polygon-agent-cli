@@ -63,6 +63,8 @@ export interface Env {
   OMS_PUBLISHABLE_KEY?: string;
   // MCP clients with their own rules: JSON, OAuth client id to profile (profiles.ts).
   MCP_CLIENT_PROFILES?: string;
+  // Caps MCP client registrations per address (wrangler.toml ratelimits).
+  REGISTER_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
 }
 
 const DEFAULT_PUBLISHABLE_KEY = 'pk_sdbx_01kqfw9zaykks_01kwvkkzs5e2wb6rfas2y2njm8';
@@ -665,12 +667,30 @@ function oauthFor(origin: string): OAuthProvider<Env> {
   return p;
 }
 
+/**
+ * Anyone may register an MCP client, so registrations are capped per address
+ * (the REGISTER_LIMITER binding). Returns the 429 to send, or null to go on.
+ */
+export async function limitRegistration(request: Request, env: Env): Promise<Response | null> {
+  if (request.method !== 'POST' || new URL(request.url).pathname !== '/oauth/register') return null;
+  if (!env.REGISTER_LIMITER) return null;
+  const key = request.headers.get('CF-Connecting-IP') ?? 'unknown';
+  const { success } = await env.REGISTER_LIMITER.limit({ key });
+  if (success) return null;
+  return Response.json(
+    { error: 'rate_limited', error_description: 'Too many registrations. Try again in a minute.' },
+    { status: 429, headers: { 'Retry-After': '60', 'Cache-Control': 'no-store' } }
+  );
+}
+
 // Cloudflare Workers require a default export. Without the OAuth store the
 // site still runs; /mcp answers 404.
 // eslint-disable-next-line import-x/no-default-export
 export default {
-  fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     if (!env.OAUTH_KV) return app.fetch(request, env);
+    const limited = await limitRegistration(request, env);
+    if (limited) return limited;
     return oauthFor(new URL(request.url).origin).fetch(request, env, ctx);
   }
 };

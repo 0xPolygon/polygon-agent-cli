@@ -58,6 +58,13 @@ binding = "CREDENTIALS"
 [[env.staging.kv_namespaces]]
 binding = "OAUTH_KV"
 
+# MCP client registration (/oauth/register) is open to any app: at most 10 a
+# minute from one address. namespace_id is any number unique to this account.
+[[env.staging.ratelimits]]
+name = "REGISTER_LIMITER"
+namespace_id = "4101"
+simple = { limit = 10, period = 60 }
+
 [env.production]
 name = "agentconnect-production"
 # Explicitly empty, as for staging: the SessionRelay class was deleted long ago,
@@ -70,3 +77,8 @@ routes = [
   { pattern = "agentconnect.polygon.technology", custom_domain = true },
   { pattern = "agents.polygon.technology", custom_domain = true }
 ]
+
+[[env.production.ratelimits]]
+name = "REGISTER_LIMITER"
+namespace_id = "4102"
+simple = { limit = 10, period = 60 }

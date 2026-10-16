@@ -9,6 +9,7 @@ import {
   handleAgentsApi,
   handleApi,
   handleConnectApi,
+  limitRegistration,
   handleSessionApi
 } from './index.ts';
 import { issueSession, SESSION_COOKIE } from './owner-session.ts';
@@ -919,5 +920,40 @@ describe('agentName', () => {
     expect(agentName('Muse')).toBe('Muse');
     expect(agentName('')).toBe('An agent');
     expect(agentName('(polygon-wallet)')).toBe('An agent');
+  });
+});
+
+describe('MCP client registration', () => {
+  const register = (ip: string, method = 'POST') =>
+    new Request('https://agentconnect.test/oauth/register', {
+      method,
+      headers: { 'CF-Connecting-IP': ip }
+    });
+  // Like the Workers binding: a fixed number of calls per key.
+  const limiter = (max: number) => {
+    const seen = new Map<string, number>();
+    return {
+      limit: async ({ key }: { key: string }) => {
+        seen.set(key, (seen.get(key) ?? 0) + 1);
+        return { success: seen.get(key)! <= max };
+      }
+    };
+  };
+
+  it('caps registrations from one address', async () => {
+    const e = env({ REGISTER_LIMITER: limiter(2) });
+    expect(await limitRegistration(register('1.1.1.1'), e)).toBeNull();
+    expect(await limitRegistration(register('1.1.1.1'), e)).toBeNull();
+    const third = await limitRegistration(register('1.1.1.1'), e);
+    expect(third?.status).toBe(429);
+    expect(third?.headers.get('Retry-After')).toBe('60');
+    expect(await limitRegistration(register('2.2.2.2'), e)).toBeNull();
+  });
+
+  it('leaves other routes alone', async () => {
+    const e = env({ REGISTER_LIMITER: limiter(0) });
+    expect(await limitRegistration(register('1.1.1.1', 'GET'), e)).toBeNull();
+    const token = new Request('https://agentconnect.test/oauth/token', { method: 'POST' });
+    expect(await limitRegistration(token, e)).toBeNull();
   });
 });

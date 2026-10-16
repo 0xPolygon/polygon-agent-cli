@@ -185,10 +185,12 @@ async function cardEnv(limitCents = 2500) {
     address: {
       name: 'Alex Rivera',
       line1: '214 Bergen St',
+      line2: '',
       city: 'Brooklyn',
       state: 'NY',
       zip: '11217',
-      country: 'US'
+      country: 'US',
+      phone: ''
     },
     agentcardConnection: {
       userId: 'usr_1',
