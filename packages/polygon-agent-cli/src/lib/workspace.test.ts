@@ -140,7 +140,7 @@ describe('initWorkspace', () => {
     expect(fs.readFileSync(path.join(root, '.encryption-key'), 'utf8')).toBe('k');
   });
 
-  it('accepts a root holding only the npm install, as setup.md leaves it', () => {
+  it('accepts a root holding only the npm install, as the install reference leaves it', () => {
     const root = path.join(tmpDir('pa-ws-'), '.polygon-agent');
     fs.mkdirSync(path.join(root, 'cli'), { recursive: true });
     expect(initWorkspace({ root, version: '1.0.0', sourceDir: null }).root).toBe(root);

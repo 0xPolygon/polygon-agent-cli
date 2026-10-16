@@ -79,7 +79,7 @@ describe('skill index', () => {
 
   it('refuses two skills with the same name', () => {
     expect(() =>
-      buildSkillIndex(skillsDir({ 'setup.md': skill('a'), 'a/SKILL.md': skill('a') }))
+      buildSkillIndex(skillsDir({ 'a/SKILL.md': skill('a'), 'b/SKILL.md': skill('a') }))
     ).toThrow(/Two skills are named a/);
   });
 
