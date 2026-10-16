@@ -1,9 +1,8 @@
 // The skill index served at /.well-known/agent-skills/index.json, so agents
 // that discover skills by index find ours (Agent Skills discovery, schema
 // 0.2.0: https://github.com/cloudflare/agent-skills-discovery-rfc). It lists
-// a setup.md (when the repo has one) and every skills/<name>/SKILL.md, each by the path it's served at
-// and the SHA-256 of its bytes. Names come from the frontmatter (the
-// Polymarket skill's differs from its folder).
+// every skills/<name>/SKILL.md, each by the path it's served at and the
+// SHA-256 of its bytes. Names come from the frontmatter.
 
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -17,9 +16,6 @@ const SCHEMA = 'https://schemas.agentskills.io/discovery/0.2.0/schema.json';
 const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const MAX_NAME = 64;
 const MAX_DESCRIPTION = 1024;
-// setup.md isn't a SKILL.md (so `npx skills add` doesn't offer it), but it has
-// the same frontmatter and is listed too.
-const SETUP_FILE = 'setup.md';
 
 export interface SkillIndexEntry {
   name: string;
@@ -70,8 +66,6 @@ function entry(params: { file: string; url: string }): SkillIndexEntry {
 // URLs are path-absolute, so the index works on whichever host serves it.
 export function buildSkillIndex(skillsDir: string): SkillIndex {
   const skills: SkillIndexEntry[] = [];
-  const setup = path.join(skillsDir, SETUP_FILE);
-  if (fs.existsSync(setup)) skills.push(entry({ file: setup, url: `/${SETUP_FILE}` }));
   const dirs = fs
     .readdirSync(skillsDir, { withFileTypes: true })
     .filter((d) => d.isDirectory() && fs.existsSync(path.join(skillsDir, d.name, 'SKILL.md')))
