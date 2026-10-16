@@ -28,7 +28,17 @@ export function tradingKeyReference(install: string): string {
   return `${prefix}${name || 'install'}`;
 }
 
-// This install's trading-key reference.
+// The one trading key every install of a user shares, so one Polymarket account follows the
+// user across machines. New keys are backed up under it; per-install labels are older keys.
+export const SHARED_TRADING_KEY_REFERENCE = `${TRADING_KEY_REFERENCE}:agent`;
+
+// The command that signs this install in to use the account through OMS. A session-mode install
+// keeps that sign-in, by the same method it signs in with (`wallet login --owner` routes it).
+export function signInAgainCommand(wallet: string): string {
+  return `polygon-agent wallet login --owner${wallet === 'main' ? '' : ` --name ${wallet}`}`;
+}
+
+// This install's own trading-key reference (keys backed up before the shared one).
 export function installTradingKeyReference(): string {
   return tradingKeyReference(installName());
 }
@@ -131,6 +141,21 @@ export async function findTradingKeyWallet(
       ? imported.findLast((x) => x.reference === by.reference)
       : undefined;
   return match ? { id: match.id, address: match.address } : null;
+}
+
+// Every imported wallet labelled as a Polymarket trading key, by any install (and the bare
+// prefix from before references were per install), oldest first.
+export async function listTradingKeyWallets(
+  w: Pick<OmsWalletLike, 'listWallets'>
+): Promise<Array<{ id: string; address: string; reference: string }>> {
+  return (await w.listWallets())
+    .filter(
+      (x) =>
+        x.keyOrigin === 'imported' &&
+        typeof x.reference === 'string' &&
+        x.reference.startsWith(TRADING_KEY_REFERENCE)
+    )
+    .map((x) => ({ id: x.id, address: x.address, reference: x.reference as string }));
 }
 
 export function backupTradingKey(

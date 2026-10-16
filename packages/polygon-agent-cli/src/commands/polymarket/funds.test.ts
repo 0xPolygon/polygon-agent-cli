@@ -150,7 +150,7 @@ describe('deposit', () => {
     m.bridgeStatus.mockResolvedValueOnce({ transactions: [{ status: 'FAILED' }] });
     const out = await run(['deposit', '5', '--broadcast']);
     expect(out).toMatchObject({ ok: false, code: 'upstream_error' });
-    expect(String(out.hint)).toMatch(/recovery\.polymarket\.com/);
+    expect(String(out.hint)).toContain('recovery.polymarket.com');
     expect(out).toMatchObject({ txHash: '0xOLD', bridgeStatus: 'FAILED' });
     expect(loadPending('main')).toBeNull();
     expect(m.runTx).not.toHaveBeenCalled();
@@ -388,6 +388,33 @@ describe('withdraw', () => {
     expect(await run(['withdraw', '2', '--dry-run'])).toMatchObject({
       ok: false,
       code: 'insufficient_pusd'
+    });
+  });
+
+  it('refuses amounts under the bridge minimum before anything is sent', async () => {
+    m.pusdBalance.mockResolvedValue(3_000_000n);
+    expect(await run(['withdraw', '1.5', '--broadcast'])).toMatchObject({
+      ok: false,
+      code: 'below_bridge_minimum'
+    });
+    expect(m.withdrawAddress).not.toHaveBeenCalled();
+    expect(m.transferErc20).not.toHaveBeenCalled();
+  });
+
+  it('refuses all when the balance is under the bridge minimum', async () => {
+    m.pusdBalance.mockResolvedValue(1_843_870n);
+    expect(await run(['withdraw', 'all', '--dry-run'])).toMatchObject({
+      ok: false,
+      code: 'below_bridge_minimum'
+    });
+  });
+
+  it('allows exactly the bridge minimum', async () => {
+    m.pusdBalance.mockResolvedValue(2_000_000n);
+    expect(await run(['withdraw', 'all', '--dry-run'])).toMatchObject({
+      ok: true,
+      dryRun: true,
+      amountUsd: '2'
     });
   });
 

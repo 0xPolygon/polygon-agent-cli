@@ -1,6 +1,5 @@
-export const SKILL_URL = 'https://agentconnect.polygon.technology/polygon-agent-cli/SKILL.md';
-export const POLYMARKET_SKILL_URL =
-  'https://agentconnect.polygon.technology/polygon-polymarket/SKILL.md';
+// The AgentPay skill: one entry point that routes to every use case, Polymarket included.
+export const SKILL_URL = 'https://agents.polygon.technology/skill.md';
 // x402 services catalog skill: pay-per-use prompts point the agent here so it
 // knows which service routes to call (not the agentconnect/CLI skill).
 export const AGENTIC_SERVICES_SKILL_URL = 'https://agent-discovery.polygon.org/SKILL.md';

@@ -17,8 +17,24 @@ import { z } from 'zod';
 import { shellQuote } from './shell.ts';
 import { cliPackageRoot } from './version.ts';
 
-// The assistant skill workspace init installs.
-export const ASSISTANT_SKILL = 'polygon-oms-wallet';
+// The skill workspace init installs: the AgentPay index, with its references
+// (references/<topic>.md) beside it.
+export const ASSISTANT_SKILL = 'agentpay';
+// Its earlier names (polygon-oms-wallet before 0.15, polygon-agent-wallet
+// until AgentPay). Older skills and setup guides still ask for them.
+export const LEGACY_ASSISTANT_SKILLS = ['polygon-oms-wallet', 'polygon-agent-wallet'];
+const REFERENCES = 'references';
+// Skills that became references of the AgentPay skill, by their old names.
+const LEGACY_TOPICS: Record<string, string> = {
+  'polygon-polymarket': 'polymarket',
+  'polymarket-skill': 'polymarket',
+  'polygon-defi': 'earn',
+  'polygon-discovery': 'paid-services',
+  'polygon-agent-cli': 'cli-reference'
+};
+
+const canonicalSkillName = (name: string): string =>
+  LEGACY_ASSISTANT_SKILLS.includes(name) ? ASSISTANT_SKILL : name;
 
 // Run it by its own path: a symlink to it elsewhere would resolve ROOT wrongly.
 export const WRAPPER_SCRIPT = `#!/bin/sh
@@ -34,6 +50,7 @@ export const PLATFORMS = [
   'muse',
   'openclaw',
   'hermes',
+  'grok',
   'claude-code',
   'cursor',
   'codex',
@@ -134,22 +151,47 @@ export function bundledSkillsDir(): string | null {
 
 const SKILL_NAME = /^[a-z0-9][a-z0-9-]*$/;
 
+// The AgentPay skill's reference topics, e.g. ['connect', 'polymarket', …].
+export function listTopics(sourceDir: string | null): string[] {
+  if (!sourceDir) return [];
+  try {
+    return fs
+      .readdirSync(path.join(sourceDir, ASSISTANT_SKILL, REFERENCES))
+      .filter((f) => f.endsWith('.md'))
+      .map((f) => f.slice(0, -'.md'.length))
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+// What `skills show` accepts: each skill, then the AgentPay reference topics.
 export function listSkills(sourceDir: string | null): string[] {
   if (!sourceDir) return [];
-  return fs
+  const skills = fs
     .readdirSync(sourceDir, { withFileTypes: true })
     .filter((d) => d.isDirectory() && fs.existsSync(path.join(sourceDir, d.name, 'SKILL.md')))
     .map((d) => d.name)
     .sort();
+  return [...skills, ...listTopics(sourceDir)];
 }
 
+// A skill's SKILL.md by name (or an earlier name), else an AgentPay reference by
+// topic (or the old skill it replaced).
 export function readSkill(params: { sourceDir: string | null; name: string }): string | null {
   if (!params.sourceDir || !SKILL_NAME.test(params.name)) return null;
-  try {
-    return fs.readFileSync(path.join(params.sourceDir, params.name, 'SKILL.md'), 'utf8');
-  } catch {
-    return null;
-  }
+  const read = (file: string): string | null => {
+    try {
+      return fs.readFileSync(file, 'utf8');
+    } catch {
+      return null;
+    }
+  };
+  const topic = LEGACY_TOPICS[params.name] ?? params.name;
+  return (
+    read(path.join(params.sourceDir, canonicalSkillName(params.name), 'SKILL.md')) ??
+    read(path.join(params.sourceDir, ASSISTANT_SKILL, REFERENCES, `${topic}.md`))
+  );
 }
 
 // Points a skill at this install's CLI. Skills say `polygon-agent …` or
@@ -162,7 +204,7 @@ export function renderSkill(params: { markdown: string; wrapper: string }): stri
   const note =
     `> **This install's CLI:** \`${params.wrapper}\`. Run it wherever this skill says ` +
     '`polygon-agent` or `agent`. If that file is missing, the workspace was reset: ' +
-    'set it up again with https://raw.githubusercontent.com/0xPolygon/polygon-agent-cli/staging/skills/setup.md.\n\n';
+    'set it up again with https://agents.polygon.technology/skill.md.\n\n';
   // A callback, so `$&` and the like in the path aren't replacement patterns.
   const markdown = params.markdown.replace(
     POLYGON_AGENT_LINE,
@@ -174,22 +216,63 @@ export function renderSkill(params: { markdown: string; wrapper: string }): stri
   return `${markdown.slice(0, end)}\n${note}${markdown.slice(end).replace(/^\r?\n/, '')}`;
 }
 
-// Writes <skillsDir>/<name>/SKILL.md, rendered for the wrapper when there is one.
+// Removes the assistant skill installed under an old name, so the assistant
+// doesn't load both. Only a folder holding nothing but that skill's SKILL.md.
+function removeLegacySkills(skillsDir: string): void {
+  for (const name of LEGACY_ASSISTANT_SKILLS) {
+    const dir = path.join(skillsDir, name);
+    try {
+      if (fs.readdirSync(dir).join() !== 'SKILL.md') continue;
+      const markdown = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
+      if (!markdown.startsWith(`---\nname: ${name}\n`)) continue;
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // not there, or not ours
+    }
+  }
+}
+
+// Writes the skill's references/<topic>.md beside its SKILL.md, replacing the
+// folder so a topic dropped from the CLI goes too. References say `polygon-agent`
+// or `agent`, and the rendered SKILL.md says where that CLI is.
+function installReferences(params: { sourceDir: string; name: string; dir: string }): void {
+  const source = path.join(params.sourceDir, params.name, REFERENCES);
+  const target = path.join(params.dir, REFERENCES);
+  if (!fs.existsSync(source)) return;
+  fs.rmSync(target, { recursive: true, force: true });
+  fs.mkdirSync(target, { recursive: true });
+  for (const file of fs.readdirSync(source)) {
+    if (!file.endsWith('.md')) continue;
+    fs.copyFileSync(path.join(source, file), path.join(target, file));
+    fs.chmodSync(path.join(target, file), 0o644);
+  }
+}
+
+// Writes <skillsDir>/<name>/SKILL.md, rendered for the wrapper when there is one,
+// and its references.
 export function installSkill(params: {
   sourceDir: string | null;
   name: string;
   skillsDir: string;
   wrapper?: string;
 }): string {
-  const markdown = readSkill({ sourceDir: params.sourceDir, name: params.name });
+  const name = canonicalSkillName(params.name);
+  // A whole skill only: a reference topic prints with `skills show` instead.
+  const markdown =
+    params.sourceDir && fs.existsSync(path.join(params.sourceDir, name, 'SKILL.md'))
+      ? readSkill({ sourceDir: params.sourceDir, name })
+      : null;
   if (markdown === null) {
     throw new Error(`Skill not found: ${params.name}`);
   }
   const content = params.wrapper ? renderSkill({ markdown, wrapper: params.wrapper }) : markdown;
-  const dir = path.join(path.resolve(params.skillsDir), params.name);
+  const skillsDir = path.resolve(params.skillsDir);
+  const dir = path.join(skillsDir, name);
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, 'SKILL.md');
   writeFileAtomic({ file, content, mode: 0o644 });
+  if (params.sourceDir) installReferences({ sourceDir: params.sourceDir, name, dir });
+  if (name === ASSISTANT_SKILL) removeLegacySkills(skillsDir);
   return file;
 }
 

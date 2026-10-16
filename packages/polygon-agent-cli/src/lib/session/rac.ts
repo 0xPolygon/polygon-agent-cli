@@ -158,7 +158,7 @@ export async function registerRac(params: {
   const { credentialId } = await racClient(params).registerCredential({
     lifetimeSeconds,
     metadata: {
-      appName: `Polygon OMS Agent Kit (${params.installName})`,
+      appName: `Polygon Agent Wallet (${params.installName})`,
       appUrl: APP_URL,
       appLogoUrl: APP_LOGO_URL,
       custom: { app: 'polygon-agent-cli', install: params.installName, version: params.version }

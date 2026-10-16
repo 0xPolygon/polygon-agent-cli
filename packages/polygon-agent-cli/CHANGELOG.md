@@ -1,5 +1,139 @@
 # Change Log
 
+## 0.16.0
+
+### Minor Changes
+
+- 64c4104: One skill, AgentPay, the user's own agent for payments on the Open Money Stack (OMS). The six skill files are now `skills/agentpay/`: a short `SKILL.md` index (check the install, then `wallet status` first, then route the request) and a reference per use case under `references/`, loaded only when a task needs it. `workspace init` installs `agentpay` with its references and removes the `polygon-agent-wallet` and `polygon-oms-wallet` folders it wrote before. `skills show <topic>` prints a reference, and the old skill names still work there. The site serves the index at `/skill.md`, now the link assistants are given, and at `/SKILL.md`, `/setup.md` and every older skill URL, and the references at `/references/`.
+
+### Patch Changes
+
+- 3bbd8dd: `workspace init --platform grok`: Grok Bot signs in with an emailed code, like the other chat assistants, even though its sandbox runs commands in a terminal.
+
+## 0.15.2
+
+### Patch Changes
+
+- fc80908: - The product is now called Polygon Agent Wallet. A connected install appears to the wallet owner as "Polygon Agent Wallet (<install name>)", and `setup.md` uses the new name.
+  - The Polymarket skill says what to do when the platform stops commands before `deposit --broadcast`'s 5-minute wait: allow 6 minutes, or use `--no-wait` and check `status` later.
+
+## 0.15.1
+
+### Patch Changes
+
+- 749131b: Assistant skills: after the install, and whenever the wallet isn't connected, the assistant asks "Would you like to sign in now?" instead of stopping on a status report. `setup.md` works better on Hermes: the workspace follows `$HERMES_HOME`, `ROOT` is exported, the install steps allow up to 10 minutes, and watches note that Hermes cron jobs need the gateway running. The `npx skills add` fallback copies instead of symlinking. The repo is now a plugin marketplace for Claude Code, Codex and Cursor.
+
+## 0.15.0
+
+### Minor Changes
+
+- 9794da1: Skills for personal assistants: `setup.md` (the one-time install guide: workspace install, Node if needed, the skill, connect by email code, funding) and the `polygon-oms-wallet` skill, which `workspace init` installs pointed at the wrapper. The `polygon-agent-cli` skill gains session mode, prices, watches, alerts and workspace installs; `polygon-discovery` gains `--max-usd`. The skills site also serves `/setup.md` and a skill index at `/.well-known/agent-skills/index.json`, and redeploys when skills change. `wallet status` reports a pending request before the first connect (so it's resumed, not resent); `watch check` returns the schedule to keep (or `null` once nothing needs checking); `workspace init` accepts `~/.polygon-agent` alongside a global install's state.
+- 468145c: Buying a token amount, paying with other holdings, and assistant skill fixes from Muse QA:
+  - `swap --to-amount <n>` buys at least that much of `--to` ("buy 10 POL"), using a Trails exact-output quote; more decimals than the token has are refused. The deposit is the quoted input, so the quote must guarantee the amount asked for, and it's never executed in one step: the user accepts it by its intent (`confirmation_required`). Estimates only rank candidates, including near-miss stablecoins and sufficiently funded holdings ahead of dust balances. Actual quotes decide affordability. A bounded search reports untried sources with ready-to-run preview commands instead of declaring insufficient funds.
+  - Without `--from`, a buy in USD or by `--to-amount` falls back to another covered token the wallet holds (largest first, never the token bought) when stablecoin balances look too small or quotes fail. Such a quote is never executed in one step (`confirmation_required`). Watches' auto trades still pay only with stablecoins. A holding that can't be priced makes the answer unknown (`upstream_unavailable`), not `insufficient_balance`. In owner mode, WPOL or WETH can pay for native POL or ETH. Destination precision is validated on the selected chain, and malformed source amounts are rejected before funding discovery.
+  - `wallet confirm` no longer prints `worstCase`.
+  - The `polygon-oms-wallet` skill and `setup.md`: how to read buy and sell requests, the wallet address as a message of its own, a plainer connect message, and how to raise the limit with a new code.
+  - Expected Trails quote failures are structured errors with reasons and preview commands. Query failures and high-price-impact refusals can try another source without relaxing limits; outages and invalid quotes stop immediately. Dollar buys, including automatic watches, may use another covered chain when no destination chain is specified. Incomplete watch searches remain armed.
+
+- 909af36: Move Polymarket reads to the current APIs before Data API v1 retires on 2026-10-24.
+  - `polymarket positions` reads Data API v2. Rows are snake_case (`current_size`, `avg_price`, `current_price`, `unrealized_pnl`, `redeemable`). New `--status` (`OPEN`, `REDEEMABLE`, `REDEEMABLE_LOST`, `MERGEABLE`, `CLOSED`), `--limit` and `--cursor` options, and the output includes `nextCursor`.
+  - `polymarket markets` lists through Gamma's keyset endpoint and searches through `/public-search`. Paging uses `--cursor <nextCursor>`; `--offset` now fails with `code: offset_removed`.
+  - `polymarket market` looks markets up by condition id directly, including closed ones, and reports `version`, `closed` and `acceptingOrders`.
+  - Token ids come from `positionIds` for Polymarket V2 markets and `clobTokenIds` for V1 markets. `clob-buy` and `sell` refuse V2 markets (`code: unsupported_market_version`) and markets not accepting orders (`code: market_not_accepting_orders`), including on dry runs.
+  - `polymarket approve` sets one batch covering the standard, neg-risk and Polymarket V2 exchanges. It no longer approves the deprecated Neg Risk Adapter, and `--neg-risk` is accepted but no longer needed. Wallets approved with an older version should run it once more.
+
+- 7f1a93e: Polymarket trading through a CLI-managed Polymarket Deposit Wallet.
+  - `polymarket setup` creates a trading key, deploys a Deposit Wallet and sets approvals through Polymarket's relayer, with no key import and no POL needed.
+  - `deposit` and `withdraw` move money between the OMS wallet and Polymarket through Polymarket's bridge. Deposits are plain USDC transfers, so they work in session mode and count against the allowance.
+  - New `status`, `event`, `book`, `history`, `buy`, `sell`, `cancel --all`, `redeem`, `activity` and `pnl`. Markets can be named by slug, and outcomes by name, including multi-outcome events.
+  - `buy --max-price` and `sell --min-price` refuse a worse estimated fill before posting.
+  - Region checks: blocked regions can't trade, and close-only regions can only sell, cancel, redeem and withdraw.
+  - `clob-buy`, `proxy-wallet`, `approve` and `set-key` remain as hidden aliases for one release.
+  - Polymarket commands run on Node 22 and 24. `@polymarket/client` declares Node 24 in `engines`, so `npm install` on Node 22 may print an `EBADENGINE` warning, which is safe to ignore.
+  - The Polymarket trading key is backed up to the user's OMS account as one imported wallet labelled `polymarket-trading-key:<install name>`. Owner-mode `setup --broadcast` and every confirmed owner request in session mode do it, with no extra sign-in.
+  - A wiped machine loses nothing. In owner mode, `status` shows `signer: "oms"` and every command signs through OMS. Signing through OMS is owner mode only; in session mode commands fail with `not_set_up` until the next owner request recovers. In session mode, the next owner request sweeps the old account's pUSD to the OMS wallet, archives the old records and backs up a new key. It never replaces the key while the old account still holds open positions, a deposit is still being credited, or a legacy proxy still holds funds. Reinstall with the same `--name` so the backup can be found.
+  - `status` gains `backup`, `signer` and `otherTradingKeys`. New owner-mode `polymarket recover <address>` moves the pUSD of a trading key this install doesn't track.
+
+- 1661c80: Polymarket: one trading key per user, found automatically on every sign-in.
+  - New keys are backed up under one shared label, `polymarket-trading-key:agent`, so a user's account follows them to every install. Older per-install keys are still found. A lost key is never replaced any more, so keys stop piling up.
+  - Every sign-in looks for the user's account. Signed in as the owner, it restores the account and signs through OMS. A session-mode install can't sign as that key, so it makes no second account: it returns `existingAccount` with a plain message ("You already have a Polymarket account with $4.20 and 2 open positions. Sign in once more to use it here.") and a command. `setup` and trading fail with the new `sign_in_required` code the same way, and `status` shows it.
+  - `wallet login --owner` on a session-mode install now starts one more sign-in by the same method the install already uses (emailed code or login page). Once confirmed, the install keeps that sign-in for a week, its session keys are revoked, and it can use the account.
+  - `polymarket buy` over the balance fails at once with the balance and shortfall, suggesting a smaller bid or a deposit of the shortfall (at least $2), or says a deposit is still being credited.
+
+- c4eb0a4: Prices, watches and alerts: `price <token>` (USD price from Trails, canonical chain per symbol, stale after 5 minutes); `watch create|list|cancel|check|run` (alert or automatic trades at price levels, once per crossing, re-armed after a 2% move back); `alerts [--ack]`; `wallet status` reports watch alerts and whether checks are running. Session buys without `--to-chain` now pay from a chain where the token bought is covered.
+- 46a8f79: Remove `polymarket import-key` (and the hidden `set-key` alias): it took a raw private key as an argument.
+- 27fe324: Session mode: connect this install to an OMS wallet with an email code and a spending allowance, enforced on-chain by smart sessions. Owner mode is unchanged.
+  - **Owner requests (email code, two steps).**
+    - `wallet login --email <e> [--allowance] [--days] [--chains]` registers this install's session key, builds the plan and sends a code.
+    - `wallet confirm --request <id> --code <code>` signs in, approves one session per chain, verifies the sessions and checks gas sponsorship through the session key, then always revokes the sign-in. Nothing owner-level is stored.
+    - The same two steps run `wallet allowance set [--amount] [--add <token@chain>] [--chains]`, `wallet allowance renew [--days]` (a new session key), `wallet withdraw` and `wallet access [--revoke <id>]`.
+  - **Allowance.**
+    - Each covered token on each covered chain gets an on-chain limit worth the whole allowance, in a reviewed table of tokens (USDC, USDT, USDG, WETH, WBTC, cbBTC, WPOL/POL) on Polygon, Base, Ethereum, Arbitrum, Optimism, BNB Chain, Avalanche, Arbitrum Nova and Katana.
+    - A local USD ledger caps the total across tokens.
+  - **Spending.**
+    - `runTx` routes session-mode wallets through `lib/session/transfer.ts`, which records each transfer before sending, reconciles uncertain ones, and never resends.
+    - `send-token`, `swap` (from covered ERC-20s) and `x402-pay` work within the allowance.
+    - Native coins return `native_not_supported`; other contract calls and Polymarket return `owner_required`.
+  - **Status.** `wallet status` and `wallet allowance` report the sessions (limits, used, remaining, expiry), the USD total, holdings the allowance does or doesn't cover, pending requests, alerts and, in `wallet status`, the latest CLI version.
+  - `wallet logout` revokes this install's session key.
+  - **Errors.** New commands return `{ok: false, error, code, hint?, command?}`.
+
+- 1acbcbd: Sign-in methods: `wallet login` now connects with an allowance and picks the sign-in itself, a browser page or an emailed code.
+  - **Session mode by default.** Bare `wallet login` is session mode. The browser method returns `waiting` with a page `url` and a `--wait` next. The chat method returns `email_required` or `code_sent`. `wallet login --owner` is the old owner sign-in (`--local` and `--remote` only work with it).
+  - **Waiting.** `wallet login --wait` and `wallet confirm --request <id> --wait` block up to about 90 seconds. `allowance set`, `renew`, `withdraw` and `access` use the same picker and accept `--email`.
+  - **Picker.** `POLYGON_AGENT_SIGNIN=browser|email` forces a method. `workspace init --platform <muse|openclaw|hermes|claude-code|cursor|codex|other>` records the assistant platform.
+  - **Errors.** New codes `email_required`, `browser_signin_failed`, `request_cancelled` and `request_in_progress`.
+  - **Funding.** Outputs may carry `funding: { url, reason?, amountUsd? }` for an empty wallet, `insufficient_balance` and a Polymarket deposit shortfall. The login page shows what the sign-in approves and offers funding after connect.
+  - **Polymarket.** Every owner sign-in backs up the Polymarket trading key, and the result shows it as `polymarket`.
+  - **Wording.** User-facing text says "agent wallet" instead of "OMS wallet".
+
+- 773403d: Trading and x402 in session mode.
+  - `swap` is built on a shared, resumable trade core (`lib/trade/`). A dry run saves the quote; `swap --intent <id> --broadcast` executes exactly that quote, and `swap status --intent <id>` resumes or reports a trade. A deposit is never sent twice: an interrupted trade picks up from its saved state and, in session mode, from the transfer engine's records.
+  - Every quote is checked before anything is sent: the deposit must be exactly a transfer of the quoted amount of the source token to the intent's deposit address, owned by and delivering to the wallet (`upstream_invalid_quote` otherwise).
+  - `--from` is optional (a covered stablecoin with enough balance and allowance: USDC on Polygon first); `--amount` takes a number, `<n>%` or `all`; `--amount-usd` sells a USD amount at the current price. In session mode buys of ETH, POL or BTC deliver the chain's covered WETH, WPOL or WBTC/cbBTC, and uncovered tokens return `not_covered`.
+  - Slippage is capped by `max_slippage` in config.json (default 1%); fees over 10% of the trade add a warning.
+  - `x402-pay` gains `--max-usd` and `--yes`. Payments over `x402_max_per_call` ($1) need `--yes` (`confirmation_required`), and `x402_daily_max` ($10 over 24 hours) caps the total (`daily_limit_exceeded`), on both payment paths. A service that fails after payment is reported plainly with what was paid.
+  - Session-mode installs get their own Builder access key (Trails quotes need one) and x402 signer after connecting, or on first use: the same zero-step provisioning as browser login.
+  - New error codes: `quote_expired`, `upstream_invalid_quote`, `trade_failed`, `confirmation_required`, `x402_price_exceeds_max`, `daily_limit_exceeded`.
+
+- b432963: Upgrade `@polygonlabs/oms-wallet` to 0.3.1 (pinned), `@0xtrails/api` and `0xtrails` to 0.18.6, `@x402/*` to 2.28, `viem` to 2.57 and `@0xsequence/network` to 2.3.47.
+  - Gas-sponsored transactions no longer fail with "Unable to pay gas": oms-wallet 0.3 calls the fee selector with an empty list for them, which now continues with no fee. Paid fees return the SDK's selection, including its index.
+  - `swap` follows the Trails 0.18 flow: no `commitIntent` (deprecated), the deposit must have a successful on-chain receipt before the quote's intent is executed, and transient `executeIntent` failures are retried. A dry run now only quotes; it no longer commits the intent. Confirmation or execution failures name the intent id and deposit hash for recovery.
+  - The funding widget uses 0xtrails 0.18's `to.token` (was `to.currency`).
+  - `slow-redact` is pinned to 0.3.1 (the last version with provenance), pulled in by 0xtrails through WalletConnect's logger.
+
+- ac85de4: Workspace installs: run the CLI from inside an assistant's workspace folder, with its own state.
+  - `POLYGON_AGENT_HOME` sets the state folder (default `~/.polygon-agent`). All state, including `config.json` and the token-directory cache, now lives under it.
+  - `workspace init --root <dir> [--skills-dir <dir>] [--name <name>]` does the setup, and is safe to re-run. It refuses a root that already holds other files. It writes:
+    - a wrapper at `<root>/bin/polygon-agent`, which runs the CLI with `POLYGON_AGENT_HOME=<root>/state` and makes Node's `fetch` honor `HTTPS_PROXY`
+    - a `.gitignore` containing `*`
+    - `state/install.json`
+    - the `polygon-oms-wallet` assistant skill, once a release bundles it
+  - `skills show <name>` and `skills install [name] --dir <dir>` print or write the skills now bundled in `dist/skills/`. When run through the wrapper, they render the wrapper's path into the skill. A `POLYGON_AGENT=` line is set to the single-quoted path, so nothing in it is expanded by the shell.
+  - `update` installs the latest CLI beside the current one, swaps it in, and re-runs `workspace init` from the new version. A failed install leaves the current CLI in place; a failed refresh rolls back. Concurrent updates of one workspace are serialized by a lock (`state/update.lock`). Outside a workspace install, it prints the global npm command.
+
+### Patch Changes
+
+- 257220d: The allowance is described as a dollar amount and period only, with no chains or tokens.
+- b3e81d0: Make `x402-pay` respect the persisted transaction mode and shared `--broadcast` / `--dry-run` safety flags.
+- 21fbf2d: Fix Google sign-in for browser owner requests (missing redirect storage).
+- 2b3f26a: `wallet login --owner` on a session-mode install now revokes the install's session keys the way `wallet logout` does: through each key itself, with the owner sign-in only as a fallback. OMS refused the owner-only revoke, so the switch failed (safely, changing nothing) with "OMS is unavailable (Unauthorized)".
+- 710888a: Polymarket: `setup --broadcast` in owner mode now finds a backed-up trading key under another install name. With no key of its own, it restores the one backed-up key whose account holds pUSD or positions instead of making a new account over it, and asks for `--from <address>` when several do. `--new` keeps the old behavior. Owner sign-in no longer makes a key on a new install while other installs' keys exist, so setup can restore one.
+- 4517306: Polymarket: when several older accounts hold money, a session-mode sign-in gives the plain message with totals ("You already have 2 Polymarket accounts with $4.50 in total. Sign in once more to use them here.") instead of a technical error. Signed in, the result has `chooseAccount`: the accounts, a plain question for the user, and the `setup --from` command to run once they pick.
+- f22cfad: `polymarket withdraw` now refuses amounts under Polymarket's $2 bridge minimum (`below_bridge_minimum`) before anything is sent. Below it, the bridge never paid out: the pUSD sat at the bridge address while the CLI reported that USDC would arrive. Trading key recovery and old-key sweeps leave a balance under $2 in the old account (its key stays in OMS) instead of stranding it at the bridge.
+- 8721bc6: The assistant skill is now `polygon-agent-wallet` (was `polygon-oms-wallet`). `workspace init`, `update` and `skills install` install it under the new name and remove the old copy, so the assistant doesn't load both. `skills show polygon-oms-wallet` still works, and agentconnect still serves `/polygon-oms-wallet/SKILL.md` for older setup guides.
+- d7d0cdb: Security hardening from a review of this release:
+  - Wallet names are validated before they become file paths: a name like `../..` could otherwise make `wallet logout` or `wallet remove` delete folders outside the CLI's state. Wallet files with names that no longer pass are skipped when listing.
+  - Symbols of tokens outside the reviewed table are shown only when short and plain (never their contract's name), and marked `unverified`, so an airdropped token can't carry instructions into `balances`, `wallet status` or alerts.
+  - A swap quoted and broadcast in one step is refused (`confirmation_required`, with the command to accept it) when fees or price impact take more than 10%.
+  - x402: authorizations valid for more than 15 minutes aren't funded or signed, redirects aren't followed, and `@file` arguments can't read the CLI's state folders (compared by device and inode).
+  - Saved trade deposits are re-checked before sending (amount, token and the deposit address checked at quote time), prices dated in the future count as stale, and allowance limits refuse implausible token prices.
+  - `update` installs the exact version it checked, with install scripts off.
+  - Ctrl-C during an owner sign-in removes the sign-in key; locks recover from a reused process id; broken key files no longer hang the CLI; the encryption key is created atomically; the state folder is kept owner-only; withdrawals to the zero address or the token contract are refused.
+- 7b4b03f: Session-mode sign-in now defaults to an emailed code. The browser is used only for an interactive terminal or a local coding agent (claude-code, cursor, codex) with no headless signal, and container detection also covers Podman, Kubernetes, and cgroup markers. Every connect and `wallet status` now return `dashboard.url`, the wallet's agentconnect page, and the CLI no longer opens the funding page on its own after a connect (`agent fund` still does).
+- 00f3df3: The wallet skill opens with how the assistant should come across (warm, matching the user's tone, useful opinions, no tool narration) and what it's for: getting the user set up, then making a payment, or funding the wallet for Polymarket or earning.
+- cac16df: The wallet skill is the one installed entry point: it reaches the Polymarket, DeFi, x402 discovery and full CLI skills through `skills show <name>`, which prints the copy bundled with the installed CLI, instead of linking to them on the web.
+
 ## 0.14.0
 
 ### Minor Changes

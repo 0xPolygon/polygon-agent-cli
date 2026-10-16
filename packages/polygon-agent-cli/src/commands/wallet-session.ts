@@ -787,6 +787,8 @@ function pendingApproves(action: OwnerAction): string {
         : 'List every install and sign-in with access to the wallet.';
     case 'link-credentials':
       return LINK_CREDENTIALS_SUMMARY;
+    case 'owner':
+      return 'Keep this install signed in to your wallet, so it can use your Polymarket account.';
   }
 }
 
@@ -1432,6 +1434,36 @@ export const linkCredentialsCommandModule: CommandModule<object, LinkCredentials
     }
   }
 };
+
+// --- wallet login --owner on a session-mode wallet ---
+
+// Keeps the next sign-in as this install's own, by the same method the install signs in with
+// (an emailed code or the login page). Used when the user's Polymarket account can only be
+// signed through OMS: the session keys are revoked once the owner has signed in.
+export async function handleKeepSignedIn(argv: { name: string; email?: string }): Promise<void> {
+  try {
+    const wallet = argv.name;
+    const pointer = await requireSessionWallet(wallet);
+    const action: OwnerAction = { kind: 'owner' };
+    const { method, emailCommand } = starterMethod({
+      wallet,
+      command: 'login --owner',
+      flags: {},
+      email: argv.email,
+      ownerEmail: pointer.email
+    });
+    await settleWaiters(wallet);
+    await startRequest({
+      wallet,
+      method,
+      action,
+      shown: { approves: pendingApproves(action) },
+      emailCommand
+    });
+  } catch (error) {
+    jsonFail(error);
+  }
+}
 
 // --- wallet logout for session-mode wallets (no code) ---
 

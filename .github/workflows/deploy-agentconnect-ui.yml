@@ -14,7 +14,7 @@ on:
       - staging
     paths:
       - 'packages/agentconnect-ui/**'
-      # The site serves the skills, setup.md and their index.
+      # The site serves the skill, at /skill.md among others, and its index.
       - 'skills/**'
       - '.github/workflows/deploy-agentconnect-ui.yml'
   workflow_dispatch:

@@ -35,6 +35,7 @@ describe('pickSignInMethod', () => {
     ['muse', { platform: 'muse' }, 'email', 'platform muse'],
     ['openclaw', { platform: 'openclaw' }, 'email', 'platform openclaw'],
     ['hermes in a terminal', { platform: 'hermes', stdinTTY: true }, 'email', 'platform hermes'],
+    ['grok in a terminal', { platform: 'grok', stdinTTY: true }, 'email', 'platform grok'],
     ['claude-code on darwin', { platform: 'claude-code' }, 'browser', 'platform claude-code'],
     ['cursor on darwin', { platform: 'cursor' }, 'browser', 'platform cursor'],
     ['codex on win32', { platform: 'codex', os: 'win32' }, 'browser', 'platform codex'],

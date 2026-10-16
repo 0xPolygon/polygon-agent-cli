@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "sessions": {
+    "b1bc1401-798b-4668-8930-da9edb86a002": {
+      "updatedAt": 1791993571663,
+      "files": {
+        "/Users/jlawton/Coding/polygon-agent-kit-worktrees/polymarket-restore-any-backup/packages/polygon-agent-cli/src/lib/polymarket/find-key.ts": {
+          "editCount": 1,
+          "findings": []
+        }
+      }
+    }
+  }
+}

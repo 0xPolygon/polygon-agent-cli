@@ -32,17 +32,10 @@ const skill = (name: string, description = 'Does a thing.') =>
   `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n`;
 
 describe('skill index', () => {
-  it("lists the repo's setup.md and every skill, by the paths they're served at", () => {
+  it("lists the repo's one skill, AgentPay, by the path it's served at", () => {
     const index = buildSkillIndex(REPO_SKILLS);
     expect(index.$schema).toBe('https://schemas.agentskills.io/discovery/0.2.0/schema.json');
-    expect(index.skills.map((s) => [s.name, s.url])).toEqual([
-      ['polygon-oms-setup', '/setup.md'],
-      ['polygon-agent-cli', '/polygon-agent-cli/SKILL.md'],
-      ['polygon-defi', '/polygon-defi/SKILL.md'],
-      ['polygon-discovery', '/polygon-discovery/SKILL.md'],
-      ['polygon-oms-wallet', '/polygon-oms-wallet/SKILL.md'],
-      ['polymarket-skill', '/polygon-polymarket/SKILL.md']
-    ]);
+    expect(index.skills.map((s) => [s.name, s.url])).toEqual([['agentpay', '/agentpay/SKILL.md']]);
     for (const entry of index.skills) {
       expect(entry.type).toBe('skill-md');
       expect(entry.digest).toMatch(/^sha256:[0-9a-f]{64}$/);

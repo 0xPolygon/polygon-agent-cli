@@ -175,7 +175,7 @@ vi.mock('@polygonlabs/oms-wallet', async (importOriginal) => {
           isCaller: false,
           sessionId,
           metadata: {
-            appName: 'Polygon OMS Agent Kit (test)',
+            appName: 'Polygon Agent Wallet (test)',
             appUrl: '',
             appLogoUrl: '',
             custom: {}
@@ -341,6 +341,7 @@ const {
   accessCommandModule,
   allowanceCommandModule,
   confirmCommandModule,
+  handleKeepSignedIn,
   handleSessionLogin,
   logoutSessionWallet,
   sessionReport,
@@ -1660,5 +1661,44 @@ describe('browser sign-in on a connected wallet', () => {
     expect(latestWaiterRequest(wallet)).toBeNull();
     expect(readResult(wallet, String(request))).toBeNull();
     expect(fs.existsSync(pidFile(wallet, 'other1'))).toBe(false);
+  });
+});
+
+describe('keeping a sign-in (wallet login --owner on a connected install)', () => {
+  it('asks for a week-long sign-in by the same method, then keeps it and drops the session', async () => {
+    await confirm(await connectStep1());
+    const racCredential = readRacRecord({ wallet, slot: 'rac' })?.credentialId;
+    world.calls.length = 0;
+    vi.mocked(console.log).mockClear();
+    await handleKeepSignedIn({ name: wallet });
+    const started = lastJson('log');
+    expect(started).toMatchObject({
+      ok: true,
+      status: 'code_sent',
+      action: 'owner',
+      email: 'owner@example.com',
+      approves: 'Keep this install signed in to your wallet, so it can use your Polymarket account.'
+    });
+    const out = await confirm(String(started.request));
+    expect(out).toMatchObject({
+      ok: true,
+      action: 'owner',
+      signedIn: true,
+      ownerSignInRevoked: false,
+      ownerSignInKept: true
+    });
+    expect(world.calls).toContain(`startEmailAuth:${7 * 24 * 60 * 60}`);
+    expect(world.calls).not.toContain('revokeAccess:owner');
+    expect(world.revoked.has(String(racCredential))).toBe(true);
+    const pointer = await loadOmsWalletPointer(wallet);
+    expect(pointer).toMatchObject({ email: 'owner@example.com' });
+    expect(pointer?.access).toBeUndefined();
+    expect(readApprovedPlan(wallet)).toBeNull();
+    expect(readRacRecord({ wallet, slot: 'rac' })).toBeNull();
+  });
+
+  it('refuses an install that is not connected', async () => {
+    await expect(handleKeepSignedIn({ name: wallet })).rejects.toThrow('CLI exited');
+    expect(lastJson('error')).toMatchObject({ ok: false, code: 'not_connected' });
   });
 });

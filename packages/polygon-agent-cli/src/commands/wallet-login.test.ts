@@ -217,7 +217,12 @@ describe('wallet login --owner polymarket backup', () => {
 
   it('a fresh login backs up the key with the owner client and main address', async () => {
     await ownerLogin();
-    expect(step.fn).toHaveBeenCalledWith({ wallet: name, owner: ownerArg, mainAddress: MAIN });
+    expect(step.fn).toHaveBeenCalledWith({
+      wallet: name,
+      owner: ownerArg,
+      mainAddress: MAIN,
+      signsWithOms: true
+    });
     expect(jsonLines('log')[0]).toMatchObject({
       ok: true,
       walletAddress: MAIN,
@@ -229,7 +234,12 @@ describe('wallet login --owner polymarket backup', () => {
     await saveOmsWalletPointer(name, { walletAddress: MAIN, loginMethod: 'google', createdAt: '' });
     fake.active = MAIN;
     await ownerLogin();
-    expect(step.fn).toHaveBeenCalledWith({ wallet: name, owner: ownerArg, mainAddress: MAIN });
+    expect(step.fn).toHaveBeenCalledWith({
+      wallet: name,
+      owner: ownerArg,
+      mainAddress: MAIN,
+      signsWithOms: true
+    });
     expect(jsonLines('log')[0]).toMatchObject({
       alreadyLoggedIn: true,
       polymarket: { backedUp: true }

@@ -113,10 +113,12 @@ vi.mock('../../lib/storage.ts', async (o) => ({
 }));
 
 const cmds = await import('./account.ts');
-const { installTradingKeyReference } = await import('../../lib/polymarket/oms-key.ts');
+const { SHARED_TRADING_KEY_REFERENCE } = await import('../../lib/polymarket/oms-key.ts');
 const portfolio = await import('./portfolio.ts');
 const { saveOmsWalletPointer } = await import('../../lib/storage.ts');
 const { accountFile, readBackup, writeBackup } = await import('../../lib/polymarket/account.ts');
+const { readExistingAccount, writeExistingAccount } =
+  await import('../../lib/polymarket/find-key.ts');
 const TRADING_KEY = `0x${'11'.repeat(32)}`;
 const BACKUP = { omsWalletId: 'w-imported', address: '0xAbC', at: '2026-10-09T00:00:00.000Z' };
 
@@ -208,7 +210,7 @@ describe('setup', () => {
       'approve the legacy NegRiskAdapter for neg-risk markets (gasless)'
     ]);
     expect(m.findTradingKeyWallet).toHaveBeenCalledWith(m.omsWallet, {
-      reference: installTradingKeyReference()
+      reference: SHARED_TRADING_KEY_REFERENCE
     });
     expect(m.restoreFromOms).not.toHaveBeenCalled();
     expect(m.ensureMainWallet).not.toHaveBeenCalled();
@@ -267,7 +269,7 @@ describe('setup', () => {
     expect(m.backupTradingKey).toHaveBeenCalledWith(
       m.omsWallet,
       TRADING_KEY,
-      installTradingKeyReference()
+      SHARED_TRADING_KEY_REFERENCE
     );
     expect(out.backup).toEqual({ backedUp: true, omsWalletId: 'w-imported', imported: true });
     expect(readBackup('main')).toMatchObject({ omsWalletId: 'w-imported', address: '0xAbC' });
@@ -357,9 +359,9 @@ describe('setup', () => {
       backup: { omsWalletId: 'w-old', address: found.address, at: 'x', kind: 'deposit-wallet' }
     });
     const out = await run(['setup', '--broadcast']);
-    // No local record: only this install's own label is looked up.
+    // No local record: the shared label is looked up first.
     expect(m.findTradingKeyWallet).toHaveBeenCalledWith(m.omsWallet, {
-      reference: installTradingKeyReference()
+      reference: SHARED_TRADING_KEY_REFERENCE
     });
     expect(m.restoreFromOms).toHaveBeenCalledWith({
       wallet: 'main',
@@ -398,7 +400,8 @@ describe('setup', () => {
 
   it('owner mode creates as before when OMS holds no trading key', async () => {
     const out = await run(['setup', '--broadcast']);
-    expect(m.findTradingKeyWallet).toHaveBeenCalledTimes(1);
+    // The shared label, then this install's own older one.
+    expect(m.findTradingKeyWallet).toHaveBeenCalledTimes(2);
     expect(m.restoreFromOms).not.toHaveBeenCalled();
     expect(m.setupAccount).toHaveBeenCalledWith('main');
     expect(out).toMatchObject({ ok: true, created: true });
@@ -412,6 +415,207 @@ describe('setup', () => {
     expect(out.ok).toBe(false);
     expect(m.setupAccount).not.toHaveBeenCalled();
     expect(m.ensureMainWallet).toHaveBeenCalledWith('main');
+  });
+
+  describe("another install's backed-up keys", () => {
+    const A = {
+      id: 'w-a',
+      address: '0x00000000000000000000000000000000000000A1',
+      reference: 'polymarket-trading-key:laptop'
+    };
+    const B = {
+      id: 'w-b',
+      address: '0x00000000000000000000000000000000000000B1',
+      reference: 'polymarket-trading-key:old-vm'
+    };
+    const imported = (...keys: Array<typeof A>) =>
+      keys.map((k) => ({ ...k, keyOrigin: 'imported' }));
+    const probe = (pusd: string, positions: unknown[] = []) => ({
+      address: 'x',
+      account: WALLET,
+      pusd,
+      positionsLeft: positions
+    });
+    const RESTORED = {
+      account: { kind: 'deposit-wallet', signer: A.address, wallet: WALLET, createdAt: 'x' },
+      approvalsSet: false,
+      backup: { omsWalletId: A.id, address: A.address, at: 'x', kind: 'deposit-wallet' }
+    };
+
+    beforeEach(() => {
+      m.restoreFromOms.mockResolvedValue(RESTORED);
+    });
+
+    it('restores the one key that holds funds or positions instead of making a key', async () => {
+      m.omsWallet.listWallets.mockResolvedValue(imported(A, B));
+      m.recoverOtherKey.mockImplementation(async ({ target }: { target: { id: string } }) =>
+        target.id === A.id ? probe('0', [{ title: 'Q' }]) : probe('0')
+      );
+      const out = await run(['setup', '--broadcast']);
+      expect(m.recoverOtherKey).toHaveBeenCalledWith(expect.objectContaining({ broadcast: false }));
+      expect(m.recoverOtherKey).not.toHaveBeenCalledWith(
+        expect.objectContaining({ broadcast: true })
+      );
+      expect(m.restoreFromOms).toHaveBeenCalledWith({
+        wallet: 'main',
+        owner: m.omsWallet,
+        target: expect.objectContaining({ id: A.id, address: A.address })
+      });
+      expect(out).toMatchObject({
+        ok: true,
+        restored: true,
+        signer: 'oms',
+        account: { signer: A.address }
+      });
+      expect(m.setupAccount).not.toHaveBeenCalled();
+      expect(m.ensureTradingKey).not.toHaveBeenCalled();
+      expect(m.ensureMainWallet).toHaveBeenCalledWith('main');
+    });
+
+    it('makes a new key when no other key holds anything', async () => {
+      m.omsWallet.listWallets.mockResolvedValue(imported(A, B));
+      m.recoverOtherKey.mockResolvedValue(probe('0'));
+      const out = await run(['setup', '--broadcast']);
+      expect(m.recoverOtherKey).toHaveBeenCalledTimes(2);
+      expect(m.restoreFromOms).not.toHaveBeenCalled();
+      expect(out).toMatchObject({ ok: true, created: true });
+    });
+
+    it('refuses to pick between several funded keys and makes nothing', async () => {
+      m.omsWallet.listWallets.mockResolvedValue(imported(A, B));
+      m.recoverOtherKey.mockResolvedValue(probe('3.5'));
+      const out = await run(['setup', '--broadcast']);
+      expect(out).toMatchObject({
+        ok: false,
+        code: 'ambiguous_trading_key',
+        hint: expect.stringContaining('--from <address>')
+      });
+      expect(JSON.stringify(out)).toContain(A.address);
+      expect(JSON.stringify(out)).toContain(B.address);
+      expect(m.restoreFromOms).not.toHaveBeenCalled();
+      expect(m.setupAccount).not.toHaveBeenCalled();
+      expect(m.ensureTradingKey).not.toHaveBeenCalled();
+    });
+
+    it("won't make a key over one whose account it couldn't read", async () => {
+      m.omsWallet.listWallets.mockResolvedValue(imported(A));
+      m.recoverOtherKey.mockRejectedValue(new Error('data api down'));
+      const out = await run(['setup', '--broadcast']);
+      expect(out).toMatchObject({ ok: false, code: 'ambiguous_trading_key' });
+      expect(JSON.stringify(out)).toContain('data api down');
+      expect(m.setupAccount).not.toHaveBeenCalled();
+    });
+
+    it('--from restores that key without probing the others', async () => {
+      m.omsWallet.listWallets.mockResolvedValue(imported(A, B));
+      const out = await run(['setup', '--broadcast', '--from', A.address.toLowerCase()]);
+      expect(m.recoverOtherKey).not.toHaveBeenCalled();
+      expect(m.restoreFromOms).toHaveBeenCalledWith(
+        expect.objectContaining({ target: expect.objectContaining({ id: A.id }) })
+      );
+      expect(out).toMatchObject({ ok: true, restored: true });
+    });
+
+    it('--from refuses an address OMS holds no trading key for', async () => {
+      m.omsWallet.listWallets.mockResolvedValue(imported(A));
+      const out = await run([
+        'setup',
+        '--broadcast',
+        '--from',
+        '0x00000000000000000000000000000000000000C1'
+      ]);
+      expect(out).toMatchObject({ ok: false, code: 'invalid_input' });
+      expect(m.restoreFromOms).not.toHaveBeenCalled();
+      expect(m.setupAccount).not.toHaveBeenCalled();
+    });
+
+    it('--from refuses when this install already has its own key', async () => {
+      m.localKey = true;
+      const out = await run(['setup', '--broadcast', '--from', A.address]);
+      expect(out).toMatchObject({
+        ok: false,
+        code: 'invalid_input',
+        hint: expect.stringContaining('polymarket recover')
+      });
+      expect(m.setupAccount).not.toHaveBeenCalled();
+    });
+
+    it('--new makes a new account without probing', async () => {
+      m.omsWallet.listWallets.mockResolvedValue(imported(A));
+      const out = await run(['setup', '--broadcast', '--new']);
+      expect(m.recoverOtherKey).not.toHaveBeenCalled();
+      expect(m.restoreFromOms).not.toHaveBeenCalled();
+      expect(out).toMatchObject({ ok: true, created: true });
+    });
+
+    it('dry run names the detection step and probes nothing', async () => {
+      m.omsWallet.listWallets.mockResolvedValue(imported(A));
+      const out = await run(['setup', '--dry-run']);
+      expect(out.steps[0]).toBe(
+        'restore the backed-up trading key that holds funds or positions, or create one if none does'
+      );
+      expect(m.recoverOtherKey).not.toHaveBeenCalled();
+      expect((await run(['setup', '--dry-run', '--new'])).steps[0]).toBe('create trading key');
+    });
+  });
+
+  describe('an account found at sign-in that this install cannot use yet', () => {
+    const EXISTING = {
+      address: '0x00000000000000000000000000000000000000A1',
+      account: '0xACCOUNT',
+      pusd: '4.2',
+      positions: 2,
+      at: 'x'
+    };
+    const sessionPointer = () =>
+      saveOmsWalletPointer('main', {
+        walletAddress: '0xC2F4cAfe89AE7e1bcB86dd3f141C0a3adCEB6C17',
+        loginMethod: 'email',
+        createdAt: 'x',
+        access: 'session'
+      } as never);
+
+    it('setup makes no second account and says one more sign-in uses it', async () => {
+      await sessionPointer();
+      writeExistingAccount('main', EXISTING);
+      for (const flag of ['--broadcast', '--dry-run']) {
+        const out = await run(['setup', flag]);
+        expect(out).toMatchObject({
+          ok: false,
+          code: 'sign_in_required',
+          error:
+            'You already have a Polymarket account with $4.20 and 2 open positions. Sign in once more to use it here.',
+          command: 'polygon-agent wallet login --owner',
+          existingAccount: { address: EXISTING.address, pusd: '4.2', positions: 2 }
+        });
+      }
+      expect(m.setupAccount).not.toHaveBeenCalled();
+    });
+
+    it('setup --new makes a separate account anyway', async () => {
+      await sessionPointer();
+      writeExistingAccount('main', EXISTING);
+      const out = await run(['setup', '--broadcast', '--new']);
+      expect(out).toMatchObject({ ok: true, created: true });
+      expect(readExistingAccount('main')).toBeNull();
+    });
+
+    it('status shows the account and the sign-in command', async () => {
+      await sessionPointer();
+      writeExistingAccount('main', EXISTING);
+      const out = await run(['status']);
+      expect(out).toMatchObject({
+        ok: true,
+        setUp: false,
+        existingAccount: {
+          address: EXISTING.address,
+          message:
+            'You already have a Polymarket account with $4.20 and 2 open positions. Sign in once more to use it here.',
+          command: 'polygon-agent wallet login --owner'
+        },
+        next: 'polygon-agent wallet login --owner'
+      });
+    });
   });
 
   it('session mode does not try OMS and reports the recorded backup', async () => {

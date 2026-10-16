@@ -9,7 +9,7 @@ import type { Position } from './markets.js';
 import type { TokenLook } from './tokens.js';
 
 import { dailyFlow } from '../indexer';
-import { buildPrompt, POLYMARKET_SKILL_URL, SKILL_URL } from './agents.js';
+import { buildPrompt, SKILL_URL } from './agents.js';
 import { cents } from './markets.js';
 import { fetchTokenLooks } from './tokens.js';
 import {
@@ -602,7 +602,7 @@ export function MarketsTab({
                 size="md"
                 label="Copy"
                 copied={ctx.copied === `m${i}`}
-                onClick={() => ctx.copy(`m${i}`, buildPrompt(t, POLYMARKET_SKILL_URL))}
+                onClick={() => ctx.copy(`m${i}`, buildPrompt(t, SKILL_URL))}
                 className="flex-shrink-0"
               />
             </div>

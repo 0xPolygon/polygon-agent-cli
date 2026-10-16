@@ -530,3 +530,64 @@ describe('confirmOwnerRequest (browser)', () => {
     expect(loadPending(wallet)?.id).toBe(request.id);
   });
 });
+
+describe('a kept sign-in (the owner action)', () => {
+  const WEEK = 7 * 24 * 60 * 60;
+  const startKept = () =>
+    startOwnerRequest({
+      wallet,
+      method: 'browser',
+      context: { purpose: 'owner' },
+      action: { kind: 'owner' },
+      now: NOW
+    });
+
+  it('writes no throwaway key, signs in for a week and is not revoked', async () => {
+    const request = await startKept();
+    expect(request.ownerKey).toBe('');
+    const { deps } = fakeDeps([...GOOGLE_DONE]);
+    const result = await confirmOwnerRequest({
+      wallet,
+      requestId: request.id,
+      now: NOW,
+      browser: { deps, timeoutMs: 60_000 },
+      run: async (context) => ({ walletAddress: context.walletAddress })
+    });
+    expect(result).toEqual({
+      walletAddress: MAIN,
+      ownerSignInRevoked: false,
+      ownerSignInKept: true
+    });
+    expect(world.calls).toEqual([`startOidc:${WEEK}:true`, `completeOidc:${WEEK}`, 'listWallets']);
+  });
+
+  it('is revoked like any other when the action fails', async () => {
+    const request = await startKept();
+    const { deps } = fakeDeps([...GOOGLE_DONE]);
+    await expect(
+      confirmOwnerRequest({
+        wallet,
+        requestId: request.id,
+        now: NOW,
+        browser: { deps, timeoutMs: 60_000 },
+        run: async () => {
+          throw new Error('boom');
+        }
+      })
+    ).rejects.toMatchObject({ details: { ownerSignInRevoked: true } });
+    expect(world.calls).toContain('revoke:owner-cred');
+    expect(world.calls).toContain('signOut');
+  });
+
+  it('an emailed code asks for the week-long sign-in too', async () => {
+    // The fake client can't save the SDK's attempt, so the request stops after the code is sent.
+    await startOwnerRequest({
+      wallet,
+      method: 'email',
+      email: 'o@example.com',
+      action: { kind: 'owner' },
+      now: NOW
+    }).catch(() => undefined);
+    expect(world.calls).toEqual([`startEmail:o@example.com:${WEEK}`]);
+  });
+});

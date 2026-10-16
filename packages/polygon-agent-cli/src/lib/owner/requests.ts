@@ -29,7 +29,7 @@ import type { LoginContext, OwnerAction, PendingRequest } from './pending.ts';
 import { runBrowserLogin } from '../browser-login.ts';
 import { CliError, mapOmsError, upstreamErrorName } from '../errors.ts';
 import { LoginSessionExpiredError, makeLoginRelay } from '../login-relay-client.ts';
-import { loginUiBaseUrl, oidcRelayBaseUrl } from '../oms-client.ts';
+import { getOmsClient, loginUiBaseUrl, oidcRelayBaseUrl } from '../oms-client.ts';
 import { selectMainWallet } from '../polymarket/oms-key.ts';
 import { loadOmsConfig, loadOmsWalletPointer } from '../storage.ts';
 import { exportEmailAttempt, restoreEmailAttempt } from './email-attempt.ts';
@@ -38,6 +38,8 @@ import { deletePending, discardPendingNow, loadPending, savePending } from './pe
 // The owner sign-in's lifetime: as short as OMS allows, so a sign-in whose
 // revoke failed dies on its own soon after.
 export const OWNER_LOGIN_SECONDS = 600;
+// A sign-in kept as the install's own (the `owner` action) lasts as long as `wallet login --owner`.
+export const KEPT_OWNER_SESSION_SECONDS = 7 * 24 * 60 * 60;
 export const REQUEST_LIFETIME_MS = 10 * 60 * 1000;
 // Consecutive failed relay polls (2s apart, so about a minute) before a
 // browser sign-in gives up.
@@ -65,6 +67,23 @@ export function ownerWallet(ownerKey: Uint8Array): OMSWallet {
   });
 }
 
+// Whether the request's sign-in is kept as the install's own instead of revoked.
+function keepsSignIn(action: OwnerAction): boolean {
+  return action.kind === 'owner';
+}
+
+// The client a request signs in with: a throwaway one, or for a kept sign-in this install's own
+// persistent client (its stored session and key), so the session outlives the request.
+function requestClient(request: { wallet: string; action: OwnerAction; ownerKey: string }) {
+  return keepsSignIn(request.action)
+    ? getOmsClient(request.wallet)
+    : ownerWallet(Buffer.from(request.ownerKey, 'hex'));
+}
+
+function signInLifetime(action: OwnerAction): number {
+  return keepsSignIn(action) ? KEPT_OWNER_SESSION_SECONDS : OWNER_LOGIN_SECONDS;
+}
+
 // The login page for a browser request's pairing session.
 export function loginPageUrl(relaySession: string): string {
   return `${loginUiBaseUrl()}/login#${relaySession}`;
@@ -76,22 +95,23 @@ export async function startOwnerRequest(
     | { method: 'browser'; context: LoginContext }
   )
 ): Promise<PendingRequest> {
-  const ownerKey = randomBytes(32);
+  // A kept sign-in uses the install's own stored key, so no throwaway key is written.
+  const ownerKey = keepsSignIn(params.action) ? '' : randomBytes(32).toString('hex');
   const base = {
     id: requestId(),
     wallet: params.wallet,
     action: params.action,
-    ownerKey: ownerKey.toString('hex'),
+    ownerKey,
     createdAt: params.now.toISOString(),
     expiresAt: new Date(params.now.getTime() + REQUEST_LIFETIME_MS).toISOString()
   };
   let request: PendingRequest;
   if (params.method === 'email') {
-    const owner = ownerWallet(ownerKey);
+    const owner = requestClient(base);
     try {
       await owner.wallet.startEmailAuth({
         email: params.email,
-        sessionLifetimeSeconds: OWNER_LOGIN_SECONDS
+        sessionLifetimeSeconds: signInLifetime(params.action)
       });
     } catch (error) {
       throw mapOmsError(error);
@@ -234,7 +254,7 @@ async function signInWithBrowser(params: {
   browser: BrowserSignIn;
 }): Promise<OwnerSignIn> {
   const { request, owner } = params;
-  const lifetime = { sessionLifetimeSeconds: OWNER_LOGIN_SECONDS };
+  const lifetime = { sessionLifetimeSeconds: signInLifetime(request.action) };
   const relayBase = oidcRelayBaseUrl();
   const relay = params.browser.deps?.relay ?? makeLoginRelay(relayBase);
   const now = params.browser.deps?.now ?? (() => Date.now());
@@ -379,7 +399,9 @@ export async function confirmOwnerRequest<T extends Record<string, unknown>>(
     // error. It runs after the sign-in is revoked, so it may use the network.
     doneExtras?: (result: T) => Promise<{ funding?: { url: string } } | undefined>;
   } & OwnerSignInInput
-): Promise<T & { ownerSignInRevoked: boolean; ownerSignInRevokeError?: string }> {
+): Promise<
+  T & { ownerSignInRevoked: boolean; ownerSignInRevokeError?: string; ownerSignInKept?: true }
+> {
   const request = loadPending(params.wallet);
   if (!request || request.id !== params.requestId) {
     throw requestExpired(`No pending request ${params.requestId} for wallet '${params.wallet}'.`);
@@ -394,7 +416,8 @@ export async function confirmOwnerRequest<T extends Record<string, unknown>>(
   const input: OwnerSignInInput =
     'code' in params ? { code: params.code } : { browser: params.browser };
 
-  const owner = ownerWallet(Buffer.from(request.ownerKey, 'hex'));
+  const owner = requestClient(request);
+  const keep = keepsSignIn(request.action);
   // Interrupted during the sign-in itself (Ctrl-C, kill): the key may already
   // be an owner credential, so it leaves the disk before exiting. Repeated
   // signals are ignored, so a second Ctrl-C can't cut this short.
@@ -474,8 +497,10 @@ export async function confirmOwnerRequest<T extends Record<string, unknown>>(
     process.removeListener('SIGTERM', onSignal);
   }
 
-  // Always: revoke the sign-in and drop the client.
-  const revokeError = await revokeSignIn();
+  // Revoke the sign-in and drop the client, unless it is kept as the install's own and the
+  // action succeeded. A kept sign-in whose action failed is revoked like any other.
+  const kept = keep && outcome.ok;
+  const revokeError = kept ? undefined : await revokeSignIn();
 
   // The deferred `done` (see doneExtras); best effort, never fails the action.
   if (params.doneExtras && walletAddress !== undefined && signedIn.report) {
@@ -498,10 +523,12 @@ export async function confirmOwnerRequest<T extends Record<string, unknown>>(
     }
   }
 
-  const revoke = {
-    ownerSignInRevoked: revokeError === undefined,
-    ...(revokeError === undefined ? {} : { ownerSignInRevokeError: revokeError })
-  };
+  const revoke = kept
+    ? { ownerSignInRevoked: false, ownerSignInKept: true as const }
+    : {
+        ownerSignInRevoked: revokeError === undefined,
+        ...(revokeError === undefined ? {} : { ownerSignInRevokeError: revokeError })
+      };
   if (!outcome.ok) {
     const mapped = mapOmsError(outcome.error);
     const error =

@@ -103,7 +103,8 @@ interface ShowArgs {
 
 const showCommand: CommandModule<object, ShowArgs> = {
   command: 'show <name>',
-  describe: 'Print a bundled skill (rendered for this install when run through its wrapper)',
+  describe:
+    'Print a bundled skill, or an AgentPay reference by topic (rendered for this install when run through its wrapper)',
   builder: (y) => y.positional('name', { type: 'string', demandOption: true }),
   handler: (argv) => {
     const sourceDir = bundledSkillsDir();
@@ -139,7 +140,7 @@ const installCommand: CommandModule<object, InstallArgs> = {
       });
       // Remember where the assistant skill lives, so `update` refreshes it.
       const record = root ? readInstallRecord(STORAGE_ROOT) : null;
-      if (record && argv.name === ASSISTANT_SKILL) {
+      if (record && path.basename(path.dirname(file)) === ASSISTANT_SKILL) {
         writeInstallRecord({
           state: STORAGE_ROOT,
           record: {
