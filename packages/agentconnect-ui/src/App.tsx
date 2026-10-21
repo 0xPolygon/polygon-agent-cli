@@ -26,7 +26,7 @@ import { FundingScreen, parseFundAmount } from './components/FundingScreen.js';
 import { fetchTotalUsdBalance } from './indexer';
 import { LoginPage } from './login/LoginPage.js';
 
-// The AgentPay skill: one entry point that routes to every use case.
+// The Open Money Agent skill: one entry point that routes to every use case.
 const SKILL_URL = 'https://agents.polygon.technology/skill.md';
 // x402 services catalog skill: Services/Search prompts point the agent here so it
 // knows which service routes to call (not the agentconnect/CLI skill).

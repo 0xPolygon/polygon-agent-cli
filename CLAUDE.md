@@ -19,20 +19,20 @@ holds the credential on disk.
 Static assets: ABI JSON in `contracts/` is published with the CLI package (it is in
 `package.json` `files`).
 
-Skills: one skill, AgentPay, in `skills/agentpay/`. `SKILL.md` is the index every agent reads
+Skills: one skill, Open Money Agent, in `skills/open-money-agent/`. `SKILL.md` is the index every agent reads
 (kept under 12 KB): check the CLI is installed, run `wallet status` first, then route
 the request to `references/<topic>.md`, loaded only for that task. Each reference opens with a
 title and a `**When to use:**` line; only the index has frontmatter. `src/lib/skills.test.ts`
 (CLI package) enforces this, and that every reference is linked from the index. The CLI bundles
 the folder (`scripts/build.mjs`), `workspace init` installs it with its references, and
 `skills show <topic>` prints a reference (old skill names map to topics). The agentconnect site
-serves the index at `/skill.md` (the URL assistants are given), `/SKILL.md`, `/setup.md`, `/agentpay/SKILL.md` and every older skill URL, and
+serves the index at `/skill.md` (the URL assistants are given), `/SKILL.md`, `/setup.md`, `/open-money-agent/SKILL.md` and every older skill URL, and
 the references at `/references/` too (`vite.config.ts`). Also distributed via `npx skills add`
 and the plugins, not via npm on its own.
 
 Plugins: the repo is a plugin marketplace for Claude Code (`.claude-plugin/marketplace.json`),
 Codex (`.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json`) and Cursor
-(`.cursor-plugin/marketplace.json`). Each points at `plugins/agentpay/`, whose `skills` and
+(`.cursor-plugin/marketplace.json`). Each points at `plugins/open-money-agent/`, whose `skills` and
 `assets` are symlinks to the root folders, so a skill edit needs no plugin change. The manifests
 carry no `version`, so installs update with each commit. Check with `claude plugin validate .`.
 
