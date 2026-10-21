@@ -35,7 +35,8 @@ export interface PendingConnect {
   // Connecting an MCP client: its authorization request and name.
   authRequest?: AuthRequest;
   clientName?: string;
-  // Who signed in.
+  // Approving a purchase: which approval, and who signed in to decide it.
+  approvalId?: string;
   signedIn?: SignedIn;
   // The OMS credential key for this sign-in only (hex).
   key: string;
@@ -84,10 +85,12 @@ export class OwnerSignIn {
   ) {}
 
   /**
-   * Start a sign-in, for connecting an MCP client or signing in on the site.
+   * Start a sign-in, for connecting an MCP client or approving a purchase.
    * Returns the id the page carries between steps.
    */
-  async create(purpose: Pick<PendingConnect, 'authRequest' | 'clientName'>): Promise<string> {
+  async create(
+    purpose: Pick<PendingConnect, 'authRequest' | 'clientName' | 'approvalId'>
+  ): Promise<string> {
     const id = hex(crypto.getRandomValues(new Uint8Array(16)));
     const pending: PendingConnect = {
       ...purpose,

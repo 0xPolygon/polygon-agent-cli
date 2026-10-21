@@ -59,7 +59,7 @@ When the user asks for a higher limit (or more time):
 "$POLYGON_AGENT" wallet allowance renew [--days <n>]
 "$POLYGON_AGENT" wallet withdraw --to <address> --token <symbol> --amount <n> --chain <chain>   # from the wallet, as the owner
 "$POLYGON_AGENT" wallet access [--revoke <id>]          # every install and sign-in with access
-"$POLYGON_AGENT" wallet link-credentials                # link this install to the saved address
+"$POLYGON_AGENT" wallet link-credentials                # link this install to the saved address and cards
 ```
 
 Each uses the same method picker as `wallet login`, and takes `--email <email>` to force an emailed code. Handle the output like step 3 of Sign in:

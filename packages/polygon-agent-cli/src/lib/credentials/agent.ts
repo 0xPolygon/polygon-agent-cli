@@ -1,5 +1,5 @@
 // The agent's identity on agentconnect, for saved credentials (shipping
-// address).
+// address, cards).
 //
 // Each wallet gets its own agent key. While the owner is signed in, the CLI
 // asks OMS for an ID token naming that key and trades it at agentconnect for a

@@ -672,7 +672,7 @@ export async function runOwnerAction(params: {
   }).catch((error: unknown) => [
     `retry failed: ${error instanceof Error ? error.message : String(error)}`
   ]);
-  // Same sign-in: link the agent's credentials key (saved address). Before
+  // Same sign-in: link the agent's credentials key (saved address, cards). Before
   // the Polymarket step, which can switch the owner session to another wallet.
   // Never throws.
   const credentials = await enrollAgent({
