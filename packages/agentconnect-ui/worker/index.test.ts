@@ -427,7 +427,10 @@ describe('connecting an agent (consent)', () => {
       email: 'owner@example.com',
       localAgent: true
     });
-    const allow = await call(e, 'POST', '/api/connect/decide', { body: { c, allow: true } });
+    const allow = await call(e, 'POST', '/api/connect/decide', {
+      cookie: await cookie(),
+      body: { c, allow: true }
+    });
     expect(await allow.json()).toEqual({
       redirectTo: 'http://localhost:9999/callback?code=abc&state=st_1'
     });
@@ -438,12 +441,38 @@ describe('connecting an agent (consent)', () => {
     });
   });
 
+  it("won't let anyone but the signed-in browser allow, even with the request's id", async () => {
+    const { e, signIn, completed } = setup();
+    const c = await signIn.create({ authRequest: authRequest as never, clientName: 'Claude Code' });
+    // The owner opens the link; whoever started the request knows c.
+    await call(e, 'GET', `/api/connect?c=${c}`, { cookie: await cookie() });
+    const bare = await call(e, 'POST', '/api/connect/decide', { body: { c, allow: true } });
+    expect(bare.status).toBe(401);
+    const other = `${SESSION_COOKIE}=${await issueSession({ wallet: '0x' + '1'.repeat(40), email: null }, SECRET)}`;
+    const theirs = await call(e, 'POST', '/api/connect/decide', {
+      cookie: other,
+      body: { c, allow: true }
+    });
+    expect(theirs.status).toBe(401);
+    expect(completed).toHaveLength(0);
+    // The owner can still decide.
+    const mine = await call(e, 'POST', '/api/connect/decide', {
+      cookie: await cookie(),
+      body: { c, allow: true }
+    });
+    expect(mine.status).toBe(200);
+    expect(completed).toHaveLength(1);
+  });
+
   it('gives a client mapped to a profile that profile, for the life of the connection', async () => {
     const { e, signIn, completed } = setup();
     e.MCP_CLIENT_PROFILES = JSON.stringify({ cli_1: 'muse' });
     const c = await signIn.create({ authRequest: authRequest as never, clientName: 'Muse' });
     await call(e, 'GET', `/api/connect?c=${c}`, { cookie: await cookie() });
-    await call(e, 'POST', '/api/connect/decide', { body: { c, allow: true } });
+    await call(e, 'POST', '/api/connect/decide', {
+      cookie: await cookie(),
+      body: { c, allow: true }
+    });
     expect(completed[0]).toMatchObject({ props: { profile: 'muse' } });
   });
 
@@ -451,7 +480,10 @@ describe('connecting an agent (consent)', () => {
     const { e, signIn, completed } = setup();
     const c = await signIn.create({ authRequest: authRequest as never, clientName: 'Claude Code' });
     await call(e, 'GET', `/api/connect?c=${c}`, { cookie: await cookie() });
-    const res = await call(e, 'POST', '/api/connect/decide', { body: { c, allow: false } });
+    const res = await call(e, 'POST', '/api/connect/decide', {
+      cookie: await cookie(),
+      body: { c, allow: false }
+    });
     const { redirectTo } = (await res.json()) as { redirectTo: string };
     const back = new URL(redirectTo);
     expect(back.origin + back.pathname).toBe('http://localhost:9999/callback');

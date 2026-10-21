@@ -202,6 +202,12 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
         throw new ValidationError('This link is not for connecting an agent.');
       if (!pending.signedIn) throw new ValidationError('Sign in first.');
       const who = pending.signedIn;
+      // Only the browser that signed in may decide: whoever started the request
+      // knows its id, so the id alone would let them allow it for the owner.
+      const owner = await sessionIdentity(req, env.AGENT_CERT_SECRET);
+      if (!owner || owner.wallet !== who.wallet) {
+        throw new AuthError('unauthorized', 'Sign in on this page to decide.');
+      }
       await signIn.forget(id);
       if (body.allow !== true) {
         const back = new URL(pending.authRequest.redirectUri);
@@ -224,6 +230,7 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
     }
     return fail(404, 'not_found', 'No such endpoint');
   } catch (err) {
+    if (err instanceof AuthError) return fail(401, err.code, err.message);
     if (err instanceof ValidationError) return fail(400, 'invalid_request', err.message);
     console.error('[connect]', err);
     const message = err instanceof Error ? err.message : '';

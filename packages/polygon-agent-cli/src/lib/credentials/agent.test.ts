@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 
 process.env.POLYGON_AGENT_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-credentials-'));
 process.env.POLYGON_AGENT_LOGIN_UI = 'https://agentconnect.test';
+process.env.POLYGON_AGENT_CREDENTIALS_URL = 'https://agentconnect.test';
 
 const { enrollAgent, loadCertificate, mintAccessToken, ENROLL_PURPOSE } =
   await import('./agent.ts');
