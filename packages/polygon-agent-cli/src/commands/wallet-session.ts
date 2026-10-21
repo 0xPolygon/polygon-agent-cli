@@ -1373,7 +1373,7 @@ export const accessCommandModule: CommandModule<object, AccessArgs> = {
 // --- wallet link-credentials ---
 
 export const LINK_CREDENTIALS_SUMMARY =
-  'Link this install so it can save and use your shipping address and cards.';
+  'Link this install so it can save and use your shipping address.';
 
 interface LinkCredentialsArgs {
   name: string;
@@ -1383,7 +1383,7 @@ interface LinkCredentialsArgs {
 export const linkCredentialsCommandModule: CommandModule<object, LinkCredentialsArgs> = {
   command: 'link-credentials',
   describe:
-    'Link this install for saved credentials (shipping address, cards); the owner approves it with one sign-in',
+    'Link this install for saved credentials (shipping address); the owner approves it with one sign-in',
   builder: (y) =>
     y.option('name', { type: 'string', default: 'main', describe: 'Wallet name' }).option('email', {
       type: 'string',

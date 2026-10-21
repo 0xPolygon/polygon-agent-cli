@@ -97,7 +97,7 @@ agent setup --oms-publishable-key <key>
 |----------|---------|
 | `POLYGON_AGENT_SIGNIN` | `browser` or `email`: forces the sign-in method for session mode instead of the automatic pick |
 | `POLYGON_AGENT_LOGIN_UI` | Base URL of the browser login page opened by `wallet login` (default `https://agentconnect.polygon.technology`) |
-| `POLYGON_AGENT_CREDENTIALS_URL` | Base URL of the site that keeps saved details (address, cards, buying) and shows the dashboard (default: the login page's site) |
+| `POLYGON_AGENT_CREDENTIALS_URL` | Base URL of the site that keeps saved details (the shipping address) and shows the dashboard (default: the login page's site) |
 | `POLYGON_AGENT_OIDC_RELAY` | Base URL of the OIDC relay used by `wallet login` (default `https://oidc-relay.polygon.technology`); also settable per run with `--relay-url` |
 | `SEQUENCE_PROJECT_ACCESS_KEY` | Used only as the Trails API key for DeFi earn-pool lookups (optional) |
 | `TRAILS_TOKEN_MAP_JSON` | Token-directory lookup |

@@ -23,7 +23,7 @@ function SignInFirst() {
   return (
     <Panel className="flex flex-col gap-4 items-start">
       <EmptyState title="Sign in to see your saved details">
-        Your address and cards are only shown after you sign in.
+        Your address is only shown after you sign in.
       </EmptyState>
       <a href="/" className="btn btn-primary btn-lg">
         Sign in
@@ -100,8 +100,8 @@ export function CredentialsTab({
   return (
     <div className="flex flex-col gap-6">
       <p className="m-0 text-base leading-snug text-[var(--slate-600)] max-w-[620px]">
-        Save the details agents need when they buy for you. They are only shared with the store at
-        checkout.
+        Save the details your agents need, like where to ship things. Only agents you connect can
+        read them.
       </p>
       <Panel className="flex flex-col gap-5">
         <div className="flex justify-between items-center gap-3">

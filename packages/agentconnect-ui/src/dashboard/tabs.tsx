@@ -1,5 +1,3 @@
-import type { ReactNode } from 'react';
-
 import { ArrowDownLeft, ArrowUpRight, Check, Copy, ExternalLink } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -408,20 +406,16 @@ export function WalletTab({
   address,
   holdings,
   onAdd,
-  onWithdraw,
-  cards
+  onWithdraw
 }: {
   address: string;
   holdings: Loadable<Holding[]>;
   onAdd: () => void;
   onWithdraw: () => void;
-  // The "Connect a card" panel, when cards are part of this page.
-  cards?: ReactNode;
 }) {
   const [showReceive, setShowReceive] = useState(false);
   return (
     <div className="flex flex-col gap-8">
-      {cards}
       <div className="flex gap-2 flex-wrap">
         <button type="button" onClick={onAdd} className="btn btn-secondary btn-lg">
           Add money
@@ -489,7 +483,6 @@ export function AskAgent({
 
 export const OVERVIEW_PROMPTS = [
   'what are the odds on the next Fed rate decision on Polymarket?',
-  'buy a 24-pack of AA batteries from Amazon, shipped to my saved address.',
   'keep $300 available to spend and move anything above that into the Prime earn vault on Katana.',
   'tell me if ETH drops below $3,000.'
 ];
@@ -501,11 +494,9 @@ export const WALLET_PROMPTS = [
   "send 5 USDC to an address I'll give you. Read it back to me before sending."
 ];
 
-export const SHOPPING_PROMPTS = [
-  'buy a 24-pack of AA batteries from Amazon, shipped to my saved address.',
-  'find a phone charger under $20 at Best Buy and show me the options before buying.',
-  'add a card to my agent wallet so you can pay for things.',
-  'show the shipping address and cards my agent wallet has saved.'
+export const DETAILS_PROMPTS = [
+  'save my shipping address to my agent wallet.',
+  'show the shipping address my agent wallet has saved.'
 ];
 
 const MARKET_PROMPTS = [

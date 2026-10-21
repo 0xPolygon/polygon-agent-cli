@@ -67,14 +67,12 @@ jobs:
       # left out (their endpoints answer 503); wrangler never deletes secrets.
       - name: Write worker secrets
         run: >-
-          node -e 'const keys = ["AGENT_CERT_SECRET", "CREDENTIALS_KEY", "AGENTCARD_CLIENT_ID", "AGENTCARD_CLIENT_SECRET", "INDEXER_ACCESS_KEY"];
+          node -e 'const keys = ["AGENT_CERT_SECRET", "CREDENTIALS_KEY", "INDEXER_ACCESS_KEY"];
           const out = Object.fromEntries(keys.filter((k) => process.env[k]).map((k) => [k, process.env[k]]));
           require("fs").writeFileSync(process.env.RUNNER_TEMP + "/worker-secrets.json", JSON.stringify(out), { mode: 0o600 });'
         env:
           AGENT_CERT_SECRET: ${{ secrets.AGENT_CERT_SECRET }}
           CREDENTIALS_KEY: ${{ secrets.CREDENTIALS_KEY }}
-          AGENTCARD_CLIENT_ID: ${{ secrets.AGENTCARD_CLIENT_ID }}
-          AGENTCARD_CLIENT_SECRET: ${{ secrets.AGENTCARD_CLIENT_SECRET }}
           # The dashboard's indexer key, reused by the MCP get_wallet tool.
           INDEXER_ACCESS_KEY: ${{ secrets.VITE_INDEXER_ACCESS_KEY }}
 

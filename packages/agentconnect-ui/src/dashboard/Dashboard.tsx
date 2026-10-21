@@ -23,8 +23,6 @@ import { LogoBadge } from '../App.js';
 import { FundingScreen } from '../components/FundingScreen.js';
 import { fetchActivity, fetchHoldings } from '../indexer';
 import { SKILL_URL } from './agents.js';
-import { AutoPayPanel } from './AutoPay.js';
-import { CardsPanel } from './CardsPanel.js';
 import { ConnectedAgents } from './ConnectedAgents.js';
 import { accountEmail, SESSION_AUTH, takeLinkToken } from './credentials-api.js';
 import { CredentialsTab } from './Credentials.js';
@@ -39,7 +37,7 @@ import {
   OVERVIEW_PROMPTS,
   OverviewTab,
   SettingsTab,
-  SHOPPING_PROMPTS,
+  DETAILS_PROMPTS,
   WALLET_PROMPTS,
   WalletTab
 } from './tabs.js';
@@ -111,7 +109,6 @@ export function Dashboard({
   const auth = owner ? SESSION_AUTH : linkToken;
   const [email] = useState(() => owner?.email ?? accountEmail(walletAddress, linkToken));
   const leave = () => void signOut().then(() => window.location.assign('/'));
-  const signIn = () => window.location.assign('/');
 
   const holdings = useLoad<Holding[]>(
     () => fetchHoldings(walletAddress, chainId),
@@ -269,7 +266,6 @@ export function Dashboard({
                 holdings={holdings}
                 onAdd={openAdd}
                 onWithdraw={openWithdraw}
-                cards={<CardsPanel token={auth} onSignIn={signIn} onSaved={flash} />}
               />
             )}
             {tab === 'wallet' && <AskAgent ctx={ctx} id="w" prompts={WALLET_PROMPTS} />}
@@ -292,10 +288,9 @@ export function Dashboard({
             )}
             {tab === 'credentials' && <CredentialsTab token={auth} onSaved={flash} />}
             {tab === 'credentials' && (
-              <AskAgent ctx={ctx} id="c" prompts={SHOPPING_PROMPTS} title="Shop with your agent" />
+              <AskAgent ctx={ctx} id="c" prompts={DETAILS_PROMPTS} title="Try with your agent" />
             )}
             {tab === 'activity' && <ActivityTab activity={activity} />}
-            {tab === 'settings' && <AutoPayPanel token={auth} />}
             {tab === 'settings' && owner && <ConnectedAgents />}
             {tab === 'settings' && <SettingsTab address={walletAddress} ctx={ctx} />}
             {tab === 'settings' && owner && (
