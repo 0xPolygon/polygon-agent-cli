@@ -14,18 +14,20 @@ const pkgDir = path.dirname(fileURLToPath(import.meta.url));
 const skillsDir = path.resolve(pkgDir, '../../skills');
 
 // Copy the repo's agent skill tree into the build output so the deployed
-// Cloudflare worker serves it as static assets: the AgentPay skill at
-// /agentpay/SKILL.md with its references at /agentpay/references/<topic>.md.
+// Cloudflare worker serves it as static assets: the Open Money Agent skill at
+// /open-money-agent/SKILL.md with its references at /open-money-agent/references/<topic>.md.
 //
-// The AgentPay skill is the one entry point, so it is also served at /skill.md
+// The Open Money Agent skill is the one entry point, so it is also served at /skill.md
 // (what assistants are given), at /SKILL.md and /setup.md, and at every older
 // skill URL (200, not a redirect: some agents don't follow redirects for
 // markdown). Its references are also served at /references/<topic>.md, where its
-// relative links resolve when it's read from one of the root copies. These are deploy-only
+// relative links resolve when it's read from one of the root copies, and at
+// /agentpay/references/<topic>.md, its path before the rename. These are deploy-only
 // copies: the repo's skills/ tree keeps one skill, so `npx skills add` offers one.
-const ENTRY_SKILL = 'agentpay';
+const ENTRY_SKILL = 'open-money-agent';
 const ENTRY_ALIASES = [
   'skill.md',
+  'agentpay/SKILL.md',
   'setup.md',
   'SKILL.md',
   'polygon-agent-wallet/SKILL.md',
@@ -57,11 +59,11 @@ function serveSkills(): Plugin {
         fs.mkdirSync(path.dirname(path.join(absOutDir, alias)), { recursive: true });
         fs.copyFileSync(entry, path.join(absOutDir, alias));
       }
-      fs.cpSync(
-        path.join(skillsDir, ENTRY_SKILL, 'references'),
-        path.join(absOutDir, 'references'),
-        { recursive: true }
-      );
+      for (const dir of ['references', 'agentpay/references']) {
+        fs.cpSync(path.join(skillsDir, ENTRY_SKILL, 'references'), path.join(absOutDir, dir), {
+          recursive: true
+        });
+      }
     }
   };
 }

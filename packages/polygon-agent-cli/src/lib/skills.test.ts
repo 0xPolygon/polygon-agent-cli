@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import { ASSISTANT_SKILL } from './workspace.ts';
 
-// The repo's skills/ tree: one skill, AgentPay, whose SKILL.md is a short index
+// The repo's skills/ tree: one skill, Open Money Agent, whose SKILL.md is a short index
 // and whose references/ hold each use case, loaded only when a task needs it.
 const SKILLS = path.resolve(import.meta.dirname, '..', '..', '..', '..', 'skills');
 const SKILL_DIR = path.join(SKILLS, ASSISTANT_SKILL);
@@ -20,7 +20,7 @@ const read = (file: string): string => fs.readFileSync(path.join(REFERENCES, fil
 const links = (markdown: string): string[] =>
   [...markdown.matchAll(/\]\(((?!https?:)[^)#\s]+\.md)\)/g)].map((m) => m[1]);
 
-describe('the AgentPay skill', () => {
+describe('the Open Money Agent skill', () => {
   it('is the only skill in the repo', () => {
     const skills = fs
       .readdirSync(SKILLS, { withFileTypes: true })
@@ -31,7 +31,7 @@ describe('the AgentPay skill', () => {
 
   it('has an index small enough to read every time', () => {
     expect(Buffer.byteLength(index)).toBeLessThanOrEqual(MAX_INDEX_BYTES);
-    expect(index).toMatch(/^---\nname: agentpay\ndescription: /);
+    expect(index).toMatch(/^---\nname: open-money-agent\ndescription: /);
   });
 
   it('links only to references that exist, and to every reference', () => {

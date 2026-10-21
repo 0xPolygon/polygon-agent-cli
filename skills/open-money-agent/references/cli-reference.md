@@ -81,7 +81,7 @@ agent alerts --ack [id…]
 ### Workspace installs
 ```bash
 agent workspace init --root <workspace>/.polygon-agent [--skills-dir <dir>] [--name <install name>] [--platform <muse|openclaw|hermes|grok|claude-code|cursor|codex|other>]
-agent skills [show <agentpay|topic> | install agentpay --dir <dir>]   # topic: a reference, e.g. polymarket
+agent skills [show <open-money-agent|topic> | install open-money-agent --dir <dir>]   # topic: a reference, e.g. polymarket
 agent update                                      # workspace installs: latest CLI, refreshed skill
 ```
 

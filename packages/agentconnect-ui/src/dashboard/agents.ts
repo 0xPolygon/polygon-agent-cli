@@ -1,4 +1,4 @@
-// The AgentPay skill: one entry point that routes to every use case, Polymarket included.
+// The Open Money Agent skill: one entry point that routes to every use case, Polymarket included.
 export const SKILL_URL = 'https://agents.polygon.technology/skill.md';
 // x402 services catalog skill: pay-per-use prompts point the agent here so it
 // knows which service routes to call (not the agentconnect/CLI skill).

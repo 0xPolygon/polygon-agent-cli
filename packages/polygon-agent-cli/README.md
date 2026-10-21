@@ -50,7 +50,7 @@ Give your assistant this link and ask it to set up your wallet:
 https://agents.polygon.technology/skill.md
 ```
 
-That page is the AgentPay skill. It installs the CLI into the assistant's workspace with the same skill, matched to the CLI's version, and connects your wallet with a spending allowance you approve by signing in. The skill is a short index: each use case (Polymarket, trading, yield, price watches, x402 services, the full CLI reference) is a reference it opens only when a task needs it.
+That page is the Open Money Agent skill. It installs the CLI into the assistant's workspace with the same skill, matched to the CLI's version, and connects your wallet with a spending allowance you approve by signing in. The skill is a short index: each use case (Polymarket, trading, yield, price watches, x402 services, the full CLI reference) is a reference it opens only when a task needs it.
 
 ### Install as a skill
 
@@ -110,7 +110,7 @@ agent swap --from USDC --to USDT --amount 5
 agent register --name "MyAgent" --broadcast
 ```
 
-> Write commands preview by default — omit `--broadcast` to dry-run, or run `agent mode auto` once to always broadcast (`--dry-run` still previews any single command). The skill lives in [`skills/agentpay/`](https://github.com/0xPolygon/polygon-agent-cli/tree/main/skills/agentpay) and ships inside the CLI package: `SKILL.md` is the index, and `references/` holds one file per use case (`connect`, `wallet`, `trade`, `earn`, `watches`, `polymarket`, `paid-services`, `identity`, `platforms`, `developer`, `cli-reference`, `troubleshooting`). `agent skills show agentpay` prints the index and `agent skills show <topic>` prints a reference. The old skill names (`polygon-agent-wallet`, `polygon-polymarket`, `polygon-defi`, `polygon-discovery`, `polygon-agent-cli`) still work there.
+> Write commands preview by default — omit `--broadcast` to dry-run, or run `agent mode auto` once to always broadcast (`--dry-run` still previews any single command). The skill lives in [`skills/open-money-agent/`](https://github.com/0xPolygon/polygon-agent-cli/tree/main/skills/open-money-agent) and ships inside the CLI package: `SKILL.md` is the index, and `references/` holds one file per use case (`connect`, `wallet`, `trade`, `earn`, `watches`, `polymarket`, `paid-services`, `identity`, `platforms`, `developer`, `cli-reference`, `troubleshooting`). `agent skills show open-money-agent` prints the index and `agent skills show <topic>` prints a reference. The old skill names (`polygon-agent-wallet`, `polygon-polymarket`, `polygon-defi`, `polygon-discovery`, `polygon-agent-cli`) still work there.
 
 ### Workspace installs
 
@@ -183,7 +183,7 @@ The CLI ships with agent-friendly documentation designed to be consumed directly
 
 Once installed, the agent receives the full skill context — including wallet setup, token operations, and ERC-8004 registration, and can execute autonomously.
 
-See the AgentPay skill ([`skills/agentpay/`](https://github.com/0xPolygon/polygon-agent-cli/tree/main/skills/agentpay)) for the agent-facing guide; every command is in its [CLI reference](https://github.com/0xPolygon/polygon-agent-cli/blob/main/skills/agentpay/references/cli-reference.md).
+See the AgentPay skill ([`skills/agentpay/`](https://github.com/0xPolygon/polygon-agent-cli/tree/main/skills/agentpay)) for the agent-facing guide; every command is in its [CLI reference](https://github.com/0xPolygon/polygon-agent-cli/blob/main/skills/open-money-agent/references/cli-reference.md).
 
 ---
 
@@ -247,7 +247,7 @@ agent polymarket redeem --all --broadcast
 agent polymarket withdraw all --broadcast  # back to the OMS wallet as USDC
 ```
 
-Markets are named by conditionId, market slug, or event slug plus outcome name (`"Bob"`, `"Bob no"`). Write commands preview unless you pass `--broadcast`. See `skills/agentpay/references/polymarket.md` for the full guide.
+Markets are named by conditionId, market slug, or event slug plus outcome name (`"Bob"`, `"Bob no"`). Write commands preview unless you pass `--broadcast`. See `skills/open-money-agent/references/polymarket.md` for the full guide.
 
 Polymarket commands run on Node 22 and 24. `@polymarket/client` declares Node 24 in `engines`, so `npm install` on Node 22 may print an `EBADENGINE` warning. It is safe to ignore.
 
