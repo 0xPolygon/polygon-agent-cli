@@ -1,0 +1,35 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "open-money-agent",
+  "version": "1.0.0",
+  "description": "See what your Open Money Agent wallet on Polygon holds, and open its dashboard.",
+  "author": { "name": "Polygon Labs", "url": "https://agents.polygon.technology" },
+  "homepage": "https://agents.polygon.technology",
+  "repository": "https://github.com/0xPolygon/polygon-agent-cli",
+  "license": "MIT",
+  "keywords": ["polygon", "wallet", "stablecoins", "balances"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Open Money Agent",
+        "shortDescription": "Your agent wallet on Polygon",
+        "longDescription": "Open Money Agent is your own agent wallet on Polygon, on the Open Money Stack. Connect it to ChatGPT to ask what the wallet holds and get a link to its dashboard.\n\nSign in with the email or Google account you use for Open Money Agent. ChatGPT then sees that one wallet: its address, each token it holds valued in US dollars, the total, and your dashboard link. If you don't have a wallet yet, signing in creates one.\n\nWho it's for: people who already use Open Money Agent with an assistant, or who want to check their agent wallet without opening the dashboard.\n\nLimitations: this connection only reads. It can't send, swap, or move funds, and it only shows the wallet you signed in with, on Polygon. Disconnect it any time from Settings on your dashboard.",
+        "developerName": "Polygon Labs",
+        "category": "Finance",
+        "capabilities": ["Read"],
+        "websiteURL": "https://agents.polygon.technology",
+        "privacyPolicyURL": "https://polygon.technology/privacy-policy",
+        "termsOfServiceURL": "https://polygon.technology/terms-of-use",
+        "defaultPrompt": [
+          "What's in my agent wallet?",
+          "What's my agent wallet address?",
+          "Give me my Open Money Agent dashboard link"
+        ],
+        "brandColor": "#7c3aed",
+        "composerIcon": "./assets/logo.png",
+        "logo": "./assets/logo.png",
+        "screenshots": []
+      }
+    }
+  }
+}

@@ -59,6 +59,18 @@ describe('MCP server', () => {
     expect(names).toEqual(['get_wallet']);
   });
 
+  it("marks every tool as reading only the owner's own wallet", async () => {
+    const { body } = await rpc(env(), { jsonrpc: '2.0', id: 2, method: 'tools/list' });
+    for (const t of (body as { result: { tools: Record<string, unknown>[] } }).result.tools) {
+      expect(t.annotations).toEqual({
+        readOnlyHint: true,
+        destructiveHint: false,
+        openWorldHint: false
+      });
+      expect(t.outputSchema).toBeTypeOf('object');
+    }
+  });
+
   it('answers get_wallet for the signed-in wallet only', async () => {
     const r = await call(env(), 'get_wallet');
     expect(r.structuredContent).toMatchObject({

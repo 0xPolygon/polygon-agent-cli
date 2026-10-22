@@ -20,9 +20,9 @@ export interface McpProps {
 }
 
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
-const SERVER = { name: 'polygon-agent-wallet', title: 'Polygon agent wallet', version: '1.0.0' };
+const SERVER = { name: 'open-money-agent', title: 'Open Money Agent', version: '1.1.0' };
 
-const INSTRUCTIONS = `The owner's Polygon agent wallet: what it holds. Sending, swapping, or predicting with the wallet's funds needs the Polygon agent CLI (npx skills add https://github.com/0xPolygon/polygon-agent-cli).`;
+const INSTRUCTIONS = `Open Money Agent: the owner's agent wallet on Polygon and what it holds, with a link to their dashboard. This connection only reads the wallet; it can't move funds.`;
 
 const TOOLS = [
   {
@@ -31,7 +31,30 @@ const TOOLS = [
     description:
       "The wallet's address, what it holds in US dollars, and the owner's dashboard link.",
     inputSchema: { type: 'object', properties: {} },
-    annotations: { readOnlyHint: true }
+    outputSchema: {
+      type: 'object',
+      properties: {
+        address: { type: 'string', description: 'The wallet address on Polygon.' },
+        owner: { type: ['string', 'null'], description: 'The email the owner signed in with.' },
+        network: { type: 'string' },
+        totalUsd: { type: 'number', description: 'What the wallet holds, in US dollars.' },
+        holdings: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { name: { type: 'string' }, usd: { type: 'number' } },
+            required: ['name', 'usd']
+          }
+        },
+        dashboardUrl: { type: 'string', description: "The owner's dashboard for this wallet." }
+      },
+      required: ['address', 'network', 'dashboardUrl']
+    },
+    // Only reads the owner's own wallet: it changes nothing and reaches no one else.
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    securitySchemes: [{ type: 'oauth2', scopes: ['wallet'] }],
+    // Names the signed-in account, so ChatGPT can tell connected accounts apart.
+    _meta: { 'openai/profile': true }
   }
 ];
 

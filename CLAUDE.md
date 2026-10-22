@@ -35,6 +35,9 @@ Codex (`.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json`) and Curs
 (`.cursor-plugin/marketplace.json`). Each points at `plugins/open-money-agent/`, whose `skills` and
 `assets` are symlinks to the root folders, so a skill edit needs no plugin change. The manifests
 carry no `version`, so installs update with each commit. Check with `claude plugin validate .`.
+ChatGPT has its own package, `plugins/open-money-agent-chatgpt/`: the read-only MCP server and no
+skills (ChatGPT plugins may not move funds). It has a `version`, bumped for each upload; how to
+build and submit it is in `docs/CHATGPT_PLUGIN.md`.
 
 ## Development
 
