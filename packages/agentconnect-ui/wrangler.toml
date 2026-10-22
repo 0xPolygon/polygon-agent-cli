@@ -45,11 +45,8 @@ migrations = [
   { tag = "v4", deleted_classes = ["WalletLock"] }
 ]
 
-# staging.agents.polygon.technology serves the staging install guide and skills
-# to hosted assistants, which can't pass Cloudflare Access.
 routes = [
-  { pattern = "agentconnect.staging.polygon.technology", custom_domain = true },
-  { pattern = "staging.agents.polygon.technology", custom_domain = true }
+  { pattern = "agentconnect.staging.polygon.technology", custom_domain = true }
 ]
 
 # No migrations: the staging worker never had the SessionRelay class, and
@@ -79,6 +76,10 @@ routes = [
   { pattern = "agentconnect.polygon.technology", custom_domain = true },
   { pattern = "agents.polygon.technology", custom_domain = true }
 ]
+
+# MCP and sign-ins in progress, as for staging. No id: created on the first deploy.
+[[env.production.kv_namespaces]]
+binding = "OAUTH_KV"
 
 [[env.production.ratelimits]]
 name = "REGISTER_LIMITER"
