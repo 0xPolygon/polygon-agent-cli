@@ -11,17 +11,15 @@ main = "worker/index.ts"
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
-# The site's API, the MCP server's OAuth routes and OpenAI's domain check are
-# handled by the worker, never the SPA fallback.
+# The site's API, the MCP server's OAuth routes and every /.well-known path are
+# handled by the worker, never the SPA fallback: a client probing for metadata
+# we don't serve must get a 404, not the SPA's HTML.
 run_worker_first = [
   "/api/*",
   "/mcp",
   "/authorize",
   "/oauth/*",
-  "/.well-known/oauth-authorization-server",
-  "/.well-known/oauth-protected-resource",
-  "/.well-known/oauth-protected-resource/*",
-  "/.well-known/openai-apps-challenge"
+  "/.well-known/*"
 ]
 
 # Sign-in and MCP. Secrets come from the GitHub environment and are uploaded
