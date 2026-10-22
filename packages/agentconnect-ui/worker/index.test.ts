@@ -358,6 +358,77 @@ describe('openaiChallenge', () => {
   });
 });
 
+describe('two sites on one worker', () => {
+  // A KV close enough for the OAuth provider's client records.
+  function oauthKv() {
+    const data = new Map<string, string>();
+    return {
+      get: async (k: string, o?: unknown) => {
+        const v = data.get(k) ?? null;
+        const type = typeof o === 'string' ? o : (o as { type?: string } | undefined)?.type;
+        return v !== null && type === 'json' ? JSON.parse(v) : v;
+      },
+      put: async (k: string, v: string) => void data.set(k, v),
+      delete: async (k: string) => void data.delete(k),
+      list: async () => ({ keys: [], list_complete: true, cursor: '' })
+    } as unknown as KVNamespace;
+  }
+
+  it("checks each site's own /mcp as the resource, whichever site is served first", async () => {
+    const e = env({ OAUTH_KV: oauthKv() });
+    const ctx = { waitUntil() {}, passThroughOnException() {} } as unknown as ExecutionContext;
+    const run = (url: string, init?: RequestInit) => worker.fetch(new Request(url, init), e, ctx);
+    // The other site serves a page first in this worker.
+    await run('https://agentconnect.test/api/session');
+    const reg = await run('https://agents.test/oauth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_name: 'ChatGPT',
+        redirect_uris: ['https://chatgpt.com/connector_platform_oauth_redirect'],
+        token_endpoint_auth_method: 'none'
+      })
+    });
+    const { client_id } = (await reg.json()) as { client_id: string };
+    const q = new URLSearchParams({
+      response_type: 'code',
+      client_id,
+      redirect_uri: 'https://chatgpt.com/connector_platform_oauth_redirect',
+      scope: 'wallet',
+      code_challenge: 'OIbNgrQwU-SMwjZFUyxdGdcjOAFm_3x6NhdvH0ZbkjY',
+      code_challenge_method: 'S256',
+      state: 's1',
+      resource: 'https://agents.test/mcp'
+    });
+    const res = await run(`https://agents.test/authorize?${q}`);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toMatch(/^https:\/\/agents\.test\/connect\?c=/);
+  });
+
+  it('sends a bad resource back to the client as an error, not a crash', async () => {
+    const e = env({ OAUTH_KV: oauthKv() });
+    const ctx = { waitUntil() {}, passThroughOnException() {} } as unknown as ExecutionContext;
+    const run = (url: string, init?: RequestInit) => worker.fetch(new Request(url, init), e, ctx);
+    const reg = await run('https://agents.test/oauth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        redirect_uris: ['https://chatgpt.com/connector_platform_oauth_redirect'],
+        token_endpoint_auth_method: 'none'
+      })
+    });
+    const { client_id } = (await reg.json()) as { client_id: string };
+    const res = await run(
+      `https://agents.test/authorize?response_type=code&client_id=${client_id}&redirect_uri=https%3A%2F%2Fchatgpt.com%2Fconnector_platform_oauth_redirect&code_challenge=OIbNgrQwU-SMwjZFUyxdGdcjOAFm_3x6NhdvH0ZbkjY&code_challenge_method=S256&state=s1&resource=https%3A%2F%2Felsewhere.test%2Fmcp`
+    );
+    expect(res.status).toBe(302);
+    const back = new URL(res.headers.get('Location')!);
+    expect(back.searchParams.get('error')).toBe('invalid_target');
+    expect(back.searchParams.get('iss')).toBe('https://agents.test');
+    expect((await run('https://agents.test/authorize')).status).toBe(400);
+  });
+});
+
 describe('/.well-known', () => {
   it("answers 404 for metadata we don't serve, not the SPA's page", async () => {
     const spa = { fetch: async () => new Response('<!doctype html>', { status: 200 }) };

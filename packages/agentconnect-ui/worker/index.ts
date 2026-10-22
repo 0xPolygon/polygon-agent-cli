@@ -3,7 +3,7 @@
 
 import type { OAuthHelpers } from '@cloudflare/workers-oauth-provider';
 
-import { OAuthProvider } from '@cloudflare/workers-oauth-provider';
+import { AuthorizationError, OAuthProvider } from '@cloudflare/workers-oauth-provider';
 
 import type { McpProps } from './mcp.ts';
 
@@ -352,7 +352,18 @@ async function handleAuthorize(req: Request, env: Env): Promise<Response> {
   if (!signIn || !env.OAUTH_PROVIDER) {
     return new Response('Connecting agents is not configured on this deployment', { status: 503 });
   }
-  const authRequest = await env.OAUTH_PROVIDER.parseAuthRequest(req);
+  let authRequest;
+  try {
+    authRequest = await env.OAUTH_PROVIDER.parseAuthRequest(req);
+  } catch (err) {
+    // A request we can answer: back to the client when its redirect is known.
+    if (err instanceof AuthorizationError) {
+      return err.redirectTo
+        ? Response.redirect(err.redirectTo, 302)
+        : new Response(err.description ?? 'Invalid authorization request', { status: 400 });
+    }
+    throw err;
+  }
   const client = await env.OAUTH_PROVIDER.lookupClient(authRequest.clientId);
   if (!client) return new Response('Unknown client', { status: 400 });
   const id = await signIn.create({ authRequest, clientName: agentName(client.clientName) });
@@ -446,6 +457,10 @@ export default {
     if (!env.OAUTH_KV) return app.fetch(request, env);
     const limited = await limitRegistration(request, env);
     if (limited) return limited;
-    return oauthFor(new URL(request.url).origin).fetch(request, env, ctx);
+    // A copy of env per request: the provider keeps its helpers on env.OAUTH_PROVIDER
+    // and only sets them when missing, so on a shared env the first site served would
+    // answer for the other one too (checking its own /mcp as the resource).
+    const { OAUTH_PROVIDER: _shared, ...own } = env;
+    return oauthFor(new URL(request.url).origin).fetch(request, own, ctx);
   }
 };
