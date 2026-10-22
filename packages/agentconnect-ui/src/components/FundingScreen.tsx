@@ -1,6 +1,8 @@
 import { Fund } from '0xtrails/widget';
+import { Check, Copy } from 'lucide-react';
 
 import { trailsApiKey } from '../config';
+import { shortAddr, useCopy } from '../dashboard/ui.js';
 
 interface FundingScreenProps {
   walletAddress: string;
@@ -73,6 +75,7 @@ export function parseFundAmount(raw: string | null | undefined): string | undefi
 }
 
 export function FundingScreen({ walletAddress, chainId, amount, onSkip }: FundingScreenProps) {
+  const [copied, copy] = useCopy();
   return (
     <div className="w-full max-w-sm animate-scale-in">
       {/* Card */}
@@ -121,6 +124,21 @@ export function FundingScreen({ walletAddress, chainId, amount, onSkip }: Fundin
                 setTimeout(onSkip, 3000);
               }}
             />
+          </div>
+
+          {/* Or send straight to the address from another wallet or exchange. */}
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <span className="text-[#64708f] font-medium">Or send on Polygon to</span>
+            <button
+              type="button"
+              onClick={() => copy('address', walletAddress)}
+              aria-label={copied ? 'Address copied' : 'Copy wallet address'}
+              title={walletAddress}
+              className="inline-flex items-center gap-1.5 font-mono text-[13px] text-[#141635] hover:text-[#7c3aed] transition-colors cursor-pointer border-0 bg-transparent p-0"
+            >
+              {shortAddr(walletAddress)}
+              {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+            </button>
           </div>
         </div>
       </div>
