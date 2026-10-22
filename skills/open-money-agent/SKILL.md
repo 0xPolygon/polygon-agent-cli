@@ -33,6 +33,8 @@ POLYGON_AGENT=<workspace>/.polygon-agent/bin/polygon-agent
 - Every command is `"$POLYGON_AGENT" …`, run by that absolute path (quoted), since nothing is on `PATH`. Commands in the CLI's output (`next`, `command`) and in the references say `polygon-agent …` or `agent …`; run those by the same path.
 - Output is JSON: `{"ok": true, …}`, or `{"ok": false, "error", "code", "hint", "command"}`. On an error, tell the user what `error` means in plain words and follow `hint` and `command`. Check `--help` before assuming a flag.
 
+**Can't run commands here?** If you can connect to remote MCP servers instead, Open Money Agent's MCP server is `https://agents.polygon.technology/mcp` (OAuth). Give the user that URL to add as a connector. They sign in with their email or Google and allow it, and you can then see the wallet's address, what it holds and their dashboard link. Spending, trading and Polymarket need the CLI.
+
 ## 2. Status first, every time
 
 Run `"$POLYGON_AGENT" wallet status` before any other wallet command, in every conversation, and act on it:
