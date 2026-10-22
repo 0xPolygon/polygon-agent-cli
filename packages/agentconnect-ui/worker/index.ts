@@ -367,6 +367,8 @@ const app = {
 
     if (url.pathname === '/authorize') return handleAuthorize(request, env);
     if (url.pathname === '/.well-known/openai-apps-challenge') return openaiChallenge(env);
+    // The OAuth provider answers its own metadata; anything else here is not ours.
+    if (url.pathname.startsWith('/.well-known/')) return new Response('Not found', { status: 404 });
     if (url.pathname.startsWith('/api/connect'))
       return handleConnectApi(request, env, url.pathname);
     if (url.pathname === '/api/agents' || url.pathname.startsWith('/api/agents/'))

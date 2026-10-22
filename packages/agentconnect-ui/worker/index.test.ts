@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from './index.ts';
 
-import {
+import worker, {
   agentName,
   handleAgentsApi,
   handleConnectApi,
@@ -355,6 +355,23 @@ describe('openaiChallenge', () => {
     expect(await res.text()).toBe('tok_123');
     expect(openaiChallenge(env()).status).toBe(404);
     expect(openaiChallenge(env({ OPENAI_APPS_CHALLENGE: '' })).status).toBe(404);
+  });
+});
+
+describe('/.well-known', () => {
+  it("answers 404 for metadata we don't serve, not the SPA's page", async () => {
+    const spa = { fetch: async () => new Response('<!doctype html>', { status: 200 }) };
+    for (const path of [
+      '/.well-known/openid-configuration',
+      '/.well-known/oauth-authorization-server/mcp'
+    ]) {
+      const res = await worker.fetch(
+        new Request(`https://agentconnect.test${path}`),
+        env({ ASSETS: spa as unknown as Fetcher }),
+        {} as ExecutionContext
+      );
+      expect(res.status).toBe(404);
+    }
   });
 });
 
