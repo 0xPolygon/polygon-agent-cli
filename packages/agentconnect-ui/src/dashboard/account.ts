@@ -1,5 +1,6 @@
-// The owner's email, remembered per wallet in this browser. Signing in on the
-// site records it; the sidebar shows it in place of the wallet address.
+// The owner's email, remembered per wallet in this browser. Sign-in on the
+// onboarding page and the agent's dashboard link both record it; the sidebar
+// shows it in place of the wallet address.
 
 const key = (wallet: string) => `agentconnect_email_${wallet.toLowerCase()}`;
 

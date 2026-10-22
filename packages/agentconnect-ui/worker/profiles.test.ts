@@ -22,7 +22,10 @@ describe('client profiles', () => {
     expect(policyOf('nope')).toBe(PROFILES.standard);
   });
 
-  it('gives Muse only the wallet tool', () => {
-    expect(PROFILES.muse.tools).toEqual(['get_wallet']);
+  it('keeps Muse to purchases it confirms, with no checkout authorization', () => {
+    expect(PROFILES.muse.confirmEachPurchase).toBe(true);
+    expect(PROFILES.muse.tools).toContain('confirm_purchase');
+    expect(PROFILES.muse.tools).not.toContain('authorize_checkout');
+    expect(PROFILES.standard.tools).not.toContain('confirm_purchase');
   });
 });

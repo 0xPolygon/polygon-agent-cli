@@ -11,8 +11,8 @@ main = "worker/index.ts"
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
-# The site's API and the MCP server's OAuth routes are handled by the worker,
-# never the SPA fallback.
+# The credentials API and the MCP server's OAuth routes are handled by the
+# worker, never the SPA fallback.
 run_worker_first = [
   "/api/*",
   "/mcp",
@@ -23,12 +23,15 @@ run_worker_first = [
   "/.well-known/oauth-protected-resource/*"
 ]
 
-# Sign-in and MCP. Secrets come from the GitHub environment and are uploaded
+# Credentials API. Secrets come from the GitHub environment and are uploaded
 # with each deploy (see .github/workflows/deploy-agentconnect-ui.yml):
-#   AGENT_CERT_SECRET  random 32+ bytes; signs the owner's session cookie
-#   CREDENTIALS_KEY    random 32+ bytes; seals sign-ins in progress in KV
+#   AGENT_CERT_SECRET  random 32+ bytes; signs agent certificates
+#   CREDENTIALS_KEY    random 32+ bytes; seals saved details in KV
+#   AGENTCARD_CLIENT_ID / AGENTCARD_CLIENT_SECRET  AgentCard client credentials (cards)
 #   INDEXER_ACCESS_KEY the dashboard's indexer key; balances for the MCP server
-# The MCP server needs the OAUTH_KV namespace; without it /mcp is not served.
+# Saved details live in the CREDENTIALS KV namespace. Without it, or without
+# CREDENTIALS_KEY, the address endpoints answer 503. The MCP server needs the
+# OAUTH_KV namespace too; without it /mcp is not served.
 
 # Drop the old SessionRelay Durable Object carried over from connector-ui.
 [[migrations]]
@@ -38,11 +41,12 @@ deleted_classes = ["SessionRelay"]
 [env.staging]
 name = "agentconnect-staging"
 # Its own list: the top-level SessionRelay migration must not apply here. v3
-# added a per-wallet payment lock for card purchases; v4 drops it while cards
-# are built on their own branch.
+# added the per-wallet payment lock (worker/wallet-lock.ts), v4 deleted it while
+# cards were off staging, and v5 brings it back.
 migrations = [
   { tag = "v3", new_sqlite_classes = ["WalletLock"] },
-  { tag = "v4", deleted_classes = ["WalletLock"] }
+  { tag = "v4", deleted_classes = ["WalletLock"] },
+  { tag = "v5", new_sqlite_classes = ["WalletLock"] }
 ]
 
 # staging.agents.polygon.technology serves the staging install guide and skills
@@ -55,10 +59,19 @@ routes = [
 # No migrations: the staging worker never had the SessionRelay class, and
 # Cloudflare refuses to delete a class that doesn't exist.
 
-# MCP: the OAuth provider's clients, grants, and tokens, plus pending sign-ins.
 # No id: wrangler creates the namespace on the first deploy.
 [[env.staging.kv_namespaces]]
+binding = "CREDENTIALS"
+
+# MCP: the OAuth provider's clients, grants, and tokens, plus pending sign-ins.
+[[env.staging.kv_namespaces]]
 binding = "OAUTH_KV"
+
+# One Durable Object per wallet, so a payment is claimed once. No route reaches
+# it: only this worker, through the binding.
+[[env.staging.durable_objects.bindings]]
+name = "WALLET_LOCK"
+class_name = "WalletLock"
 
 # MCP client registration (/oauth/register) is open to any app: at most 10 a
 # minute from one address. namespace_id is any number unique to this account.
@@ -69,9 +82,9 @@ simple = { limit = 10, period = 60 }
 
 [env.production]
 name = "agentconnect-production"
-# Explicitly empty: the SessionRelay class was deleted long ago,
+# Its own list, as for staging: the SessionRelay class was deleted long ago,
 # and wrangler now refuses to delete a class that doesn't exist.
-migrations = []
+migrations = [{ tag = "v3", new_sqlite_classes = ["WalletLock"] }]
 
 # agents.polygon.technology serves the assistant install guide (/skill.md)
 # and the skills from the same assets.
@@ -84,3 +97,7 @@ routes = [
 name = "REGISTER_LIMITER"
 namespace_id = "4102"
 simple = { limit = 10, period = 60 }
+
+[[env.production.durable_objects.bindings]]
+name = "WALLET_LOCK"
+class_name = "WalletLock"

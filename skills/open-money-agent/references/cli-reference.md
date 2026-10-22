@@ -31,6 +31,7 @@ agent wallet allowance set [--amount <usd>] [--add <token>[@<chain>]] [--chains 
 agent wallet allowance renew [--days <n>]                 # new sign-in
 agent wallet withdraw --to <addr> --token <SYM> --amount <n> [--chain <chain>]           # as the owner; new sign-in
 agent wallet access [--revoke <credentialId>] [--session <id>]                           # new sign-in
+agent wallet link-credentials [--email <email>]                                          # new sign-in: saved address and cards
 ```
 
 ### Operations
@@ -43,6 +44,10 @@ agent swap --to <SYM> (--amount <num|n%|all> | --amount-usd <usd> | --to-amount 
 agent swap --intent <intentId> --broadcast          # execute a quote from a dry run
 agent swap status --intent <intentId>               # follow a trade still in progress
 agent deposit --asset <SYM> --amount <num> [--protocol aave|morpho] [--vault <addr>] [--chain <c>] [--broadcast]
+agent credentials address [--name ... --line1 ... --city ... --state ... --zip ... --country ...] [--clear]
+agent credentials status | cards | cards add | cards wait --session <id>
+agent buy "<what>" | --conversation <id> "<answer>" | --approval <id> --wait     # shopping reference
+agent checkout --merchant <store> --url <page> --total <usd> [--item "1x Name"]
 agent withdraw --position <addr> --amount <num|max> [--chain <chain>] [--broadcast]
 agent fund [--wallet <n>]
 agent x402-pay --url <url> --wallet <n> [--chain <chain>] [--method GET] [--body <str>] [--header Key:Value] [--max-usd <usd>] [--yes] [--broadcast] [--dry-run]
