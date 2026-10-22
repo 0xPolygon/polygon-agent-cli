@@ -18,8 +18,8 @@
         "category": "Finance",
         "capabilities": ["Read"],
         "websiteURL": "https://agents.polygon.technology",
-        "privacyPolicyURL": "https://polygon.technology/privacy-policy",
-        "termsOfServiceURL": "https://polygon.technology/terms-of-use",
+        "privacyPolicyURL": "https://dashboard.polygon.technology/privacy-policy.pdf",
+        "termsOfServiceURL": "https://dashboard.polygon.technology/tos",
         "defaultPrompt": [
           "What's in my agent wallet?",
           "What's my agent wallet address?",

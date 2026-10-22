@@ -26,7 +26,7 @@ Polygon Labs identity (business verification in the organization settings).
    serves it at `/.well-known/openai-apps-challenge`.
 3. Connect the MCP server (OAuth, DCR), sign in with the reviewer account, then scan tools.
 4. Fill in the review details below and the support URL
-   (`https://github.com/0xPolygon/polygon-agent-cli/issues`), then submit.
+   (`https://support.polygon.technology/support/home`), then submit.
 
 Redirect URI: ChatGPT registers its own through `/oauth/register`; nothing to allowlist. The
 authorization server names itself (`iss`) on every response, so ChatGPT uses
