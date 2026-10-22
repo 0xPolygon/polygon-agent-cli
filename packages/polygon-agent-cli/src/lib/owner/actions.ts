@@ -15,7 +15,6 @@ import type { Plan, PlanChain } from '../session/plan.ts';
 import type { RacSlot } from '../session/rac.ts';
 import type { OwnerContext } from './requests.ts';
 
-import { enrollAgent } from '../credentials/agent.ts';
 import { CliError, httpStatus, mapOmsError } from '../errors.ts';
 import { makeFeeSelector } from '../oms-tx.ts';
 import { polymarketOwnerStep } from '../polymarket/owner-step.ts';
@@ -650,9 +649,6 @@ async function runAction(params: {
       return { action: 'withdraw', ...(await withdraw({ ...params, action })) };
     case 'access':
       return { action: 'access', ...(await access({ ...params, revoke: action.revoke })) };
-    case 'link-credentials':
-      // runOwnerAction links the agent key; there's nothing else to do.
-      return { action: 'link-credentials' };
     case 'owner':
       return { action: 'owner', ...(await keepSignedIn(params)) };
   }
@@ -672,15 +668,6 @@ export async function runOwnerAction(params: {
   }).catch((error: unknown) => [
     `retry failed: ${error instanceof Error ? error.message : String(error)}`
   ]);
-  // Same sign-in: link the agent's credentials key (saved address). Before
-  // the Polymarket step, which can switch the owner session to another wallet.
-  // Never throws.
-  const credentials = await enrollAgent({
-    wallet: params.wallet,
-    owner: params.context.owner.wallet,
-    walletAddress: params.context.walletAddress,
-    force: params.context.request.action.kind === 'link-credentials'
-  });
   // Same sign-in, no extra code: back up the Polymarket trading key. Never throws.
   const polymarket = await polymarketOwnerStep({
     wallet: params.wallet,
@@ -695,7 +682,6 @@ export async function runOwnerAction(params: {
   return {
     ...result,
     ...(pending.length > 0 ? { keysPendingRevocation: pending } : {}),
-    credentials,
     polymarket
   };
 }

@@ -33,8 +33,6 @@ export type OwnerAction =
       amount: bigint;
     }
   | { kind: 'access'; revoke?: { credentialId: string; sessionId?: string } }
-  // Sign in only so the agent can link its credentials key (done for every owner action).
-  | { kind: 'link-credentials' }
   // The sign-in is kept as this install's own (no allowance), for what only the
   // owner can sign: a Polymarket account whose key is held in OMS.
   | { kind: 'owner' };
@@ -84,7 +82,6 @@ const OwnerActionSchema = z.discriminatedUnion('kind', [
     kind: z.literal('access'),
     revoke: z.object({ credentialId: z.string(), sessionId: z.string().optional() }).optional()
   }),
-  z.object({ kind: z.literal('link-credentials') }),
   z.object({ kind: z.literal('owner') })
 ]);
 
@@ -128,7 +125,6 @@ function actionToJson(action: OwnerAction): unknown {
     case 'withdraw':
       return { ...action, amount: action.amount.toString() };
     case 'access':
-    case 'link-credentials':
     case 'owner':
       return action;
   }

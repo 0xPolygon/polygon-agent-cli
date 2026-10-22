@@ -69,7 +69,6 @@ Do the request. If they already asked for something, setup is not the end: carry
 | buy, sell, swap or bridge a token | [trade](references/trade.md) |
 | earn yield, deposit into or withdraw from a vault | [earn](references/earn.md) |
 | watch a price, get alerts, trade when a price is hit | [watches](references/watches.md) |
-| save, change or check a shipping address | [shopping](references/shopping.md) |
 | see odds, bet, manage Polymarket positions or winnings | [polymarket](references/polymarket.md) |
 | use a paid service: web search, scraping, news, inference (x402) | [paid services](references/paid-services.md) |
 | register the agent on-chain, reputation, reviews (ERC-8004) | [identity](references/identity.md) |

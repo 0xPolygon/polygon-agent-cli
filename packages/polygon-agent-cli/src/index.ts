@@ -14,7 +14,6 @@ import {
   reputationCommand,
   reviewsCommand
 } from './commands/agent.ts';
-import { credentialsCommand } from './commands/credentials.ts';
 import { modeCommand } from './commands/mode.ts';
 import {
   balancesCommand,
@@ -72,7 +71,6 @@ const parser = yargs(hideBin(process.argv))
   .command(reviewsCommand)
   .command(feedbackCommand)
   .command(polymarketCommand)
-  .command(credentialsCommand)
   .command(workspaceCommand)
   .command(skillsCommand)
   .command(updateCommand);

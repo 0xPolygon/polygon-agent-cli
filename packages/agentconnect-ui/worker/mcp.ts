@@ -2,7 +2,7 @@
 // agents that can't run the CLI. The OAuth provider in front of it has already
 // checked the bearer token; `props` names the wallet the owner signed in with.
 //
-// It covers what needs no wallet signature: balances and the saved address.
+// It covers what needs no wallet signature: the wallet and its balances.
 // Moving tokens stays with the CLI, which holds the keys.
 //
 // What a connection sees depends on its profile (profiles.ts): which tools.
@@ -11,8 +11,6 @@ import type { Env } from './index.ts';
 import type { Profile, ProfilePolicy } from './profiles.ts';
 
 import { policyOf } from './profiles.ts';
-import { store } from './services.ts';
-import { parseAddress, ValidationError } from './shipping.ts';
 
 export interface McpProps {
   wallet: string;
@@ -24,18 +22,7 @@ export interface McpProps {
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const SERVER = { name: 'polygon-agent-wallet', title: 'Polygon agent wallet', version: '1.0.0' };
 
-const INSTRUCTIONS = `The owner's Polygon agent wallet: what it holds and their saved shipping address. Never repeat the shipping address unless the owner asks for it. Sending, swapping, or predicting with the wallet's funds needs the Polygon agent CLI (npx skills add https://github.com/0xPolygon/polygon-agent-cli).`;
-
-const ADDRESS_PROPS = {
-  name: { type: 'string', description: 'Recipient full name' },
-  line1: { type: 'string', description: 'Street address' },
-  line2: { type: 'string', description: 'Apartment or suite (optional)' },
-  city: { type: 'string' },
-  state: { type: 'string', description: 'State or region, e.g. CA' },
-  zip: { type: 'string', description: 'ZIP or postal code' },
-  country: { type: 'string', description: 'Country code, e.g. US' },
-  phone: { type: 'string', description: 'Phone for delivery' }
-};
+const INSTRUCTIONS = `The owner's Polygon agent wallet: what it holds. Sending, swapping, or predicting with the wallet's funds needs the Polygon agent CLI (npx skills add https://github.com/0xPolygon/polygon-agent-cli).`;
 
 const TOOLS = [
   {
@@ -45,24 +32,6 @@ const TOOLS = [
       "The wallet's address, what it holds in US dollars, and the owner's dashboard link.",
     inputSchema: { type: 'object', properties: {} },
     annotations: { readOnlyHint: true }
-  },
-  {
-    name: 'get_shipping_address',
-    title: 'Shipping address',
-    description: "The owner's saved shipping address, or null.",
-    inputSchema: { type: 'object', properties: {} },
-    annotations: { readOnlyHint: true }
-  },
-  {
-    name: 'save_shipping_address',
-    title: 'Save shipping address',
-    description: 'Save or replace the shipping address. Only with the owner saying so.',
-    inputSchema: {
-      type: 'object',
-      properties: ADDRESS_PROPS,
-      required: ['name', 'line1', 'city', 'state', 'zip', 'country']
-    },
-    annotations: { readOnlyHint: false, idempotentHint: true }
   }
 ];
 
@@ -109,18 +78,7 @@ async function walletHoldings(env: Env, wallet: string) {
   return { totalUsd: Math.round(rows.reduce((t, r) => t + r.usd, 0) * 100) / 100, holdings: rows };
 }
 
-async function callTool(
-  env: Env,
-  props: McpProps,
-  name: string,
-  args: Record<string, unknown>,
-  origin: string
-) {
-  const db = store(env);
-  const need = () => {
-    if (!db) throw new ValidationError('Saved details are not configured on this server.');
-    return db;
-  };
+async function callTool(env: Env, props: McpProps, name: string, origin: string) {
   switch (name) {
     case 'get_wallet':
       return {
@@ -130,13 +88,6 @@ async function callTool(
         ...((await walletHoldings(env, props.wallet)) ?? {}),
         dashboardUrl: `${origin}/?wallet=${props.wallet}&chain=137&view=dashboard`
       };
-    case 'get_shipping_address':
-      return { address: (await need().get(props.wallet)).address ?? null };
-    case 'save_shipping_address': {
-      const address = parseAddress(args);
-      await need().update(props.wallet, (r) => ({ ...r, address }));
-      return { address };
-    }
     default:
       return undefined;
   }
@@ -159,18 +110,14 @@ async function handleMessage(env: Env, props: McpProps, msg: Rpc, origin: string
     case 'tools/list':
       return rpcResult(msg.id, { tools: toolsFor(policy) });
     case 'tools/call': {
-      const p = (msg.params ?? {}) as { name?: string; arguments?: Record<string, unknown> };
+      const p = (msg.params ?? {}) as { name?: string };
       // Checked here too, not only in the list: a hidden tool can't be called by name.
       if (!p.name || !policy.tools.includes(p.name)) {
         return rpcError(msg.id, -32602, `Unknown tool: ${p.name}`);
       }
       try {
-        return rpcResult(
-          msg.id,
-          toolText(await callTool(env, props, p.name, p.arguments ?? {}, origin))
-        );
+        return rpcResult(msg.id, toolText(await callTool(env, props, p.name, origin)));
       } catch (err) {
-        if (err instanceof ValidationError) return rpcResult(msg.id, toolText(err.message, true));
         console.error('[mcp]', err);
         return rpcResult(msg.id, toolText('Something went wrong. Try again.', true));
       }

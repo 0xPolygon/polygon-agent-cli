@@ -13,7 +13,6 @@ import type { OmsLoginMethod } from '../lib/storage.ts';
 
 import { runBrowserLogin } from '../lib/browser-login.ts';
 import { provisionBuilderOnce } from '../lib/builder-provision.ts';
-import { enrollAgent, LINK_TOKEN_TTL_SECONDS, mintAccessToken } from '../lib/credentials/agent.ts';
 import { CliError, jsonFail } from '../lib/errors.ts';
 import { dashboardInfo } from '../lib/funding.ts';
 import { isWalletFunded } from '../lib/indexer.ts';
@@ -36,7 +35,6 @@ import { isTTY, inkRender } from '../ui/render.js';
 import { showFunding } from './operations.ts';
 import {
   accessCommandModule,
-  linkCredentialsCommandModule,
   allowanceCommandModule,
   confirmCommandModule,
   handleKeepSignedIn,
@@ -179,10 +177,6 @@ async function handleOwnerLogin(argv: LoginArgs): Promise<void> {
       return ok;
     }
 
-    // The owner is signed in: link the agent's credentials key. Never throws.
-    const linkCredentials = (mainAddress: string) =>
-      enrollAgent({ wallet: argv.name, owner: oms.wallet, walletAddress: mainAddress });
-
     // The owner is signed in: back up the Polymarket trading key too. Never throws.
     const backUpPolymarket = (mainAddress: string) =>
       polymarketOwnerStep({
@@ -204,7 +198,6 @@ async function handleOwnerLogin(argv: LoginArgs): Promise<void> {
       // A crashed process may have left the session on an imported wallet.
       await ensureMainWallet(argv.name);
       const builderProvisioned = await provisionBuilder(oms.wallet.walletAddress);
-      const credentials = await linkCredentials(oms.wallet.walletAddress);
       const polymarket = await backUpPolymarket(oms.wallet.walletAddress);
       const txMode = await maybeAskTxMode();
       jsonOut({
@@ -213,14 +206,12 @@ async function handleOwnerLogin(argv: LoginArgs): Promise<void> {
         walletAddress: oms.wallet.walletAddress,
         alreadyLoggedIn: true,
         builderProvisioned,
-        credentials,
         polymarket,
         // The wallet's agentconnect page, for the assistant to send after login.
         dashboard: dashboardInfo({
           walletAddress: oms.wallet.walletAddress,
           funded: await isWalletFunded(argv.name, oms.wallet.walletAddress, 137),
-          polymarketAddress: loadAccount(argv.name)?.wallet,
-          credentialsToken: await mintAccessToken(argv.name, LINK_TOKEN_TTL_SECONDS)
+          polymarketAddress: loadAccount(argv.name)?.wallet
         }),
         txMode: txMode ?? loadTxMode(),
         ...(txMode === null ? { modePrompt: MODE_PROMPT } : {})
@@ -301,7 +292,6 @@ async function handleOwnerLogin(argv: LoginArgs): Promise<void> {
 
     const builderProvisioned = await provisionBuilder(walletAddress);
 
-    const credentials = await linkCredentials(walletAddress);
     const polymarket = await backUpPolymarket(walletAddress);
     // One funded check, for the dashboard link and the funding panel.
     const funded = await isWalletFunded(argv.name, walletAddress, 137);
@@ -312,13 +302,11 @@ async function handleOwnerLogin(argv: LoginArgs): Promise<void> {
       walletAddress,
       loginMethod,
       builderProvisioned,
-      credentials,
       polymarket,
       dashboard: dashboardInfo({
         walletAddress,
         funded,
-        polymarketAddress: loadAccount(argv.name)?.wallet,
-        credentialsToken: await mintAccessToken(argv.name, LINK_TOKEN_TTL_SECONDS)
+        polymarketAddress: loadAccount(argv.name)?.wallet
       }),
       txMode: txMode ?? loadTxMode(),
       ...(txMode === null ? { modePrompt: MODE_PROMPT } : {})
@@ -636,7 +624,6 @@ export const walletCommand: CommandModule = {
       .command(allowanceCommandModule)
       .command(withdrawCommandModule)
       .command(accessCommandModule)
-      .command(linkCredentialsCommandModule)
       .demandCommand(1, '')
       .showHelpOnFail(true),
   handler: () => {}

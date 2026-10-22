@@ -63,7 +63,7 @@ jobs:
           # falls back to the production default in src/config.ts).
           VITE_OIDC_RELAY_URL: ${{ vars.VITE_OIDC_RELAY_URL }}
 
-      # Credentials API secrets are uploaded with the deploy. Unset ones are
+      # Sign-in and MCP secrets are uploaded with the deploy. Unset ones are
       # left out (their endpoints answer 503); wrangler never deletes secrets.
       - name: Write worker secrets
         run: >-

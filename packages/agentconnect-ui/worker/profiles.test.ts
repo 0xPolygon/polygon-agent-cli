@@ -22,11 +22,7 @@ describe('client profiles', () => {
     expect(policyOf('nope')).toBe(PROFILES.standard);
   });
 
-  it('gives Muse only the wallet and address tools', () => {
-    expect(PROFILES.muse.tools).toEqual([
-      'get_wallet',
-      'get_shipping_address',
-      'save_shipping_address'
-    ]);
+  it('gives Muse only the wallet tool', () => {
+    expect(PROFILES.muse.tools).toEqual(['get_wallet']);
   });
 });

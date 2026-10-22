@@ -1,9 +1,8 @@
 // The owner's sign-in on the site itself: after an email code or Google
 // sign-in (done by the worker, see owner-signin.ts), the browser holds an
-// HttpOnly cookie naming the agent wallet. The dashboard's saved-details calls
-// accept it in place of an agent's link token, so the site works without one.
+// HttpOnly cookie naming the agent wallet. It lets the owner see and
+// disconnect connected agents, and decide on a connecting one.
 
-import type { AgentIdentity } from './agent-auth.ts';
 import type { SignedIn } from './owner-signin.ts';
 
 import { AuthError, decodeJson, encodeJson, hmac, safeEqual } from './agent-auth.ts';
@@ -70,12 +69,11 @@ export function sessionCookie(req: Request, value: string | null): string {
  * site: SameSite=Lax already keeps the cookie off cross-site posts, and the
  * Origin check covers browsers that send it anyway.
  */
-export async function sessionIdentity(req: Request, secret: string): Promise<AgentIdentity | null> {
+export async function sessionIdentity(req: Request, secret: string): Promise<SignedIn | null> {
   const token = readSessionCookie(req);
   if (!token) return null;
   if (req.method !== 'GET' && req.headers.get('Origin') !== new URL(req.url).origin) {
     throw new AuthError('bad_origin', 'Requests must come from this site');
   }
-  const who = await verifySession(token, secret);
-  return { wallet: who.wallet, agentKey: '', email: who.email };
+  return verifySession(token, secret);
 }
