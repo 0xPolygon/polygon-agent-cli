@@ -35,6 +35,8 @@ export interface Env {
   OMS_PUBLISHABLE_KEY?: string;
   // MCP clients with their own rules: JSON, OAuth client id to profile (profiles.ts).
   MCP_CLIENT_PROFILES?: string;
+  // The token OpenAI's plugin portal asks this domain to serve, to prove we own it.
+  OPENAI_APPS_CHALLENGE?: string;
   // Caps MCP client registrations per address (wrangler.toml ratelimits).
   REGISTER_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
 }
@@ -179,6 +181,8 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
         back.searchParams.set('error', 'access_denied');
         back.searchParams.set('error_description', 'The owner did not allow access');
         if (pending.authRequest.state) back.searchParams.set('state', pending.authRequest.state);
+        // The metadata says every response names the issuer (RFC 9207), errors too.
+        back.searchParams.set('iss', new URL(req.url).origin);
         return json({ redirectTo: back.toString() });
       }
       // The profile is fixed for this connection's life.
@@ -335,6 +339,13 @@ export function agentName(clientName: string | undefined): string {
   return (clientName ?? '').replace(/\s*\([^)]*\)\s*$/, '').trim() || 'An agent';
 }
 
+/** GET /.well-known/openai-apps-challenge: OpenAI's check that we own this domain. */
+export function openaiChallenge(env: Env): Response {
+  return env.OPENAI_APPS_CHALLENGE
+    ? new Response(env.OPENAI_APPS_CHALLENGE, { headers: { 'Content-Type': 'text/plain' } })
+    : new Response('Not found', { status: 404 });
+}
+
 /** GET /authorize: an MCP client wants access. Hand off to the connect page. */
 async function handleAuthorize(req: Request, env: Env): Promise<Response> {
   const signIn = ownerSignIn(env);
@@ -355,6 +366,7 @@ const app = {
     const url = new URL(request.url);
 
     if (url.pathname === '/authorize') return handleAuthorize(request, env);
+    if (url.pathname === '/.well-known/openai-apps-challenge') return openaiChallenge(env);
     if (url.pathname.startsWith('/api/connect'))
       return handleConnectApi(request, env, url.pathname);
     if (url.pathname === '/api/agents' || url.pathname.startsWith('/api/agents/'))
@@ -400,7 +412,7 @@ function oauthFor(origin: string): OAuthProvider<Env> {
         authorization_servers: [origin],
         scopes_supported: ['wallet'],
         bearer_methods_supported: ['header'],
-        resource_name: 'Polygon agent wallet'
+        resource_name: 'Open Money Agent'
       }
     });
     providers.set(origin, p);

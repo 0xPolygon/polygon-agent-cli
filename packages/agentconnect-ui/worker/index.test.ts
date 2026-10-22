@@ -8,6 +8,7 @@ import {
   handleConnectApi,
   isLocalAgent,
   limitRegistration,
+  openaiChallenge,
   handleSessionApi
 } from './index.ts';
 import { issueSession, SESSION_COOKIE } from './owner-session.ts';
@@ -300,6 +301,7 @@ describe('connecting an agent (consent)', () => {
     expect(back.origin + back.pathname).toBe('http://localhost:9999/callback');
     expect(back.searchParams.get('error')).toBe('access_denied');
     expect(back.searchParams.get('state')).toBe('st_1');
+    expect(back.searchParams.get('iss')).toBe(ORIGIN);
     expect(completed).toHaveLength(0);
   });
 
@@ -343,6 +345,16 @@ describe('connecting an agent (consent)', () => {
     );
     expect(crossSite.status).toBe(401);
     expect(revoked).toHaveLength(0);
+  });
+});
+
+describe('openaiChallenge', () => {
+  it('serves the portal token as plain text, and nothing until one is set', async () => {
+    const res = openaiChallenge(env({ OPENAI_APPS_CHALLENGE: 'tok_123' }));
+    expect(res.headers.get('Content-Type')).toBe('text/plain');
+    expect(await res.text()).toBe('tok_123');
+    expect(openaiChallenge(env()).status).toBe(404);
+    expect(openaiChallenge(env({ OPENAI_APPS_CHALLENGE: '' })).status).toBe(404);
   });
 });
 
