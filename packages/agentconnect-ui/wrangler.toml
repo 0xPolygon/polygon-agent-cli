@@ -80,7 +80,7 @@ routes = [
 
 # The domain check for OpenAI's plugin portal: paste the token it shows here.
 [env.production.vars]
-OPENAI_APPS_CHALLENGE = ""
+OPENAI_APPS_CHALLENGE = "LbcJ6AV155LnWC_iwegRgAunGaFiXtVaJgIPxJYxuvs"
 
 # MCP and sign-ins in progress, as for staging. No id: created on the first deploy.
 [[env.production.kv_namespaces]]

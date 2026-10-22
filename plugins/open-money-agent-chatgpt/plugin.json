@@ -1,9 +1,12 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "open-money-agent",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "See what your Open Money Agent wallet on Polygon holds, and open its dashboard.",
-  "author": { "name": "Polygon Labs", "url": "https://agents.polygon.technology" },
+  "author": {
+    "name": "Polygon Labs",
+    "url": "https://agents.polygon.technology"
+  },
   "homepage": "https://agents.polygon.technology",
   "repository": "https://github.com/0xPolygon/polygon-agent-cli",
   "license": "MIT",
@@ -18,7 +21,8 @@
         "category": "Finance",
         "capabilities": ["Read"],
         "websiteURL": "https://agents.polygon.technology",
-        "privacyPolicyURL": "https://dashboard.polygon.technology/privacy-policy.pdf",
+        "supportURL": "https://support.polygon.technology/support/home",
+        "privacyPolicyURL": "https://dashboard.polygon.technology/privacy-policy",
         "termsOfServiceURL": "https://dashboard.polygon.technology/tos",
         "defaultPrompt": [
           "What's in my agent wallet?",
@@ -29,6 +33,61 @@
         "composerIcon": "./assets/logo.png",
         "logo": "./assets/logo.png",
         "screenshots": []
+      },
+      "review": {
+        "test_cases": {
+          "positive": [
+            {
+              "description": "Wallet balance",
+              "prompt": "What's in my agent wallet?",
+              "tools_triggered": "get_wallet",
+              "expected_behavior": "The total the wallet holds in US dollars and each token with its dollar value."
+            },
+            {
+              "description": "Wallet address",
+              "prompt": "What's my agent wallet address?",
+              "tools_triggered": "get_wallet",
+              "expected_behavior": "The connected wallet's 0x address on Polygon."
+            },
+            {
+              "description": "Dashboard link",
+              "prompt": "Give me my Open Money Agent dashboard link",
+              "tools_triggered": "get_wallet",
+              "expected_behavior": "A link to agents.polygon.technology that opens the dashboard for the connected wallet."
+            },
+            {
+              "description": "One token's balance",
+              "prompt": "How much USDC does my agent wallet have?",
+              "tools_triggered": "get_wallet",
+              "expected_behavior": "The USDC holding in US dollars, or that the wallet holds no USDC."
+            },
+            {
+              "description": "Connected account",
+              "prompt": "Which account is my agent wallet connected with?",
+              "tools_triggered": "get_wallet",
+              "expected_behavior": "The email the wallet is signed in with and the wallet's address."
+            }
+          ],
+          "negative": [
+            {
+              "description": "Sending funds is not supported: the plugin only reads the wallet",
+              "prompt": "Send 5 USDC from my agent wallet to 0x000000000000000000000000000000000000dEaD"
+            },
+            {
+              "description": "Swapping tokens is not supported: the plugin only reads the wallet",
+              "prompt": "Swap my USDC for POL"
+            },
+            {
+              "description": "Wallets other than the connected one are not available",
+              "prompt": "What's in vitalik.eth's wallet?"
+            }
+          ]
+        },
+        "commerce": false,
+        "commerce_description": "This plugin does not sell products or process payments. It only reads the connected wallet."
+      },
+      "publication": {
+        "release_notes": "See what your Open Money Agent wallet on Polygon holds, its address, and your dashboard link. Read-only."
       }
     }
   }
