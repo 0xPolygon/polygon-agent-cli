@@ -1,5 +1,15 @@
 # @polygonlabs/agentconnect-ui
 
+## 0.1.1
+
+### Patch Changes
+
+- 6c0f8af: The site serves OpenAI's domain check token, and the ChatGPT listing carries its support link and review test cases.
+- 8191bd3: Ready for ChatGPT: the MCP server is named Open Money Agent, `get_wallet` declares its output and that it only reads the owner's wallet, denying a connection names the issuer like every other response, and the site can serve OpenAI's domain check at `/.well-known/openai-apps-challenge`. The plugin package is `plugins/open-money-agent-chatgpt/`.
+- 18744bc: The fund modal shows the agent wallet's short address with a copy button, for sending funds to it directly.
+- 2551ac0: Connecting an MCP client works on both sites the worker serves: each request checks its own site's `/mcp` as the OAuth resource, so ChatGPT's sign-in no longer fails depending on which site was served first. A bad authorization request now goes back to the client as an OAuth error instead of failing. The skill points assistants that can't run commands to the MCP server.
+- d564966: Unknown `/.well-known` paths answer 404 instead of the site's page, so OAuth clients probing for OpenID metadata move on to the metadata the MCP server does serve.
+
 ## 0.1.0
 
 ### Minor Changes
