@@ -1,5 +1,17 @@
 # Change Log
 
+## 0.17.0
+
+### Minor Changes
+
+- e76475d: `agent deposit --vault <address>` deposits into a specific ERC-4626 vault, such as the Prime, Frontier, and Advanced vaults on Katana that the dashboard offers. The vault must take the `--asset` token; its rate and size come from the Trails Yield API. Katana is now supported for deposits.
+- 0ae28a3: AgentPay is now Open Money Agent. The skill is `skills/open-money-agent/` and the plugin is `open-money-agent` in Claude Code, Codex and Cursor (existing `agentpay` plugin installs need a reinstall under the new name). `workspace init` and `update` install `open-money-agent` and remove the `agentpay` folder they wrote before; `skills show agentpay` still works. The site keeps serving `/agentpay/SKILL.md` and `/agentpay/references/`.
+
+### Patch Changes
+
+- c901f73: The CLI's dashboard links can point at a different site from its login page with `POLYGON_AGENT_CREDENTIALS_URL`.
+- 65768ca: Dashboard links now carry the Polymarket deposit account as `pm`, so the dashboard's Markets tab shows that account's positions.
+
 ## 0.16.0
 
 ### Minor Changes
