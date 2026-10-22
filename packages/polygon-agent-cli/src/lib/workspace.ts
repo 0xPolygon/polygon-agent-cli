@@ -17,14 +17,14 @@ import { z } from 'zod';
 import { shellQuote } from './shell.ts';
 import { cliPackageRoot } from './version.ts';
 
-// The skill workspace init installs: the AgentPay index, with its references
+// The skill workspace init installs: the Open Money Agent index, with its references
 // (references/<topic>.md) beside it.
-export const ASSISTANT_SKILL = 'agentpay';
+export const ASSISTANT_SKILL = 'open-money-agent';
 // Its earlier names (polygon-oms-wallet before 0.15, polygon-agent-wallet
-// until AgentPay). Older skills and setup guides still ask for them.
-export const LEGACY_ASSISTANT_SKILLS = ['polygon-oms-wallet', 'polygon-agent-wallet'];
+// until 0.16, agentpay until 0.17). Older skills and setup guides still ask for them.
+export const LEGACY_ASSISTANT_SKILLS = ['polygon-oms-wallet', 'polygon-agent-wallet', 'agentpay'];
 const REFERENCES = 'references';
-// Skills that became references of the AgentPay skill, by their old names.
+// Skills that became references of the Open Money Agent skill, by their old names.
 const LEGACY_TOPICS: Record<string, string> = {
   'polygon-polymarket': 'polymarket',
   'polymarket-skill': 'polymarket',
@@ -151,7 +151,7 @@ export function bundledSkillsDir(): string | null {
 
 const SKILL_NAME = /^[a-z0-9][a-z0-9-]*$/;
 
-// The AgentPay skill's reference topics, e.g. ['connect', 'polymarket', …].
+// The Open Money Agent skill's reference topics, e.g. ['connect', 'polymarket', …].
 export function listTopics(sourceDir: string | null): string[] {
   if (!sourceDir) return [];
   try {
@@ -165,7 +165,7 @@ export function listTopics(sourceDir: string | null): string[] {
   }
 }
 
-// What `skills show` accepts: each skill, then the AgentPay reference topics.
+// What `skills show` accepts: each skill, then the Open Money Agent reference topics.
 export function listSkills(sourceDir: string | null): string[] {
   if (!sourceDir) return [];
   const skills = fs
@@ -176,7 +176,7 @@ export function listSkills(sourceDir: string | null): string[] {
   return [...skills, ...listTopics(sourceDir)];
 }
 
-// A skill's SKILL.md by name (or an earlier name), else an AgentPay reference by
+// A skill's SKILL.md by name (or an earlier name), else an Open Money Agent reference by
 // topic (or the old skill it replaced).
 export function readSkill(params: { sourceDir: string | null; name: string }): string | null {
   if (!params.sourceDir || !SKILL_NAME.test(params.name)) return null;

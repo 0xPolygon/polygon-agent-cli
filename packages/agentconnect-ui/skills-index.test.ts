@@ -32,10 +32,12 @@ const skill = (name: string, description = 'Does a thing.') =>
   `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n`;
 
 describe('skill index', () => {
-  it("lists the repo's one skill, AgentPay, by the path it's served at", () => {
+  it("lists the repo's one skill, Open Money Agent, by the path it's served at", () => {
     const index = buildSkillIndex(REPO_SKILLS);
     expect(index.$schema).toBe('https://schemas.agentskills.io/discovery/0.2.0/schema.json');
-    expect(index.skills.map((s) => [s.name, s.url])).toEqual([['agentpay', '/agentpay/SKILL.md']]);
+    expect(index.skills.map((s) => [s.name, s.url])).toEqual([
+      ['open-money-agent', '/open-money-agent/SKILL.md']
+    ]);
     for (const entry of index.skills) {
       expect(entry.type).toBe('skill-md');
       expect(entry.digest).toMatch(/^sha256:[0-9a-f]{64}$/);

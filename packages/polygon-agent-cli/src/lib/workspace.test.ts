@@ -23,7 +23,7 @@ function tmpDir(prefix: string): string {
 }
 
 const SKILL =
-  '---\nname: agentpay\ndescription: test\n---\n\n# AgentPay\n\nRun `polygon-agent wallet status`.\n';
+  '---\nname: open-money-agent\ndescription: test\n---\n\n# Open Money Agent\n\nRun `polygon-agent wallet status`.\n';
 const TRADE = '# Trade\n\nRun `polygon-agent swap`.\n';
 
 // A bundled-skills folder holding the assistant skill and one reference.
@@ -70,7 +70,7 @@ describe('initWorkspace', () => {
     const skillPath = path.join(skillsDir, ASSISTANT_SKILL, 'SKILL.md');
     expect(result.skill).toEqual({ name: ASSISTANT_SKILL, installed: true, path: skillPath });
     const installed = fs.readFileSync(skillPath, 'utf8');
-    expect(installed.startsWith('---\nname: agentpay\n')).toBe(true);
+    expect(installed.startsWith('---\nname: open-money-agent\n')).toBe(true);
     expect(installed).toContain(`\`${result.wrapper}\``);
     expect(readInstallRecord(result.state)).toMatchObject({ skillsDir, skillPath });
   });
@@ -269,9 +269,9 @@ describe('skills', () => {
   it('renders the CLI note after the frontmatter', () => {
     const rendered = renderSkill({ markdown: SKILL, wrapper: '/w/bin/polygon-agent' });
     const [, frontmatter, body] = rendered.split('---\n');
-    expect(frontmatter).toBe('name: agentpay\ndescription: test\n');
+    expect(frontmatter).toBe('name: open-money-agent\ndescription: test\n');
     expect(body.startsWith("\n> **This install's CLI:** `/w/bin/polygon-agent`.")).toBe(true);
-    expect(body).toContain('# AgentPay');
+    expect(body).toContain('# Open Money Agent');
   });
 
   it('sets a POLYGON_AGENT placeholder line to the wrapper path', () => {
@@ -306,7 +306,7 @@ describe('skills', () => {
     expect(fs.readdirSync(cwd)).toEqual([]);
   });
 
-  it("renders the repo's agentpay skill for a wrapper", () => {
+  it("renders the repo's open-money-agent skill for a wrapper", () => {
     const repoSkills = path.resolve(import.meta.dirname, '..', '..', '..', '..', 'skills');
     const markdown = readSkill({ sourceDir: repoSkills, name: ASSISTANT_SKILL });
     expect(markdown).not.toBeNull();
@@ -314,7 +314,7 @@ describe('skills', () => {
     const rendered = renderSkill({ markdown: markdown ?? '', wrapper });
     const lines = rendered.split('\n').filter((l) => l.startsWith('POLYGON_AGENT='));
     expect(lines).toEqual([`POLYGON_AGENT=${shellQuote(wrapper)}`]);
-    expect(rendered).toMatch(/^---\nname: agentpay\n/);
+    expect(rendered).toMatch(/^---\nname: open-money-agent\n/);
     expect(rendered).toContain(`> **This install's CLI:** \`${wrapper}\``);
   });
 
@@ -344,12 +344,15 @@ describe('skills', () => {
     expect(fs.existsSync(stale)).toBe(false);
   });
 
-  it.each(LEGACY_ASSISTANT_SKILLS)('installs AgentPay when asked by an old name (%s)', (old) => {
-    const skillsDir = tmpDir('pa-skills-');
-    const file = installSkill({ sourceDir: skillSource(), name: old, skillsDir });
-    expect(file).toBe(path.join(skillsDir, ASSISTANT_SKILL, 'SKILL.md'));
-    expect(readSkill({ sourceDir: skillSource(), name: old })).toBe(SKILL);
-  });
+  it.each(LEGACY_ASSISTANT_SKILLS)(
+    'installs Open Money Agent when asked by an old name (%s)',
+    (old) => {
+      const skillsDir = tmpDir('pa-skills-');
+      const file = installSkill({ sourceDir: skillSource(), name: old, skillsDir });
+      expect(file).toBe(path.join(skillsDir, ASSISTANT_SKILL, 'SKILL.md'));
+      expect(readSkill({ sourceDir: skillSource(), name: old })).toBe(SKILL);
+    }
+  );
 
   it('shows a reference by topic, or by the old skill it replaced', () => {
     const sourceDir = skillSource();

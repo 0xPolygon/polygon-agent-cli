@@ -1,15 +1,15 @@
 // The wallet funding page (Trails on-ramp + swap): the agentconnect dashboard
-// (same host as the login page), which reads ?wallet&chain&view&amount.
-// POLYGON_AGENT_FUNDING_UI overrides per environment.
+// (POLYGON_AGENT_CREDENTIALS_URL, else the login page's host), which reads
+// ?wallet&chain&view&amount. POLYGON_AGENT_FUNDING_UI overrides.
 
-import { loginUiBaseUrl } from './oms-client.ts';
+import { credentialsBaseUrl } from './oms-client.ts';
 
 // The Polymarket bridge's minimum, and so the smallest amount worth asking for.
 export const MIN_FUNDING_USD = 2;
 
 export function fundingUiBase(): string {
   const v = process.env.POLYGON_AGENT_FUNDING_UI;
-  return v ? v.replace(/\/+$/, '') : loginUiBaseUrl();
+  return v ? v.replace(/\/+$/, '') : credentialsBaseUrl();
 }
 
 export type FundingView = 'fund' | 'dashboard';
@@ -39,14 +39,20 @@ export function fundingInfo(params: {
 
 // The wallet's page on agentconnect, sent after every connect and by `wallet
 // status`: the fund view while the wallet is empty, the dashboard after.
-export function dashboardInfo(params: { walletAddress: string; funded: boolean }): {
+// `polymarketAddress` is the Polymarket deposit (trading) account, where
+// positions live; the dashboard reads it as `pm`.
+export function dashboardInfo(params: {
+  walletAddress: string;
+  funded: boolean;
+  polymarketAddress?: string | null;
+}): {
   url: string;
 } {
-  return {
-    url: fundingUrl({
-      walletAddress: params.walletAddress,
-      chainId: 137,
-      view: params.funded ? 'dashboard' : 'fund'
-    })
-  };
+  let url = fundingUrl({
+    walletAddress: params.walletAddress,
+    chainId: 137,
+    view: params.funded ? 'dashboard' : 'fund'
+  });
+  if (params.polymarketAddress) url += `&pm=${params.polymarketAddress}`;
+  return { url };
 }

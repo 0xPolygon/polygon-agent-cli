@@ -1,6 +1,6 @@
 {
-  "name": "agentpay",
-  "description": "AgentPay, your own agent for payments on the Open Money Stack (OMS), spending only within a limit you approve: balances, prices and watches, swaps and bridges, Polymarket, and x402 paid services, through the polygon-agent CLI.",
+  "name": "open-money-agent",
+  "description": "Open Money Agent, your own agent for payments on the Open Money Stack (OMS), spending only within a limit you approve: balances, prices and watches, swaps and bridges, Polymarket, and x402 paid services, through the polygon-agent CLI.",
   "author": { "name": "Polygon Labs", "url": "https://agents.polygon.technology" },
   "homepage": "https://agents.polygon.technology",
   "repository": "https://github.com/0xPolygon/polygon-agent-cli",
@@ -16,14 +16,14 @@
   ],
   "skills": "./skills/",
   "interface": {
-    "displayName": "AgentPay",
+    "displayName": "Open Money Agent",
     "shortDescription": "Your own agent for payments on the Open Money Stack",
-    "longDescription": "AgentPay, your own agent for payments on the Open Money Stack (OMS), spending only within a limit you approve: balances, prices and watches, swaps and bridges, Polymarket, and x402 paid services, through the polygon-agent CLI.",
+    "longDescription": "Open Money Agent, your own agent for payments on the Open Money Stack (OMS), spending only within a limit you approve: balances, prices and watches, swaps and bridges, Polymarket, and x402 paid services, through the polygon-agent CLI.",
     "developerName": "Polygon Labs",
     "category": "Payments",
     "capabilities": [],
     "websiteURL": "https://agents.polygon.technology",
-    "defaultPrompt": ["Set up my AgentPay wallet"],
+    "defaultPrompt": ["Set up my Open Money Agent wallet"],
     "screenshots": [],
     "composerIcon": "./assets/polygon.svg",
     "logo": "./assets/polygon.svg"

@@ -63,3 +63,13 @@ export function loginUiBaseUrl(): string {
   const v = process.env.POLYGON_AGENT_LOGIN_UI;
   return v ? v.replace(/\/+$/, '') : DEFAULT_LOGIN_UI;
 }
+
+/**
+ * Base URL of the agentconnect site that shows the wallet's dashboard: the
+ * login page's site unless POLYGON_AGENT_CREDENTIALS_URL says otherwise, so
+ * sign-in and the dashboard can run on different deployments.
+ */
+export function credentialsBaseUrl(): string {
+  const v = process.env.POLYGON_AGENT_CREDENTIALS_URL;
+  return v ? v.replace(/\/+$/, '') : loginUiBaseUrl();
+}

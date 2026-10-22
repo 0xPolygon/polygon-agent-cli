@@ -1,0 +1,9 @@
+{
+  "name": "open-money-agent",
+  "description": "Open Money Agent, your own agent for payments on the Open Money Stack (OMS), spending only within a limit you approve: balances, prices and watches, swaps and bridges, Polymarket, and x402 paid services, through the polygon-agent CLI.",
+  "author": { "name": "Polygon Labs" },
+  "homepage": "https://agents.polygon.technology",
+  "repository": "https://github.com/0xPolygon/polygon-agent-cli",
+  "license": "MIT",
+  "skills": "./skills/"
+}

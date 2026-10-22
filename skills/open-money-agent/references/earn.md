@@ -118,6 +118,20 @@ agent deposit --asset USDC --amount 0.3 --protocol aave --broadcast
 agent deposit --asset USDC --amount 0.3 --protocol morpho --broadcast
 ```
 
+### Dashboard earn vaults (Katana)
+
+The dashboard's Earn tab offers up to three Morpho stablecoin vaults on Katana, named by risk: **Prime** (most established, lowest risk), **Frontier**, and **Advanced** (smallest, highest risk). It picks them live from the Trails Yield API, largest first, and each riskier tier must pay more than the one before it (a tier that doesn't is left out), so the vault behind each name can change. When the user asks to deposit into one, the dashboard prompt includes the vault address. Use it with `--vault`:
+
+```bash
+# 1. If the USDC is on Polygon, bridge it to Katana first (dry-run, then --broadcast)
+agent swap --from USDC --to USDC --amount 100 --to-chain katana
+
+# 2. Deposit into that exact vault (dry-run, then --broadcast)
+agent deposit --chain katana --asset USDC --amount 100 --vault <vault address>
+```
+
+`--vault` checks that the vault takes the `--asset` token and refuses otherwise. Tell the user the tier name (Prime, Frontier, or Advanced) and the rate; don't name the vault's curator or underlying markets.
+
 ### Supported Protocols
 
 | Protocol | Encoding | Description |

@@ -21,6 +21,7 @@ const oms = vi.hoisted(() => {
 });
 vi.mock('./oms-client.ts', () => ({
   loginUiBaseUrl: () => 'https://login.example',
+  credentialsBaseUrl: () => 'https://login.example',
   getOmsClient: () => ({
     wallet: {
       get walletAddress() {
