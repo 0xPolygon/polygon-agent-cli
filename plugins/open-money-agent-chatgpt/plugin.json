@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "open-money-agent",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "See what your Open Money Agent wallet on Polygon holds, and open its dashboard.",
   "author": {
     "name": "Polygon Labs",
@@ -41,7 +41,7 @@
               "description": "Wallet balance",
               "prompt": "What's in my agent wallet?",
               "tools_triggered": "get_wallet",
-              "expected_behavior": "The total the wallet holds in US dollars and each token with its dollar value."
+              "expected_behavior": "The total the wallet holds in US dollars and each token with its dollar value. A new wallet that hasn't been funded reports $0 and no tokens."
             },
             {
               "description": "Wallet address",
@@ -59,7 +59,7 @@
               "description": "One token's balance",
               "prompt": "How much USDC does my agent wallet have?",
               "tools_triggered": "get_wallet",
-              "expected_behavior": "The USDC holding in US dollars, or that the wallet holds no USDC."
+              "expected_behavior": "The wallet's USDC in US dollars, or that it holds no USDC (as for a new, unfunded wallet)."
             },
             {
               "description": "Connected account",

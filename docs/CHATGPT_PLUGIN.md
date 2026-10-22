@@ -34,8 +34,9 @@ authorization server names itself (`iss`) on every response, so ChatGPT uses
 
 ## Review details
 
-Reviewer account: a dedicated account that signs in without an email code (reviewers can't use
-MFA, codes or magic links), with a little USDC on Polygon so `get_wallet` has holdings to show.
+Reviewer account: choose **Magic link or email code** in the review form. OpenAI gives the
+reviewer email (`mcp-review@theaicompany.org`), which signs in on the connect page with an email
+code. Its wallet is created on first sign-in and starts empty, so the test cases allow for $0.
 Credentials go in the portal's secure form only.
 
 Positive test cases (expected tool: `get_wallet` for each):
