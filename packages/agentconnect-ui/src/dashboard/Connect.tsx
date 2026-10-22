@@ -1,4 +1,4 @@
-import { Ban, Eye } from 'lucide-react';
+import { Ban, Eye, MapPin } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { LogoBadge } from '../App.js';
@@ -38,6 +38,7 @@ interface Consent {
 // What the agent gets, in the owner's words. Moving money stays with the CLI.
 const PERMISSIONS = [
   { icon: Eye, text: 'See your balance and what you hold' },
+  { icon: MapPin, text: 'Read and save your shipping address' },
   { icon: Ban, text: "It can't send or withdraw your money" }
 ];
 

@@ -183,7 +183,7 @@ The CLI ships with agent-friendly documentation designed to be consumed directly
 
 Once installed, the agent receives the full skill context — including wallet setup, token operations, and ERC-8004 registration, and can execute autonomously.
 
-See the Open Money Agent skill ([`skills/open-money-agent/`](https://github.com/0xPolygon/polygon-agent-cli/tree/main/skills/open-money-agent)) for the agent-facing guide; every command is in its [CLI reference](https://github.com/0xPolygon/polygon-agent-cli/blob/main/skills/open-money-agent/references/cli-reference.md).
+See the AgentPay skill ([`skills/agentpay/`](https://github.com/0xPolygon/polygon-agent-cli/tree/main/skills/agentpay)) for the agent-facing guide; every command is in its [CLI reference](https://github.com/0xPolygon/polygon-agent-cli/blob/main/skills/open-money-agent/references/cli-reference.md).
 
 ---
 

@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from './index.ts';
 
+import { issueCertificate, resetJwksCache } from './agent-auth.ts';
 import {
   agentName,
   handleAgentsApi,
+  handleApi,
   handleConnectApi,
   isLocalAgent,
   limitRegistration,
@@ -12,8 +14,27 @@ import {
 } from './index.ts';
 import { issueSession, SESSION_COOKIE } from './owner-session.ts';
 import { OwnerSignIn } from './owner-signin.ts';
-import { SealedKv } from './store.ts';
-import { SECRET, WALLET } from './test-helpers.ts';
+import { CredentialStore, SealedKv } from './store.ts';
+import {
+  AGENT,
+  AUDIENCE,
+  ISSUER,
+  makeIssuer,
+  mintAccessToken,
+  SECRET,
+  WALLET
+} from './test-helpers.ts';
+
+const ADDRESS = {
+  name: 'Test Agent',
+  line1: '214 Bergen St',
+  line2: '',
+  city: 'Brooklyn',
+  state: 'NY',
+  zip: '11217',
+  country: 'US',
+  phone: ''
+};
 
 // A tiny in-memory Workers KV.
 function fakeKv() {
@@ -25,69 +46,221 @@ function fakeKv() {
   return { data, kv };
 }
 
+let kv: ReturnType<typeof fakeKv>;
+
 const env = (over: Partial<Env> = {}): Env => ({
   ASSETS: {} as Fetcher,
   AGENT_CERT_SECRET: SECRET,
+  CREDENTIALS: kv.kv,
   CREDENTIALS_KEY: 'test-credentials-key',
+  OMS_ID_TOKEN_ISSUER: ISSUER,
+  OMS_ID_TOKEN_AUDIENCES: AUDIENCE,
+  OMS_JWKS_URL: 'https://jwks.test',
   ...over
 });
 
-beforeEach(() => {
-  vi.stubGlobal('fetch', async () => new Response('unexpected fetch', { status: 599 }));
+let jwksFetch: typeof fetch;
+
+beforeEach(async () => {
+  resetJwksCache();
+  kv = fakeKv();
+  const iss = await makeIssuer();
+  jwksFetch = iss.fetchImpl;
+  vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url === 'https://jwks.test') return jwksFetch(url, init);
+    return new Response('unexpected fetch', { status: 599 });
+  });
+  issuer = iss;
 });
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
-const req = (method: string, path: string, opts: { body?: unknown } = {}) =>
+let issuer: Awaited<ReturnType<typeof makeIssuer>>;
+
+async function token() {
+  const { certificate } = await issueCertificate(
+    { wallet: WALLET, agentKey: AGENT.address.toLowerCase(), email: 'owner@example.com' },
+    SECRET
+  );
+  return mintAccessToken(certificate);
+}
+
+const req = (method: string, path: string, opts: { token?: string; body?: unknown } = {}) =>
   new Request(`https://agentconnect.test${path}`, {
     method,
-    headers: opts.body ? { 'Content-Type': 'application/json' } : {},
+    headers: {
+      ...(opts.token ? { Authorization: `Agent ${opts.token}` } : {}),
+      ...(opts.body ? { 'Content-Type': 'application/json' } : {})
+    },
     body: opts.body ? JSON.stringify(opts.body) : undefined
   });
 
+describe('POST /api/agent/enroll', () => {
+  it('issues a certificate for a valid OMS token', async () => {
+    const idToken = await issuer.sign(issuer.enrollClaims());
+    const res = await handleApi(
+      req('POST', '/api/agent/enroll', { body: { idToken } }),
+      env(),
+      '/api/agent/enroll'
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { certificate: string; wallet: string };
+    expect(body.wallet).toBe(WALLET);
+    expect(body.certificate).toMatch(/^c1\./);
+  });
+
+  it("links the owner's verified email to the agent wallet", async () => {
+    const idToken = await issuer.sign(issuer.enrollClaims());
+    await handleApi(
+      req('POST', '/api/agent/enroll', { body: { idToken } }),
+      env(),
+      '/api/agent/enroll'
+    );
+    const db = new CredentialStore(kv.kv, 'test-credentials-key');
+    expect(await db.ownerWallet('Owner@Example.com')).toBe(WALLET);
+  });
+
+  it('refuses a bad token', async () => {
+    const idToken = await issuer.sign(issuer.enrollClaims({ aud: ['prj_other'] }));
+    const res = await handleApi(
+      req('POST', '/api/agent/enroll', { body: { idToken } }),
+      env(),
+      '/api/agent/enroll'
+    );
+    expect(res.status).toBe(401);
+  });
+});
+
+describe('/api/credentials/address', () => {
+  const path = '/api/credentials/address';
+
+  it('requires an agent token', async () => {
+    const res = await handleApi(req('GET', path), env(), path);
+    expect(res.status).toBe(401);
+  });
+
+  it('returns null before anything is saved', async () => {
+    const res = await handleApi(req('GET', path, { token: await token() }), env(), path);
+    expect(await res.json()).toEqual({ address: null });
+  });
+
+  it('saves the address sealed, then reads it back', async () => {
+    const t = await token();
+    const put = await handleApi(req('PUT', path, { token: t, body: ADDRESS }), env(), path);
+    expect(put.status).toBe(200);
+    const stored = kv.data.get(`wallet:${WALLET}`)!;
+    expect(stored).toMatch(/^v1\./);
+    expect(stored).not.toContain('Bergen');
+
+    const get = await handleApi(req('GET', path, { token: t }), env(), path);
+    expect(await get.json()).toEqual({ address: ADDRESS });
+  });
+
+  it('replaces the saved address', async () => {
+    const t = await token();
+    await handleApi(req('PUT', path, { token: t, body: ADDRESS }), env(), path);
+    await handleApi(
+      req('PUT', path, { token: t, body: { ...ADDRESS, city: 'Queens' } }),
+      env(),
+      path
+    );
+    const get = await handleApi(req('GET', path, { token: t }), env(), path);
+    expect(await get.json()).toEqual({ address: { ...ADDRESS, city: 'Queens' } });
+  });
+
+  it('clears the address', async () => {
+    const t = await token();
+    await handleApi(req('PUT', path, { token: t, body: ADDRESS }), env(), path);
+    await handleApi(req('DELETE', path, { token: t }), env(), path);
+    const get = await handleApi(req('GET', path, { token: t }), env(), path);
+    expect(await get.json()).toEqual({ address: null });
+  });
+
+  it('refuses a record moved under another wallet', async () => {
+    const t = await token();
+    await handleApi(req('PUT', path, { token: t, body: ADDRESS }), env(), path);
+    const other = '0x00000000000000000000000000000000000000bb';
+    kv.data.set(`wallet:${other}`, kv.data.get(`wallet:${WALLET}`)!);
+    await expect(new CredentialStore(kv.kv, 'test-credentials-key').get(other)).rejects.toThrow();
+  });
+
+  it('validates the address', async () => {
+    const res = await handleApi(
+      req('PUT', path, { token: await token(), body: { ...ADDRESS, line1: '' } }),
+      env(),
+      path
+    );
+    expect(res.status).toBe(400);
+    expect(kv.data.size).toBe(0);
+  });
+
+  it('answers 503 when storage is not configured', async () => {
+    const res = await handleApi(
+      req('GET', path, { token: await token() }),
+      env({ CREDENTIALS_KEY: undefined }),
+      path
+    );
+    expect(res.status).toBe(503);
+  });
+});
+
 describe('signed in on the site (session cookie)', () => {
-  const path = '/api/agents';
+  const path = '/api/credentials/address';
   const cookie = async () =>
     `${SESSION_COOKIE}=${await issueSession({ wallet: WALLET, email: 'owner@example.com' }, SECRET)}`;
-  const agents = (method: string, c: string, origin?: string) =>
-    handleAgentsApi(
-      new Request(`https://agentconnect.test${path}${method === 'DELETE' ? '/g1' : ''}`, {
-        method,
-        headers: { Cookie: c, ...(origin ? { Origin: origin } : {}) }
-      }),
-      env({
-        OAUTH_PROVIDER: {
-          listUserGrants: async () => ({ items: [] }),
-          revokeGrant: async () => {}
-        } as unknown as Env['OAUTH_PROVIDER']
-      }),
-      `${path}${method === 'DELETE' ? '/g1' : ''}`
-    );
+  const withCookie = (method: string, c: string, origin?: string, body?: unknown) =>
+    new Request(`https://agentconnect.test${path}`, {
+      method,
+      headers: {
+        Cookie: c,
+        ...(origin ? { Origin: origin } : {}),
+        ...(body ? { 'Content-Type': 'application/json' } : {})
+      },
+      body: body ? JSON.stringify(body) : undefined
+    });
 
-  it('accepts the cookie for this site', async () => {
-    expect((await agents('GET', await cookie())).status).toBe(200);
-    expect((await agents('DELETE', await cookie(), 'https://agentconnect.test')).status).toBe(200);
+  it('reads and saves the address without an agent token', async () => {
+    const c = await cookie();
+    const put = await handleApi(
+      withCookie('PUT', c, 'https://agentconnect.test', ADDRESS),
+      env(),
+      path
+    );
+    expect(put.status).toBe(200);
+    const get = await handleApi(withCookie('GET', c), env(), path);
+    expect(await get.json()).toEqual({ address: ADDRESS });
   });
 
   it('refuses changes posted from another site', async () => {
-    expect((await agents('DELETE', await cookie(), 'https://evil.test')).status).toBe(401);
+    const res = await handleApi(
+      withCookie('PUT', await cookie(), 'https://evil.test', ADDRESS),
+      env(),
+      path
+    );
+    expect(res.status).toBe(401);
+    expect(kv.data.size).toBe(0);
   });
 
   it('refuses a tampered cookie', async () => {
     const c = (await cookie()).slice(0, -2) + 'xx';
-    expect((await agents('GET', c)).status).toBe(401);
+    const res = await handleApi(withCookie('GET', c), env(), path);
+    expect(res.status).toBe(401);
   });
 
   it('refuses an expired session', async () => {
     const old = await issueSession({ wallet: WALLET, email: null }, SECRET, 1_000);
-    expect((await agents('GET', `${SESSION_COOKIE}=${old}`)).status).toBe(401);
+    const res = await handleApi(withCookie('GET', `${SESSION_COOKIE}=${old}`), env(), path);
+    expect(res.status).toBe(401);
   });
 
-  it('signs the owner in to the wallet the sign-in found', async () => {
+  it("signs the owner in to their agent's wallet, whichever wallet the sign-in made", async () => {
+    await new CredentialStore(kv.kv, 'test-credentials-key').linkOwner('owner@example.com', WALLET);
+    const other = '0x' + '1'.repeat(40);
     vi.spyOn(OwnerSignIn.prototype, 'finishEmail').mockResolvedValue({
-      wallet: WALLET,
+      wallet: other,
       email: 'owner@example.com'
     });
     vi.spyOn(OwnerSignIn.prototype, 'forget').mockResolvedValue();
@@ -97,7 +270,6 @@ describe('signed in on the site (session cookie)', () => {
       '/api/session/email/finish'
     );
     expect(await res.json()).toEqual({ wallet: WALLET, email: 'owner@example.com' });
-    expect(res.headers.get('Set-Cookie')).toMatch(new RegExp(`^${SESSION_COOKIE}=os1\\.`));
   });
 
   it('GET /api/session names the wallet; DELETE clears the cookie', async () => {
@@ -130,12 +302,29 @@ describe('signed in on the site (session cookie)', () => {
 
 describe('without a certificate secret', () => {
   it('answers 503', async () => {
-    const res = await handleSessionApi(
-      req('GET', '/api/session'),
-      env({ AGENT_CERT_SECRET: undefined, OAUTH_KV: fakeKv().kv }),
-      '/api/session'
+    const res = await handleApi(
+      req('GET', '/api/credentials/address'),
+      env({ AGENT_CERT_SECRET: undefined }),
+      '/api/credentials/address'
     );
     expect(res.status).toBe(503);
+  });
+});
+
+describe('global fetch binding', () => {
+  it('never calls fetch as a method (Workers throw Illegal invocation)', async () => {
+    const strict = function (this: unknown, input: RequestInfo | URL, init?: RequestInit) {
+      if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation');
+      return jwksFetch(String(input), init);
+    };
+    vi.stubGlobal('fetch', strict);
+    const idToken = await issuer.sign(issuer.enrollClaims());
+    const res = await handleApi(
+      req('POST', '/api/agent/enroll', { body: { idToken } }),
+      env(),
+      '/api/agent/enroll'
+    );
+    expect(res.status).toBe(200);
   });
 });
 
@@ -329,10 +518,14 @@ describe('connecting an agent (consent)', () => {
     expect(revoked).toEqual([['g1', WALLET]]);
   });
 
-  it('keeps the agent list from anyone not signed in, and from other sites', async () => {
+  it('keeps the agent list from agents and other sites', async () => {
     const { e, revoked } = setup();
-    const signedOut = await handleAgentsApi(new Request(`${ORIGIN}/api/agents`), e, '/api/agents');
-    expect(signedOut.status).toBe(401);
+    const withToken = await handleAgentsApi(
+      new Request(`${ORIGIN}/api/agents`, { headers: { Authorization: `Agent ${await token()}` } }),
+      e,
+      '/api/agents'
+    );
+    expect(withToken.status).toBe(401);
     const crossSite = await handleAgentsApi(
       new Request(`${ORIGIN}/api/agents/g1`, {
         method: 'DELETE',

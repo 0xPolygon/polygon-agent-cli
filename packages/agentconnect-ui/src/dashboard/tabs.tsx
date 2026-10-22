@@ -494,6 +494,11 @@ export const WALLET_PROMPTS = [
   "send 5 USDC to an address I'll give you. Read it back to me before sending."
 ];
 
+export const DETAILS_PROMPTS = [
+  'save my shipping address to my agent wallet.',
+  'show the shipping address my agent wallet has saved.'
+];
+
 const MARKET_PROMPTS = [
   'show the five most traded Polymarket markets today, with their current odds.',
   'show my open Polymarket positions and how much each has moved.',

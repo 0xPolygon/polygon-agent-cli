@@ -17,6 +17,8 @@ import {
 
 import type { SealedKv } from './store.ts';
 
+import { ValidationError } from './shipping.ts';
+
 const TTL_SECONDS = 600;
 // The SDK keeps an email sign-in attempt on this field between the two steps
 // (the CLI saves it the same way; see lib/owner/email-attempt.ts).
@@ -28,9 +30,6 @@ interface EmailAttempt {
   challenge: string;
   sessionLifetimeSeconds: number;
 }
-
-/** A request the owner can fix (a missing field, an expired sign-in). */
-export class ValidationError extends Error {}
 
 export interface PendingConnect {
   // Connecting an MCP client: its authorization request and name.

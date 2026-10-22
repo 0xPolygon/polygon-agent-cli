@@ -4,10 +4,23 @@ import type { Env } from './index.ts';
 import type { McpProps } from './mcp.ts';
 
 import { handleMcp } from './mcp.ts';
+import { CredentialStore } from './store.ts';
 
 const WALLET = '0x00000000000000000000000000000000000000aa';
 
-const env = (): Env => ({ ASSETS: {} as Fetcher });
+function fakeKv() {
+  const data = new Map<string, string>();
+  return {
+    get: async (k: string) => data.get(k) ?? null,
+    put: async (k: string, v: string) => void data.set(k, v)
+  } as unknown as KVNamespace;
+}
+
+const env = (): Env => ({
+  ASSETS: {} as Fetcher,
+  CREDENTIALS: fakeKv(),
+  CREDENTIALS_KEY: 'test-credentials-key'
+});
 
 const OWNER: McpProps = { wallet: WALLET, email: 'owner@example.com' };
 
@@ -24,10 +37,20 @@ const rpc = async (e: Env, body: unknown, props: McpProps = OWNER) => {
   return { status: res.status, body: res.status === 202 ? null : await res.json() };
 };
 
-const call = async (e: Env, name: string, props: McpProps = OWNER) =>
+const call = async (
+  e: Env,
+  name: string,
+  args: Record<string, unknown> = {},
+  props: McpProps = OWNER
+) =>
   (
-    (await rpc(e, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name } }, props))
-      .body as {
+    (
+      await rpc(
+        e,
+        { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } },
+        props
+      )
+    ).body as {
       result: { content: { text: string }[]; isError?: boolean; structuredContent?: unknown };
     }
   ).result;
@@ -56,7 +79,7 @@ describe('MCP server', () => {
     const names = (body as { result: { tools: { name: string }[] } }).result.tools.map(
       (t) => t.name
     );
-    expect(names).toEqual(['get_wallet']);
+    expect(names).toEqual(['get_wallet', 'get_shipping_address', 'save_shipping_address']);
   });
 
   it('answers get_wallet for the signed-in wallet only', async () => {
@@ -66,6 +89,30 @@ describe('MCP server', () => {
       owner: 'owner@example.com',
       dashboardUrl: `https://agentconnect.test/?wallet=${WALLET}&chain=137&view=dashboard`
     });
+  });
+
+  it('saves and reads the shipping address, sealed', async () => {
+    const e = env();
+    const saved = await call(e, 'save_shipping_address', {
+      name: 'Alex Rivera',
+      line1: '214 Bergen St',
+      city: 'Brooklyn',
+      state: 'NY',
+      zip: '11217',
+      country: 'US'
+    });
+    expect(saved.isError).toBeUndefined();
+    expect(
+      (await new CredentialStore(e.CREDENTIALS!, 'test-credentials-key').get(WALLET)).address
+    ).toMatchObject({ line1: '214 Bergen St' });
+    expect((await call(e, 'get_shipping_address')).structuredContent).toMatchObject({
+      address: { city: 'Brooklyn' }
+    });
+  });
+
+  it('reports bad input as a tool error, not a protocol error', async () => {
+    const r = await call(env(), 'save_shipping_address', { name: 'Alex Rivera' });
+    expect(r.isError).toBe(true);
   });
 
   it('rejects an unknown tool', async () => {
@@ -86,6 +133,6 @@ describe('MCP client profiles', () => {
     const { body } = await rpc(env(), { jsonrpc: '2.0', id: 2, method: 'tools/list' }, MUSE);
     expect(
       (body as { result: { tools: { name: string }[] } }).result.tools.map((t) => t.name)
-    ).toEqual(['get_wallet']);
+    ).toEqual(['get_wallet', 'get_shipping_address', 'save_shipping_address']);
   });
 });

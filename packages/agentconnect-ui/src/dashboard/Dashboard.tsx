@@ -2,6 +2,7 @@ import type { ElementType } from 'react';
 
 import {
   Activity,
+  IdCard,
   LayoutGrid,
   Menu,
   PiggyBank,
@@ -21,9 +22,10 @@ import type { AgentContext, Loadable } from './tabs.js';
 import { LogoBadge } from '../App.js';
 import { FundingScreen } from '../components/FundingScreen.js';
 import { fetchActivity, fetchHoldings } from '../indexer';
-import { rememberedEmail } from './account.js';
 import { SKILL_URL } from './agents.js';
 import { ConnectedAgents } from './ConnectedAgents.js';
+import { accountEmail, SESSION_AUTH, takeLinkToken } from './credentials-api.js';
+import { CredentialsTab } from './Credentials.js';
 import { fetchPolygonRates, fetchVaultBalances, fetchVaults } from './earn.js';
 import { fetchPositions, fetchPredictionCash } from './markets.js';
 import { signOut } from './signin.js';
@@ -35,18 +37,20 @@ import {
   OVERVIEW_PROMPTS,
   OverviewTab,
   SettingsTab,
+  DETAILS_PROMPTS,
   WALLET_PROMPTS,
   WalletTab
 } from './tabs.js';
 import { AgentPromptBox, AmountChips, Modal, Toast, useCopy, usd } from './ui.js';
 
-type Tab = 'overview' | 'wallet' | 'markets' | 'earn' | 'activity' | 'settings';
+type Tab = 'overview' | 'wallet' | 'markets' | 'earn' | 'credentials' | 'activity' | 'settings';
 
 const NAV: { id: Tab; label: string; icon: ElementType }[] = [
   { id: 'overview', label: 'Overview', icon: LayoutGrid },
   { id: 'wallet', label: 'Wallet', icon: Wallet },
   { id: 'markets', label: 'Markets', icon: TrendingUp },
   { id: 'earn', label: 'Earn', icon: PiggyBank },
+  { id: 'credentials', label: 'Credentials', icon: IdCard },
   { id: 'activity', label: 'Activity', icon: Activity },
   { id: 'settings', label: 'Settings', icon: Settings }
 ];
@@ -98,8 +102,12 @@ export function Dashboard({
   const [modal, setModal] = useState<ModalState | null>(initialFundOpen ? { kind: 'add' } : null);
   const [copied, copy] = useCopy();
   const [toast, setToast] = useState<string | null>(null);
+  // The agent's signed token from the link fragment; read once per load.
+  const [linkToken] = useState(() => takeLinkToken(walletAddress));
   const owner = session?.wallet === walletAddress.toLowerCase() ? session : null;
-  const [email] = useState(() => owner?.email ?? rememberedEmail(walletAddress));
+  // Saved details: the owner's own sign-in, else the agent's link.
+  const auth = owner ? SESSION_AUTH : linkToken;
+  const [email] = useState(() => owner?.email ?? accountEmail(walletAddress, linkToken));
   const leave = () => void signOut().then(() => window.location.assign('/'));
 
   const holdings = useLoad<Holding[]>(
@@ -136,6 +144,7 @@ export function Dashboard({
   useEffect(() => {
     if (copied) setToast('Copied. Paste it into your agent.');
   }, [copied]);
+  const flash = (msg: string) => setToast(msg);
 
   const ctx: AgentContext = { copied, copy };
   const go = (t: string) => {
@@ -276,6 +285,10 @@ export function Dashboard({
                 ctx={ctx}
                 onDeposit={(vault) => setModal({ kind: 'deposit', vault })}
               />
+            )}
+            {tab === 'credentials' && <CredentialsTab token={auth} onSaved={flash} />}
+            {tab === 'credentials' && (
+              <AskAgent ctx={ctx} id="c" prompts={DETAILS_PROMPTS} title="Try with your agent" />
             )}
             {tab === 'activity' && <ActivityTab activity={activity} />}
             {tab === 'settings' && owner && <ConnectedAgents />}

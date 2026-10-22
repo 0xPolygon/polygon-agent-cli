@@ -13,7 +13,7 @@ export interface ProfilePolicy {
   tools: readonly string[];
 }
 
-const COMMON = ['get_wallet'] as const;
+const COMMON = ['get_wallet', 'get_shipping_address', 'save_shipping_address'] as const;
 
 export const PROFILES: Record<Profile, ProfilePolicy> = {
   standard: { tools: [...COMMON] },
