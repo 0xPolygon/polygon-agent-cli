@@ -27,6 +27,8 @@ import {
   approvalForPage,
   approvalStatus,
   authorizeCheckout,
+  checkoutCard,
+  closeCheckout,
   buyTurn,
   decideApproval,
   getSettings,
@@ -552,12 +554,15 @@ export async function handleApi(req: Request, env: Env, path: string): Promise<R
     }
 
     // Purchases: POST /api/credentials/buy ({ ask, conversationId? }),
-    // POST /api/credentials/checkout (before paying in the agent's browser),
+    // POST /api/credentials/checkout (paying in the agent's browser: a one-time
+    // card, or an approval first), POST /api/credentials/checkout/<id>/card
+    // (the card once approved), POST /api/credentials/checkout/<id>/close,
     // GET /api/credentials/approvals/<id>?wait=<seconds>, and the owner's
     // auto-pay limit at /api/credentials/settings.
     if (
       path === '/api/credentials/buy' ||
       path === '/api/credentials/checkout' ||
+      path.startsWith('/api/credentials/checkout/') ||
       path === '/api/credentials/settings' ||
       path.startsWith('/api/credentials/approvals/')
     ) {
@@ -571,8 +576,24 @@ export async function handleApi(req: Request, env: Env, path: string): Promise<R
       }
       if (path === '/api/credentials/checkout' && req.method === 'POST') {
         return json(
-          await authorizeCheckout(db, who.wallet, parseCheckout(await readBody(req)), origin)
+          await authorizeCheckout(db, cards, who.wallet, parseCheckout(await readBody(req)), origin)
         );
+      }
+      const co = /^\/api\/credentials\/checkout\/(apr_[0-9a-f]{24})\/(card|close)$/.exec(path);
+      if (co && req.method === 'POST') {
+        let result;
+        if (co[2] === 'card') {
+          result = await checkoutCard(db, cards, who.wallet, co[1], origin);
+        } else {
+          const body = (await readBody(req)) as { outcome?: unknown } | null;
+          const outcome = body?.outcome;
+          if (outcome !== 'paid' && outcome !== 'canceled') {
+            throw new ValidationError('outcome must be paid or canceled');
+          }
+          result = await closeCheckout(db, cards, who.wallet, co[1], outcome);
+        }
+        if (!result) return fail(404, 'not_found', 'No such checkout for this wallet');
+        return json(result);
       }
       if (path === '/api/credentials/settings') {
         if (req.method === 'GET') return json(await getSettings(db, who.wallet));

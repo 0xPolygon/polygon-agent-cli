@@ -4,9 +4,12 @@
 
 import type { CommandModule } from 'yargs';
 
+import fs from 'node:fs';
+import path from 'node:path';
+
 import { credentialsApi, loadCertificate } from '../lib/credentials/agent.ts';
 import { CliError, jsonFail, jsonOut } from '../lib/errors.ts';
-import { loadOmsWalletPointer } from '../lib/storage.ts';
+import { ensureStorageDir, loadOmsWalletPointer, STORAGE_ROOT } from '../lib/storage.ts';
 
 interface ShippingAddress {
   name: string;
@@ -281,6 +284,7 @@ interface BuyTurn {
 
 interface ApprovalStatus {
   approvalId: string;
+  kind?: 'cart' | 'checkout';
   status: string;
   merchant: string;
   totalCents: number;
@@ -342,12 +346,19 @@ async function waitForApproval(
   }
 }
 
-function approvalNext(s: ApprovalStatus): Record<string, string> {
+function approvalNext(s: ApprovalStatus, wallet: string): Record<string, string> {
   switch (s.status) {
     case 'placed':
       return { next: 'The owner approved and the order is placed. Tell them.' };
     case 'approved':
-      return { next: 'Approved. Finish the checkout now with the placeholder card.' };
+      return s.kind === 'checkout'
+        ? {
+            next: 'Approved. Get the one-time card, then pay:',
+            then: `polygon-agent checkout --card ${s.approvalId}${walletFlag(wallet)}`
+          }
+        : { next: 'Approved. The order is being placed; check again shortly.' };
+    case 'canceled':
+      return { next: 'This checkout was canceled. Nothing was charged.' };
     case 'declined':
       return { next: 'The owner declined. Nothing was charged; do not retry.' };
     case 'failed':
@@ -392,7 +403,7 @@ export const buyCommand: CommandModule<object, BuyArgs> = {
               'GET',
               `/api/credentials/approvals/${encodeURIComponent(argv.approval)}`
             );
-        jsonOut({ ok: true, walletName: argv.wallet, ...s, ...approvalNext(s) });
+        jsonOut({ ok: true, walletName: argv.wallet, ...s, ...approvalNext(s, argv.wallet) });
         return;
       }
       if (!argv.ask) {
@@ -412,25 +423,152 @@ export const buyCommand: CommandModule<object, BuyArgs> = {
   }
 };
 
-type CheckoutArgs = WalletArgs & { merchant: string; url?: string; total: number; item?: string[] };
+type CheckoutArgs = WalletArgs & {
+  merchant?: string;
+  url?: string;
+  total?: number;
+  item?: string[];
+  card?: string;
+  done?: string;
+  cancel?: string;
+};
+
+interface CheckoutStep {
+  status: string;
+  checkoutId?: string;
+  approvalId?: string;
+  approvalUrl?: string;
+  passkeyUrl?: string | null;
+  merchant?: string;
+  totalCents?: number;
+  card?: {
+    number: string;
+    expMonth: number | null;
+    expYear: number | null;
+    cvc: string;
+    last4: string;
+  };
+  nextAction?: { type: string; url?: string | null; sessionId?: string; message?: string };
+}
+
+const cardDir = () => path.join(STORAGE_ROOT, 'checkout');
+const cardFile = (id: string) => path.join(cardDir(), `${id.replace(/[^\w-]/g, '')}.json`);
+
+// The one-time card goes to a file only this user can read, never to stdout:
+// output lands in logs and chat transcripts.
+function keepCard(step: CheckoutStep): string | null {
+  if (!step.card || !step.checkoutId) return null;
+  ensureStorageDir();
+  fs.mkdirSync(cardDir(), { recursive: true, mode: 0o700 });
+  const file = cardFile(step.checkoutId);
+  fs.writeFileSync(
+    file,
+    JSON.stringify(
+      {
+        merchant: step.merchant,
+        totalCents: step.totalCents,
+        number: step.card.number,
+        expMonth: step.card.expMonth,
+        expYear: step.card.expYear,
+        cvc: step.card.cvc
+      },
+      null,
+      2
+    ),
+    { mode: 0o600 }
+  );
+  fs.chmodSync(file, 0o600);
+  return file;
+}
+
+export function checkoutOut(step: CheckoutStep, wallet: string) {
+  const file = keepCard(step);
+  const { card, ...rest } = step;
+  const id = step.checkoutId ?? step.approvalId;
+  const w = walletFlag(wallet);
+  const out: Record<string, unknown> = { ok: true, walletName: wallet, ...rest };
+  if (card && file) {
+    Object.assign(out, {
+      card: { last4: card.last4, expMonth: card.expMonth, expYear: card.expYear },
+      cardFile: file,
+      next: "Pay now: type the card from cardFile into the store's payment form and submit. Read cardFile only to fill the form, and never show the number in chat. It pays once, for exactly totalCents, and lasts about an hour.",
+      then: `polygon-agent checkout --done ${id}${w}   # once the store confirms the order (or --cancel ${id} if you give up)`
+    });
+  } else if (step.status === 'pending_approval') {
+    Object.assign(out, {
+      next: "Over the owner's auto-pay limit. Send them approvalUrl alone on its own line, then wait.",
+      then: `polygon-agent buy --approval ${id} --wait${w}`
+    });
+  } else if (step.status === 'awaiting_passkey') {
+    Object.assign(out, {
+      next: 'The owner confirms this card with their passkey. Send them passkeyUrl alone on its own line, then:',
+      then: `polygon-agent checkout --card ${id}${w}`
+    });
+  } else if (step.status === 'requires_action' && step.nextAction?.type === 'add_card') {
+    Object.assign(out, {
+      next: 'No card is saved yet. Send the owner nextAction.url alone on its own line, then wait for them.',
+      then: `polygon-agent credentials cards wait --session ${step.nextAction.sessionId}${w}`
+    });
+  } else if (step.status === 'requires_action' && step.nextAction?.type === 'attach_card') {
+    Object.assign(out, {
+      next: 'The owner adds their card for paying at any store. Send them nextAction.url alone on its own line; once they say done, run checkout again with the same store and total.'
+    });
+  } else if (step.status === 'declined' || step.status === 'canceled') {
+    Object.assign(out, { next: 'Nothing was charged. Do not retry; tell the owner.' });
+  }
+  return out;
+}
 
 export const checkoutCommand: CommandModule<object, CheckoutArgs> = {
   command: 'checkout',
   describe:
-    "Before paying at a store's checkout in your browser: approved at once under the auto-pay limit, else the owner approves",
+    "Pay at any store's checkout in your browser: a one-time card for the exact total (the owner approves over their auto-pay limit)",
   builder: (y) =>
     y
-      .option('merchant', { type: 'string', demandOption: true, describe: 'The store' })
+      .option('merchant', { type: 'string', describe: 'The store' })
       .option('url', { type: 'string', describe: 'The checkout or product page' })
-      .option('total', { type: 'number', demandOption: true, describe: 'Checkout total in USD' })
+      .option('total', { type: 'number', describe: 'Checkout total in USD, with tax and shipping' })
       .option('item', {
         type: 'string',
         array: true,
         describe: 'An item, "name" or "2x name" (repeatable)'
       })
+      .option('card', {
+        type: 'string',
+        describe: 'Get the one-time card for an approved checkout'
+      })
+      .option('done', { type: 'string', describe: 'The store confirmed the order: close the card' })
+      .option('cancel', { type: 'string', describe: 'Give up on a checkout: close the card' })
       .option('wallet', walletOpt),
   handler: async (argv) => {
     try {
+      const finish = argv.done ?? argv.cancel;
+      if (finish) {
+        const s = await credentialsApi<CheckoutStep>(
+          argv.wallet,
+          'POST',
+          `/api/credentials/checkout/${encodeURIComponent(finish)}/close`,
+          { outcome: argv.done ? 'paid' : 'canceled' }
+        );
+        fs.rmSync(cardFile(finish), { force: true });
+        jsonOut({ ok: true, walletName: argv.wallet, ...s });
+        return;
+      }
+      if (argv.card) {
+        const s = await credentialsApi<CheckoutStep>(
+          argv.wallet,
+          'POST',
+          `/api/credentials/checkout/${encodeURIComponent(argv.card)}/card`
+        );
+        jsonOut(checkoutOut(s, argv.wallet));
+        return;
+      }
+      if (!argv.merchant || argv.total === undefined) {
+        throw new CliError({
+          code: 'invalid_input',
+          message: 'Pass --merchant and --total, or --card / --done / --cancel <checkoutId>.'
+        });
+      }
       if (!Number.isFinite(argv.total) || argv.total <= 0) {
         throw new CliError({
           code: 'invalid_input',
@@ -441,7 +579,7 @@ export const checkoutCommand: CommandModule<object, CheckoutArgs> = {
         const m = /^(\d+)\s*x\s+(.+)$/i.exec(raw.trim());
         return m ? { name: m[2], qty: Number(m[1]) } : { name: raw.trim(), qty: 1 };
       });
-      const s = await credentialsApi<{ status: string; approvalId?: string; approvalUrl?: string }>(
+      const s = await credentialsApi<CheckoutStep>(
         argv.wallet,
         'POST',
         '/api/credentials/checkout',
@@ -452,19 +590,7 @@ export const checkoutCommand: CommandModule<object, CheckoutArgs> = {
           items
         }
       );
-      jsonOut({
-        ok: true,
-        walletName: argv.wallet,
-        ...s,
-        ...(s.status === 'approved'
-          ? {
-              next: 'Under the auto-pay limit: pay now with the placeholder card (4242 4242 4242 4242).'
-            }
-          : {
-              next: "Over the owner's auto-pay limit. Send them approvalUrl alone on its own line, then wait.",
-              then: `polygon-agent buy --approval ${s.approvalId} --wait${walletFlag(argv.wallet)}`
-            })
-      });
+      jsonOut(checkoutOut(s, argv.wallet));
     } catch (error) {
       jsonFail(error);
     }

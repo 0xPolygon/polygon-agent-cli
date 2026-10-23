@@ -1,7 +1,7 @@
 // What the HTTP API and the MCP server both do for a wallet: saved cards,
 // add-a-card sessions, and purchases through AgentCard.
 
-import type { BuyTurn } from './agentcard.ts';
+import type { BuyTurn, MemberCard } from './agentcard.ts';
 import type { Env } from './index.ts';
 import type { Approval, Quote, WalletRecord } from './store.ts';
 import type { PaymentLock } from './wallet-lock.ts';
@@ -169,12 +169,12 @@ const approvalUrl = (origin: string, id: string) => `${origin}/approve?r=${id}`;
 async function createApproval(
   db: CredentialStore,
   wallet: string,
-  a: Omit<Approval, 'id' | 'status' | 'createdAt'>
+  a: Omit<Approval, 'id' | 'status' | 'createdAt'> & { status?: Approval['status'] }
 ): Promise<Approval> {
   const approval: Approval = {
+    status: 'pending',
     ...a,
     id: randomId('apr'),
-    status: 'pending',
     createdAt: new Date().toISOString()
   };
   await db.update(wallet, (r) => ({
@@ -460,11 +460,13 @@ async function setQuoteResult(
 }
 
 /**
- * Before paying at a store's checkout in the agent's own browser: at or under
- * the limit it may go ahead; over it, the owner approves first.
+ * Paying at any store's checkout in the agent's own browser. At or under the
+ * owner's limit it answers with a one-time card for exactly the total; over
+ * it, the owner approves first and `checkoutCard` then hands out the card.
  */
 export async function authorizeCheckout(
   db: CredentialStore,
+  cards: AgentCard,
   wallet: string,
   input: {
     merchant: string;
@@ -474,21 +476,170 @@ export async function authorizeCheckout(
   },
   origin: string
 ) {
+  const token = await userToken(db, cards, wallet);
+  if (!token) return addCardTurn(await startCardSession(db, cards, wallet));
   const limit = limitOf(await db.get(wallet));
-  if (input.totalCents <= limit)
-    return { status: 'approved', autoApproved: true, limitCents: limit };
+  const auto = input.totalCents <= limit;
   const approval = await createApproval(db, wallet, {
     kind: 'checkout',
     ...input,
     conversationId: null,
-    hash: null
+    hash: null,
+    ...(auto ? { status: 'approved', autoApproved: true, decidedAt: new Date().toISOString() } : {})
   });
+  if (auto) {
+    return { ...(await checkoutCard(db, cards, wallet, approval.id, origin)), limitCents: limit };
+  }
   return {
     status: 'pending_approval',
+    checkoutId: approval.id,
     approvalId: approval.id,
     approvalUrl: approvalUrl(origin, approval.id),
     limitCents: limit
   };
+}
+
+// Checkout cards that are still being created answer `request_in_flight`.
+async function createCardWithRetry(
+  cards: AgentCard,
+  token: string,
+  a: Approval
+): Promise<MemberCard> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await cards.createCard(token, a.id, {
+        amount_cents: a.totalCents,
+        merchant: { name: a.merchant, ...(a.merchantUrl ? { url: a.merchantUrl } : {}) },
+        description: a.items.length
+          ? a.items
+              .map((i) => `${i.qty}x ${i.name}`)
+              .join(', ')
+              .slice(0, 200)
+          : `Checkout at ${a.merchant}`.slice(0, 200)
+      });
+    } catch (err) {
+      const retry =
+        err instanceof AgentCardError &&
+        (err.code === 'request_in_flight' || err.code === 'byoc_unavailable');
+      if (!retry || attempt >= 3) throw err;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+}
+
+const cardSummary = (c: MemberCard) => ({
+  id: c.id,
+  last4: c.last4 ?? null,
+  status: c.status,
+  ...(c.closed_reason ? { closedReason: c.closed_reason } : {})
+});
+
+/**
+ * The one-time card for an approved checkout, created on first ask. The same
+ * checkout always gets the same card, and the card pays once, for exactly the
+ * approved total. The number is passed straight through, never stored.
+ */
+export async function checkoutCard(
+  db: CredentialStore,
+  cards: AgentCard,
+  wallet: string,
+  id: string,
+  origin: string
+) {
+  const a = ((await db.get(wallet)).approvals ?? []).find((x) => x.id === id);
+  if (!a || a.kind !== 'checkout') return null;
+  const base = { checkoutId: a.id, merchant: a.merchant, totalCents: a.totalCents };
+  if (a.status === 'pending') {
+    return {
+      ...base,
+      status: 'pending_approval',
+      approvalId: a.id,
+      approvalUrl: approvalUrl(origin, a.id)
+    };
+  }
+  if (a.status !== 'approved') return { ...base, status: a.status };
+  const token = await userToken(db, cards, wallet);
+  if (!token) return addCardTurn(await startCardSession(db, cards, wallet));
+
+  let card: MemberCard;
+  try {
+    card = await createCardWithRetry(cards, token, a);
+  } catch (err) {
+    // The vault card isn't added for paying anywhere yet: hand over that link.
+    if (err instanceof AgentCardError && err.code === 'attach_required') {
+      const flow = await cards.flowStatus(token);
+      return {
+        ...base,
+        status: 'requires_action',
+        nextAction: {
+          type: 'attach_card',
+          message:
+            'Add your card for paying at any store: open this link and confirm your card. Then ask again.',
+          url: flow.next_action?.url ?? null
+        }
+      };
+    }
+    throw err;
+  }
+  if (card.status === 'open' && !card.credentials) card = await cards.getCard(token, card.id);
+  await setApproval(db, wallet, a.id, { card: cardSummary(card) });
+
+  if (card.status === 'approval_pending') {
+    return {
+      ...base,
+      status: 'awaiting_passkey',
+      passkeyUrl: card.approval_url ?? null,
+      expiresAt: card.expires_at ?? null
+    };
+  }
+  if (card.status !== 'open' || !card.credentials) {
+    return {
+      ...base,
+      status: card.status === 'closed' ? 'closed' : card.status,
+      closedReason: card.closed_reason ?? null,
+      ...(card.credentials_status ? { credentialsStatus: card.credentials_status } : {})
+    };
+  }
+  const c = card.credentials;
+  return {
+    ...base,
+    status: 'card_ready',
+    autoApproved: !!a.autoApproved,
+    card: {
+      number: c.number,
+      expMonth: c.exp_month,
+      expYear: c.exp_year,
+      cvc: c.cvc,
+      last4: card.last4 ?? c.number.slice(-4)
+    },
+    // The card spends exactly this, once, and its details last about an hour.
+    spendLimitCents: card.spend_limit_cents ?? a.totalCents
+  };
+}
+
+/**
+ * The agent is done with a checkout: `paid` once the store confirmed the
+ * order, `canceled` if it gave up. Either way the card is closed.
+ */
+export async function closeCheckout(
+  db: CredentialStore,
+  cards: AgentCard,
+  wallet: string,
+  id: string,
+  outcome: 'paid' | 'canceled'
+) {
+  const a = ((await db.get(wallet)).approvals ?? []).find((x) => x.id === id);
+  if (!a || a.kind !== 'checkout') return null;
+  const token = await userToken(db, cards, wallet);
+  let card = a.card ?? null;
+  if (card && token) {
+    const closed = await cards.closeCard(token, card.id);
+    card = { ...card, status: closed.status };
+  }
+  const status = outcome === 'paid' ? 'placed' : 'canceled';
+  const keep = a.status === 'approved' || a.status === 'pending';
+  if (keep) await setApproval(db, wallet, id, { status, card, result: { outcome } });
+  return { checkoutId: id, status: keep ? status : a.status, card };
 }
 
 const approvalView = (a: Approval, origin: string) => ({
@@ -499,6 +650,7 @@ const approvalView = (a: Approval, origin: string) => ({
   totalCents: a.totalCents,
   items: a.items,
   ...(a.status === 'pending' ? { approvalUrl: approvalUrl(origin, a.id) } : {}),
+  ...(a.card ? { card: a.card } : {}),
   ...(a.result ? { result: a.result } : {})
 });
 

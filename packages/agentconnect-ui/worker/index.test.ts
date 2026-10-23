@@ -70,6 +70,11 @@ function fakeAgentCard() {
   const exchanged = new Set<string>();
   const refreshed: string[] = [];
   const buys: { auth: string | null; body: Record<string, unknown> }[] = [];
+  // One-time cards by idempotency key, and whether the member added a card.
+  const memberCards = new Map<string, { id: string; status: string; amount: number }>();
+  const cardCreates: { key: string | null; body: Record<string, unknown> }[] = [];
+  const closed: string[] = [];
+  const member = { attached: true };
   let n = 0;
   const handler = async (url: string, init: RequestInit = {}) => {
     const u = new URL(url);
@@ -146,6 +151,48 @@ function fakeAgentCard() {
           : { conversation_id: 'conv_1', status: 'needs_input', reply: 'Found it.', cart }
       );
     }
+    if (u.pathname === '/api/v2/flow_status') {
+      return Response.json({
+        status: member.attached ? 'ready' : 'no_card_attached',
+        next_action: member.attached
+          ? { type: 'create_card' }
+          : { type: 'attach_card', url: 'https://agentcard.test/add?m=1' }
+      });
+    }
+    const open = (c: { id: string; status: string; amount: number }) => ({
+      object: 'card',
+      id: c.id,
+      status: c.status,
+      spend_limit_cents: c.amount,
+      last4: '7318',
+      ...(c.status === 'open'
+        ? { credentials: { number: '4111111111117318', exp_month: 12, exp_year: 2030, cvc: '123' } }
+        : {})
+    });
+    if (method === 'POST' && u.pathname === '/api/v2/cards') {
+      const key = new Headers(init.headers).get('Idempotency-Key');
+      const body = JSON.parse(String(init.body));
+      cardCreates.push({ key, body });
+      if (!member.attached) {
+        return Response.json(
+          { error: { code: 'attach_required', message: 'no added card' } },
+          { status: 409 }
+        );
+      }
+      const c = memberCards.get(key ?? '') ?? {
+        id: `card_${memberCards.size + 1}`,
+        status: 'open',
+        amount: body.amount_cents
+      };
+      memberCards.set(key ?? '', c);
+      return Response.json(open(c), { status: 201 });
+    }
+    const cc = /^\/api\/v2\/cards\/(.+)\/close$/.exec(u.pathname);
+    if (method === 'POST' && cc) {
+      closed.push(cc[1]);
+      for (const c of memberCards.values()) if (c.id === cc[1]) c.status = 'closed';
+      return Response.json({ object: 'card', id: cc[1], status: 'closed' });
+    }
     if (method === 'GET' && u.pathname === '/api/v2/vault_cards') {
       const list = cards.get(u.searchParams.get('user_id') ?? '');
       return list
@@ -171,7 +218,18 @@ function fakeAgentCard() {
       }
     ]);
   };
-  return { handler, passkey, finish, created, withContact, buys, refreshed };
+  return {
+    handler,
+    passkey,
+    finish,
+    created,
+    withContact,
+    buys,
+    refreshed,
+    cardCreates,
+    closed,
+    member
+  };
 }
 
 let agentcard: ReturnType<typeof fakeAgentCard>;
@@ -717,33 +775,131 @@ describe('/api/credentials/buy', () => {
     expect(agentcard.buys).toHaveLength(1);
   });
 
-  it("authorizes a checkout in the agent's browser by the limit", async () => {
+  const checkout = (t: string, totalCents: number) =>
+    handleApi(
+      req('POST', '/api/credentials/checkout', {
+        token: t,
+        body: {
+          merchant: 'Zalando',
+          merchantUrl: 'https://www.zalando.de/',
+          totalCents,
+          items: [{ name: 'Rain jacket', qty: 1 }]
+        }
+      }),
+      env(),
+      '/api/credentials/checkout'
+    );
+  const checkoutStep = (t: string, id: string, step: 'card' | 'close', body?: unknown) =>
+    handleApi(
+      req('POST', `/api/credentials/checkout/${id}/${step}`, { token: t, body }),
+      env(),
+      `/api/credentials/checkout/${id}/${step}`
+    );
+
+  it('pays a checkout under the limit with a one-time card for the exact total', async () => {
     const t = await token();
-    const checkout = (totalCents: number) =>
-      handleApi(
-        req('POST', '/api/credentials/checkout', {
-          token: t,
-          body: {
-            merchant: 'IKEA',
-            merchantUrl: 'https://www.ikea.com/us/en/',
-            totalCents,
-            items: [{ name: 'LISABO table', qty: 1 }]
-          }
-        }),
-        env(),
-        '/api/credentials/checkout'
-      );
-    expect(await (await checkout(1999)).json()).toMatchObject({
-      status: 'approved',
-      autoApproved: true
+    await connect(t);
+    const res = (await (await checkout(t, 8990)).json()) as {
+      status: string;
+      checkoutId: string;
+      card: { number: string; last4: string };
+    };
+    expect(res).toMatchObject({
+      status: 'card_ready',
+      autoApproved: true,
+      totalCents: 8990,
+      spendLimitCents: 8990,
+      card: { number: '4111111111117318', expMonth: 12, expYear: 2030, cvc: '123', last4: '7318' }
     });
-    const over = (await (await checkout(14999)).json()) as { status: string; approvalId: string };
+    expect(agentcard.cardCreates).toEqual([
+      {
+        key: res.checkoutId,
+        body: expect.objectContaining({
+          amount_cents: 8990,
+          currency: 'usd',
+          merchant: { name: 'Zalando', url: 'https://www.zalando.de/' }
+        })
+      }
+    ]);
+    // Only the card's display fields are kept, sealed, never the number.
+    const rec = await new CredentialStore(kv.kv, 'test-credentials-key').get(WALLET);
+    expect(rec.approvals?.[0]).toMatchObject({
+      status: 'approved',
+      autoApproved: true,
+      card: { id: 'card_1', last4: '7318', status: 'open' }
+    });
+    expect(JSON.stringify(rec)).not.toContain('4111111111117318');
+
+    const done = await (await checkoutStep(t, res.checkoutId, 'close', { outcome: 'paid' })).json();
+    expect(done).toMatchObject({ status: 'placed', card: { status: 'closed' } });
+    expect(agentcard.closed).toEqual(['card_1']);
+  });
+
+  it('creates the card over the limit only once the owner approves', async () => {
+    const t = await token();
+    await connect(t);
+    const over = (await (await checkout(t, 14999)).json()) as {
+      status: string;
+      checkoutId: string;
+      approvalUrl: string;
+    };
     expect(over.status).toBe('pending_approval');
+    expect(over.approvalUrl).toContain(`/approve?r=${over.checkoutId}`);
+    expect(await (await checkoutStep(t, over.checkoutId, 'card')).json()).toMatchObject({
+      status: 'pending_approval'
+    });
+    expect(agentcard.cardCreates).toHaveLength(0);
+
     const db = new CredentialStore(kv.kv, 'test-credentials-key');
     const cards = new AgentCard({ clientId: 'client', clientSecret: 'acs_secret' });
-    expect(await decideApproval(db, cards, over.approvalId, WALLET, true)).toEqual({
+    expect(await decideApproval(db, cards, over.checkoutId, WALLET, true)).toEqual({
       status: 'approved'
     });
+    const first = await (await checkoutStep(t, over.checkoutId, 'card')).json();
+    const again = await (await checkoutStep(t, over.checkoutId, 'card')).json();
+    expect(first).toMatchObject({ status: 'card_ready', autoApproved: false });
+    // The same checkout resumes the same card.
+    expect(again).toMatchObject({ card: { last4: '7318' } });
+    expect(new Set(agentcard.cardCreates.map((c) => c.key))).toEqual(new Set([over.checkoutId]));
+  });
+
+  it('creates no card for a declined checkout', async () => {
+    const t = await token();
+    await connect(t);
+    const { checkoutId } = (await (await checkout(t, 14999)).json()) as { checkoutId: string };
+    const db = new CredentialStore(kv.kv, 'test-credentials-key');
+    const cards = new AgentCard({ clientId: 'client', clientSecret: 'acs_secret' });
+    await decideApproval(db, cards, checkoutId, WALLET, false);
+    expect(await (await checkoutStep(t, checkoutId, 'card')).json()).toMatchObject({
+      status: 'declined'
+    });
+    expect(agentcard.cardCreates).toHaveLength(0);
+  });
+
+  it('hands over the add-your-card link when no card is added for paying anywhere', async () => {
+    const t = await token();
+    await connect(t);
+    agentcard.member.attached = false;
+    expect(await (await checkout(t, 2500)).json()).toMatchObject({
+      status: 'requires_action',
+      nextAction: { type: 'attach_card', url: 'https://agentcard.test/add?m=1' }
+    });
+  });
+
+  it('asks for a card first when none is saved', async () => {
+    expect(await (await checkout(await token(), 2500)).json()).toMatchObject({
+      status: 'requires_action',
+      nextAction: { type: 'add_card' }
+    });
+    expect(agentcard.cardCreates).toHaveLength(0);
+  });
+
+  it('validates the checkout steps', async () => {
+    const t = await token();
+    await connect(t);
+    const { checkoutId } = (await (await checkout(t, 2500)).json()) as { checkoutId: string };
+    expect((await checkoutStep(t, checkoutId, 'close', { outcome: 'maybe' })).status).toBe(400);
+    expect((await checkoutStep(t, 'apr_000000000000000000000000', 'card')).status).toBe(404);
   });
 
   it('refreshes an expired connection and keeps the new pair', async () => {

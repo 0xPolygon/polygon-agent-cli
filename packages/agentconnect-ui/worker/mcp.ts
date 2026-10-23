@@ -18,6 +18,8 @@ import {
   agentCard,
   approvalStatus,
   authorizeCheckout,
+  checkoutCard,
+  closeCheckout,
   buyTurn,
   confirmQuote,
   parseCheckout,
@@ -45,7 +47,7 @@ When something needs paying for, the owner has set an auto-pay limit. At or unde
 
 Buying from a store that takes orders directly (Amazon, Walmart, Target, Best Buy, DoorDash, and more): call buy with what they want. It ships to the saved address and pays with the saved card, or comes back for approval. Answer its questions with another buy call on the same conversation_id.
 
-Paying at any other store's checkout in your browser (Kernel or Browserbase with card checkout support): call authorize_checkout with the store and the checkout total first. Once it says approved, fill shipping from get_shipping_address, enter a placeholder card (4242 4242 4242 4242, any future expiry, any CVC), and submit; the saved card pays. Confirm the order on the store's page before reporting it, and never retry a payment on your own.
+Paying at any other store's checkout in your browser: fill the cart and shipping (from get_shipping_address) first, then call authorize_checkout with the store and the exact checkout total in USD. Under the limit it answers card_ready with a one-time card for exactly that total; over it, get the owner's approval, then call get_checkout_card. Type the card into the store's payment form and submit. Never show the card number in chat, and never ask the owner for theirs. Once the store confirms the order, call close_checkout with outcome paid; if you give up, call it with outcome canceled. The card pays once: never retry a payment on your own.
 
 No card saved yet: buy answers with the add-card link (or call add_card). Never repeat the shipping address outside a purchase. Sending, swapping, or predicting with the wallet's funds needs the Polygon agent CLI (npx skills add https://github.com/0xPolygon/polygon-agent-cli).`;
 
@@ -140,9 +142,9 @@ const TOOLS = [
   },
   {
     name: 'authorize_checkout',
-    title: 'Authorize a checkout',
+    title: 'Pay at a checkout',
     description:
-      "Before paying at a store's checkout in your own browser: the store and the total. Under the owner's auto-pay limit it answers approved at once; over it, pending_approval with approval_url and approval_id. Pay only once approved.",
+      "Paying at any store's checkout in your own browser: the store and the exact total in USD. Under the owner's auto-pay limit it answers card_ready with a one-time card for exactly that total; over it, pending_approval with approval_url and checkout_id, then call get_checkout_card once approved.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -166,6 +168,33 @@ const TOOLS = [
         }
       },
       required: ['merchant', 'total_cents']
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false }
+  },
+  {
+    name: 'get_checkout_card',
+    title: 'Get the checkout card',
+    description:
+      'The one-time card for a checkout the owner approved: card_ready with the number, expiry, and CVC to type into the payment form. Each read notifies the owner, so read it once, right before paying.',
+    inputSchema: {
+      type: 'object',
+      properties: { checkout_id: { type: 'string' } },
+      required: ['checkout_id']
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false }
+  },
+  {
+    name: 'close_checkout',
+    title: 'Close a checkout',
+    description:
+      'Finish a checkout: outcome paid once the store confirmed the order, canceled if you gave up. Closes the one-time card.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        checkout_id: { type: 'string' },
+        outcome: { type: 'string', enum: ['paid', 'canceled'] }
+      },
+      required: ['checkout_id', 'outcome']
     },
     annotations: { readOnlyHint: false, destructiveHint: false }
   },
@@ -328,6 +357,7 @@ async function callTool(
     case 'authorize_checkout':
       return authorizeCheckout(
         need(),
+        needCards(),
         props.wallet,
         parseCheckout({
           merchant: args.merchant,
@@ -343,6 +373,21 @@ async function callTool(
         }),
         origin
       );
+    case 'get_checkout_card': {
+      const id = typeof args.checkout_id === 'string' ? args.checkout_id : '';
+      const c = await checkoutCard(need(), needCards(), props.wallet, id, origin);
+      if (!c) throw new ValidationError('No such checkout for this wallet.');
+      return c;
+    }
+    case 'close_checkout': {
+      const id = typeof args.checkout_id === 'string' ? args.checkout_id : '';
+      if (args.outcome !== 'paid' && args.outcome !== 'canceled') {
+        throw new ValidationError('outcome must be paid or canceled.');
+      }
+      const c = await closeCheckout(need(), needCards(), props.wallet, id, args.outcome);
+      if (!c) throw new ValidationError('No such checkout for this wallet.');
+      return c;
+    }
     case 'payment_status': {
       const id = typeof args.approval_id === 'string' ? args.approval_id : '';
       const s = await approvalStatus(need(), needCards(), props.wallet, id, origin, 25_000);

@@ -39,12 +39,13 @@ const inputClass =
   'h-12 border border-[var(--slate-300)] rounded-xl px-3.5 text-base bg-white outline-none focus:border-[var(--purple-500)]';
 
 const DONE: Record<string, string> = {
-  approved: 'Approved. Your agent is finishing the purchase.',
+  approved: 'Approved. Your agent is paying with a one-time card for this total.',
   placed: 'Approved. The order is placed.',
   placing: 'Approved. Your order is being placed.',
   awaiting_passkey: 'Approved. Confirm with your passkey to pay.',
   declined: 'Declined. Nothing was charged.',
-  failed: "The purchase didn't go through, and nothing was charged."
+  failed: "The purchase didn't go through, and nothing was charged.",
+  canceled: 'Canceled. Nothing was charged.'
 };
 
 /**

@@ -8,7 +8,8 @@ import { b64urlDecode, b64urlEncode } from './agent-auth.ts';
 
 // A purchase over the owner's auto-pay limit, waiting for them to approve on
 // the approval page. `cart` purchases are placed by the worker once approved;
-// `checkout` ones (the agent's own browser) just let the agent proceed.
+// `checkout` ones (any store, in the agent's own browser) get a one-time card
+// for the total. Checkouts under the limit are kept too, already approved.
 export interface Approval {
   id: string;
   kind: 'cart' | 'checkout';
@@ -26,7 +27,11 @@ export interface Approval {
     | 'declined'
     | 'placed'
     | 'failed'
-    | 'awaiting_passkey';
+    | 'awaiting_passkey'
+    | 'canceled';
+  autoApproved?: boolean;
+  // A checkout's one-time card: display fields only, never the number.
+  card?: { id: string; last4: string | null; status: string; closedReason?: string } | null;
   // Set once the cart was confirmed: what the store and AgentCard said.
   result?: Record<string, unknown> | null;
   createdAt: string;

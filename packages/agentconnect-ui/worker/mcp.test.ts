@@ -88,6 +88,8 @@ describe('MCP server', () => {
       'check_card',
       'buy',
       'authorize_checkout',
+      'get_checkout_card',
+      'close_checkout',
       'payment_status'
     ]);
   });

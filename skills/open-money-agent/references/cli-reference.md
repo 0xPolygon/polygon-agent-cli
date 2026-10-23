@@ -47,7 +47,7 @@ agent deposit --asset <SYM> --amount <num> [--protocol aave|morpho] [--vault <ad
 agent credentials address [--name ... --line1 ... --city ... --state ... --zip ... --country ...] [--clear]
 agent credentials status | cards | cards add | cards wait --session <id>
 agent buy "<what>" | --conversation <id> "<answer>" | --approval <id> --wait     # shopping reference
-agent checkout --merchant <store> --url <page> --total <usd> [--item "1x Name"]
+agent checkout --merchant <store> --url <page> --total <usd> [--item "1x Name"] | --card <id> | --done <id> | --cancel <id>
 agent withdraw --position <addr> --amount <num|max> [--chain <chain>] [--broadcast]
 agent fund [--wallet <n>]
 agent x402-pay --url <url> --wallet <n> [--chain <chain>] [--method GET] [--body <str>] [--header Key:Value] [--max-usd <usd>] [--yes] [--broadcast] [--dry-run]

@@ -28,7 +28,13 @@ const COMMON = [
 
 export const PROFILES: Record<Profile, ProfilePolicy> = {
   standard: {
-    tools: [...COMMON, 'authorize_checkout', 'payment_status'],
+    tools: [
+      ...COMMON,
+      'authorize_checkout',
+      'get_checkout_card',
+      'close_checkout',
+      'payment_status'
+    ],
     confirmEachPurchase: false
   },
   muse: {

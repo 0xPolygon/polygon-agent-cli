@@ -99,6 +99,52 @@ export interface BuyRequest {
   };
 }
 
+// A one-time card drawn on the member's own added card, for checkouts the
+// agent fills in itself. `credentials` only come on an open card: never store them.
+export interface MemberCard {
+  id: string;
+  status: 'approval_pending' | 'open' | 'in_use' | 'paused' | 'pausing' | 'closing' | 'closed';
+  spend_limit_cents?: number;
+  last4?: string;
+  expiry?: string;
+  approval_url?: string;
+  expires_at?: string;
+  closed_reason?: 'used' | 'canceled' | 'expired' | 'declined' | string;
+  credentials?: {
+    number: string;
+    exp_month: number | null;
+    exp_year: number | null;
+    cvc: string;
+  } | null;
+  credentials_status?: 'protected' | 'retry' | string;
+}
+
+// What happens next for a member: add their card, create one, or approve.
+export interface FlowStatus {
+  status:
+    | 'no_card_attached'
+    | 'attach_pending'
+    | 'attach_failed'
+    | 'ready'
+    | 'approval_pending'
+    | 'card_ready';
+  next_action?: {
+    type: 'attach_card' | 'create_card' | 'share_approval_url' | 'get_card';
+    id?: string;
+    url?: string;
+    expires_at?: string;
+  } | null;
+  attached_cards?: {
+    id: string;
+    status: 'pending' | 'active' | 'ineligible' | 'revoked';
+    network?: string | null;
+    brand?: string | null;
+    last4?: string | null;
+  }[];
+  reason?: string;
+  message?: string;
+}
+
 export class AgentCardError extends Error {
   constructor(
     public readonly status: number,
@@ -122,6 +168,18 @@ export function agentCardFailure(err: AgentCardError): {
       code: err.code,
       message:
         'The store cannot deliver to the saved shipping address. Save a US address and try again.'
+    };
+  if (err.code === 'subscription_required')
+    return {
+      status: 503,
+      code: 'cards_unavailable',
+      message: 'Paying at other stores is not switched on for this deployment yet.'
+    };
+  if (err.code === 'byoc_unavailable')
+    return {
+      status: 503,
+      code: 'card_network_unavailable',
+      message: 'The card network is briefly unavailable. Try again in a minute.'
     };
   if (err.status === 429)
     return {
@@ -189,13 +247,20 @@ export class AgentCard {
   }
 
   // `asUser` sends a user's connection token instead of the platform token.
-  private async call<T>(method: string, path: string, body?: unknown, asUser?: string): Promise<T> {
+  private async call<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    asUser?: string,
+    headers: Record<string, string> = {}
+  ): Promise<T> {
     for (let attempt = 0; ; attempt++) {
       const res = await this.f(`${this.base}${path}`, {
         method,
         headers: {
           Authorization: `Bearer ${asUser ?? (await this.token())}`,
-          ...(body === undefined ? {} : { 'Content-Type': 'application/json' })
+          ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+          ...headers
         },
         body: body === undefined ? undefined : JSON.stringify(body)
       });
@@ -276,6 +341,48 @@ export class AgentCard {
     return this.call<BuyConversation>(
       'GET',
       `/buy/conversations/${encodeURIComponent(id)}`,
+      undefined,
+      userToken
+    );
+  }
+
+  flowStatus(userToken: string): Promise<FlowStatus> {
+    return this.call<FlowStatus>('GET', '/api/v2/flow_status', undefined, userToken);
+  }
+
+  /**
+   * A one-time card for exactly `amount_cents`, drawn on the member's added
+   * card. The same `key` always resumes the same card, never a second one.
+   */
+  createCard(
+    userToken: string,
+    key: string,
+    body: {
+      amount_cents: number;
+      merchant?: { name: string; url?: string };
+      description?: string;
+    }
+  ): Promise<MemberCard> {
+    return this.call<MemberCard>('POST', '/api/v2/cards', { currency: 'usd', ...body }, userToken, {
+      'Idempotency-Key': key
+    });
+  }
+
+  /** The card's state. Reading an open card notifies the member, so read it once. */
+  getCard(userToken: string, id: string): Promise<MemberCard> {
+    return this.call<MemberCard>(
+      'GET',
+      `/api/v2/cards/${encodeURIComponent(id)}`,
+      undefined,
+      userToken
+    );
+  }
+
+  /** Close a card early. Closing a closed card is fine. */
+  closeCard(userToken: string, id: string): Promise<{ id: string; status: string }> {
+    return this.call<{ id: string; status: string }>(
+      'POST',
+      `/api/v2/cards/${encodeURIComponent(id)}/close`,
       undefined,
       userToken
     );
