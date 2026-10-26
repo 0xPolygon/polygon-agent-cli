@@ -391,11 +391,7 @@ async function publicClient(chainId: number) {
   if (!chain) throw new Error(`No RPC configuration for chain ${chainId}`);
   return createPublicClient({
     chain,
-    transport: http(
-      process.env.SEQUENCE_PROJECT_ACCESS_KEY
-        ? getReadRpcUrl(resolveNetwork(chainId))
-        : chain.rpcUrls.default.http[0]
-    )
+    transport: http(getReadRpcUrl(resolveNetwork(chainId)))
   });
 }
 

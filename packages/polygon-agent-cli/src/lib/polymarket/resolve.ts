@@ -3,7 +3,7 @@
 
 import { CliError } from '../errors.ts';
 import { PolymarketError } from './gamma.ts';
-import { loadSdk, mapSdkError } from './sdk.ts';
+import { environment, loadSdk, mapSdkError } from './sdk.ts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type SdkMarket = any;
@@ -22,7 +22,10 @@ export type ResolvedOutcome = {
 
 let pub: PublicClient | undefined;
 export async function publicClient(): Promise<PublicClient> {
-  if (!pub) pub = (await loadSdk()).root.createPublicClient();
+  if (!pub) {
+    const { root } = await loadSdk();
+    pub = root.createPublicClient(environment(root));
+  }
   return pub;
 }
 
