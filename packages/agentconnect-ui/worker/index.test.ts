@@ -2,12 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from './index.ts';
 
-import {
+import worker, {
   agentName,
   handleAgentsApi,
   handleConnectApi,
   isLocalAgent,
   limitRegistration,
+  openaiChallenge,
   handleSessionApi
 } from './index.ts';
 import { issueSession, SESSION_COOKIE } from './owner-session.ts';
@@ -300,7 +301,97 @@ describe('connecting an agent (consent)', () => {
     expect(back.origin + back.pathname).toBe('http://localhost:9999/callback');
     expect(back.searchParams.get('error')).toBe('access_denied');
     expect(back.searchParams.get('state')).toBe('st_1');
+    expect(back.searchParams.get('iss')).toBe(ORIGIN);
     expect(completed).toHaveLength(0);
+  });
+
+  // A stand-in for the connections' Durable Objects: records what each was asked.
+  const agentKeys = () => {
+    const asked: { name: string; body: unknown }[] = [];
+    const ns = {
+      idFromName: (name: string) => name,
+      get: (name: string) => ({
+        fetch: async (_url: string, init: { body: string }) => {
+          asked.push({ name, body: JSON.parse(init.body) });
+          return Response.json({ ok: true, value: { revoked: true } });
+        }
+      })
+    } as unknown as DurableObjectNamespace;
+    return { ns, asked };
+  };
+
+  it('has the owner sign in on the page to approve an allowance, even when signed in on the site', async () => {
+    const { e, signIn } = setup();
+    e.AGENT_KEYS = agentKeys().ns;
+    const c = await signIn.create({ authRequest: authRequest as never, clientName: 'Claude Code' });
+    const res = await call(e, 'GET', `/api/connect?c=${c}`, { cookie: await cookie() });
+    expect(await res.json()).toEqual({
+      clientName: 'Claude Code',
+      signedIn: false,
+      spending: true
+    });
+  });
+
+  it("won't set up an allowance without the owner signed in on this page", async () => {
+    const { e, signIn, completed } = setup();
+    e.AGENT_KEYS = agentKeys().ns;
+    const c = await signIn.create({ authRequest: authRequest as never, clientName: 'Claude Code' });
+    // Signed in on the site only: no OMS session kept for the decision.
+    await signIn.markSignedIn(c, { wallet: WALLET, email: 'owner@example.com' });
+    const res = await call(e, 'POST', '/api/connect/decide', {
+      cookie: await cookie(),
+      body: { c, allow: true, allowanceUsd: 100, days: 30 }
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { message: string }).message).toMatch(/Sign in again/);
+    expect(completed).toHaveLength(0);
+  });
+
+  it('keeps ChatGPT to reading the wallet, with no allowance to approve', async () => {
+    const { e, signIn, completed } = setup();
+    const keys = agentKeys();
+    e.AGENT_KEYS = keys.ns;
+    const chatgpt = {
+      ...authRequest,
+      redirectUri: 'https://chatgpt.com/connector_platform_oauth_redirect'
+    };
+    const c = await signIn.create({ authRequest: chatgpt as never, clientName: 'ChatGPT' });
+    const res = await call(e, 'GET', `/api/connect?c=${c}`, { cookie: await cookie() });
+    expect(await res.json()).not.toHaveProperty('spending');
+    await call(e, 'POST', '/api/connect/decide', {
+      cookie: await cookie(),
+      body: { c, allow: true }
+    });
+    expect(completed[0]).toMatchObject({ props: { profile: 'openai' } });
+    expect((completed[0] as { props: object }).props).not.toHaveProperty('keyId');
+    expect(keys.asked).toEqual([]);
+  });
+
+  it("revokes a connection's key when the owner disconnects it", async () => {
+    const { e, revoked } = setup();
+    const keys = agentKeys();
+    e.AGENT_KEYS = keys.ns;
+    const provider = e.OAUTH_PROVIDER as unknown as {
+      listUserGrants: (u: string) => Promise<{ items: { id: string; metadata: unknown }[] }>;
+    };
+    const list = provider.listUserGrants.bind(provider);
+    provider.listUserGrants = async (u) => {
+      const page = await list(u);
+      return {
+        items: page.items.map((g) => (g.id === 'g1' ? { ...g, metadata: { keyId: 'k1' } } : g))
+      };
+    };
+    const res = await handleAgentsApi(
+      new Request(`${ORIGIN}/api/agents/g1`, {
+        method: 'DELETE',
+        headers: { Cookie: await cookie(), Origin: ORIGIN }
+      }),
+      e,
+      '/api/agents/g1'
+    );
+    expect(res.status).toBe(200);
+    expect(keys.asked).toEqual([{ name: 'k1', body: { op: 'revoke', wallet: WALLET } }]);
+    expect(revoked).toEqual([['g1', WALLET]]);
   });
 
   it('lists connected agents for the signed-in owner, newest first, and disconnects one', async () => {
@@ -343,6 +434,104 @@ describe('connecting an agent (consent)', () => {
     );
     expect(crossSite.status).toBe(401);
     expect(revoked).toHaveLength(0);
+  });
+});
+
+describe('openaiChallenge', () => {
+  it('serves the portal token as plain text, and nothing until one is set', async () => {
+    const res = openaiChallenge(env({ OPENAI_APPS_CHALLENGE: 'tok_123' }));
+    expect(res.headers.get('Content-Type')).toBe('text/plain');
+    expect(await res.text()).toBe('tok_123');
+    expect(openaiChallenge(env()).status).toBe(404);
+    expect(openaiChallenge(env({ OPENAI_APPS_CHALLENGE: '' })).status).toBe(404);
+  });
+});
+
+describe('two sites on one worker', () => {
+  // A KV close enough for the OAuth provider's client records.
+  function oauthKv() {
+    const data = new Map<string, string>();
+    return {
+      get: async (k: string, o?: unknown) => {
+        const v = data.get(k) ?? null;
+        const type = typeof o === 'string' ? o : (o as { type?: string } | undefined)?.type;
+        return v !== null && type === 'json' ? JSON.parse(v) : v;
+      },
+      put: async (k: string, v: string) => void data.set(k, v),
+      delete: async (k: string) => void data.delete(k),
+      list: async () => ({ keys: [], list_complete: true, cursor: '' })
+    } as unknown as KVNamespace;
+  }
+
+  it("checks each site's own /mcp as the resource, whichever site is served first", async () => {
+    const e = env({ OAUTH_KV: oauthKv() });
+    const ctx = { waitUntil() {}, passThroughOnException() {} } as unknown as ExecutionContext;
+    const run = (url: string, init?: RequestInit) => worker.fetch(new Request(url, init), e, ctx);
+    // The other site serves a page first in this worker.
+    await run('https://agentconnect.test/api/session');
+    const reg = await run('https://agents.test/oauth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_name: 'ChatGPT',
+        redirect_uris: ['https://chatgpt.com/connector_platform_oauth_redirect'],
+        token_endpoint_auth_method: 'none'
+      })
+    });
+    const { client_id } = (await reg.json()) as { client_id: string };
+    const q = new URLSearchParams({
+      response_type: 'code',
+      client_id,
+      redirect_uri: 'https://chatgpt.com/connector_platform_oauth_redirect',
+      scope: 'wallet',
+      code_challenge: 'OIbNgrQwU-SMwjZFUyxdGdcjOAFm_3x6NhdvH0ZbkjY',
+      code_challenge_method: 'S256',
+      state: 's1',
+      resource: 'https://agents.test/mcp'
+    });
+    const res = await run(`https://agents.test/authorize?${q}`);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toMatch(/^https:\/\/agents\.test\/connect\?c=/);
+  });
+
+  it('sends a bad resource back to the client as an error, not a crash', async () => {
+    const e = env({ OAUTH_KV: oauthKv() });
+    const ctx = { waitUntil() {}, passThroughOnException() {} } as unknown as ExecutionContext;
+    const run = (url: string, init?: RequestInit) => worker.fetch(new Request(url, init), e, ctx);
+    const reg = await run('https://agents.test/oauth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        redirect_uris: ['https://chatgpt.com/connector_platform_oauth_redirect'],
+        token_endpoint_auth_method: 'none'
+      })
+    });
+    const { client_id } = (await reg.json()) as { client_id: string };
+    const res = await run(
+      `https://agents.test/authorize?response_type=code&client_id=${client_id}&redirect_uri=https%3A%2F%2Fchatgpt.com%2Fconnector_platform_oauth_redirect&code_challenge=OIbNgrQwU-SMwjZFUyxdGdcjOAFm_3x6NhdvH0ZbkjY&code_challenge_method=S256&state=s1&resource=https%3A%2F%2Felsewhere.test%2Fmcp`
+    );
+    expect(res.status).toBe(302);
+    const back = new URL(res.headers.get('Location')!);
+    expect(back.searchParams.get('error')).toBe('invalid_target');
+    expect(back.searchParams.get('iss')).toBe('https://agents.test');
+    expect((await run('https://agents.test/authorize')).status).toBe(400);
+  });
+});
+
+describe('/.well-known', () => {
+  it("answers 404 for metadata we don't serve, not the SPA's page", async () => {
+    const spa = { fetch: async () => new Response('<!doctype html>', { status: 200 }) };
+    for (const path of [
+      '/.well-known/openid-configuration',
+      '/.well-known/oauth-authorization-server/mcp'
+    ]) {
+      const res = await worker.fetch(
+        new Request(`https://agentconnect.test${path}`),
+        env({ ASSETS: spa as unknown as Fetcher }),
+        {} as ExecutionContext
+      );
+      expect(res.status).toBe(404);
+    }
   });
 });
 

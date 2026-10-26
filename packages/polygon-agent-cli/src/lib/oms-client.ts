@@ -70,8 +70,6 @@ export function loginUiBaseUrl(): string {
  * sign-in and the dashboard can run on different deployments.
  */
 export function credentialsBaseUrl(): string {
-  // QA build: the dashboard on staging. Not for main.
-  const v =
-    process.env.POLYGON_AGENT_CREDENTIALS_URL ?? 'https://staging.agents.polygon.technology';
+  const v = process.env.POLYGON_AGENT_CREDENTIALS_URL;
   return v ? v.replace(/\/+$/, '') : loginUiBaseUrl();
 }

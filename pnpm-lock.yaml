@@ -64,6 +64,9 @@ importers:
       '@0xsequence/wallet-primitives':
         specifier: 3.0.0-beta.16
         version: 3.0.0-beta.16(typescript@5.9.3)(zod@3.25.76)
+      '@0xtrails/api':
+        specifier: ^0.18.6
+        version: 0.18.6
       '@cloudflare/workers-oauth-provider':
         specifier: 1.2.3
         version: 1.2.3
