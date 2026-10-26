@@ -26,6 +26,9 @@ export interface PendingAction<R = unknown> {
   // Set when it runs as the owner (signed in on the approval page), not with
   // the connection's key: these transactions, sent from the owner's wallet.
   owner?: { chainId: number; transactions: { to: string; data: string }[] };
+  // What the owner action needs on its chain first: bridged there from the
+  // wallet's other chains, within the allowance, once approved.
+  fund?: { chainId: number; symbol: string; amount: string };
   status: ActionStatus;
   createdAt: string;
   expiresAt: string;
@@ -43,6 +46,7 @@ export async function proposeAction<R>(params: {
   details: PendingAction['details'];
   appName: string;
   owner?: PendingAction['owner'];
+  fund?: PendingAction['fund'];
   now: Date;
 }): Promise<PendingAction<R>> {
   const id = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) =>
@@ -55,6 +59,7 @@ export async function proposeAction<R>(params: {
     details: params.details,
     appName: params.appName,
     ...(params.owner ? { owner: params.owner } : {}),
+    ...(params.fund ? { fund: params.fund } : {}),
     status: 'pending',
     createdAt: params.now.toISOString(),
     expiresAt: new Date(params.now.getTime() + ACTION_TTL_MS).toISOString()
@@ -144,7 +149,9 @@ export async function decideAction<R>(params: {
 export async function beginOwnerAction(
   storage: KeyStorage,
   id: string,
-  now: Date
+  now: Date,
+  // Runs before it's marked running: a failure here leaves it to retry.
+  fund?: (f: NonNullable<PendingAction['fund']>) => Promise<unknown>
 ): Promise<NonNullable<PendingAction['owner']>> {
   const action = await loadAction(storage, id, now);
   if (!action.owner)
@@ -158,6 +165,7 @@ export async function beginOwnerAction(
           : 'This request was already answered.'
     });
   }
+  if (action.fund && fund) await fund(action.fund);
   await storage.put(key(id), { ...action, status: 'running', decidedAt: now.toISOString() });
   return action.owner;
 }

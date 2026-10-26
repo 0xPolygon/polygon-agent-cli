@@ -47,6 +47,7 @@ import {
 import { httpStatus, MoneyError } from './errors.ts';
 import { planFromJson, sessionMatchesPlan } from './plan.ts';
 import {
+  ownerAccess,
   pmAccount,
   pmBuy,
   pmCancel,
@@ -58,7 +59,14 @@ import {
 } from './polymarket.ts';
 import { StoredNonceSigner } from './signer.ts';
 import { chainLabel, findSupportedToken, parseChain, resolveSupportedSymbol } from './tokens.ts';
-import { describeTrade, executeApprovedSwap, executeSwap, quoteSwap, tokenUnits } from './trade.ts';
+import {
+  describeTrade,
+  ensureOn,
+  executeApprovedSwap,
+  executeSwap,
+  quoteSwap,
+  tokenUnits
+} from './trade.ts';
 import { payAndFetch } from './x402.ts';
 
 const APP_URL = 'https://agents.polygon.technology';
@@ -325,6 +333,15 @@ export class AgentKey {
             ],
             appName: req.appName,
             owner: txs,
+            ...(deposit
+              ? {
+                  fund: {
+                    chainId: vault.chainId,
+                    symbol: vault.asset.symbol,
+                    amount: tokenUnits(amount, vault.asset.decimals).toString()
+                  }
+                }
+              : {}),
             now: this.now()
           })
         );
@@ -336,7 +353,19 @@ export class AgentKey {
       case 'pm_deposit': {
         const deps = await this.pmDeps(record, req.ownerRegion);
         await this.settleStuckDeposit(record);
-        return pmDeposit({ usd: req.usd }, deps);
+        // Polymarket is funded from Polygon USDC: bridge it there first if the
+        // wallet holds it elsewhere (only where the owner may use Polymarket).
+        const units = /^\d+(\.\d{1,6})?$/.test(req.usd.trim()) ? tokenUnits(req.usd, 6) : 0n;
+        const bridged =
+          units >= 2_000_000n && ownerAccess(deps.ownerRegion) === 'open'
+            ? await ensureOn(await this.deps(record), {
+                chainId: 137,
+                symbol: 'USDC',
+                amount: units
+              })
+            : null;
+        const result = await pmDeposit({ usd: req.usd }, deps);
+        return bridged ? { bridged, ...(result as object) } : result;
       }
       case 'pm_buy': {
         const { op: _op, wallet: _w, ownerRegion, ...p } = req;
@@ -354,8 +383,12 @@ export class AgentKey {
         return pmRedeem(await this.pmDeps(record, req.ownerRegion));
       case 'pm_withdraw':
         return pmWithdraw({ usd: req.usd }, await this.pmDeps(record, req.ownerRegion));
-      case 'owner_begin':
-        return beginOwnerAction(this.storage, req.id, this.now());
+      case 'owner_begin': {
+        const deps = await this.deps(record);
+        return beginOwnerAction(this.storage, req.id, this.now(), (f) =>
+          ensureOn(deps, { chainId: f.chainId, symbol: f.symbol, amount: BigInt(f.amount) })
+        );
+      }
       case 'owner_end':
         return viewAction(
           await endOwnerAction(
@@ -664,7 +697,8 @@ export class AgentKey {
       trails,
       trades: {
         trade: async (id) => (await storage.get<TradeRecord>(`trade:${id}`)) ?? null,
-        putTrade: (t) => storage.put(`trade:${t.intentId}`, t)
+        putTrade: (t) => storage.put(`trade:${t.intentId}`, t),
+        trades: async () => [...(await storage.list<TradeRecord>({ prefix: 'trade:' })).values()]
       },
       ...this.tradeDeps
     };
@@ -682,6 +716,18 @@ export class AgentKey {
         const key = hex(crypto.getRandomValues(new Uint8Array(32)));
         await storage.put('x402-key', await seal(sealer, 'x402-key', key));
         return `0x${key}`;
+      },
+      ensureFunds: async ({
+        chainId,
+        asset,
+        amount
+      }: {
+        chainId: number;
+        asset: string;
+        amount: bigint;
+      }) => {
+        const symbol = findSupportedToken({ chainId, address: asset })?.symbol;
+        if (symbol) await ensureOn(await this.deps(record), { chainId, symbol, amount });
       },
       x402: {
         pending: async () => [
@@ -808,17 +854,21 @@ export class AgentKey {
 
   private async send(record: KeyRecord, req: Extract<KeyRequest, { op: 'send' }>) {
     const { chainId, token, to, amount } = this.resolveSend(record, req);
+    const deps = await this.deps(record);
+    const bridged =
+      token.kind === 'usd' ? await ensureOn(deps, { chainId, symbol: token.symbol, amount }) : null;
     const result = await transfer({
       chainId,
       token: token.address,
       to,
       amount,
       purpose: 'send',
-      deps: await this.deps(record)
+      deps
     });
     const network = findNetworkById(chainId);
     return {
       sent: { amount: req.amount, token: token.symbol, chain: chainLabel(chainId), to },
+      ...(bridged ? { bridged } : {}),
       usd: result.usd,
       txHash: result.txHash,
       ...(network

@@ -7,7 +7,7 @@ import type { TradeDeps, TradeRecord } from './trade.ts';
 
 import { MoneyError } from './errors.ts';
 import { fakeEngine, START, USDC, WALLET, WETH } from './test-fakes.ts';
-import { describeTrade, executeSwap, quoteSwap, tokenUnits } from './trade.ts';
+import { describeTrade, ensureOn, executeSwap, quoteSwap, tokenUnits } from './trade.ts';
 
 const DEPOSIT_ADDRESS = '0x00000000000000000000000000000000000000d1';
 
@@ -79,7 +79,8 @@ function setup(quoted = intent()) {
     trails,
     trades: {
       trade: async (id) => trades.get(id) ?? null,
-      putTrade: async (t) => void trades.set(t.intentId, t)
+      putTrade: async (t) => void trades.set(t.intentId, t),
+      trades: async () => [...trades.values()]
     },
     waitForReceipt: async () => 'success'
   };
@@ -203,5 +204,58 @@ describe('swaps', () => {
   it('says when a quote is unknown', async () => {
     const { deps } = setup();
     expect(await code(executeSwap(deps, 'nope', { send: true }))).toBe('quote_not_found');
+  });
+});
+
+describe('topping up a chain', () => {
+  it('does nothing when the wallet already holds enough there', async () => {
+    const { deps, trailsCalls } = setup();
+    expect(await ensureOn(deps, { chainId: 137, symbol: 'USDC', amount: 1_000_000n })).toBeNull();
+    expect(trailsCalls).toEqual([]);
+  });
+
+  it('only tops up stablecoins', async () => {
+    const { deps, fake } = setup();
+    fake.state.balance = 0n;
+    await expect(
+      ensureOn(deps, { chainId: 137, symbol: 'WETH', amount: 1n })
+    ).rejects.toMatchObject({ code: 'insufficient_balance' });
+  });
+
+  it('never starts a second bridge while one to the same place is on its way', async () => {
+    const { deps, fake, trades, trailsCalls } = setup();
+    const { trade } = await quoteSwap({ from: 'USDC', to: 'ETH', amount: '10' }, deps);
+    trades.set(trade.intentId, {
+      ...trade,
+      state: 'executing',
+      destination: { ...trade.destination, token: USDC, symbol: 'USDC', decimals: 6 }
+    });
+    trailsCalls.length = 0;
+    fake.state.balance = 0n;
+    await expect(
+      ensureOn(
+        { ...deps, sleep: async () => undefined },
+        { chainId: 137, symbol: 'USDC', amount: 5_000_000n, waitMs: 0 }
+      )
+    ).rejects.toMatchObject({ code: 'upstream_unavailable' });
+    expect(trailsCalls).not.toContain('quote');
+  });
+});
+
+describe('exact-output quotes', () => {
+  it('refuses a quote that delivers less than asked', async () => {
+    const { deps } = setup(
+      intent({
+        quoteRequest: {
+          destinationToAddress: WALLET,
+          destinationTokenAmount: 5_000_000n,
+          tradeType: 'EXACT_OUTPUT'
+        },
+        quote: { fromAmount: 10_000_000n, toAmount: 4_900_000n, toAmountMin: 4_900_000n }
+      })
+    );
+    await expect(
+      quoteSwap({ from: 'USDC', to: 'USDT', toAmount: '5', chain: 'polygon' }, deps)
+    ).rejects.toMatchObject({ code: 'upstream_invalid_quote' });
   });
 });
