@@ -263,20 +263,28 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
         const days = Number(body.days);
         const id_ = hexId();
         const key = agentKey(env.AGENT_KEYS!, id_);
-        allowance = await signIn.withOwner(id, (oms) =>
-          setUpAllowance({
-            wallet: who.wallet,
-            appName: pending.clientName ?? 'An agent',
-            allowanceUsd,
-            days,
-            deps: {
-              owner: oms.wallet,
-              indexer: oms.indexer,
-              prices: (tokens) => trailsPrices(env, tokens),
-              key,
-              now: () => new Date()
-            }
-          })
+        allowance = await signIn.withOwner(
+          id,
+          (oms) =>
+            setUpAllowance({
+              wallet: who.wallet,
+              appName: pending.clientName ?? 'An agent',
+              allowanceUsd,
+              days,
+              deps: {
+                owner: oms.wallet,
+                indexer: oms.indexer,
+                prices: (tokens) => trailsPrices(env, tokens),
+                key,
+                now: () => new Date()
+              }
+            }),
+          // The connection keeps the sign-in for owner actions the owner
+          // approves on the site (earn withdrawals), so those need no sign-in.
+          async (snapshot) => {
+            const kept = await key({ op: 'keep_owner', wallet: who.wallet, snapshot });
+            if (!kept.ok) throw new Error(kept.error.error);
+          }
         );
         keyId = id_;
       } else {
@@ -482,9 +490,11 @@ export async function handleActionsApi(req: Request, env: Env, path: string): Pr
         })
       );
     }
-    // Runs from the owner's wallet, signed in on this page just now.
-    if (typeof body.c !== 'string')
-      throw new ValidationError('Sign in on this page to approve it.');
+    // Runs from the owner's wallet: with the sign-in the connection kept, or
+    // one made on this page just now.
+    if (typeof body.c !== 'string') {
+      return answer(await key({ op: 'owner_run', wallet: owner.wallet, id: actionId }));
+    }
     const pending = await signIn.load(body.c);
     if (!pending.ownerSession || pending.signedIn?.wallet !== owner.wallet) {
       throw new ValidationError('Sign in on this page to approve it.');

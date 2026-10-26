@@ -1,8 +1,9 @@
 // Earning on stablecoins: ERC-4626 vaults (Morpho) that Trails' Yield API
-// lists, on Katana and Polygon, as on the dashboard. Depositing and withdrawing
-// are contract calls the connection's key can't make (it only transfers
-// tokens), so, as in the CLI, they're the owner's: the agent asks, the owner
-// approves on the site after signing in, and they run as the owner.
+// lists, on Katana and Polygon, as on the dashboard. The connection's key only
+// transfers tokens, so a deposit goes through Trails: the key pays an intent,
+// and Trails calls the vault's deposit for the wallet. Withdrawing is a call
+// from the wallet itself, so it's the owner's: the agent asks, the owner
+// approves on the site, and it runs as the owner.
 
 import type { Address } from 'viem';
 
@@ -214,36 +215,23 @@ async function findVault(
   return vault;
 }
 
-/** Approve and deposit `amount` of the vault's stablecoin, as the owner. */
-export async function depositTxs(
+/** The vault call that deposits `amount` of its stablecoin for the wallet. */
+export async function depositCall(
   params: { vault: string; amount: string; chain?: string; wallet: Address },
   deps: EarnDeps
-): Promise<{ vault: Vault; txs: OwnerTxs; amount: string }> {
+): Promise<{ vault: Vault; amount: string; call: { to: Address; data: `0x${string}` } }> {
   const vault = await findVault(params, deps);
   const units = tokenUnits(params.amount, vault.asset.decimals);
   return {
     vault,
     amount: params.amount,
-    txs: {
-      chainId: vault.chainId,
-      transactions: [
-        {
-          to: vault.asset.address,
-          data: encodeFunctionData({
-            abi: erc20Abi,
-            functionName: 'approve',
-            args: [vault.address, units]
-          })
-        },
-        {
-          to: vault.address,
-          data: encodeFunctionData({
-            abi: erc4626Abi,
-            functionName: 'deposit',
-            args: [units, params.wallet]
-          })
-        }
-      ]
+    call: {
+      to: vault.address,
+      data: encodeFunctionData({
+        abi: erc4626Abi,
+        functionName: 'deposit',
+        args: [units, params.wallet]
+      })
     }
   };
 }
