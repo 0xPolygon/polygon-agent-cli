@@ -44,7 +44,12 @@ describe('client profiles', () => {
 
   it('has the owner approve each ChatGPT spend, and keeps Muse to reading the wallet', () => {
     expect(PROFILES.openai).toMatchObject({ movesMoney: true, ownerApproves: true });
-    expect(PROFILES.openai.tools).toEqual(PROFILES.standard.tools);
+    // Everything but funding Polymarket and betting.
+    expect(PROFILES.openai.tools).toEqual(
+      PROFILES.standard.tools.filter(
+        (t) => !['polymarket_deposit', 'polymarket_buy', 'polymarket_sell'].includes(t)
+      )
+    );
     expect(PROFILES.muse).toEqual({
       tools: ['get_wallet'],
       movesMoney: false,
@@ -61,6 +66,18 @@ describe('client profiles', () => {
       'swap_quote',
       'swap',
       'swap_status',
+      'pay_service',
+      'earn_vaults',
+      'earn_deposit',
+      'earn_withdraw',
+      'polymarket_markets',
+      'polymarket_account',
+      'polymarket_deposit',
+      'polymarket_buy',
+      'polymarket_sell',
+      'polymarket_cancel',
+      'polymarket_redeem',
+      'polymarket_withdraw',
       'get_action'
     ]);
   });

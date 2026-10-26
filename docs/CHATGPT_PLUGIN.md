@@ -2,9 +2,10 @@
 
 The ChatGPT plugin is `plugins/open-money-agent-chatgpt/`: `plugin.json` (listing), `mcp.json`
 (the remote MCP server at `https://agents.polygon.technology/mcp`, OAuth with dynamic client
-registration) and the logo. It has no skills: the Open Money Agent skill sends funds, swaps and
-bets on Polymarket, which ChatGPT plugins may not do. The MCP server only reads the wallet
-(`get_wallet`).
+registration) and the logo. It has no skills. ChatGPT connections get the `openai` profile
+(`worker/profiles.ts`): every MCP tool except funding Polymarket and betting, and every spend
+waits for the owner to approve it on agents.polygon.technology (`/approve`), so ChatGPT itself
+never moves money. Earn deposits and withdrawals also ask the owner to sign in again.
 
 Build the ZIP:
 
@@ -39,7 +40,8 @@ reviewer email (`mcp-review@theaicompany.org`), which signs in on the connect pa
 code. Its wallet is created on first sign-in and starts empty, so the test cases allow for $0.
 Credentials go in the portal's secure form only.
 
-Positive test cases (expected tool: `get_wallet` for each):
+The test cases are in `plugin.json` (`review.test_cases`), and must match what a connection made
+with the reviewer's empty wallet does. Version 1.0.3, read-only, had these:
 
 | Scenario | Prompt | Expected result |
 | --- | --- | --- |

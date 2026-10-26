@@ -66,6 +66,16 @@ function ownerSignIn(env: Env): OwnerSignIn | null {
   return new OwnerSignIn(new SealedKv(env.OAUTH_KV, env.CREDENTIALS_KEY), publishableKey(env));
 }
 
+/** Where Cloudflare saw this browser: ISO country and subdivision (e.g. CA-ON). */
+export function ownerRegion(req: Request): { country: string | null; region: string | null } {
+  const cf = (req as Request & { cf?: { country?: string; regionCode?: string } }).cf;
+  const country = cf?.country && /^[A-Z]{2}$/.test(cf.country) ? cf.country : null;
+  return {
+    country,
+    region: country && cf?.regionCode ? `${country}-${cf.regionCode}` : null
+  };
+}
+
 const hexId = () =>
   Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
     b.toString(16).padStart(2, '0')
@@ -276,7 +286,9 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
         wallet: who.wallet,
         email: who.email,
         profile,
-        ...(keyId ? { keyId, appName: pending.clientName ?? 'Your agent' } : {})
+        ...(keyId
+          ? { keyId, appName: pending.clientName ?? 'Your agent', ownerRegion: ownerRegion(req) }
+          : {})
       };
       const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
         request: authRequest,

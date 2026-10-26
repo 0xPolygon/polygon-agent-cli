@@ -22,11 +22,38 @@ export interface ProfilePolicy {
 }
 
 const READ = ['get_wallet'] as const;
-const MONEY = ['get_allowance', 'send', 'swap_quote', 'swap', 'swap_status', 'get_action'] as const;
+const MONEY = [
+  'get_allowance',
+  'send',
+  'swap_quote',
+  'swap',
+  'swap_status',
+  'pay_service',
+  'earn_vaults',
+  'earn_deposit',
+  'earn_withdraw',
+  'polymarket_markets',
+  'polymarket_account',
+  'polymarket_deposit',
+  'polymarket_buy',
+  'polymarket_sell',
+  'polymarket_cancel',
+  'polymarket_redeem',
+  'polymarket_withdraw',
+  'get_action'
+] as const;
+
+// OpenAI's rules count real-money betting apart from moving money: ChatGPT
+// sees Polymarket markets and the account, but can't fund it or bet.
+const BETTING = new Set<string>(['polymarket_deposit', 'polymarket_buy', 'polymarket_sell']);
 
 export const PROFILES: Record<Profile, ProfilePolicy> = {
   standard: { tools: [...READ, ...MONEY], movesMoney: true, ownerApproves: false },
-  openai: { tools: [...READ, ...MONEY], movesMoney: true, ownerApproves: true },
+  openai: {
+    tools: [...READ, ...MONEY].filter((t) => !BETTING.has(t)),
+    movesMoney: true,
+    ownerApproves: true
+  },
   muse: { tools: [...READ], movesMoney: false, ownerApproves: false }
 };
 

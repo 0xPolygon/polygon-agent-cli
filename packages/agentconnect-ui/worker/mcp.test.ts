@@ -86,6 +86,18 @@ describe('MCP server', () => {
       'swap_quote',
       'swap',
       'swap_status',
+      'pay_service',
+      'earn_vaults',
+      'earn_deposit',
+      'earn_withdraw',
+      'polymarket_markets',
+      'polymarket_account',
+      'polymarket_deposit',
+      'polymarket_buy',
+      'polymarket_sell',
+      'polymarket_cancel',
+      'polymarket_redeem',
+      'polymarket_withdraw',
       'get_action'
     ]);
   });

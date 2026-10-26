@@ -36,9 +36,26 @@ import {
   viewAction
 } from './actions.ts';
 import { depositTxs, listVaults, positions, withdrawTxs } from './earn.ts';
-import { checkTransfer, getSessions, probeSponsorship, spentUsdSince, transfer } from './engine.ts';
+import {
+  checkTransfer,
+  getSessions,
+  probeSponsorship,
+  reconcileTransfers,
+  spentUsdSince,
+  transfer
+} from './engine.ts';
 import { httpStatus, MoneyError } from './errors.ts';
 import { planFromJson, sessionMatchesPlan } from './plan.ts';
+import {
+  pmAccount,
+  pmBuy,
+  pmCancel,
+  pmDeposit,
+  pmMarkets,
+  pmRedeem,
+  pmSell,
+  pmWithdraw
+} from './polymarket.ts';
 import { StoredNonceSigner } from './signer.ts';
 import { chainLabel, findSupportedToken, parseChain, resolveSupportedSymbol } from './tokens.ts';
 import { describeTrade, executeApprovedSwap, executeSwap, quoteSwap, tokenUnits } from './trade.ts';
@@ -101,6 +118,39 @@ export type KeyRequest =
       amount: string;
       chain?: string;
     }
+  | { op: 'pm_markets'; wallet: string; query?: string }
+  | { op: 'pm_account'; wallet: string; ownerRegion?: OwnerRegion }
+  | { op: 'pm_deposit'; wallet: string; ownerRegion?: OwnerRegion; usd: string }
+  | {
+      op: 'pm_buy';
+      wallet: string;
+      ownerRegion?: OwnerRegion;
+      market: string;
+      outcome: string;
+      usd: string;
+      maxPrice?: number;
+      limitPrice?: number;
+    }
+  | {
+      op: 'pm_sell';
+      wallet: string;
+      ownerRegion?: OwnerRegion;
+      market: string;
+      outcome: string;
+      shares: string;
+      minPrice?: number;
+      limitPrice?: number;
+    }
+  | {
+      op: 'pm_cancel';
+      wallet: string;
+      ownerRegion?: OwnerRegion;
+      orderId?: string;
+      market?: string;
+      all?: boolean;
+    }
+  | { op: 'pm_redeem'; wallet: string; ownerRegion?: OwnerRegion }
+  | { op: 'pm_withdraw'; wallet: string; ownerRegion?: OwnerRegion; usd: string }
   | { op: 'owner_begin'; wallet: string; id: string }
   | {
       op: 'owner_end';
@@ -115,13 +165,26 @@ export type KeyRequest =
   | { op: 'action'; wallet: string; id: string }
   | { op: 'decide'; wallet: string; id: string; approve: boolean };
 
+type WithoutWallet<T> = T extends unknown ? Omit<T, 'wallet'> : never;
+
 // The requests that spend, and so can wait for the owner's approval.
 export type SpendRequest =
   | Omit<Extract<KeyRequest, { op: 'send' }>, 'wallet'>
   | Omit<Extract<KeyRequest, { op: 'swap' }>, 'wallet'>
-  | Omit<Extract<KeyRequest, { op: 'pay_service' }>, 'wallet'>;
+  | Omit<Extract<KeyRequest, { op: 'pay_service' }>, 'wallet'>
+  | WithoutWallet<Extract<KeyRequest, { op: 'pm_deposit' | 'pm_buy' | 'pm_sell' }>>;
 
-export const SPEND_OPS: ReadonlySet<string> = new Set(['send', 'swap', 'pay_service']);
+// Spends, and bets: on platforms where the owner approves each, these wait.
+export const SPEND_OPS: ReadonlySet<string> = new Set([
+  'send',
+  'swap',
+  'pay_service',
+  'pm_deposit',
+  'pm_buy',
+  'pm_sell'
+]);
+
+export type OwnerRegion = { country: string | null; region: string | null };
 
 // This site's own hosts: never paid as a service.
 const OWN_HOSTS = [
@@ -156,6 +219,7 @@ export class AgentKey {
   tradeDeps?: Partial<TradeDeps>;
   x402Overrides?: Partial<X402Deps>;
   earnOverrides?: Partial<EarnDeps>;
+  pmOverrides?: Record<string, unknown>;
 
   constructor(
     state: { storage: KeyStorage },
@@ -265,6 +329,31 @@ export class AgentKey {
           })
         );
       }
+      case 'pm_markets':
+        return pmMarkets({ query: req.query }, await this.pmDeps(record, undefined));
+      case 'pm_account':
+        return pmAccount(await this.pmDeps(record, req.ownerRegion));
+      case 'pm_deposit': {
+        const deps = await this.pmDeps(record, req.ownerRegion);
+        await this.settleStuckDeposit(record);
+        return pmDeposit({ usd: req.usd }, deps);
+      }
+      case 'pm_buy': {
+        const { op: _op, wallet: _w, ownerRegion, ...p } = req;
+        return pmBuy(p, await this.pmDeps(record, ownerRegion));
+      }
+      case 'pm_sell': {
+        const { op: _op, wallet: _w, ownerRegion, ...p } = req;
+        return pmSell(p, await this.pmDeps(record, ownerRegion));
+      }
+      case 'pm_cancel': {
+        const { op: _op, wallet: _w, ownerRegion, ...p } = req;
+        return pmCancel(p, await this.pmDeps(record, ownerRegion));
+      }
+      case 'pm_redeem':
+        return pmRedeem(await this.pmDeps(record, req.ownerRegion));
+      case 'pm_withdraw':
+        return pmWithdraw({ usd: req.usd }, await this.pmDeps(record, req.ownerRegion));
       case 'owner_begin':
         return beginOwnerAction(this.storage, req.id, this.now());
       case 'owner_end':
@@ -314,6 +403,25 @@ export class AgentKey {
         { label: 'To', value: to },
         { label: 'Network', value: chainLabel(chainId) }
       ];
+    } else if (request.op === 'pm_deposit') {
+      title = `Move $${request.usd} to Polymarket`;
+      details = [
+        { label: 'From', value: 'USDC on Polygon, from the allowance' },
+        { label: 'Note', value: 'Money on Polymarket is outside the allowance' }
+      ];
+    } else if (request.op === 'pm_buy') {
+      title = `Bet $${request.usd} on "${request.outcome}"`;
+      details = [
+        { label: 'Market', value: request.market },
+        ...(request.limitPrice !== undefined
+          ? [{ label: 'Limit price', value: String(request.limitPrice) }]
+          : request.maxPrice !== undefined
+            ? [{ label: 'Pay at most', value: `${request.maxPrice} a share` }]
+            : [])
+      ];
+    } else if (request.op === 'pm_sell') {
+      title = `Sell ${request.shares} "${request.outcome}" shares on Polymarket`;
+      details = [{ label: 'Market', value: request.market }];
     } else if (request.op === 'pay_service') {
       title = `Pay up to $${request.maxUsd} for a web service`;
       details = [
@@ -583,6 +691,68 @@ export class AgentKey {
       },
       ...this.x402Overrides
     };
+  }
+
+  // Polymarket: the connection's own trading key and account, kept sealed
+  // here, funded from the allowance through Polymarket's bridge.
+  private async pmDeps(record: KeyRecord, ownerRegion: OwnerRegion | undefined) {
+    const sealer = await this.sealer();
+    const storage = this.storage;
+    const deps = await this.deps(record);
+    const USDC = getAddress('0x3c499c542cef5e3811e1192ce70d8cc03d5c3359');
+    return {
+      store: {
+        get: async (name: string) => {
+          const sealed = await storage.get<string>(name);
+          return sealed ? openSealed<string>(sealer, name, sealed) : null;
+        },
+        put: async (name: string, value: string) =>
+          storage.put(name, await seal(sealer, name, value))
+      },
+      walletAddress: getAddress(record.wallet),
+      ownerRegion: ownerRegion ?? { country: null, region: null },
+      sendUsdc: async ({ to, amount }: { to: `0x${string}`; amount: bigint }) =>
+        transfer({
+          chainId: 137,
+          token: USDC,
+          to,
+          amount,
+          purpose: 'trade',
+          ref: 'polymarket-deposit',
+          deps
+        }),
+      usdcBalance: () => deps.balanceOf({ chainId: 137, token: USDC }),
+      now: this.now,
+      sleep: this.sleep,
+      ...this.pmOverrides
+    };
+  }
+
+  // A deposit recorded as 'sending' whose transfer never left (stopped between
+  // the record and the send) would hold up every later deposit. The engine's
+  // own records say: an executed transfer for it means it was sent; none, or
+  // only ones that certainly moved nothing, means it can be cleared.
+  private async settleStuckDeposit(record: KeyRecord): Promise<void> {
+    const pm = await this.pmDeps(record, undefined);
+    const raw = await pm.store.get('pm-deposit');
+    if (!raw) return;
+    const pending = JSON.parse(raw) as { status: string; sentAt: string; txHash: string | null };
+    if (pending.status !== 'sending') return;
+    const deps = await this.deps(record);
+    await reconcileTransfers(deps);
+    const since = Date.parse(pending.sentAt) - 60_000;
+    const transfers = (await deps.store.transfers()).filter(
+      (t) => t.ref === 'polymarket-deposit' && Date.parse(t.createdAt) >= since
+    );
+    const sent = transfers.find((t) => t.state === 'executed' && t.txHash);
+    if (sent) {
+      await pm.store.put(
+        'pm-deposit',
+        JSON.stringify({ ...pending, status: 'sent', txHash: sent.txHash })
+      );
+    } else if (transfers.every((t) => t.state === 'failed' && t.neverSent)) {
+      await pm.store.put('pm-deposit', '');
+    }
   }
 
   private async status(record: KeyRecord) {
