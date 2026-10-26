@@ -86,6 +86,7 @@ export interface TradeRecord {
 export interface TradeStore {
   trade(intentId: string): Promise<TradeRecord | null>;
   putTrade(record: TradeRecord): Promise<void>;
+  trades?(): Promise<TradeRecord[]>;
 }
 
 export interface TradeDeps extends EngineDeps {
@@ -172,6 +173,8 @@ export function validateDeposit(params: {
   destination: { chainId: number; address: string };
   amount: bigint;
   slippage: number;
+  // An exact-output trade: what it must deliver. `amount` is then the quoted input.
+  exactOutput?: bigint;
 }): void {
   const { intent, walletAddress } = params;
   if (!intent.intentId || !/^[\w-]+$/.test(intent.intentId)) throw invalidQuote('bad intent id');
@@ -187,22 +190,39 @@ export function validateDeposit(params: {
   ) {
     throw invalidQuote('the output would be used in a contract call');
   }
-  if (
-    request.originTokenAmount === undefined ||
-    BigInt(request.originTokenAmount) !== params.amount
-  ) {
-    throw invalidQuote('the quoted amount differs from the request');
-  }
-  if (request.tradeType !== undefined && request.tradeType !== 'EXACT_INPUT') {
-    throw invalidQuote('not an exact-input trade');
-  }
   const expected = BigInt(intent.quote?.toAmount ?? 0);
   const minimum = BigInt(intent.quote?.toAmountMin ?? 0);
-  // The minimum may sit below the expected output by at most the slippage
-  // (plus 0.01% for Trails' rounding).
-  const bps = BigInt(Math.ceil(params.slippage * 10_000)) + 1n;
-  if (expected <= 0n || minimum <= 0n || minimum * 10_000n < expected * (10_000n - bps)) {
-    throw invalidQuote('the minimum output is below the slippage asked for');
+  if (params.exactOutput !== undefined) {
+    // Trails puts the slippage on the input: the minimum out is what was asked.
+    if (request.tradeType !== 'EXACT_OUTPUT') throw invalidQuote('not an exact-output trade');
+    if (
+      request.destinationTokenAmount === undefined ||
+      BigInt(request.destinationTokenAmount) !== params.exactOutput
+    ) {
+      throw invalidQuote('the quoted amount differs from the request');
+    }
+    if (minimum < params.exactOutput || expected < minimum) {
+      throw invalidQuote('the minimum output is below the amount asked for');
+    }
+    if (params.amount <= 0n || BigInt(intent.quote?.fromAmount ?? 0) !== params.amount) {
+      throw invalidQuote('no input amount');
+    }
+  } else {
+    if (
+      request.originTokenAmount === undefined ||
+      BigInt(request.originTokenAmount) !== params.amount
+    ) {
+      throw invalidQuote('the quoted amount differs from the request');
+    }
+    if (request.tradeType !== undefined && request.tradeType !== 'EXACT_INPUT') {
+      throw invalidQuote('not an exact-input trade');
+    }
+    // The minimum may sit below the expected output by at most the slippage
+    // (plus 0.01% for Trails' rounding).
+    const bps = BigInt(Math.ceil(params.slippage * 10_000)) + 1n;
+    if (expected <= 0n || minimum <= 0n || minimum * 10_000n < expected * (10_000n - bps)) {
+      throw invalidQuote('the minimum output is below the slippage asked for');
+    }
   }
   if (intent.originChainId !== params.origin.chainId) throw invalidQuote('wrong source chain');
   if (intent.destinationChainId !== params.destination.chainId) {
@@ -254,16 +274,79 @@ function checkDepositCall(params: {
 export interface QuoteParams {
   from: string;
   to: string;
-  // Exactly one: units of `from`, or US dollars of it.
+  // Exactly one: units of `from` to sell, US dollars of it, or units of `to`
+  // to receive (an exact-output buy, also how a bridge tops up a chain).
   amount?: string;
   amountUsd?: number;
+  toAmount?: string;
+  // Where to sell. Without it, the chain the wallet holds enough `from` on,
+  // the destination chain first.
   chain?: string;
   toChain?: string;
   slippage?: number;
 }
 
-/** Quotes a swap or bridge and saves it for `swap` to execute. Sends nothing. */
+/**
+ * Quotes a swap or bridge and saves it for `swap` to execute. Sends nothing.
+ * Without a chain to sell on, it tries each chain the allowance covers where
+ * the wallet holds the token, like Trails does: the destination chain first,
+ * then the biggest holding.
+ */
 export async function quoteSwap(
+  params: QuoteParams,
+  deps: TradeDeps
+): Promise<{ trade: TradeRecord; warnings: string[] }> {
+  if (params.chain !== undefined && params.chain.trim() !== '') return quoteOn(params, deps);
+  const toChainId = params.toChain ? chainOf(params.toChain, 137) : undefined;
+  const sessions = await getSessions({ deps });
+  const candidates: { chainId: number; balance: bigint }[] = [];
+  const target =
+    toChainId !== undefined
+      ? resolveSupportedSymbol({ chainId: toChainId, symbol: params.to })
+      : undefined;
+  for (const chainId of new Set(sessions.filter((x) => !x.expired).map((x) => x.chainId))) {
+    const token = resolveSupportedSymbol({ chainId, symbol: params.from });
+    if (!token) continue;
+    // Not a trade at all: the token is already where it's wanted.
+    if (chainId === toChainId && target && same(token.address, target.address)) continue;
+    const balance = await deps.balanceOf({ chainId, token: token.address });
+    if (balance > 0n) candidates.push({ chainId, balance });
+  }
+  candidates.sort((a, b) =>
+    a.chainId === toChainId ? -1 : b.chainId === toChainId ? 1 : a.balance > b.balance ? -1 : 1
+  );
+  if (candidates.length === 0) {
+    throw new MoneyError({
+      code: 'insufficient_balance',
+      message: `The wallet holds no ${params.from.toUpperCase()} on the chains this connection can spend on.`
+    });
+  }
+  let first: unknown;
+  for (const { chainId } of candidates) {
+    try {
+      return await quoteOn(
+        {
+          ...params,
+          chain: String(chainId),
+          toChain: params.toChain ?? (toChainId === undefined ? undefined : String(toChainId))
+        },
+        deps
+      );
+    } catch (error) {
+      // Short on this chain: try the next one. Anything else stops.
+      if (
+        !(error instanceof MoneyError) ||
+        !['insufficient_balance', 'allowance_exhausted', 'not_covered'].includes(error.code)
+      ) {
+        throw error;
+      }
+      first ??= error;
+    }
+  }
+  throw first;
+}
+
+async function quoteOn(
   params: QuoteParams,
   deps: TradeDeps
 ): Promise<{ trade: TradeRecord; warnings: string[] }> {
@@ -274,10 +357,11 @@ export async function quoteSwap(
       message: `Slippage must be above 0 and at most ${MAX_SLIPPAGE}.`
     });
   }
-  if ((params.amount === undefined) === (params.amountUsd === undefined)) {
+  const given = [params.amount, params.amountUsd, params.toAmount].filter((v) => v !== undefined);
+  if (given.length !== 1) {
     throw new MoneyError({
       code: 'invalid_input',
-      message: 'Give exactly one of amount or amount_usd.'
+      message: 'Give exactly one of amount, amount_usd or to_amount.'
     });
   }
   const originChainId = chainOf(params.chain, 137);
@@ -290,9 +374,14 @@ export async function quoteSwap(
       message: 'The source and destination are the same token on the same chain.'
     });
   }
+  const exactOutput =
+    params.toAmount !== undefined ? tokenUnits(params.toAmount, destination.decimals) : undefined;
 
   let amount: bigint;
-  if (params.amount !== undefined) {
+  if (exactOutput !== undefined) {
+    // What it costs is Trails' to say; checked against the balance after.
+    amount = 0n;
+  } else if (params.amount !== undefined) {
     amount = tokenUnits(params.amount, origin.decimals);
   } else {
     const usd = params.amountUsd ?? 0;
@@ -312,28 +401,33 @@ export async function quoteSwap(
     amount = tokenUnits((usd / price).toFixed(origin.decimals), origin.decimals);
   }
 
-  // What the allowance and the wallet can cover, before asking Trails.
+  // What the allowance and the wallet can cover (before asking Trails, unless
+  // only Trails knows the cost).
   const balance = await deps.balanceOf({ chainId: originChainId, token: origin.address });
-  if (balance < amount) {
-    throw new MoneyError({
-      code: 'insufficient_balance',
-      message: `The wallet holds ${formatUnits(balance, origin.decimals)} ${origin.symbol} on ${chainLabel(originChainId)}, less than ${formatUnits(amount, origin.decimals)}.`
-    });
-  }
   const sessions = await getSessions({ deps, chainId: originChainId });
   const found = sessionForToken({ sessions, chainId: originChainId, token: origin.address });
-  if (!found) {
-    throw new MoneyError({
-      code: 'not_covered',
-      message: `${origin.symbol} on ${chainLabel(originChainId)} isn't covered by this connection's allowance.`
-    });
-  }
-  if (found.grant.remaining !== null && amount > found.grant.remaining) {
-    throw new MoneyError({
-      code: 'allowance_exhausted',
-      message: `That's more than the ${formatUnits(found.grant.remaining, origin.decimals)} ${origin.symbol} the allowance has left on ${chainLabel(originChainId)}.`
-    });
-  }
+  const coverable = (units: bigint) => {
+    if (balance < units) {
+      throw new MoneyError({
+        code: 'insufficient_balance',
+        message: `The wallet holds ${formatUnits(balance, origin.decimals)} ${origin.symbol} on ${chainLabel(originChainId)}, less than ${formatUnits(units, origin.decimals)}.`
+      });
+    }
+    if (!found) {
+      throw new MoneyError({
+        code: 'not_covered',
+        message: `${origin.symbol} on ${chainLabel(originChainId)} isn't covered by this connection's allowance.`
+      });
+    }
+    if (found.grant.remaining !== null && units > found.grant.remaining) {
+      throw new MoneyError({
+        code: 'allowance_exhausted',
+        message: `That's more than the ${formatUnits(found.grant.remaining, origin.decimals)} ${origin.symbol} the allowance has left on ${chainLabel(originChainId)}.`
+      });
+    }
+  };
+  if (exactOutput === undefined) coverable(amount);
+  else if (balance === 0n || !found) coverable(1n);
 
   const { TradeType } = await import('@0xtrails/api');
   let intent: Intent;
@@ -345,8 +439,9 @@ export async function quoteSwap(
       destinationChainId,
       destinationTokenAddress: destination.address,
       destinationToAddress: deps.walletAddress,
-      originTokenAmount: amount,
-      tradeType: TradeType.EXACT_INPUT,
+      ...(exactOutput === undefined
+        ? { originTokenAmount: amount, tradeType: TradeType.EXACT_INPUT }
+        : { destinationTokenAmount: exactOutput, tradeType: TradeType.EXACT_OUTPUT }),
       options: { slippageTolerance: slippage }
     }));
   } catch (error) {
@@ -356,13 +451,18 @@ export async function quoteSwap(
       cause: error
     });
   }
+  if (exactOutput !== undefined) {
+    amount = BigInt(intent.quote?.fromAmount ?? 0);
+    coverable(amount);
+  }
   validateDeposit({
     intent,
     walletAddress: deps.walletAddress,
     origin: { chainId: originChainId, address: origin.address },
     destination: { chainId: destinationChainId, address: destination.address },
     amount,
-    slippage
+    slippage,
+    ...(exactOutput !== undefined ? { exactOutput } : {})
   });
 
   const warnings: string[] = [];
@@ -733,4 +833,92 @@ export function describeTrade(trade: TradeRecord): Record<string, unknown> {
     ...(trade.refundTxHash ? { refundTxHash: trade.refundTxHash } : {}),
     ...(trade.error && trade.state !== 'completed' ? { error: trade.error } : {})
   };
+}
+
+/**
+ * Makes sure the wallet holds `amount` of `token` on `chainId`, bridging the
+ * shortfall from a stablecoin it holds on another chain the allowance covers
+ * (USDC first, then USDT), the way Trails pays from wherever funds are. Only
+ * stablecoins top up stablecoins. Returns the bridge it ran, if any.
+ */
+export async function ensureOn(
+  deps: TradeDeps,
+  params: { chainId: number; symbol: string; amount: bigint; waitMs?: number }
+): Promise<Record<string, unknown> | null> {
+  const token = coveredToken(params.chainId, params.symbol);
+  const have = await deps.balanceOf({ chainId: params.chainId, token: token.address });
+  if (have >= params.amount) return null;
+  if (token.kind !== 'usd') {
+    throw new MoneyError({
+      code: 'insufficient_balance',
+      message: `The wallet holds ${formatUnits(have, token.decimals)} ${token.symbol} on ${chainLabel(params.chainId)}, less than ${formatUnits(params.amount, token.decimals)}.`
+    });
+  }
+  // A bridge here already on its way: see it through, never start another.
+  const open = (await deps.trades.trades?.())?.find(
+    (t) =>
+      (t.state === 'depositing' || t.state === 'executing') &&
+      t.destination.chainId === params.chainId &&
+      same(t.destination.token, token.address)
+  );
+  if (open) {
+    const moved = await executeSwap(deps, open.intentId, {
+      send: false,
+      waitMs: params.waitMs ?? 150_000
+    });
+    if (moved.state === 'depositing' || moved.state === 'executing') {
+      throw new MoneyError({
+        code: 'upstream_unavailable',
+        message: `A bridge to ${chainLabel(params.chainId)} is still on its way. Try again in a minute; it won't be bridged twice.`,
+        details: { intentId: moved.intentId }
+      });
+    }
+    if (
+      (await deps.balanceOf({ chainId: params.chainId, token: token.address })) >= params.amount
+    ) {
+      return describeTrade(moved);
+    }
+  }
+  const short = formatUnits(
+    params.amount - (await deps.balanceOf({ chainId: params.chainId, token: token.address })),
+    token.decimals
+  );
+  let quoted: Awaited<ReturnType<typeof quoteSwap>> | undefined;
+  let refusal: unknown;
+  for (const from of ['USDC', 'USDT']) {
+    try {
+      quoted = await quoteSwap(
+        { from, to: token.symbol, toAmount: short, toChain: String(params.chainId) },
+        deps
+      );
+      break;
+    } catch (error) {
+      refusal ??= error;
+    }
+  }
+  if (!quoted) {
+    throw new MoneyError({
+      code: 'insufficient_balance',
+      message: `The wallet needs ${short} more ${token.symbol} on ${chainLabel(params.chainId)}, and no other chain it can spend on holds enough stablecoins to bridge it.`,
+      ...(refusal instanceof MoneyError ? { details: { bridge: refusal.toJSON() } } : {})
+    });
+  }
+  const done = await executeSwap(deps, quoted.trade.intentId, {
+    send: true,
+    waitMs: params.waitMs ?? 150_000
+  });
+  if (done.state !== 'completed') {
+    throw new MoneyError({
+      code: 'upstream_unavailable',
+      message: `Bridging ${short} ${token.symbol} to ${chainLabel(params.chainId)} hasn't finished yet (${done.state}). Try again in a minute; it won't be bridged twice.`,
+      details: { intentId: done.intentId }
+    });
+  }
+  // The receipt can land a moment before the balance reads it.
+  for (let i = 0; i < 10; i++) {
+    if ((await deps.balanceOf({ chainId: params.chainId, token: token.address })) >= params.amount)
+      break;
+    await deps.sleep(3_000);
+  }
+  return describeTrade(done);
 }

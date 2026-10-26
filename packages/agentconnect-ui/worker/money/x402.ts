@@ -58,6 +58,8 @@ export interface X402Deps extends EngineDeps {
   // Reads the signer's balance (viem in production).
   signerBalance?: (p: { chainId: number; asset: Address; signer: Address }) => Promise<bigint>;
   fetch?: typeof fetch;
+  // Tops up the wallet on a chain from its other chains when it's short there.
+  ensureFunds?: (p: { chainId: number; asset: Address; amount: bigint }) => Promise<unknown>;
 }
 
 export interface PayParams {
@@ -233,6 +235,7 @@ export async function payAndFetch(
   let fundTx: string | undefined;
   if (free < amount) {
     const shortfall = amount - free;
+    await deps.ensureFunds?.({ chainId, asset, amount: shortfall });
     fundTx = (
       await transfer({
         chainId,

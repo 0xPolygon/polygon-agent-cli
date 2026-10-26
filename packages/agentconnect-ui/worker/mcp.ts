@@ -9,11 +9,21 @@
 //
 // What a connection sees depends on its profile (profiles.ts): which tools.
 
+import { formatUnits } from 'viem';
+
+import {
+  EthereumPrivateKeyCredentialSigner,
+  findNetworkById,
+  OMSWallet
+} from '@polygonlabs/oms-wallet';
+
 import type { Env } from './index.ts';
 import type { KeyRequest, SpendRequest } from './money/agent-key.ts';
 import type { Profile, ProfilePolicy } from './profiles.ts';
 
 import { agentKey, SPEND_OPS } from './money/agent-key.ts';
+import { chainLabel, supportedChainIds } from './money/tokens.ts';
+import { publishableKey } from './oms-config.ts';
 import { policyOf } from './profiles.ts';
 
 export interface McpProps {
@@ -44,12 +54,12 @@ const TOOLS = [
     name: 'get_wallet',
     title: 'Wallet',
     description:
-      "The wallet's address, what it holds in US dollars, and the owner's dashboard link.",
+      "The wallet's address (the same on every chain), what it holds on each chain in US dollars, and the owner's dashboard link.",
     inputSchema: { type: 'object', properties: {} },
     outputSchema: {
       type: 'object',
       properties: {
-        address: { type: 'string', description: 'The wallet address on Polygon.' },
+        address: { type: 'string', description: 'The wallet address, the same on every chain.' },
         owner: { type: ['string', 'null'], description: 'The email the owner signed in with.' },
         network: { type: 'string' },
         totalUsd: { type: 'number', description: 'What the wallet holds, in US dollars.' },
@@ -57,7 +67,13 @@ const TOOLS = [
           type: 'array',
           items: {
             type: 'object',
-            properties: { name: { type: 'string' }, usd: { type: 'number' } },
+            properties: {
+              name: { type: 'string' },
+              symbol: { type: 'string' },
+              chain: { type: 'string' },
+              amount: { type: 'string' },
+              usd: { type: 'number' }
+            },
             required: ['name', 'usd']
           }
         },
@@ -357,22 +373,39 @@ const toolText = (value: unknown, isError = false) => ({
   ...(!isError && typeof value === 'object' && value ? { structuredContent: value } : {})
 });
 
+// What the wallet holds on every chain it's on, through the OMS indexer (no
+// sign-in needed; the signer is a throwaway), valued in US dollars.
 async function walletHoldings(env: Env, wallet: string) {
-  if (!env.INDEXER_ACCESS_KEY) return null;
-  const res = await fetch('https://polygon-indexer.sequence.app/rpc/Indexer/GetTokenBalances', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Access-Key': env.INDEXER_ACCESS_KEY },
-    body: JSON.stringify({ accountAddress: wallet, includeMetadata: true })
+  const oms = new OMSWallet({
+    publishableKey: publishableKey(env),
+    storage: { get: () => null, set: () => {}, delete: () => {} },
+    credentialSigner: new EthereumPrivateKeyCredentialSigner(
+      crypto.getRandomValues(new Uint8Array(32))
+    )
   });
-  if (!res.ok) return null;
-  const body = (await res.json()) as {
-    balances?: { balanceUSD?: string; contractInfo?: { name?: string; symbol?: string } }[];
-  };
-  const rows = (body.balances ?? [])
-    .map((b) => ({
-      name: b.contractInfo?.name ?? b.contractInfo?.symbol ?? 'Token',
-      usd: Math.round(Number(b.balanceUSD ?? 0) * 100) / 100
-    }))
+  const networks = supportedChainIds()
+    .map((id) => findNetworkById(id))
+    .filter((n) => n !== undefined);
+  let res;
+  try {
+    res = await oms.indexer.getBalances({ walletAddress: wallet, networks, includeMetadata: true });
+  } catch (err) {
+    console.error('[mcp] balances', err);
+    return null;
+  }
+  const rows = [...res.nativeBalances, ...res.balances]
+    .map((b) => {
+      const info = 'contractInfo' in b ? b.contractInfo : undefined;
+      const symbol = info?.symbol ?? ('symbol' in b ? b.symbol : undefined) ?? 'Token';
+      const decimals = info?.decimals ?? 18;
+      return {
+        name: info?.name ?? ('name' in b ? b.name : undefined) ?? symbol,
+        symbol,
+        chain: chainLabel(b.chainId),
+        amount: formatUnits(BigInt(b.balance), decimals),
+        usd: Math.round(Number(b.balanceUSD ?? 0) * 100) / 100
+      };
+    })
     .filter((r) => r.usd > 0)
     .sort((a, b) => b.usd - a.usd);
   return { totalUsd: Math.round(rows.reduce((t, r) => t + r.usd, 0) * 100) / 100, holdings: rows };
@@ -521,7 +554,7 @@ async function callTool(
       value: {
         address: props.wallet,
         owner: props.email,
-        network: 'Polygon',
+        network: 'The same address on every chain',
         ...((await walletHoldings(env, props.wallet)) ?? {}),
         dashboardUrl: `${origin}/?wallet=${props.wallet}&chain=137&view=dashboard`
       }
