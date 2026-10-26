@@ -1,12 +1,15 @@
 // Earning on stablecoins: ERC-4626 vaults (Morpho) that Trails' Yield API
 // lists, on Katana and Polygon, as on the dashboard. The connection's key only
 // transfers tokens, so a deposit goes through Trails: the key pays an intent,
-// and Trails calls the vault's deposit for the wallet. Withdrawing is a call
+// and Trails' executor (intent protocol v1.5) approves the vault, deposits what
+// it received for the wallet, and sweeps anything left back to the wallet.
+// Withdrawing is a call
 // from the wallet itself, so it's the owner's: the agent asks, the owner
 // approves on the site, and it runs as the owner.
 
 import type { Address } from 'viem';
 
+import { encodeMulticallHydrateExecute, HYDRATE_PROXY_ADDRESS } from '0xtrails/hydrate';
 import {
   createPublicClient,
   encodeFunctionData,
@@ -15,7 +18,9 @@ import {
   formatUnits,
   getAddress,
   http,
-  isAddress
+  isAddress,
+  keccak256,
+  toBytes
 } from 'viem';
 import { katana, polygon } from 'viem/chains';
 
@@ -27,6 +32,8 @@ const TRAILS = 'https://trails-api.sequence.app/rpc/Trails';
 export const EARN_CHAINS = [747474, 137];
 const CHAINS = { 747474: katana, 137: polygon } as const;
 const MIN_TVL_USD = 10_000;
+// Trails' executor puts its runtime balance of the token in this amount slot.
+const HYDRATE_AMOUNT = BigInt(keccak256(toBytes('sequence.trails.hydrate.amount.sentinel.v1')));
 
 export interface Vault {
   chainId: number;
@@ -215,22 +222,35 @@ async function findVault(
   return vault;
 }
 
-/** The vault call that deposits `amount` of its stablecoin for the wallet. */
+/**
+ * The executor call that deposits what Trails delivers into the vault for the
+ * wallet: `amount` of its stablecoin, the exact output asked of Trails.
+ */
 export async function depositCall(
   params: { vault: string; amount: string; chain?: string; wallet: Address },
   deps: EarnDeps
 ): Promise<{ vault: Vault; amount: string; call: { to: Address; data: `0x${string}` } }> {
   const vault = await findVault(params, deps);
-  const units = tokenUnits(params.amount, vault.asset.decimals);
+  tokenUnits(params.amount, vault.asset.decimals);
   return {
     vault,
     amount: params.amount,
     call: {
-      to: vault.address,
-      data: encodeFunctionData({
-        abi: erc4626Abi,
-        functionName: 'deposit',
-        args: [units, params.wallet]
+      to: HYDRATE_PROXY_ADDRESS,
+      data: encodeMulticallHydrateExecute({
+        calls: [
+          {
+            to: vault.address,
+            data: encodeFunctionData({
+              abi: erc4626Abi,
+              functionName: 'deposit',
+              args: [HYDRATE_AMOUNT, params.wallet]
+            }),
+            dynamicAmountToken: vault.asset.address
+          }
+        ],
+        token: vault.asset.address,
+        sweepTarget: params.wallet
       })
     }
   };

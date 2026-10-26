@@ -190,10 +190,7 @@ export function validateDeposit(params: {
     throw invalidQuote('the call sends native value');
   }
   if (call) {
-    if (
-      !same(request.destinationApproveAddress, call.to) ||
-      !same(request.destinationCallData, call.data)
-    ) {
+    if (request.destinationApproveAddress || !same(request.destinationCallData, call.data)) {
       throw invalidQuote('the contract call differs from the request');
     }
   } else if (
@@ -283,7 +280,8 @@ function checkDepositCall(params: {
   if (amount !== params.amount) throw fail('deposit amount differs from the quote');
 }
 
-// A contract call Trails makes with the output, approving `to` for it first.
+// A contract call Trails makes with the output: its v1.5 executor running a
+// multicall that makes its own approvals.
 export interface DestinationCall {
   to: string;
   data: string;
@@ -455,7 +453,7 @@ async function quoteOn(
   if (exactOutput === undefined) coverable(amount);
   else if (balance === 0n || !found) coverable(1n);
 
-  const { TradeType } = await import('@0xtrails/api');
+  const { IntentProtocolVersion, TradeType } = await import('@0xtrails/api');
   let intent: Intent;
   try {
     ({ intent } = await deps.trails.quoteIntent({
@@ -465,13 +463,14 @@ async function quoteOn(
       destinationChainId,
       destinationTokenAddress: destination.address,
       destinationToAddress: params.call?.to ?? deps.walletAddress,
-      ...(params.call
-        ? { destinationApproveAddress: params.call.to, destinationCallData: params.call.data }
-        : {}),
+      ...(params.call ? { destinationCallData: params.call.data } : {}),
       ...(exactOutput === undefined
         ? { originTokenAmount: amount, tradeType: TradeType.EXACT_INPUT }
         : { destinationTokenAmount: exactOutput, tradeType: TradeType.EXACT_OUTPUT }),
-      options: { slippageTolerance: slippage }
+      options: {
+        slippageTolerance: slippage,
+        ...(params.call ? { intentProtocol: IntentProtocolVersion.v1_5 } : {})
+      }
     }));
   } catch (error) {
     throw new MoneyError({
