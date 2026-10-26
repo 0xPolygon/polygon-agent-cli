@@ -24,10 +24,22 @@ const rpc = async (e: Env, body: unknown, props: McpProps = OWNER) => {
   return { status: res.status, body: res.status === 202 ? null : await res.json() };
 };
 
-const call = async (e: Env, name: string, props: McpProps = OWNER) =>
+const OPENAI: McpProps = { ...OWNER, profile: 'openai' };
+
+const call = async (
+  e: Env,
+  name: string,
+  props: McpProps = OWNER,
+  args: Record<string, unknown> = {}
+) =>
   (
-    (await rpc(e, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name } }, props))
-      .body as {
+    (
+      await rpc(
+        e,
+        { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } },
+        props
+      )
+    ).body as {
       result: { content: { text: string }[]; isError?: boolean; structuredContent?: unknown };
     }
   ).result;
@@ -51,16 +63,51 @@ describe('MCP server', () => {
     expect(status).toBe(202);
   });
 
-  it('lists the wallet tools', async () => {
+  it('lists only get_wallet for a connection made without an allowance', async () => {
     const { body } = await rpc(env(), { jsonrpc: '2.0', id: 2, method: 'tools/list' });
+    expect(
+      (body as { result: { tools: { name: string }[] } }).result.tools.map((t) => t.name)
+    ).toEqual(['get_wallet']);
+  });
+
+  it('lists every tool for a standard connection with an allowance', async () => {
+    const { body } = await rpc(
+      env(),
+      { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+      { ...OWNER, keyId: 'k1' }
+    );
     const names = (body as { result: { tools: { name: string }[] } }).result.tools.map(
       (t) => t.name
     );
-    expect(names).toEqual(['get_wallet']);
+    expect(names).toEqual([
+      'get_wallet',
+      'get_allowance',
+      'send',
+      'swap_quote',
+      'swap',
+      'swap_status'
+    ]);
   });
 
-  it("marks every tool as reading only the owner's own wallet", async () => {
-    const { body } = await rpc(env(), { jsonrpc: '2.0', id: 2, method: 'tools/list' });
+  it('marks the tools that move money as destructive', async () => {
+    const { body } = await rpc(
+      env(),
+      { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+      { ...OWNER, keyId: 'k1' }
+    );
+    const tools = (body as { result: { tools: { name: string; annotations: unknown }[] } }).result
+      .tools;
+    for (const name of ['send', 'swap']) {
+      expect(tools.find((t) => t.name === name)?.annotations).toEqual({
+        readOnlyHint: false,
+        destructiveHint: true,
+        openWorldHint: true
+      });
+    }
+  });
+
+  it("marks every ChatGPT tool as reading only the owner's own wallet", async () => {
+    const { body } = await rpc(env(), { jsonrpc: '2.0', id: 2, method: 'tools/list' }, OPENAI);
     for (const t of (body as { result: { tools: Record<string, unknown>[] } }).result.tools) {
       expect(t.annotations).toEqual({
         readOnlyHint: true,
@@ -99,5 +146,103 @@ describe('MCP client profiles', () => {
     expect(
       (body as { result: { tools: { name: string }[] } }).result.tools.map((t) => t.name)
     ).toEqual(['get_wallet']);
+  });
+});
+
+describe('MCP money tools', () => {
+  // A stand-in for the connection's Durable Object: records what it was asked.
+  const keys = (answer: unknown) => {
+    const asked: { name: string; body: unknown }[] = [];
+    const ns = {
+      idFromName: (name: string) => name,
+      get: (name: string) => ({
+        fetch: async (_url: string, init: { body: string }) => {
+          asked.push({ name, body: JSON.parse(init.body) });
+          return Response.json(answer);
+        }
+      })
+    } as unknown as DurableObjectNamespace;
+    return { ns, asked };
+  };
+
+  it("won't let a connection made without an allowance call a money tool", async () => {
+    const { body } = await rpc(env(), {
+      jsonrpc: '2.0',
+      id: 9,
+      method: 'tools/call',
+      params: { name: 'send', arguments: { token: 'USDC', amount: '1', to: WALLET } }
+    });
+    expect(body).toMatchObject({ error: { code: -32602 } });
+  });
+
+  it("sends through the connection's own key, for its wallet", async () => {
+    const { ns, asked } = keys({ ok: true, value: { txHash: '0xabc' } });
+    const r = await call(
+      { ...env(), AGENT_KEYS: ns },
+      'send',
+      { ...OWNER, keyId: 'k1' },
+      {
+        token: 'USDC',
+        amount: '5',
+        to: '0x000000000000000000000000000000000000dEaD',
+        chain: 'base'
+      }
+    );
+    expect(r.structuredContent).toEqual({ txHash: '0xabc' });
+    expect(asked).toEqual([
+      {
+        name: 'k1',
+        body: {
+          op: 'send',
+          wallet: WALLET,
+          token: 'USDC',
+          amount: '5',
+          to: '0x000000000000000000000000000000000000dEaD',
+          chain: 'base'
+        }
+      }
+    ]);
+  });
+
+  it("returns the key's refusal as a tool error the agent can read", async () => {
+    const { ns } = keys({
+      ok: false,
+      error: { error: 'Over the allowance.', code: 'allowance_exhausted' }
+    });
+    const r = await call(
+      { ...env(), AGENT_KEYS: ns },
+      'swap',
+      { ...OWNER, keyId: 'k1' },
+      {
+        intent_id: 'i1'
+      }
+    );
+    expect(r.isError).toBe(true);
+    expect(JSON.parse(r.content[0].text)).toEqual({
+      error: 'Over the allowance.',
+      code: 'allowance_exhausted'
+    });
+  });
+
+  it("won't let a ChatGPT connection call a money tool by name", async () => {
+    const { ns, asked } = keys({ ok: true, value: {} });
+    const { body } = await rpc(
+      { ...env(), AGENT_KEYS: ns },
+      { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'send', arguments: {} } },
+      { ...OPENAI, keyId: 'k1' }
+    );
+    expect(body).toMatchObject({ error: { code: -32602 } });
+    expect(asked).toEqual([]);
+  });
+
+  it('tells each client what it can do', async () => {
+    const instructions = async (props: McpProps) =>
+      (
+        (await rpc(env(), { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }, props))
+          .body as { result: { instructions: string } }
+      ).result.instructions;
+    expect(await instructions({ ...OWNER, keyId: 'k1' })).toMatch(/send, swap and bridge/);
+    expect(await instructions(OWNER)).toMatch(/can't move funds/);
+    expect(await instructions({ ...OPENAI, keyId: 'k1' })).toMatch(/can't move funds/);
   });
 });

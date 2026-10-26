@@ -305,6 +305,95 @@ describe('connecting an agent (consent)', () => {
     expect(completed).toHaveLength(0);
   });
 
+  // A stand-in for the connections' Durable Objects: records what each was asked.
+  const agentKeys = () => {
+    const asked: { name: string; body: unknown }[] = [];
+    const ns = {
+      idFromName: (name: string) => name,
+      get: (name: string) => ({
+        fetch: async (_url: string, init: { body: string }) => {
+          asked.push({ name, body: JSON.parse(init.body) });
+          return Response.json({ ok: true, value: { revoked: true } });
+        }
+      })
+    } as unknown as DurableObjectNamespace;
+    return { ns, asked };
+  };
+
+  it('has the owner sign in on the page to approve an allowance, even when signed in on the site', async () => {
+    const { e, signIn } = setup();
+    e.AGENT_KEYS = agentKeys().ns;
+    const c = await signIn.create({ authRequest: authRequest as never, clientName: 'Claude Code' });
+    const res = await call(e, 'GET', `/api/connect?c=${c}`, { cookie: await cookie() });
+    expect(await res.json()).toEqual({
+      clientName: 'Claude Code',
+      signedIn: false,
+      spending: true
+    });
+  });
+
+  it("won't set up an allowance without the owner signed in on this page", async () => {
+    const { e, signIn, completed } = setup();
+    e.AGENT_KEYS = agentKeys().ns;
+    const c = await signIn.create({ authRequest: authRequest as never, clientName: 'Claude Code' });
+    // Signed in on the site only: no OMS session kept for the decision.
+    await signIn.markSignedIn(c, { wallet: WALLET, email: 'owner@example.com' });
+    const res = await call(e, 'POST', '/api/connect/decide', {
+      cookie: await cookie(),
+      body: { c, allow: true, allowanceUsd: 100, days: 30 }
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { message: string }).message).toMatch(/Sign in again/);
+    expect(completed).toHaveLength(0);
+  });
+
+  it('keeps ChatGPT to reading the wallet, with no allowance to approve', async () => {
+    const { e, signIn, completed } = setup();
+    const keys = agentKeys();
+    e.AGENT_KEYS = keys.ns;
+    const chatgpt = {
+      ...authRequest,
+      redirectUri: 'https://chatgpt.com/connector_platform_oauth_redirect'
+    };
+    const c = await signIn.create({ authRequest: chatgpt as never, clientName: 'ChatGPT' });
+    const res = await call(e, 'GET', `/api/connect?c=${c}`, { cookie: await cookie() });
+    expect(await res.json()).not.toHaveProperty('spending');
+    await call(e, 'POST', '/api/connect/decide', {
+      cookie: await cookie(),
+      body: { c, allow: true }
+    });
+    expect(completed[0]).toMatchObject({ props: { profile: 'openai' } });
+    expect((completed[0] as { props: object }).props).not.toHaveProperty('keyId');
+    expect(keys.asked).toEqual([]);
+  });
+
+  it("revokes a connection's key when the owner disconnects it", async () => {
+    const { e, revoked } = setup();
+    const keys = agentKeys();
+    e.AGENT_KEYS = keys.ns;
+    const provider = e.OAUTH_PROVIDER as unknown as {
+      listUserGrants: (u: string) => Promise<{ items: { id: string; metadata: unknown }[] }>;
+    };
+    const list = provider.listUserGrants.bind(provider);
+    provider.listUserGrants = async (u) => {
+      const page = await list(u);
+      return {
+        items: page.items.map((g) => (g.id === 'g1' ? { ...g, metadata: { keyId: 'k1' } } : g))
+      };
+    };
+    const res = await handleAgentsApi(
+      new Request(`${ORIGIN}/api/agents/g1`, {
+        method: 'DELETE',
+        headers: { Cookie: await cookie(), Origin: ORIGIN }
+      }),
+      e,
+      '/api/agents/g1'
+    );
+    expect(res.status).toBe(200);
+    expect(keys.asked).toEqual([{ name: 'k1', body: { op: 'revoke', wallet: WALLET } }]);
+    expect(revoked).toEqual([['g1', WALLET]]);
+  });
+
   it('lists connected agents for the signed-in owner, newest first, and disconnects one', async () => {
     const { e, revoked } = setup();
     const c = await cookie();

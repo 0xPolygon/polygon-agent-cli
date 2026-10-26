@@ -27,7 +27,10 @@ run_worker_first = [
 #   AGENT_CERT_SECRET  random 32+ bytes; signs the owner's session cookie
 #   CREDENTIALS_KEY    random 32+ bytes; seals sign-ins in progress in KV
 #   INDEXER_ACCESS_KEY the dashboard's indexer key; balances for the MCP server
+#   TRAILS_API_KEY     the dashboard's Trails key; prices, swaps and bridges
 # The MCP server needs the OAUTH_KV namespace; without it /mcp is not served.
+# Connections that move money need the AGENT_KEYS Durable Object: one per
+# connection, holding its key and allowance (worker/money/agent-key.ts).
 
 # Drop the old SessionRelay Durable Object carried over from connector-ui.
 [[migrations]]
@@ -38,11 +41,14 @@ deleted_classes = ["SessionRelay"]
 name = "agentconnect-staging"
 # Its own list: the top-level SessionRelay migration must not apply here. v3
 # added a per-wallet payment lock for card purchases; v4 drops it while cards
-# are built on their own branch.
+# are built on their own branch. v5 adds each MCP connection's key.
 migrations = [
   { tag = "v3", new_sqlite_classes = ["WalletLock"] },
-  { tag = "v4", deleted_classes = ["WalletLock"] }
+  { tag = "v4", deleted_classes = ["WalletLock"] },
+  { tag = "v5", new_sqlite_classes = ["AgentKey"] }
 ]
+
+durable_objects.bindings = [{ name = "AGENT_KEYS", class_name = "AgentKey" }]
 
 routes = [
   { pattern = "agentconnect.staging.polygon.technology", custom_domain = true }
@@ -65,9 +71,11 @@ simple = { limit = 10, period = 60 }
 
 [env.production]
 name = "agentconnect-production"
-# Explicitly empty: the SessionRelay class was deleted long ago,
-# and wrangler now refuses to delete a class that doesn't exist.
-migrations = []
+# The SessionRelay class was deleted long ago (wrangler refuses to delete a
+# class that doesn't exist), so only v5: each MCP connection's key.
+migrations = [{ tag = "v5", new_sqlite_classes = ["AgentKey"] }]
+
+durable_objects.bindings = [{ name = "AGENT_KEYS", class_name = "AgentKey" }]
 
 # agents.polygon.technology serves the assistant install guide (/skill.md)
 # and the skills from the same assets.

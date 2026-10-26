@@ -67,7 +67,7 @@ jobs:
       # left out (their endpoints answer 503); wrangler never deletes secrets.
       - name: Write worker secrets
         run: >-
-          node -e 'const keys = ["AGENT_CERT_SECRET", "CREDENTIALS_KEY", "INDEXER_ACCESS_KEY"];
+          node -e 'const keys = ["AGENT_CERT_SECRET", "CREDENTIALS_KEY", "INDEXER_ACCESS_KEY", "TRAILS_API_KEY"];
           const out = Object.fromEntries(keys.filter((k) => process.env[k]).map((k) => [k, process.env[k]]));
           require("fs").writeFileSync(process.env.RUNNER_TEMP + "/worker-secrets.json", JSON.stringify(out), { mode: 0o600 });'
         env:
@@ -75,6 +75,8 @@ jobs:
           CREDENTIALS_KEY: ${{ secrets.CREDENTIALS_KEY }}
           # The dashboard's indexer key, reused by the MCP get_wallet tool.
           INDEXER_ACCESS_KEY: ${{ secrets.VITE_INDEXER_ACCESS_KEY }}
+          # The dashboard's Trails key: prices, swaps and bridges for MCP connections.
+          TRAILS_API_KEY: ${{ secrets.VITE_TRAILS_API_KEY }}
 
       - name: Deploy to staging
         run: npx -y wrangler@4 deploy --env staging --secrets-file "$RUNNER_TEMP/worker-secrets.json"
@@ -117,13 +119,14 @@ jobs:
       # As for staging: sign-in and MCP secrets go up with the deploy.
       - name: Write worker secrets
         run: >-
-          node -e 'const keys = ["AGENT_CERT_SECRET", "CREDENTIALS_KEY", "INDEXER_ACCESS_KEY"];
+          node -e 'const keys = ["AGENT_CERT_SECRET", "CREDENTIALS_KEY", "INDEXER_ACCESS_KEY", "TRAILS_API_KEY"];
           const out = Object.fromEntries(keys.filter((k) => process.env[k]).map((k) => [k, process.env[k]]));
           require("fs").writeFileSync(process.env.RUNNER_TEMP + "/worker-secrets.json", JSON.stringify(out), { mode: 0o600 });'
         env:
           AGENT_CERT_SECRET: ${{ secrets.AGENT_CERT_SECRET }}
           CREDENTIALS_KEY: ${{ secrets.CREDENTIALS_KEY }}
           INDEXER_ACCESS_KEY: ${{ secrets.VITE_INDEXER_ACCESS_KEY }}
+          TRAILS_API_KEY: ${{ secrets.VITE_TRAILS_API_KEY }}
 
       - name: Deploy to production
         run: npx -y wrangler@4 deploy --env production --secrets-file "$RUNNER_TEMP/worker-secrets.json"

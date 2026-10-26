@@ -1,6 +1,8 @@
 // Owner sign-in for connecting an MCP client: the worker signs in to OMS the
 // way the CLI does (email code or Google), finds the agent wallet, and signs
-// out. Each step is its own request, so the SDK's state between them (the
+// out. A connection that will move money keeps the owner signed in until they
+// allow or deny it, so the allowance can be approved as the owner (withOwner),
+// and signs out then. Each step is its own request, so the SDK's state between them (the
 // credential key, its storage, an email attempt) is kept sealed in KV for ten
 // minutes. Signing in from the worker, not the browser, works on any domain:
 // the OMS project only accepts browser calls from the production origin.
@@ -43,6 +45,8 @@ export interface PendingConnect {
   storage: Record<string, string>;
   redirect: Record<string, string>;
   emailAttempt?: EmailAttempt;
+  // The owner is still signed in (in `storage`), until the decision.
+  ownerSession?: boolean;
 }
 
 export interface SignedIn {
@@ -123,16 +127,33 @@ export class OwnerSignIn {
     await this.sealed.put(keyName(id), null, { expirationTtl: 60 });
   }
 
-  private wallet(pending: PendingConnect) {
-    const storage = new SnapshotStorage(pending.storage);
-    const redirect = new SnapshotStorage(pending.redirect);
-    const oms = new OMSWallet({
+  private oms(pending: PendingConnect) {
+    return new OMSWallet({
       publishableKey: this.publishableKey,
-      storage,
-      redirectAuthStorage: redirect,
+      storage: new SnapshotStorage(pending.storage),
+      redirectAuthStorage: new SnapshotStorage(pending.redirect),
       credentialSigner: new EthereumPrivateKeyCredentialSigner(unhex(pending.key))
     });
-    return oms.wallet;
+  }
+
+  private wallet(pending: PendingConnect) {
+    return this.oms(pending).wallet;
+  }
+
+  /**
+   * Runs `fn` as the owner, still signed in from this page, then signs out and
+   * forgets the sign-in, whatever `fn` does.
+   */
+  async withOwner<T>(id: string, fn: (oms: OMSWallet) => Promise<T>): Promise<T> {
+    const pending = await this.load(id);
+    if (!pending.ownerSession) throw new ValidationError('Sign in again to approve spending.');
+    const oms = this.oms(pending);
+    try {
+      return await fn(oms);
+    } finally {
+      await oms.wallet.signOut().catch(() => {});
+      await this.forget(id);
+    }
   }
 
   async startEmail(id: string, email: string): Promise<void> {
@@ -148,13 +169,17 @@ export class OwnerSignIn {
     await this.save(id, pending);
   }
 
-  async finishEmail(id: string, code: string): Promise<SignedIn> {
+  /** `keep`: stay signed in until the decision (a connection that moves money). */
+  async finishEmail(id: string, code: string, keep = false): Promise<SignedIn> {
     const pending = await this.load(id);
     if (!pending.emailAttempt) throw new ValidationError('Send the code to your email first.');
     const w = this.wallet(pending);
     Reflect.set(w, EMAIL_ATTEMPT_FIELD, { ...pending.emailAttempt });
     await w.completeEmailAuth({ code, walletSelection: 'automatic' });
-    return this.walletAndSignOut(w, pending.emailAttempt.email);
+    const email = pending.emailAttempt.email;
+    return keep
+      ? this.walletKeepingSession(id, pending, w, email)
+      : this.walletAndSignOut(w, email);
   }
 
   /** The Google page to send the browser to; it comes back to `returnUri`. */
@@ -169,7 +194,7 @@ export class OwnerSignIn {
     return authorizationUrl;
   }
 
-  async finishGoogle(id: string, callbackUrl: string): Promise<SignedIn> {
+  async finishGoogle(id: string, callbackUrl: string, keep = false): Promise<SignedIn> {
     const pending = await this.load(id);
     const w = this.wallet(pending);
     await w.completeOidcRedirectAuth({
@@ -177,7 +202,30 @@ export class OwnerSignIn {
       cleanUrl: false,
       walletSelection: 'automatic'
     });
-    return this.walletAndSignOut(w, null);
+    return keep ? this.walletKeepingSession(id, pending, w, null) : this.walletAndSignOut(w, null);
+  }
+
+  // As walletAndSignOut, but the owner stays signed in: the session (in the
+  // snapshot storage the SDK just wrote) is kept sealed for the decision.
+  private async walletKeepingSession(
+    id: string,
+    pending: PendingConnect,
+    w: ReturnType<OwnerSignIn['wallet']>,
+    email: string | null
+  ): Promise<SignedIn> {
+    try {
+      const who = await this.mainWallet(w, email);
+      await this.save(id, {
+        ...pending,
+        emailAttempt: undefined,
+        signedIn: who,
+        ownerSession: true
+      });
+      return who;
+    } catch (err) {
+      await w.signOut().catch(() => {});
+      throw err;
+    }
   }
 
   // The same wallet the CLI picks: the account's own, not an imported one.
@@ -186,15 +234,22 @@ export class OwnerSignIn {
     email: string | null
   ): Promise<SignedIn> {
     try {
-      const main = (await w.listWallets()).find((x) => x.keyOrigin !== 'imported');
-      if (!main) throw new ValidationError('No agent wallet on this account.');
-      const idToken = email ? null : await w.getIdToken().catch(() => null);
-      return {
-        wallet: main.address.toLowerCase(),
-        email: email ?? (idToken && emailFromIdToken(idToken))
-      };
+      return await this.mainWallet(w, email);
     } finally {
       await w.signOut().catch(() => {});
     }
+  }
+
+  private async mainWallet(
+    w: ReturnType<OwnerSignIn['wallet']>,
+    email: string | null
+  ): Promise<SignedIn> {
+    const main = (await w.listWallets()).find((x) => x.keyOrigin !== 'imported');
+    if (!main) throw new ValidationError('No agent wallet on this account.');
+    const idToken = email ? null : await w.getIdToken().catch(() => null);
+    return {
+      wallet: main.address.toLowerCase(),
+      email: email ?? (idToken && emailFromIdToken(idToken))
+    };
   }
 }
