@@ -42,7 +42,7 @@ import {
   proposeAction,
   viewAction
 } from './actions.ts';
-import { depositCall, listVaults, positions, withdrawTxs } from './earn.ts';
+import { depositCall, listVaults, openVaults, positions, withdrawTxs } from './earn.ts';
 import {
   checkTransfer,
   getSessions,
@@ -346,10 +346,12 @@ export class AgentKey {
       case 'earn_vaults': {
         const deps = this.earnDeps();
         const vaults = await listVaults(req.chain, deps);
-        return {
-          vaults: vaults.slice(0, 12),
-          positions: await positions(vaults, getAddress(record.wallet), deps)
-        };
+        const wallet = getAddress(record.wallet);
+        const [open, held] = await Promise.all([
+          openVaults(vaults.slice(0, 20), wallet, deps),
+          positions(vaults, wallet, deps)
+        ]);
+        return { vaults: open.slice(0, 12), positions: held };
       }
       case 'earn_deposit':
         return this.earnDeposit(record, req);
