@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { EarnDeps } from './earn.ts';
 
-import { depositCall, listVaults, withdrawTxs } from './earn.ts';
+import { depositCall, listVaults, openVaults, withdrawTxs } from './earn.ts';
 import { WALLET } from './test-fakes.ts';
 
 const VAULT = '0x00000000000000000000000000000000000000f1';
@@ -21,12 +21,13 @@ const market = (overrides: Record<string, unknown> = {}) => ({
   ...overrides
 });
 
-const deps = (items: unknown[], shares = 0n): EarnDeps => ({
+const deps = (items: unknown[], shares = 0n, room = 10n ** 30n): EarnDeps => ({
   trailsKey: 'k',
   fetch: (async () => Response.json({ items })) as typeof fetch,
   read: async ({ fn, args }) => {
     if (fn === 'asset') return USDC_KATANA;
     if (fn === 'balanceOf') return shares;
+    if (fn === 'maxDeposit') return room;
     if (fn === 'convertToAssets') return (args[0] as bigint) * 2n;
     if (fn === 'convertToShares') return (args[0] as bigint) / 2n;
     throw new Error(fn);
@@ -96,5 +97,26 @@ describe('earn', () => {
         deps([market()], 1_000_000n)
       )
     ).rejects.toMatchObject({ code: 'insufficient_balance' });
+  });
+
+  it("refuses a vault that isn't taking deposits, before anything is sent", async () => {
+    await expect(
+      depositCall(
+        { vault: VAULT, amount: '5', chain: 'katana', wallet: WALLET },
+        deps([market()], 0n, 0n)
+      )
+    ).rejects.toMatchObject({ code: 'not_covered' });
+    await expect(
+      depositCall(
+        { vault: VAULT, amount: '5', chain: 'katana', wallet: WALLET },
+        deps([market()], 0n, 1_000_000n)
+      )
+    ).rejects.toMatchObject({ code: 'not_covered' });
+  });
+
+  it('lists only vaults that take deposits now', async () => {
+    const vaults = await listVaults('katana', deps([market()]));
+    expect(await openVaults(vaults, WALLET, deps([market()]))).toHaveLength(1);
+    expect(await openVaults(vaults, WALLET, deps([market()], 0n, 0n))).toHaveLength(0);
   });
 });

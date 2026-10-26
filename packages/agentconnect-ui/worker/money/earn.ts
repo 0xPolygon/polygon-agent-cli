@@ -143,6 +143,27 @@ export async function listVaults(chain: string | undefined, deps: EarnDeps): Pro
   return lists.flat().sort((a, b) => b.tvlUsd - a.tvlUsd);
 }
 
+/** The vaults that take deposits from the wallet now (Trails also lists full or closed ones). */
+export async function openVaults(
+  vaults: Vault[],
+  wallet: Address,
+  deps: EarnDeps
+): Promise<Vault[]> {
+  const read = reader(deps);
+  const open = await Promise.all(
+    vaults.map(async (v) => {
+      const room = (await read({
+        chainId: v.chainId,
+        address: v.address,
+        fn: 'maxDeposit',
+        args: [wallet]
+      }).catch(() => 0n)) as bigint;
+      return room > 0n;
+    })
+  );
+  return vaults.filter((_, i) => open[i]);
+}
+
 /** What the wallet holds in each vault, in its stablecoin. */
 export async function positions(
   vaults: Vault[],
@@ -229,6 +250,23 @@ export async function depositCall(
   // The exact amount, as Trails delivers exactly that (its runtime-balance
   // placeholder would also take the intent's fee, and the call would revert).
   const units = tokenUnits(params.amount, vault.asset.decimals);
+  // Trails lists vaults that are full or closed; the vault's own word decides.
+  const room = (await reader(deps)({
+    chainId: vault.chainId,
+    address: vault.address,
+    fn: 'maxDeposit',
+    args: [params.wallet]
+  })) as bigint;
+  if (room < units) {
+    throw new MoneyError({
+      code: 'not_covered',
+      message:
+        room === 0n
+          ? `${vault.name} isn't taking deposits right now.`
+          : `${vault.name} takes at most ${formatUnits(room, vault.asset.decimals)} ${vault.asset.symbol} right now.`,
+      hint: 'Pick another vault from earn_vaults.'
+    });
+  }
   return {
     vault,
     amount: params.amount,
