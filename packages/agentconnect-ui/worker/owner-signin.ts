@@ -1,9 +1,8 @@
 // Owner sign-in for connecting an MCP client: the worker signs in to OMS the
 // way the CLI does (email code or Google), finds the agent wallet, and signs
 // out. A connection that will move money keeps the owner signed in until they
-// allow or deny it, so the allowance can be approved as the owner (withOwner);
-// allowing it hands the sign-in to the connection (OwnerSnapshot), which uses
-// it only for owner actions the owner approves on the site. Each step is its own request, so the SDK's state between them (the
+// allow or deny it, so the allowance can be approved as the owner (withOwner),
+// and signs out then. Each step is its own request, so the SDK's state between them (the
 // credential key, its storage, an email attempt) is kept sealed in KV for ten
 // minutes. Signing in from the worker, not the browser, works on any domain:
 // the OMS project only accepts browser calls from the production origin.
@@ -50,12 +49,6 @@ export interface PendingConnect {
   ownerSession?: boolean;
 }
 
-/** A signed-in OMS session: its credential key (hex) and the SDK's storage. */
-export interface OwnerSnapshot {
-  key: string;
-  storage: Record<string, string>;
-}
-
 export interface SignedIn {
   wallet: string;
   email: string | null;
@@ -78,19 +71,6 @@ const hex = (bytes: Uint8Array) =>
   Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 const unhex = (s: string) => Uint8Array.from(s.match(/../g)!.map((b) => parseInt(b, 16)));
 const keyName = (id: string) => `mcpconnect:${id}`;
-
-/**
- * The OMS client for a kept session. The SDK writes its storage back into
- * `snapshot.storage`, so the caller saves the snapshot again after use.
- */
-export function omsFromSnapshot(publishableKey: string, snapshot: OwnerSnapshot): OMSWallet {
-  return new OMSWallet({
-    publishableKey,
-    storage: new SnapshotStorage(snapshot.storage),
-    redirectAuthStorage: new SnapshotStorage({}),
-    credentialSigner: new EthereumPrivateKeyCredentialSigner(unhex(snapshot.key))
-  });
-}
 
 function emailFromIdToken(token: string): string | null {
   try {
@@ -162,28 +142,16 @@ export class OwnerSignIn {
 
   /**
    * Runs `fn` as the owner, still signed in from this page, then signs out and
-   * forgets the sign-in, whatever `fn` does. With `keep`, a sign-in `fn`
-   * succeeded with is handed over instead of signed out (signed out if `keep`
-   * fails).
+   * forgets the sign-in, whatever `fn` does.
    */
-  async withOwner<T>(
-    id: string,
-    fn: (oms: OMSWallet) => Promise<T>,
-    keep?: (snapshot: OwnerSnapshot) => Promise<void>
-  ): Promise<T> {
+  async withOwner<T>(id: string, fn: (oms: OMSWallet) => Promise<T>): Promise<T> {
     const pending = await this.load(id);
     if (!pending.ownerSession) throw new ValidationError('Sign in again to approve spending.');
     const oms = this.oms(pending);
-    let kept = false;
     try {
-      const value = await fn(oms);
-      if (keep) {
-        await keep({ key: pending.key, storage: pending.storage });
-        kept = true;
-      }
-      return value;
+      return await fn(oms);
     } finally {
-      if (!kept) await oms.wallet.signOut().catch(() => {});
+      await oms.wallet.signOut().catch(() => {});
       await this.forget(id);
     }
   }

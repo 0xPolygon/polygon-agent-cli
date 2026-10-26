@@ -1,8 +1,7 @@
 // One Durable Object per MCP connection that may move money: its own session
 // key (a remote access credential the owner authorizes smart sessions for,
 // like a CLI install's), the request nonce, the approved allowance, every
-// transfer and trade it makes, and the owner's sign-in from connecting, kept
-// for owner actions the owner approves on the site.
+// transfer and trade it makes.
 //
 // One more per wallet (named `wallet:<address>`) holds what belongs to the
 // wallet rather than to a connection: its Polymarket account, so every
@@ -24,7 +23,6 @@ import {
   RemoteAccessClient
 } from '@polygonlabs/oms-wallet';
 
-import type { OwnerSnapshot } from '../owner-signin.ts';
 import type { EarnDeps } from './earn.ts';
 import type { EngineDeps, TransferRecord } from './engine.ts';
 import type { PlanJson } from './plan.ts';
@@ -32,7 +30,6 @@ import type { QuoteParams, TradeDeps, TradeRecord } from './trade.ts';
 import type { PayParams, PendingAuthorization, X402Deps } from './x402.ts';
 
 import { publishableKey } from '../oms-config.ts';
-import { omsFromSnapshot } from '../owner-signin.ts';
 import { deriveKey, openSealed, seal } from '../store.ts';
 import {
   beginOwnerAction,
@@ -51,8 +48,7 @@ import {
   spentUsdSince,
   transfer
 } from './engine.ts';
-import { httpStatus, mapOmsError, MoneyError } from './errors.ts';
-import { runAsOwner } from './owner-run.ts';
+import { httpStatus, MoneyError } from './errors.ts';
 import { planFromJson, sessionMatchesPlan } from './plan.ts';
 import {
   ownerAccess,
@@ -187,10 +183,6 @@ export type KeyRequest =
       result?: unknown;
       error?: ReturnType<MoneyError['toJSON']>;
     }
-  // The owner's sign-in from connecting, handed over by the worker.
-  | { op: 'keep_owner'; wallet: string; snapshot: OwnerSnapshot }
-  // An approved owner action, sent with that sign-in.
-  | { op: 'owner_run'; wallet: string; id: string }
   | { op: 'revoke'; wallet: string }
   // A spend the owner approves first (money/actions.ts): saved, not run.
   | { op: 'propose'; wallet: string; appName: string; request: SpendRequest }
@@ -270,8 +262,6 @@ export class AgentKey {
   pmOverrides?: Record<string, unknown>;
   // The wallet's object (tests); AGENT_KEYS otherwise.
   walletStore?: (wallet: string) => (req: WalletStoreRequest) => Promise<KeyResponse>;
-  // The OMS client for the kept sign-in (tests).
-  ownerOms?: (snapshot: OwnerSnapshot) => Pick<OMSWallet, 'wallet'>;
 
   constructor(
     state: { storage: KeyStorage },
@@ -365,7 +355,7 @@ export class AgentKey {
           },
           this.earnDeps()
         );
-        return this.viewAction(
+        return viewAction(
           await proposeAction({
             storage: this.storage,
             request: { op: req.op },
@@ -398,7 +388,7 @@ export class AgentKey {
         );
       }
       case 'owner_end':
-        return this.viewAction(
+        return viewAction(
           await endOwnerAction(
             this.storage,
             req.id,
@@ -406,22 +396,14 @@ export class AgentKey {
             this.now()
           )
         );
-      case 'keep_owner':
-        await this.storage.put(
-          'owner-session',
-          await seal(await this.sealer(), 'owner-session', req.snapshot)
-        );
-        return { kept: true };
-      case 'owner_run':
-        return this.ownerRun(record, req.id);
       case 'revoke':
         return this.revoke(record);
       case 'propose':
         return this.propose(record, req.appName, req.request);
       case 'action':
-        return this.viewAction(await loadAction(this.storage, req.id, this.now()));
+        return viewAction(await loadAction(this.storage, req.id, this.now()));
       case 'decide':
-        return this.viewAction(
+        return viewAction(
           await decideAction<SpendRequest>({
             storage: this.storage,
             id: req.id,
@@ -520,15 +502,7 @@ export class AgentKey {
       appName,
       now: this.now()
     });
-    return this.viewAction(action);
-  }
-
-  // An owner action needs no sign-in on the page while the kept one works.
-  private async viewAction(action: Parameters<typeof viewAction>[0]) {
-    const view = viewAction(action);
-    return view.ownerSignIn && (await this.storage.get('owner-session'))
-      ? { ...view, ownerSignIn: false }
-      : view;
+    return viewAction(action);
   }
 
   // --- Polymarket -----------------------------------------------------------------
@@ -704,62 +678,6 @@ export class AgentKey {
     };
   }
 
-  // Sends an approved owner action with the owner's sign-in from connecting.
-  // If that has run out, nothing is marked: the owner signs in on the page.
-  private async ownerRun(record: KeyRecord, id: string) {
-    const sealed = await this.storage.get<string>('owner-session');
-    const signInNeeded = () =>
-      new MoneyError({
-        code: 'owner_signin_needed',
-        message: 'Sign in on this page to approve it: the sign-in from connecting has run out.'
-      });
-    if (!sealed) throw signInNeeded();
-    const snapshot = await openSealed<OwnerSnapshot>(await this.sealer(), 'owner-session', sealed);
-    const oms = this.ownerOms
-      ? this.ownerOms(snapshot)
-      : omsFromSnapshot(this.publishableKey(), snapshot);
-    const save = async () =>
-      this.storage.put('owner-session', await seal(await this.sealer(), 'owner-session', snapshot));
-    try {
-      await oms.wallet.listWallets();
-    } catch (error) {
-      const status = httpStatus(error);
-      const mapped = mapOmsError(error);
-      if (
-        status === 401 ||
-        status === 403 ||
-        (mapped instanceof MoneyError && mapped.code === 'session_expired')
-      ) {
-        await this.storage.put('owner-session', null);
-        throw signInNeeded();
-      }
-      throw error;
-    }
-    const deps = await this.deps(record);
-    const txs = await beginOwnerAction(this.storage, id, this.now(), (f) =>
-      ensureOn(deps, { chainId: f.chainId, symbol: f.symbol, amount: BigInt(f.amount) })
-    );
-    let outcome: { result: unknown } | { error: ReturnType<MoneyError['toJSON']> };
-    try {
-      outcome = {
-        result: await runAsOwner({ oms, wallet: record.wallet, ...txs })
-      };
-    } catch (error) {
-      console.error('[agent-key] owner run', error);
-      outcome = {
-        error:
-          error instanceof MoneyError
-            ? error.toJSON()
-            : new MoneyError({
-                code: 'upstream_error',
-                message: error instanceof Error ? error.message : 'It failed.'
-              }).toJSON()
-      };
-    }
-    await save();
-    return this.viewAction(await endOwnerAction(this.storage, id, outcome, this.now()));
-  }
-
   // --- the key -------------------------------------------------------------------
 
   private sealer(): Promise<CryptoKey> {
@@ -881,24 +799,6 @@ export class AgentKey {
   }
 
   private async revoke(record: KeyRecord): Promise<{ revoked: boolean }> {
-    // The owner's kept sign-in goes first: signed out at OMS, not only forgotten.
-    const sealed = await this.storage.get<string>('owner-session');
-    if (sealed) {
-      try {
-        const snapshot = await openSealed<OwnerSnapshot>(
-          await this.sealer(),
-          'owner-session',
-          sealed
-        );
-        const oms = this.ownerOms
-          ? this.ownerOms(snapshot)
-          : omsFromSnapshot(this.publishableKey(), snapshot);
-        await oms.wallet.signOut();
-      } catch {
-        // Already gone at OMS, or unreachable: it's deleted with the rest below.
-      }
-      await this.storage.put('owner-session', null);
-    }
     const key = await this.privateKey();
     let revoked = Date.parse(record.expiresAt) <= this.now().getTime();
     if (key && !revoked) {

@@ -210,7 +210,7 @@ const TOOLS = [
     name: 'earn_withdraw',
     title: 'Withdraw from a vault',
     description:
-      'Withdraws stablecoins from a vault back to the wallet: an amount, or "all". It runs from the owner\'s wallet, so it always answers pending_approval with a link for the owner to approve.',
+      'Withdraws stablecoins from a vault back to the wallet: an amount, or "all". It runs from the owner\'s wallet, so it always answers pending_approval with a link: the owner signs in there to approve it.',
     inputSchema: {
       type: 'object',
       properties: {
