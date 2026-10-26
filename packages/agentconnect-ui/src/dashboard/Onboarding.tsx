@@ -31,7 +31,7 @@ function Heading({ title, children }: { title: string; children: React.ReactNode
 const inputClass =
   'h-12 border border-[var(--slate-300)] rounded-xl px-3.5 text-base bg-white outline-none focus:border-[var(--purple-500)]';
 
-function SignIn({
+export function SignIn({
   finishing,
   onSignedIn
 }: {
@@ -157,6 +157,21 @@ function SignIn({
   );
 }
 
+// A page that asked the owner to sign in (approving an agent's request) and
+// wants them back after a Google sign-in, which returns to /login.
+export const RETURN_KEY = 'agentconnect_return';
+
+function takeReturnPath(): string {
+  try {
+    const path = sessionStorage.getItem(RETURN_KEY);
+    sessionStorage.removeItem(RETURN_KEY);
+    // Only a path on this site.
+    return path && path.startsWith('/') && !path.startsWith('//') ? path : '/';
+  } catch {
+    return '/';
+  }
+}
+
 /**
  * Shown when the page is opened without a wallet: sign in, then straight to the
  * dashboard. `finishing` is set on the Google return to `/login`.
@@ -169,7 +184,10 @@ export function Onboarding({ finishing = false }: { finishing?: boolean }) {
       </div>
       <div className="flex-1 grid md:grid-cols-2 gap-12 max-w-[1120px] w-full mx-auto px-5 pt-7 pb-10 md:px-10 md:py-12 items-center">
         <div className="flex flex-col gap-7 max-w-[460px] w-full min-w-0">
-          <SignIn finishing={finishing} onSignedIn={() => window.location.assign('/')} />
+          <SignIn
+            finishing={finishing}
+            onSignedIn={() => window.location.assign(takeReturnPath())}
+          />
         </div>
 
         <div className="hidden md:flex bg-white border border-[var(--slate-200)] rounded-3xl p-7 flex-col gap-5">

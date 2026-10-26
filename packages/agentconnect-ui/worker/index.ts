@@ -275,7 +275,7 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
         wallet: who.wallet,
         email: who.email,
         profile,
-        ...(keyId ? { keyId } : {})
+        ...(keyId ? { keyId, appName: pending.clientName ?? 'Your agent' } : {})
       };
       const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
         request: authRequest,
@@ -389,6 +389,49 @@ async function grantKeyId(
     cursor = page.cursor;
   } while (cursor);
   return undefined;
+}
+
+/**
+ * An agent's request waiting for the owner (money/actions.ts): GET shows it,
+ * POST {"approve"} answers it. Only the owner signed in on this site, and only
+ * for a connection to their own wallet: the connection's key checks the wallet.
+ */
+export async function handleActionsApi(req: Request, env: Env, path: string): Promise<Response> {
+  if (!env.AGENT_CERT_SECRET || !env.AGENT_KEYS) {
+    return fail(503, 'mcp_unavailable', 'Connecting agents is not configured on this deployment');
+  }
+  const m = /^\/api\/actions\/([0-9a-f]{32})\/([0-9a-f]{24})$/.exec(path);
+  if (!m) return fail(404, 'not_found', 'No such request');
+  try {
+    const owner = await sessionIdentity(req, env.AGENT_CERT_SECRET);
+    if (!owner) return fail(401, 'unauthorized', 'Sign in to answer this request');
+    const key = agentKey(env.AGENT_KEYS, m[1]);
+    let res;
+    if (req.method === 'GET') {
+      res = await key({ op: 'action', wallet: owner.wallet, id: m[2] });
+    } else if (req.method === 'POST') {
+      const body = (await readBody(req)) as { approve?: unknown };
+      res = await key({
+        op: 'decide',
+        wallet: owner.wallet,
+        id: m[2],
+        approve: body.approve === true
+      });
+    } else {
+      return fail(405, 'method_not_allowed', 'Use GET or POST');
+    }
+    if (!res.ok) {
+      // Another wallet's connection reads as not found, like a wrong id.
+      if (res.error.code === 'not_connected') return fail(404, 'not_found', 'No such request');
+      return fail(400, res.error.code, res.error.error);
+    }
+    return json(res.value);
+  } catch (err) {
+    if (err instanceof AuthError) return fail(401, err.code, err.message);
+    if (err instanceof ValidationError) return fail(400, 'invalid_request', err.message);
+    console.error('[actions]', err);
+    return fail(500, 'internal_error', 'Something went wrong');
+  }
 }
 
 /**
@@ -520,6 +563,8 @@ const app = {
     if (url.pathname.startsWith('/.well-known/')) return new Response('Not found', { status: 404 });
     if (url.pathname.startsWith('/api/connect'))
       return handleConnectApi(request, env, url.pathname);
+    if (url.pathname.startsWith('/api/actions/'))
+      return handleActionsApi(request, env, url.pathname);
     if (url.pathname === '/api/agents' || url.pathname.startsWith('/api/agents/'))
       return handleAgentsApi(request, env, url.pathname);
     if (url.pathname === '/api/session' || url.pathname.startsWith('/api/session/'))

@@ -25,12 +25,13 @@ import type { QuoteParams, TradeDeps, TradeRecord } from './trade.ts';
 
 import { publishableKey } from '../oms-config.ts';
 import { deriveKey, openSealed, seal } from '../store.ts';
-import { getSessions, probeSponsorship, spentUsdSince, transfer } from './engine.ts';
+import { decideAction, loadAction, proposeAction, viewAction } from './actions.ts';
+import { checkTransfer, getSessions, probeSponsorship, spentUsdSince, transfer } from './engine.ts';
 import { httpStatus, MoneyError } from './errors.ts';
 import { planFromJson, sessionMatchesPlan } from './plan.ts';
 import { StoredNonceSigner } from './signer.ts';
 import { chainLabel, findSupportedToken, parseChain, resolveSupportedSymbol } from './tokens.ts';
-import { describeTrade, executeSwap, quoteSwap, tokenUnits } from './trade.ts';
+import { describeTrade, executeApprovedSwap, executeSwap, quoteSwap, tokenUnits } from './trade.ts';
 
 const APP_URL = 'https://agents.polygon.technology';
 const APP_LOGO_URL = 'https://agents.polygon.technology/polygon-logo.png';
@@ -76,9 +77,21 @@ export type KeyRequest =
   | { op: 'status'; wallet: string }
   | { op: 'send'; wallet: string; token: string; chain?: string; to: string; amount: string }
   | ({ op: 'swap_quote'; wallet: string } & QuoteParams)
-  | { op: 'swap'; wallet: string; intentId: string }
+  // `approved`: the owner approved it on the site (it may be quoted again).
+  | { op: 'swap'; wallet: string; intentId: string; approved?: boolean }
   | { op: 'swap_status'; wallet: string; intentId: string }
-  | { op: 'revoke'; wallet: string };
+  | { op: 'revoke'; wallet: string }
+  // A spend the owner approves first (money/actions.ts): saved, not run.
+  | { op: 'propose'; wallet: string; appName: string; request: SpendRequest }
+  | { op: 'action'; wallet: string; id: string }
+  | { op: 'decide'; wallet: string; id: string; approve: boolean };
+
+// The requests that spend, and so can wait for the owner's approval.
+export type SpendRequest =
+  | Omit<Extract<KeyRequest, { op: 'send' }>, 'wallet'>
+  | Omit<Extract<KeyRequest, { op: 'swap' }>, 'wallet'>;
+
+export const SPEND_OPS: ReadonlySet<string> = new Set(['send', 'swap']);
 
 export type KeyResponse =
   | { ok: true; value: unknown }
@@ -159,7 +172,9 @@ export class AgentKey {
       }
       case 'swap':
         return describeTrade(
-          await executeSwap(await this.deps(record), req.intentId, { send: true })
+          req.approved
+            ? await executeApprovedSwap(await this.deps(record), req.intentId)
+            : await executeSwap(await this.deps(record), req.intentId, { send: true })
         );
       case 'swap_status':
         return describeTrade(
@@ -167,7 +182,72 @@ export class AgentKey {
         );
       case 'revoke':
         return this.revoke(record);
+      case 'propose':
+        return this.propose(record, req.appName, req.request);
+      case 'action':
+        return viewAction(await loadAction(this.storage, req.id, this.now()));
+      case 'decide':
+        return viewAction(
+          await decideAction<SpendRequest>({
+            storage: this.storage,
+            id: req.id,
+            approve: req.approve,
+            // Runs as if the agent had asked, within the allowance like any spend.
+            run: (request) =>
+              this.dispatch({
+                ...request,
+                ...(request.op === 'swap' ? { approved: true } : {}),
+                wallet: record.wallet
+              } as KeyRequest),
+            now: this.now
+          })
+        );
     }
+  }
+
+  // Checks what can be checked now (so the owner isn't asked to approve
+  // something that would fail), then saves it for the owner.
+  private async propose(record: KeyRecord, appName: string, request: SpendRequest) {
+    let title: string;
+    let details: { label: string; value: string }[];
+    if (request.op === 'send') {
+      const { chainId, token, to, amount } = this.resolveSend(record, request);
+      await checkTransfer({ chainId, token: token.address, amount, deps: await this.deps(record) });
+      title = `Send ${request.amount} ${token.symbol}`;
+      details = [
+        { label: 'To', value: to },
+        { label: 'Network', value: chainLabel(chainId) }
+      ];
+    } else {
+      const trade = await this.storage.get<TradeRecord>(`trade:${request.intentId}`);
+      if (!trade || trade.state !== 'quoted') {
+        throw new MoneyError({
+          code: 'quote_not_found',
+          message: `No open quote ${request.intentId} on this connection.`,
+          hint: 'Quote again with swap_quote.'
+        });
+      }
+      const view = describeTrade(trade) as {
+        from: { amount: string; token: string; chain: string };
+        to: { expected: string; minimum: string; token: string; chain: string };
+        usd: { fees: number };
+      };
+      title = `Swap ${view.from.amount} ${view.from.token} for about ${Number(view.to.expected).toPrecision(4)} ${view.to.token}`;
+      details = [
+        { label: 'From', value: `${view.from.amount} ${view.from.token} on ${view.from.chain}` },
+        { label: 'At least', value: `${view.to.minimum} ${view.to.token} on ${view.to.chain}` },
+        { label: 'Fees', value: `$${view.usd.fees.toFixed(2)}` }
+      ];
+    }
+    const action = await proposeAction({
+      storage: this.storage,
+      request,
+      title,
+      details,
+      appName,
+      now: this.now()
+    });
+    return viewAction(action);
   }
 
   // --- the key -------------------------------------------------------------------
@@ -401,7 +481,7 @@ export class AgentKey {
     };
   }
 
-  private async send(record: KeyRecord, req: Extract<KeyRequest, { op: 'send' }>) {
+  private resolveSend(record: KeyRecord, req: Omit<Extract<KeyRequest, { op: 'send' }>, 'wallet'>) {
     const chainId = req.chain ? parseChain(req.chain) : 137;
     if (chainId === undefined) {
       throw new MoneyError({ code: 'invalid_input', message: `Unknown chain: ${req.chain}.` });
@@ -425,7 +505,11 @@ export class AgentKey {
     if (to.toLowerCase() === record.wallet) {
       throw new MoneyError({ code: 'invalid_input', message: "That's this wallet's own address." });
     }
-    const amount = tokenUnits(req.amount, token.decimals);
+    return { chainId, token, to, amount: tokenUnits(req.amount, token.decimals) };
+  }
+
+  private async send(record: KeyRecord, req: Extract<KeyRequest, { op: 'send' }>) {
+    const { chainId, token, to, amount } = this.resolveSend(record, req);
     const result = await transfer({
       chainId,
       token: token.address,

@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Session } from './dashboard/signin.js';
 
 import { parseFundAmount } from './components/FundingScreen.js';
+import { Approve } from './dashboard/Approve.js';
 import { Connect, isConnectReturn } from './dashboard/Connect.js';
 import { Dashboard } from './dashboard/Dashboard.js';
 import { Onboarding } from './dashboard/Onboarding.js';
@@ -47,6 +48,10 @@ function App() {
 
   if (window.location.pathname === '/connect') {
     return <Connect />;
+  }
+
+  if (window.location.pathname === '/approve') {
+    return <Approve />;
   }
 
   if (window.location.pathname === '/login') {
