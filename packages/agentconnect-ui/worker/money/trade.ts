@@ -599,6 +599,7 @@ async function sendDeposit(deps: TradeDeps, trade: TradeRecord): Promise<TradeRe
 async function waitForReceipt(params: {
   chainId: number;
   hash: `0x${string}`;
+  rpc?: string;
 }): Promise<'success' | 'reverted'> {
   const chain = [
     mainnet,
@@ -612,7 +613,7 @@ async function waitForReceipt(params: {
     katana
   ].find((c) => c.id === params.chainId);
   if (!chain) throw new Error(`No RPC configuration for chain ${params.chainId}`);
-  const client = createPublicClient({ chain, transport: http() });
+  const client = createPublicClient({ chain, transport: http(params.rpc) });
   const receipt = await client.waitForTransactionReceipt({
     hash: params.hash,
     timeout: RECEIPT_TIMEOUT_MS
@@ -645,8 +646,9 @@ async function startIntent(deps: TradeDeps, initial: TradeRecord): Promise<Trade
   try {
     mined = await (deps.waitForReceipt ?? waitForReceipt)({
       chainId: trade.origin.chainId,
-      hash: txHash
-    });
+      hash: txHash,
+      rpc: deps.rpcUrl?.(trade.origin.chainId)
+    } as { chainId: number; hash: `0x${string}` });
   } catch (error) {
     throw new MoneyError({
       code: 'upstream_unavailable',

@@ -83,6 +83,8 @@ export interface EngineDeps {
   usdPrice: (params: { chainId: number; token: Address }) => Promise<number | undefined>;
   sleep: (ms: number) => Promise<void>;
   now: () => Date;
+  // An RPC for reading a chain (money/rpc.ts); viem's public default without it.
+  rpcUrl?: (chainId: number) => string | undefined;
 }
 
 const POLL_MS = 2_000;

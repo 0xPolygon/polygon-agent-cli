@@ -57,6 +57,7 @@ import {
   pmSell,
   pmWithdraw
 } from './polymarket.ts';
+import { rpcUrl } from './rpc.ts';
 import { StoredNonceSigner } from './signer.ts';
 import { chainLabel, findSupportedToken, parseChain, resolveSupportedSymbol } from './tokens.ts';
 import {
@@ -76,6 +77,7 @@ const LIFETIME_MARGIN_SECONDS = 24 * 60 * 60;
 
 export interface AgentKeyEnv {
   CREDENTIALS_KEY?: string;
+  INDEXER_ACCESS_KEY?: string;
   OMS_PUBLISHABLE_KEY?: string;
   TRAILS_API_KEY?: string;
 }
@@ -296,7 +298,11 @@ export class AgentKey {
         return payAndFetch(params, await this.x402Deps(record), OWN_HOSTS);
       }
       case 'earn_vaults': {
-        const deps = { trailsKey: this.env.TRAILS_API_KEY ?? '', ...this.earnOverrides };
+        const deps = {
+          trailsKey: this.env.TRAILS_API_KEY ?? '',
+          rpcUrl: (id: number) => rpcUrl(id, this.env.INDEXER_ACCESS_KEY),
+          ...this.earnOverrides
+        };
         const vaults = await listVaults(req.chain, deps);
         return {
           vaults: vaults.slice(0, 12),
@@ -305,7 +311,11 @@ export class AgentKey {
       }
       case 'earn_deposit':
       case 'earn_withdraw': {
-        const deps = { trailsKey: this.env.TRAILS_API_KEY ?? '', ...this.earnOverrides };
+        const deps = {
+          trailsKey: this.env.TRAILS_API_KEY ?? '',
+          rpcUrl: (id: number) => rpcUrl(id, this.env.INDEXER_ACCESS_KEY),
+          ...this.earnOverrides
+        };
         const params = {
           vault: req.vault,
           amount: req.amount,
@@ -690,7 +700,8 @@ export class AgentKey {
         }
       },
       sleep: this.sleep,
-      now: this.now
+      now: this.now,
+      rpcUrl: (chainId) => rpcUrl(chainId, this.env.INDEXER_ACCESS_KEY)
     };
     return {
       ...engine,
@@ -768,6 +779,7 @@ export class AgentKey {
           deps
         }),
       usdcBalance: () => deps.balanceOf({ chainId: 137, token: USDC }),
+      polygonRpcUrl: rpcUrl(137, this.env.INDEXER_ACCESS_KEY),
       now: this.now,
       sleep: this.sleep,
       ...this.pmOverrides
