@@ -73,6 +73,15 @@ importers:
       '@polygonlabs/oms-wallet':
         specifier: 0.3.1
         version: 0.3.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
+      '@x402/core':
+        specifier: ^2.28.0
+        version: 2.28.0
+      '@x402/evm':
+        specifier: ^2.28.0
+        version: 2.28.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
+      '@x402/fetch':
+        specifier: ^2.28.0
+        version: 2.28.0
       lucide-react:
         specifier: ^0.564.0
         version: 0.564.0(react@18.3.1)

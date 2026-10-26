@@ -22,7 +22,7 @@ import type { Plan } from './plan.ts';
 import { httpStatus, keyRefused, mapOmsError, MoneyError, upstreamErrorName } from './errors.ts';
 import { chainLabel, findSupportedToken } from './tokens.ts';
 
-export type SpendPurpose = 'send' | 'trade';
+export type SpendPurpose = 'send' | 'trade' | 'x402';
 
 export interface TransferRecord {
   id: string;

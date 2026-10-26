@@ -23,6 +23,9 @@ export interface PendingAction<R = unknown> {
   details: { label: string; value: string }[];
   // The app that asked.
   appName: string;
+  // Set when it runs as the owner (signed in on the approval page), not with
+  // the connection's key: these transactions, sent from the owner's wallet.
+  owner?: { chainId: number; transactions: { to: string; data: string }[] };
   status: ActionStatus;
   createdAt: string;
   expiresAt: string;
@@ -39,6 +42,7 @@ export async function proposeAction<R>(params: {
   title: string;
   details: PendingAction['details'];
   appName: string;
+  owner?: PendingAction['owner'];
   now: Date;
 }): Promise<PendingAction<R>> {
   const id = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) =>
@@ -50,6 +54,7 @@ export async function proposeAction<R>(params: {
     title: params.title,
     details: params.details,
     appName: params.appName,
+    ...(params.owner ? { owner: params.owner } : {}),
     status: 'pending',
     createdAt: params.now.toISOString(),
     expiresAt: new Date(params.now.getTime() + ACTION_TTL_MS).toISOString()
@@ -99,6 +104,12 @@ export async function decideAction<R>(params: {
     });
   }
   const decidedAt = params.now().toISOString();
+  if (params.approve && action.owner) {
+    throw new MoneyError({
+      code: 'invalid_input',
+      message: 'This one runs from your wallet: sign in on the page to approve it.'
+    });
+  }
   if (!params.approve) {
     const declined = { ...action, status: 'declined' as const, decidedAt };
     await params.storage.put(key(action.id), declined);
@@ -129,6 +140,43 @@ export async function decideAction<R>(params: {
   }
 }
 
+/** An owner action, approved: marked running and handed to the worker to send. */
+export async function beginOwnerAction(
+  storage: KeyStorage,
+  id: string,
+  now: Date
+): Promise<NonNullable<PendingAction['owner']>> {
+  const action = await loadAction(storage, id, now);
+  if (!action.owner)
+    throw new MoneyError({ code: 'invalid_input', message: 'Not an owner action.' });
+  if (action.status !== 'pending') {
+    throw new MoneyError({
+      code: 'invalid_input',
+      message:
+        action.status === 'expired'
+          ? 'This request expired. Ask the agent to try again.'
+          : 'This request was already answered.'
+    });
+  }
+  await storage.put(key(id), { ...action, status: 'running', decidedAt: now.toISOString() });
+  return action.owner;
+}
+
+export async function endOwnerAction(
+  storage: KeyStorage,
+  id: string,
+  outcome: { result: unknown } | { error: ReturnType<MoneyError['toJSON']> },
+  now: Date
+): Promise<PendingAction> {
+  const action = await loadAction(storage, id, now);
+  const ended =
+    'result' in outcome
+      ? { ...action, status: 'done' as const, result: outcome.result }
+      : { ...action, status: 'failed' as const, error: outcome.error };
+  await storage.put(key(id), ended);
+  return ended;
+}
+
 /** What the agent and the approval page see of an action. */
 export function viewAction(action: PendingAction) {
   return {
@@ -137,6 +185,8 @@ export function viewAction(action: PendingAction) {
     title: action.title,
     details: action.details,
     appName: action.appName,
+    // Approving it means signing in on the page: it runs from the owner's wallet.
+    ownerSignIn: !!action.owner,
     expiresAt: action.expiresAt,
     ...(action.result !== undefined ? { result: action.result } : {}),
     ...(action.error ? { error: action.error } : {})
