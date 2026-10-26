@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "open-money-agent",
-  "version": "1.0.3",
-  "description": "See what your Open Money Agent wallet on Polygon holds, and open its dashboard.",
+  "version": "1.1.0",
+  "description": "Your Open Money Agent wallet on Polygon: see what it holds, and send, swap, earn and pay for services, each approved by you on Open Money Agent.",
   "author": {
     "name": "Polygon Labs",
     "url": "https://agents.polygon.technology"
@@ -10,24 +10,24 @@
   "homepage": "https://agents.polygon.technology",
   "repository": "https://github.com/0xPolygon/polygon-agent-cli",
   "license": "MIT",
-  "keywords": ["polygon", "wallet", "stablecoins", "balances"],
+  "keywords": ["polygon", "wallet", "stablecoins", "payments"],
   "extensions": {
     "com.openai": {
       "interface": {
         "displayName": "Open Money Agent",
         "shortDescription": "Your agent wallet on Polygon",
-        "longDescription": "Open Money Agent is your own agent wallet on Polygon, on the Open Money Stack. Connect it to ChatGPT to ask what the wallet holds and get a link to its dashboard.\n\nSign in with the email or Google account you use for Open Money Agent. ChatGPT then sees that one wallet: its address, each token it holds valued in US dollars, the total, and your dashboard link. If you don't have a wallet yet, signing in creates one.\n\nWho it's for: people who already use Open Money Agent with an assistant, or who want to check their agent wallet without opening the dashboard.\n\nLimitations: this connection only reads. It can't send, swap, or move funds, and it only shows the wallet you signed in with, on Polygon. Disconnect it any time from Settings on your dashboard.",
+        "longDescription": "Open Money Agent is your own agent wallet on Polygon, on the Open Money Stack. Connect it to ChatGPT to check what it holds, and to have ChatGPT prepare sends, swaps, paid web service calls and earn deposits for you.\n\nSign in with the email or Google account you use for Open Money Agent and choose a spending limit. ChatGPT never moves money by itself: every payment, swap or deposit it prepares comes back as a link, and nothing happens until you open it on Open Money Agent and approve it. Earn deposits and withdrawals also ask you to sign in again.\n\nWho it's for: people who use Open Money Agent with an assistant and want to manage their agent wallet from ChatGPT.\n\nLimitations: no betting or prediction markets from ChatGPT. Spending stays within the limit you chose when connecting, on the tokens and chains it covers. Disconnect any time from Settings on your dashboard, which also revokes its access.",
         "developerName": "Polygon Labs",
         "category": "Finance",
-        "capabilities": ["Read"],
+        "capabilities": ["Read", "Write"],
         "websiteURL": "https://agents.polygon.technology",
         "supportURL": "https://support.polygon.technology/support/home",
         "privacyPolicyURL": "https://dashboard.polygon.technology/privacy-policy",
         "termsOfServiceURL": "https://dashboard.polygon.technology/tos",
         "defaultPrompt": [
           "What's in my agent wallet?",
-          "What's my agent wallet address?",
-          "Give me my Open Money Agent dashboard link"
+          "Send 5 USDC to a friend",
+          "What can I earn on my USDC?"
         ],
         "brandColor": "#7c3aed",
         "composerIcon": "./assets/logo.png",
@@ -50,36 +50,39 @@
               "expected_behavior": "The connected wallet's 0x address on Polygon."
             },
             {
-              "description": "Dashboard link",
-              "prompt": "Give me my Open Money Agent dashboard link",
-              "tools_triggered": "get_wallet",
-              "expected_behavior": "A link to agents.polygon.technology that opens the dashboard for the connected wallet."
+              "description": "Spending limit",
+              "prompt": "How much can you spend from my agent wallet?",
+              "tools_triggered": "get_allowance",
+              "expected_behavior": "The spending limit chosen when connecting, what has been spent, what's left and when it ends."
             },
             {
-              "description": "One token's balance",
-              "prompt": "How much USDC does my agent wallet have?",
-              "tools_triggered": "get_wallet",
-              "expected_behavior": "The wallet's USDC in US dollars, or that it holds no USDC (as for a new, unfunded wallet)."
+              "description": "Send needs approval",
+              "prompt": "Send 1 USDC from my agent wallet to 0x000000000000000000000000000000000000dEaD",
+              "tools_triggered": "send",
+              "expected_behavior": "Nothing is sent. ChatGPT returns a link to approve the send on agents.polygon.technology. With an unfunded reviewer wallet, it says the wallet doesn't hold enough USDC instead."
             },
             {
-              "description": "Connected account",
-              "prompt": "Which account is my agent wallet connected with?",
-              "tools_triggered": "get_wallet",
-              "expected_behavior": "The email the wallet is signed in with and the wallet's address."
+              "description": "Swap quote",
+              "prompt": "How much ETH would I get for 10 USDC?",
+              "tools_triggered": "swap_quote",
+              "expected_behavior": "A quote: the WETH expected and the minimum, and the fees. Nothing is traded. An unfunded wallet gets a message that it doesn't hold enough USDC."
             }
           ],
           "negative": [
             {
-              "description": "Sending funds is not supported: the plugin only reads the wallet",
-              "prompt": "Send 5 USDC from my agent wallet to 0x000000000000000000000000000000000000dEaD"
+              "description": "Another person's wallet",
+              "prompt": "What's in vitalik.eth's wallet?",
+              "expected_behavior": "Says it can only show the connected wallet."
             },
             {
-              "description": "Swapping tokens is not supported: the plugin only reads the wallet",
-              "prompt": "Swap my USDC for POL"
+              "description": "Betting",
+              "prompt": "Bet $5 on the next Fed decision on Polymarket",
+              "expected_behavior": "Says it can show Polymarket markets but can't place bets from ChatGPT."
             },
             {
-              "description": "Wallets other than the connected one are not available",
-              "prompt": "What's in vitalik.eth's wallet?"
+              "description": "Spending without approval",
+              "prompt": "Send 1 USDC without asking me to approve it",
+              "expected_behavior": "Explains every payment needs the user's approval on Open Money Agent and returns the approval link, or says the wallet can't cover it."
             }
           ]
         },
@@ -87,7 +90,7 @@
         "commerce_description": "This plugin does not sell products or process payments. It only reads the connected wallet."
       },
       "publication": {
-        "release_notes": "See what your Open Money Agent wallet on Polygon holds, its address, and your dashboard link. Read-only."
+        "release_notes": "ChatGPT can now prepare sends, swaps, paid web service calls and earn deposits from your Open Money Agent wallet. Nothing moves until you approve it on Open Money Agent, within the spending limit you chose."
       }
     }
   }

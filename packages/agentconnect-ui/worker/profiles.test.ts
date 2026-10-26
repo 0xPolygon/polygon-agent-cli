@@ -42,20 +42,43 @@ describe('client profiles', () => {
     expect(policyOf('nope')).toBe(PROFILES.standard);
   });
 
-  it('keeps ChatGPT and Muse to reading the wallet', () => {
-    expect(PROFILES.openai).toEqual({ tools: ['get_wallet'], movesMoney: false });
-    expect(PROFILES.muse).toEqual({ tools: ['get_wallet'], movesMoney: false });
+  it('has the owner approve each ChatGPT spend, and keeps Muse to reading the wallet', () => {
+    expect(PROFILES.openai).toMatchObject({ movesMoney: true, ownerApproves: true });
+    // Everything but funding Polymarket and betting.
+    expect(PROFILES.openai.tools).toEqual(
+      PROFILES.standard.tools.filter(
+        (t) => !['polymarket_deposit', 'polymarket_buy', 'polymarket_sell'].includes(t)
+      )
+    );
+    expect(PROFILES.muse).toEqual({
+      tools: ['get_wallet'],
+      movesMoney: false,
+      ownerApproves: false
+    });
   });
 
   it('gives standard clients every tool and an allowance', () => {
-    expect(PROFILES.standard.movesMoney).toBe(true);
+    expect(PROFILES.standard).toMatchObject({ movesMoney: true, ownerApproves: false });
     expect(PROFILES.standard.tools).toEqual([
       'get_wallet',
       'get_allowance',
       'send',
       'swap_quote',
       'swap',
-      'swap_status'
+      'swap_status',
+      'pay_service',
+      'earn_vaults',
+      'earn_deposit',
+      'earn_withdraw',
+      'polymarket_markets',
+      'polymarket_account',
+      'polymarket_deposit',
+      'polymarket_buy',
+      'polymarket_sell',
+      'polymarket_cancel',
+      'polymarket_redeem',
+      'polymarket_withdraw',
+      'get_action'
     ]);
   });
 });

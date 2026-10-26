@@ -19,7 +19,22 @@ export type MoneyCode =
   | 'upstream_invalid_quote'
   | 'upstream_unavailable'
   | 'upstream_error'
-  | 'rate_limited';
+  | 'rate_limited'
+  // Polymarket
+  | 'region_blocked'
+  | 'region_close_only'
+  | 'not_set_up'
+  | 'key_missing'
+  | 'below_bridge_minimum'
+  | 'bridge_pending'
+  | 'bridge_failed'
+  | 'insufficient_pusd'
+  | 'insufficient_shares'
+  | 'market_not_accepting_orders'
+  | 'outcome_not_found'
+  | 'ambiguous_market'
+  | 'price_guard'
+  | 'order_rejected';
 
 // A refusal with any of these codes was raised before anything was sent.
 export const NOTHING_SENT_CODES: ReadonlySet<MoneyCode> = new Set([
@@ -34,7 +49,19 @@ export const NOTHING_SENT_CODES: ReadonlySet<MoneyCode> = new Set([
   'native_not_supported',
   'quote_expired',
   'quote_not_found',
-  'upstream_invalid_quote'
+  'upstream_invalid_quote',
+  'region_blocked',
+  'region_close_only',
+  'not_set_up',
+  'key_missing',
+  'below_bridge_minimum',
+  'bridge_pending',
+  'insufficient_pusd',
+  'insufficient_shares',
+  'market_not_accepting_orders',
+  'outcome_not_found',
+  'ambiguous_market',
+  'price_guard'
 ]);
 
 export class MoneyError extends Error {

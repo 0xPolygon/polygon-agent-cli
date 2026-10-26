@@ -2,11 +2,12 @@
 // allows it, from the OAuth client it came from, and keeps it for its life.
 //
 // `standard` is every client we haven't set up: everything the agent wallet
-// does, within the allowance the owner approves when connecting. Platforms with
-// stricter rules get a narrower profile: ChatGPT apps may not move crypto or
-// place bets, and Muse takes no money movement. ChatGPT is recognised by its
-// redirect URI (it registers a new client per install); others are mapped by
-// client id in MCP_CLIENT_PROFILES.
+// does, within the allowance the owner approves when connecting. ChatGPT
+// (`openai`) gets the same tools, but its apps may not move money themselves:
+// each spend waits for the owner to approve it on this site (money/actions.ts).
+// Muse takes no money movement at all. ChatGPT is recognised by its redirect
+// URI (it registers a new client per install); others are mapped by client id
+// in MCP_CLIENT_PROFILES.
 
 export type Profile = 'standard' | 'openai' | 'muse';
 
@@ -16,15 +17,44 @@ export interface ProfilePolicy {
   tools: readonly string[];
   // Whether connecting asks the owner for an allowance to spend from.
   movesMoney: boolean;
+  // Whether each spend waits for the owner's approval on the site.
+  ownerApproves: boolean;
 }
 
 const READ = ['get_wallet'] as const;
-const MONEY = ['get_allowance', 'send', 'swap_quote', 'swap', 'swap_status'] as const;
+const MONEY = [
+  'get_allowance',
+  'send',
+  'swap_quote',
+  'swap',
+  'swap_status',
+  'pay_service',
+  'earn_vaults',
+  'earn_deposit',
+  'earn_withdraw',
+  'polymarket_markets',
+  'polymarket_account',
+  'polymarket_deposit',
+  'polymarket_buy',
+  'polymarket_sell',
+  'polymarket_cancel',
+  'polymarket_redeem',
+  'polymarket_withdraw',
+  'get_action'
+] as const;
+
+// OpenAI's rules count real-money betting apart from moving money: ChatGPT
+// sees Polymarket markets and the account, but can't fund it or bet.
+const BETTING = new Set<string>(['polymarket_deposit', 'polymarket_buy', 'polymarket_sell']);
 
 export const PROFILES: Record<Profile, ProfilePolicy> = {
-  standard: { tools: [...READ, ...MONEY], movesMoney: true },
-  openai: { tools: [...READ], movesMoney: false },
-  muse: { tools: [...READ], movesMoney: false }
+  standard: { tools: [...READ, ...MONEY], movesMoney: true, ownerApproves: false },
+  openai: {
+    tools: [...READ, ...MONEY].filter((t) => !BETTING.has(t)),
+    movesMoney: true,
+    ownerApproves: true
+  },
+  muse: { tools: [...READ], movesMoney: false, ownerApproves: false }
 };
 
 const isProfile = (v: unknown): v is Profile => typeof v === 'string' && Object.hasOwn(PROFILES, v);

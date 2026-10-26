@@ -12,6 +12,7 @@ import { handleMcp } from './mcp.ts';
 import { agentKey } from './money/agent-key.ts';
 import { setUpAllowance } from './money/connect.ts';
 import { MoneyError } from './money/errors.ts';
+import { runAsOwner } from './money/owner-run.ts';
 import {
   DEFAULT_ALLOWANCE_USD,
   DEFAULT_DAYS,
@@ -63,6 +64,16 @@ export interface Env {
 function ownerSignIn(env: Env): OwnerSignIn | null {
   if (!env.OAUTH_KV || !env.CREDENTIALS_KEY) return null;
   return new OwnerSignIn(new SealedKv(env.OAUTH_KV, env.CREDENTIALS_KEY), publishableKey(env));
+}
+
+/** Where Cloudflare saw this browser: ISO country and subdivision (e.g. CA-ON). */
+export function ownerRegion(req: Request): { country: string | null; region: string | null } {
+  const cf = (req as Request & { cf?: { country?: string; regionCode?: string } }).cf;
+  const country = cf?.country && /^[A-Z]{2}$/.test(cf.country) ? cf.country : null;
+  return {
+    country,
+    region: country && cf?.regionCode ? `${country}-${cf.regionCode}` : null
+  };
 }
 
 const hexId = () =>
@@ -275,7 +286,9 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
         wallet: who.wallet,
         email: who.email,
         profile,
-        ...(keyId ? { keyId } : {})
+        ...(keyId
+          ? { keyId, appName: pending.clientName ?? 'Your agent', ownerRegion: ownerRegion(req) }
+          : {})
       };
       const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
         request: authRequest,
@@ -389,6 +402,131 @@ async function grantKeyId(
     cursor = page.cursor;
   } while (cursor);
   return undefined;
+}
+
+/**
+ * An agent's request waiting for the owner (money/actions.ts): GET shows it,
+ * POST {"approve"} answers it. Only the owner signed in on this site, and only
+ * for a connection to their own wallet: the connection's key checks the wallet.
+ */
+export async function handleActionsApi(req: Request, env: Env, path: string): Promise<Response> {
+  const signIn = ownerSignIn(env);
+  if (!signIn || !env.AGENT_CERT_SECRET || !env.AGENT_KEYS) {
+    return fail(503, 'mcp_unavailable', 'Connecting agents is not configured on this deployment');
+  }
+  const m =
+    /^\/api\/actions\/([0-9a-f]{32})\/([0-9a-f]{24})(\/signin\/(email|google)\/(start|finish))?$/.exec(
+      path
+    );
+  if (!m) return fail(404, 'not_found', 'No such request');
+  const [, keyId, actionId, , method, step] = m;
+  const key = agentKey(env.AGENT_KEYS, keyId);
+  const answer = (res: Awaited<ReturnType<typeof key>>) => {
+    if (res.ok) return json(res.value);
+    // Another wallet's connection reads as not found, like a wrong id.
+    if (res.error.code === 'not_connected') return fail(404, 'not_found', 'No such request');
+    return fail(400, res.error.code, res.error.error);
+  };
+  try {
+    // Signing in on the approval page: the worker's OMS sign-in, kept until the
+    // owner answers (an owner action runs from their wallet), and the site's
+    // session cookie, as on the connect page.
+    if (method) {
+      if (req.method !== 'POST') return fail(405, 'method_not_allowed', 'Use POST');
+      const body = (await readBody(req)) as Record<string, unknown>;
+      const str = (k: string) => {
+        const v = body[k];
+        if (typeof v !== 'string' || !v.trim()) throw new ValidationError(`${k} is required`);
+        return v.trim();
+      };
+      if (step === 'start') {
+        const c = await signIn.create({});
+        if (method === 'email') {
+          await signIn.startEmail(c, str('email'));
+          return json({ c });
+        }
+        return json({ c, url: await signIn.startGoogle(c, `${new URL(req.url).origin}/login`) });
+      }
+      const c = str('c');
+      const who =
+        method === 'email'
+          ? await signIn.finishEmail(c, str('code'), true)
+          : await signIn.finishGoogle(c, str('callbackUrl'), true);
+      return new Response(JSON.stringify({ c, signedIn: true }), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+          'Set-Cookie': sessionCookie(req, await issueSession(who, env.AGENT_CERT_SECRET))
+        }
+      });
+    }
+
+    const owner = await sessionIdentity(req, env.AGENT_CERT_SECRET);
+    if (!owner) return fail(401, 'unauthorized', 'Sign in to answer this request');
+    if (req.method === 'GET')
+      return answer(await key({ op: 'action', wallet: owner.wallet, id: actionId }));
+    if (req.method !== 'POST') return fail(405, 'method_not_allowed', 'Use GET or POST');
+    const body = (await readBody(req)) as { approve?: unknown; c?: unknown };
+    const view = await key({ op: 'action', wallet: owner.wallet, id: actionId });
+    if (!view.ok) return answer(view);
+    const ownerAction = (view.value as { ownerSignIn?: boolean }).ownerSignIn === true;
+    if (!ownerAction || body.approve !== true) {
+      if (typeof body.c === 'string')
+        await signIn.withOwner(body.c, async () => {}).catch(() => {});
+      return answer(
+        await key({
+          op: 'decide',
+          wallet: owner.wallet,
+          id: actionId,
+          approve: body.approve === true
+        })
+      );
+    }
+    // Runs from the owner's wallet, signed in on this page just now.
+    if (typeof body.c !== 'string')
+      throw new ValidationError('Sign in on this page to approve it.');
+    const pending = await signIn.load(body.c);
+    if (!pending.ownerSession || pending.signedIn?.wallet !== owner.wallet) {
+      throw new ValidationError('Sign in on this page to approve it.');
+    }
+    return answer(
+      await signIn.withOwner(body.c, async (oms) => {
+        const begun = await key({ op: 'owner_begin', wallet: owner.wallet, id: actionId });
+        if (!begun.ok) return begun;
+        const txs = begun.value as {
+          chainId: number;
+          transactions: { to: string; data: string }[];
+        };
+        try {
+          const result = await runAsOwner({ oms, wallet: owner.wallet, ...txs });
+          return key({ op: 'owner_end', wallet: owner.wallet, id: actionId, result });
+        } catch (err) {
+          console.error('[actions] owner run', err);
+          const e =
+            err instanceof MoneyError
+              ? err.toJSON()
+              : {
+                  error: err instanceof Error ? err.message : 'It failed.',
+                  code: 'upstream_error' as const
+                };
+          return key({ op: 'owner_end', wallet: owner.wallet, id: actionId, error: e });
+        }
+      })
+    );
+  } catch (err) {
+    if (err instanceof AuthError) return fail(401, err.code, err.message);
+    if (err instanceof ValidationError) return fail(400, 'invalid_request', err.message);
+    console.error('[actions]', err);
+    const message = err instanceof Error ? err.message : '';
+    if (/code|otp|expired|invalid/i.test(message)) {
+      return fail(
+        400,
+        'sign_in_failed',
+        'That sign-in did not work. Check the code and try again.'
+      );
+    }
+    return fail(500, 'internal_error', 'Something went wrong');
+  }
 }
 
 /**
@@ -520,6 +658,8 @@ const app = {
     if (url.pathname.startsWith('/.well-known/')) return new Response('Not found', { status: 404 });
     if (url.pathname.startsWith('/api/connect'))
       return handleConnectApi(request, env, url.pathname);
+    if (url.pathname.startsWith('/api/actions/'))
+      return handleActionsApi(request, env, url.pathname);
     if (url.pathname === '/api/agents' || url.pathname.startsWith('/api/agents/'))
       return handleAgentsApi(request, env, url.pathname);
     if (url.pathname === '/api/session' || url.pathname.startsWith('/api/session/'))

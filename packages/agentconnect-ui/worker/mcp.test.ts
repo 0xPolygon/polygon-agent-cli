@@ -85,7 +85,20 @@ describe('MCP server', () => {
       'send',
       'swap_quote',
       'swap',
-      'swap_status'
+      'swap_status',
+      'pay_service',
+      'earn_vaults',
+      'earn_deposit',
+      'earn_withdraw',
+      'polymarket_markets',
+      'polymarket_account',
+      'polymarket_deposit',
+      'polymarket_buy',
+      'polymarket_sell',
+      'polymarket_cancel',
+      'polymarket_redeem',
+      'polymarket_withdraw',
+      'get_action'
     ]);
   });
 
@@ -224,15 +237,39 @@ describe('MCP money tools', () => {
     });
   });
 
-  it("won't let a ChatGPT connection call a money tool by name", async () => {
-    const { ns, asked } = keys({ ok: true, value: {} });
-    const { body } = await rpc(
+  it("saves a ChatGPT spend for the owner to approve, and doesn't spend", async () => {
+    const { ns, asked } = keys({
+      ok: true,
+      value: { actionId: 'a1', title: 'Send 5 USDC', expiresAt: 'later' }
+    });
+    const r = await call(
       { ...env(), AGENT_KEYS: ns },
-      { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'send', arguments: {} } },
-      { ...OPENAI, keyId: 'k1' }
+      'send',
+      { ...OPENAI, keyId: 'k1', appName: 'ChatGPT' },
+      { token: 'USDC', amount: '5', to: WALLET }
     );
-    expect(body).toMatchObject({ error: { code: -32602 } });
-    expect(asked).toEqual([]);
+    expect(r.structuredContent).toMatchObject({
+      status: 'pending_approval',
+      actionId: 'a1',
+      approvalUrl: 'https://agentconnect.test/approve?k=k1&a=a1'
+    });
+    expect(asked).toEqual([
+      {
+        name: 'k1',
+        body: {
+          op: 'propose',
+          wallet: WALLET,
+          appName: 'ChatGPT',
+          request: { op: 'send', token: 'USDC', amount: '5', to: WALLET }
+        }
+      }
+    ]);
+  });
+
+  it('lets ChatGPT read and quote without approval', async () => {
+    const { ns, asked } = keys({ ok: true, value: { allowanceUsd: 10 } });
+    await call({ ...env(), AGENT_KEYS: ns }, 'get_allowance', { ...OPENAI, keyId: 'k1' });
+    expect(asked[0].body).toMatchObject({ op: 'status' });
   });
 
   it('tells each client what it can do', async () => {
@@ -243,6 +280,7 @@ describe('MCP money tools', () => {
       ).result.instructions;
     expect(await instructions({ ...OWNER, keyId: 'k1' })).toMatch(/send, swap and bridge/);
     expect(await instructions(OWNER)).toMatch(/can't move funds/);
-    expect(await instructions({ ...OPENAI, keyId: 'k1' })).toMatch(/can't move funds/);
+    expect(await instructions({ ...OPENAI, keyId: 'k1' })).toMatch(/approves every spend/);
+    expect(await instructions(OPENAI)).toMatch(/can't move funds/);
   });
 });

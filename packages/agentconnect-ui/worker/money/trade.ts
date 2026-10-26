@@ -68,6 +68,8 @@ export interface TradeRecord {
     minAmount: string;
   };
   quote: { fromAmountUsd: number; toAmountUsd: number; totalFeeUsd: number; slippage: number };
+  // What was asked, so an approved trade whose quote ran out can be quoted again.
+  request?: QuoteParams;
   expiresAt: string;
   deposit: { to: string; data: string };
   depositAddress: string;
@@ -405,6 +407,7 @@ export async function quoteSwap(
       minAmount: String(intent.quote?.toAmountMin ?? 0n)
     },
     quote: { fromAmountUsd: fromUsd, toAmountUsd: toUsd, totalFeeUsd: feeUsd, slippage },
+    request: params,
     expiresAt: expiresAt.toISOString(),
     deposit: { to: intent.depositTransaction.to, data: intent.depositTransaction.data || '0x' },
     depositAddress: intent.originIntentAddress,
@@ -671,6 +674,32 @@ export async function executeSwap(
     trade = await waitForIntent(deps, trade, opts.waitMs ?? DEFAULT_WAIT_MS);
   }
   return trade;
+}
+
+/**
+ * A trade the owner approved, whose quote may have run out while they
+ * decided: quoted again, and executed only if it still delivers at least the
+ * minimum they approved.
+ */
+export async function executeApprovedSwap(deps: TradeDeps, intentId: string): Promise<TradeRecord> {
+  const approved = await deps.trades.trade(intentId);
+  if (
+    !approved ||
+    approved.state !== 'quoted' ||
+    Date.parse(approved.expiresAt) > deps.now().getTime() ||
+    !approved.request
+  ) {
+    return executeSwap(deps, intentId, { send: true });
+  }
+  const { trade } = await quoteSwap(approved.request, deps);
+  if (BigInt(trade.destination.minAmount) < BigInt(approved.destination.minAmount)) {
+    throw new MoneyError({
+      code: 'quote_expired',
+      message: `The price moved while this waited for approval: it would now deliver less than the ${formatUnits(BigInt(approved.destination.minAmount), approved.destination.decimals)} ${approved.destination.symbol} approved. Nothing was sent.`,
+      hint: 'Ask for a new quote.'
+    });
+  }
+  return executeSwap(deps, trade.intentId, { send: true });
 }
 
 /** How a trade reads to a person: amounts in token units. */
