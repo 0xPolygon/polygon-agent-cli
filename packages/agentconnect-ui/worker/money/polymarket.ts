@@ -34,6 +34,8 @@ export interface PmSdk {
   root: {
     createSecureClient(options: object): Promise<any>;
     createPublicClient(options?: object): any;
+    // Points the SDK's own chain reads at our RPC (the public one rate-limits).
+    forkEnvironmentConfig?(fork: { rpc?: string }): unknown;
     OrderSide: { BUY: any; SELL: any };
     OrderType: { FAK: any };
     AssetType: { COLLATERAL: any; CONDITIONAL: any; CONDITIONAL_V2: any };
@@ -484,12 +486,19 @@ async function createClient(
   const client = await guarded(sdk, () =>
     sdk.root.createSecureClient({
       signer: sdk.viem.privateKey(key),
+      ...environment(sdk, deps),
       ...(builder ? { apiKey: builderApiKey(builder, deps.now) } : {}),
       ...(clob ? { credentials: clob } : {})
     })
   );
   if (!clob && client.credentials) await writeJson(deps, KEYS.clob, client.credentials);
   return client;
+}
+
+function environment(sdk: PmSdk, deps: PolymarketDeps): { environment?: unknown } {
+  return deps.polygonRpcUrl && sdk.root.forkEnvironmentConfig
+    ? { environment: sdk.root.forkEnvironmentConfig({ rpc: deps.polygonRpcUrl }) }
+    : {};
 }
 
 // The client for a recorded account. Never creates anything.
@@ -648,7 +657,8 @@ async function setupAccount(
     const minted = await guarded(sdk, async () => {
       const eoa = await sdk.root.createSecureClient({
         signer: sdk.viem.privateKey(key),
-        wallet: signer
+        wallet: signer,
+        ...environment(sdk, deps)
       });
       return (await sdk.actions.createBuilderApiKey(eoa)) as Creds;
     });
