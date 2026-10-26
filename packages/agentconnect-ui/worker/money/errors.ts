@@ -20,6 +20,8 @@ export type MoneyCode =
   | 'upstream_unavailable'
   | 'upstream_error'
   | 'rate_limited'
+  // An owner action the owner has to sign in for (the kept sign-in ran out).
+  | 'owner_signin_needed'
   // Polymarket
   | 'region_blocked'
   | 'region_close_only'
@@ -50,6 +52,7 @@ export const NOTHING_SENT_CODES: ReadonlySet<MoneyCode> = new Set([
   'quote_expired',
   'quote_not_found',
   'upstream_invalid_quote',
+  'owner_signin_needed',
   'region_blocked',
   'region_close_only',
   'not_set_up',

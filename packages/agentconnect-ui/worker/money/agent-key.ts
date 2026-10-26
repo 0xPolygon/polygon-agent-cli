@@ -1,7 +1,12 @@
 // One Durable Object per MCP connection that may move money: its own session
 // key (a remote access credential the owner authorizes smart sessions for,
-// like a CLI install's), the request nonce, the approved allowance, and every
-// transfer and trade it makes.
+// like a CLI install's), the request nonce, the approved allowance, every
+// transfer and trade it makes, and the owner's sign-in from connecting, kept
+// for owner actions the owner approves on the site.
+//
+// One more per wallet (named `wallet:<address>`) holds what belongs to the
+// wallet rather than to a connection: its Polymarket account, so every
+// connection trades the same one.
 //
 // It runs one request at a time, so the nonce and the transfer records only
 // ever move forward in order. It has no route: only this worker reaches it,
@@ -19,6 +24,7 @@ import {
   RemoteAccessClient
 } from '@polygonlabs/oms-wallet';
 
+import type { OwnerSnapshot } from '../owner-signin.ts';
 import type { EarnDeps } from './earn.ts';
 import type { EngineDeps, TransferRecord } from './engine.ts';
 import type { PlanJson } from './plan.ts';
@@ -26,6 +32,7 @@ import type { QuoteParams, TradeDeps, TradeRecord } from './trade.ts';
 import type { PayParams, PendingAuthorization, X402Deps } from './x402.ts';
 
 import { publishableKey } from '../oms-config.ts';
+import { omsFromSnapshot } from '../owner-signin.ts';
 import { deriveKey, openSealed, seal } from '../store.ts';
 import {
   beginOwnerAction,
@@ -35,7 +42,7 @@ import {
   proposeAction,
   viewAction
 } from './actions.ts';
-import { depositTxs, listVaults, positions, withdrawTxs } from './earn.ts';
+import { depositCall, listVaults, positions, withdrawTxs } from './earn.ts';
 import {
   checkTransfer,
   getSessions,
@@ -44,7 +51,8 @@ import {
   spentUsdSince,
   transfer
 } from './engine.ts';
-import { httpStatus, MoneyError } from './errors.ts';
+import { httpStatus, mapOmsError, MoneyError } from './errors.ts';
+import { runAsOwner } from './owner-run.ts';
 import { planFromJson, sessionMatchesPlan } from './plan.ts';
 import {
   ownerAccess,
@@ -76,6 +84,8 @@ const APP_LOGO_URL = 'https://agents.polygon.technology/polygon-logo.png';
 const LIFETIME_MARGIN_SECONDS = 24 * 60 * 60;
 
 export interface AgentKeyEnv {
+  // This class's own namespace: a connection reaches its wallet's object.
+  AGENT_KEYS?: DurableObjectNamespace;
   CREDENTIALS_KEY?: string;
   INDEXER_ACCESS_KEY?: string;
   OMS_PUBLISHABLE_KEY?: string;
@@ -169,11 +179,28 @@ export type KeyRequest =
       result?: unknown;
       error?: ReturnType<MoneyError['toJSON']>;
     }
+  // The owner's sign-in from connecting, handed over by the worker.
+  | { op: 'keep_owner'; wallet: string; snapshot: OwnerSnapshot }
+  // An approved owner action, sent with that sign-in.
+  | { op: 'owner_run'; wallet: string; id: string }
   | { op: 'revoke'; wallet: string }
   // A spend the owner approves first (money/actions.ts): saved, not run.
   | { op: 'propose'; wallet: string; appName: string; request: SpendRequest }
   | { op: 'action'; wallet: string; id: string }
   | { op: 'decide'; wallet: string; id: string; approve: boolean };
+
+// What the wallet's own object answers (it has no key): sealed values by name.
+// `put_new` keeps a value already there and returns it. A lease lets one
+// connection at a time use what's stored (it lapses at `until`, in ms).
+export type WalletStoreRequest =
+  | { op: 'wstore_get'; name: string }
+  | { op: 'wstore_put'; name: string; value: string }
+  | { op: 'wstore_put_new'; name: string; value: string }
+  | { op: 'wstore_lease'; holder: string; until: number }
+  | { op: 'wstore_release'; holder: string };
+
+// Long enough for a Polymarket deposit's wait for the bridge.
+const PM_LEASE_MS = 5 * 60 * 1000;
 
 type WithoutWallet<T> = T extends unknown ? Omit<T, 'wallet'> : never;
 
@@ -182,13 +209,16 @@ export type SpendRequest =
   | Omit<Extract<KeyRequest, { op: 'send' }>, 'wallet'>
   | Omit<Extract<KeyRequest, { op: 'swap' }>, 'wallet'>
   | Omit<Extract<KeyRequest, { op: 'pay_service' }>, 'wallet'>
-  | WithoutWallet<Extract<KeyRequest, { op: 'pm_deposit' | 'pm_buy' | 'pm_sell' }>>;
+  | WithoutWallet<
+      Extract<KeyRequest, { op: 'pm_deposit' | 'pm_buy' | 'pm_sell' | 'earn_deposit' }>
+    >;
 
 // Spends, and bets: on platforms where the owner approves each, these wait.
 export const SPEND_OPS: ReadonlySet<string> = new Set([
   'send',
   'swap',
   'pay_service',
+  'earn_deposit',
   'pm_deposit',
   'pm_buy',
   'pm_sell'
@@ -230,6 +260,10 @@ export class AgentKey {
   x402Overrides?: Partial<X402Deps>;
   earnOverrides?: Partial<EarnDeps>;
   pmOverrides?: Record<string, unknown>;
+  // The wallet's object (tests); AGENT_KEYS otherwise.
+  walletStore?: (wallet: string) => (req: WalletStoreRequest) => Promise<KeyResponse>;
+  // The OMS client for the kept sign-in (tests).
+  ownerOms?: (snapshot: OwnerSnapshot) => Pick<OMSWallet, 'wallet'>;
 
   constructor(
     state: { storage: KeyStorage },
@@ -240,16 +274,19 @@ export class AgentKey {
 
   async fetch(request: Request): Promise<Response> {
     if (request.method !== 'POST') return new Response(null, { status: 405 });
-    const body = (await request.json()) as KeyRequest;
+    const body = (await request.json()) as KeyRequest | WalletStoreRequest;
     // One request at a time, start to finish.
     const run = this.queue.then(() => this.handle(body));
     this.queue = run.catch(() => undefined);
     return Response.json(await run);
   }
 
-  private async handle(req: KeyRequest): Promise<KeyResponse> {
+  private async handle(req: KeyRequest | WalletStoreRequest): Promise<KeyResponse> {
     try {
-      return { ok: true, value: await this.dispatch(req) };
+      if (req.op.startsWith('wstore_')) {
+        return { ok: true, value: await this.walletStoreOp(req as WalletStoreRequest) };
+      }
+      return { ok: true, value: await this.dispatch(req as KeyRequest) };
     } catch (error) {
       if (error instanceof MoneyError) return { ok: false, error: error.toJSON() };
       console.error('[agent-key]', error);
@@ -275,7 +312,8 @@ export class AgentKey {
       case 'send':
         return this.send(record, req);
       case 'swap_quote': {
-        const { op: _op, wallet: _wallet, ...params } = req;
+        // A contract call is only ever this worker's (earn deposits), not an agent's.
+        const { op: _op, wallet: _wallet, call: _call, ...params } = req;
         const { trade, warnings } = await quoteSwap(params, await this.deps(record));
         return {
           ...describeTrade(trade),
@@ -298,11 +336,7 @@ export class AgentKey {
         return payAndFetch(params, await this.x402Deps(record), OWN_HOSTS);
       }
       case 'earn_vaults': {
-        const deps = {
-          trailsKey: this.env.TRAILS_API_KEY ?? '',
-          rpcUrl: (id: number) => rpcUrl(id, this.env.INDEXER_ACCESS_KEY),
-          ...this.earnOverrides
-        };
+        const deps = this.earnDeps();
         const vaults = await listVaults(req.chain, deps);
         return {
           vaults: vaults.slice(0, 12),
@@ -310,89 +344,43 @@ export class AgentKey {
         };
       }
       case 'earn_deposit':
+        return this.earnDeposit(record, req);
       case 'earn_withdraw': {
-        const deps = {
-          trailsKey: this.env.TRAILS_API_KEY ?? '',
-          rpcUrl: (id: number) => rpcUrl(id, this.env.INDEXER_ACCESS_KEY),
-          ...this.earnOverrides
-        };
-        const params = {
-          vault: req.vault,
-          amount: req.amount,
-          chain: req.chain,
-          wallet: getAddress(record.wallet)
-        };
-        const { vault, txs, amount } =
-          req.op === 'earn_deposit'
-            ? await depositTxs(params, deps)
-            : await withdrawTxs(params, deps);
-        const deposit = req.op === 'earn_deposit';
-        return viewAction(
+        const { vault, txs, amount } = await withdrawTxs(
+          {
+            vault: req.vault,
+            amount: req.amount,
+            chain: req.chain,
+            wallet: getAddress(record.wallet)
+          },
+          this.earnDeps()
+        );
+        return this.viewAction(
           await proposeAction({
             storage: this.storage,
             request: { op: req.op },
-            title: deposit
-              ? `Deposit ${amount} ${vault.asset.symbol} to earn about ${vault.apy}% a year`
-              : `Withdraw ${amount} ${vault.asset.symbol} from a vault`,
+            title: `Withdraw ${amount} ${vault.asset.symbol} from a vault`,
             details: [
               { label: 'Vault', value: `${vault.name} (${vault.address})` },
               { label: 'Network', value: vault.chain },
-              ...(deposit
-                ? [{ label: 'Rate today', value: `${vault.apy}% a year, not fixed` }]
-                : [])
+              { label: 'To', value: 'This wallet' }
             ],
             appName: req.appName,
             owner: txs,
-            ...(deposit
-              ? {
-                  fund: {
-                    chainId: vault.chainId,
-                    symbol: vault.asset.symbol,
-                    amount: tokenUnits(amount, vault.asset.decimals).toString()
-                  }
-                }
-              : {}),
             now: this.now()
           })
         );
       }
+      case 'pm_account':
+      case 'pm_deposit':
+      case 'pm_buy':
+      case 'pm_sell':
+      case 'pm_cancel':
+      case 'pm_redeem':
+      case 'pm_withdraw':
+        return this.withPmLease(record, () => this.polymarket(record, req));
       case 'pm_markets':
         return pmMarkets({ query: req.query }, await this.pmDeps(record, undefined));
-      case 'pm_account':
-        return pmAccount(await this.pmDeps(record, req.ownerRegion));
-      case 'pm_deposit': {
-        const deps = await this.pmDeps(record, req.ownerRegion);
-        await this.settleStuckDeposit(record);
-        // Polymarket is funded from Polygon USDC: bridge it there first if the
-        // wallet holds it elsewhere (only where the owner may use Polymarket).
-        const units = /^\d+(\.\d{1,6})?$/.test(req.usd.trim()) ? tokenUnits(req.usd, 6) : 0n;
-        const bridged =
-          units >= 2_000_000n && ownerAccess(deps.ownerRegion) === 'open'
-            ? await ensureOn(await this.deps(record), {
-                chainId: 137,
-                symbol: 'USDC',
-                amount: units
-              })
-            : null;
-        const result = await pmDeposit({ usd: req.usd }, deps);
-        return bridged ? { bridged, ...(result as object) } : result;
-      }
-      case 'pm_buy': {
-        const { op: _op, wallet: _w, ownerRegion, ...p } = req;
-        return pmBuy(p, await this.pmDeps(record, ownerRegion));
-      }
-      case 'pm_sell': {
-        const { op: _op, wallet: _w, ownerRegion, ...p } = req;
-        return pmSell(p, await this.pmDeps(record, ownerRegion));
-      }
-      case 'pm_cancel': {
-        const { op: _op, wallet: _w, ownerRegion, ...p } = req;
-        return pmCancel(p, await this.pmDeps(record, ownerRegion));
-      }
-      case 'pm_redeem':
-        return pmRedeem(await this.pmDeps(record, req.ownerRegion));
-      case 'pm_withdraw':
-        return pmWithdraw({ usd: req.usd }, await this.pmDeps(record, req.ownerRegion));
       case 'owner_begin': {
         const deps = await this.deps(record);
         return beginOwnerAction(this.storage, req.id, this.now(), (f) =>
@@ -400,7 +388,7 @@ export class AgentKey {
         );
       }
       case 'owner_end':
-        return viewAction(
+        return this.viewAction(
           await endOwnerAction(
             this.storage,
             req.id,
@@ -408,14 +396,22 @@ export class AgentKey {
             this.now()
           )
         );
+      case 'keep_owner':
+        await this.storage.put(
+          'owner-session',
+          await seal(await this.sealer(), 'owner-session', req.snapshot)
+        );
+        return { kept: true };
+      case 'owner_run':
+        return this.ownerRun(record, req.id);
       case 'revoke':
         return this.revoke(record);
       case 'propose':
         return this.propose(record, req.appName, req.request);
       case 'action':
-        return viewAction(await loadAction(this.storage, req.id, this.now()));
+        return this.viewAction(await loadAction(this.storage, req.id, this.now()));
       case 'decide':
-        return viewAction(
+        return this.viewAction(
           await decideAction<SpendRequest>({
             storage: this.storage,
             id: req.id,
@@ -465,6 +461,17 @@ export class AgentKey {
     } else if (request.op === 'pm_sell') {
       title = `Sell ${request.shares} "${request.outcome}" shares on Polymarket`;
       details = [{ label: 'Market', value: request.market }];
+    } else if (request.op === 'earn_deposit') {
+      const { vault, amount } = await depositCall(
+        { ...request, wallet: getAddress(record.wallet) },
+        this.earnDeps()
+      );
+      title = `Deposit ${amount} ${vault.asset.symbol} to earn about ${vault.apy}% a year`;
+      details = [
+        { label: 'Vault', value: `${vault.name} (${vault.address})` },
+        { label: 'Network', value: vault.chain },
+        { label: 'Rate today', value: `${vault.apy}% a year, not fixed` }
+      ];
     } else if (request.op === 'pay_service') {
       title = `Pay up to $${request.maxUsd} for a web service`;
       details = [
@@ -503,7 +510,225 @@ export class AgentKey {
       appName,
       now: this.now()
     });
-    return viewAction(action);
+    return this.viewAction(action);
+  }
+
+  // An owner action needs no sign-in on the page while the kept one works.
+  private async viewAction(action: Parameters<typeof viewAction>[0]) {
+    const view = viewAction(action);
+    return view.ownerSignIn && (await this.storage.get('owner-session'))
+      ? { ...view, ownerSignIn: false }
+      : view;
+  }
+
+  // --- Polymarket -----------------------------------------------------------------
+
+  private async polymarket(
+    record: KeyRecord,
+    req: Extract<KeyRequest, { op: `pm_${string}` }>
+  ): Promise<unknown> {
+    switch (req.op) {
+      case 'pm_account':
+        return pmAccount(await this.pmDeps(record, req.ownerRegion));
+      case 'pm_deposit': {
+        const deps = await this.pmDeps(record, req.ownerRegion);
+        await this.settleStuckDeposit(record);
+        // Polymarket is funded from Polygon USDC: bridge it there first if the
+        // wallet holds it elsewhere (only where the owner may use Polymarket).
+        const units = /^\d+(\.\d{1,6})?$/.test(req.usd.trim()) ? tokenUnits(req.usd, 6) : 0n;
+        const bridged =
+          units >= 2_000_000n && ownerAccess(deps.ownerRegion) === 'open'
+            ? await ensureOn(await this.deps(record), {
+                chainId: 137,
+                symbol: 'USDC',
+                amount: units
+              })
+            : null;
+        const result = await pmDeposit({ usd: req.usd }, deps);
+        return bridged ? { bridged, ...(result as object) } : result;
+      }
+      case 'pm_buy': {
+        const { op: _op, wallet: _w, ownerRegion, ...p } = req;
+        return pmBuy(p, await this.pmDeps(record, ownerRegion));
+      }
+      case 'pm_sell': {
+        const { op: _op, wallet: _w, ownerRegion, ...p } = req;
+        return pmSell(p, await this.pmDeps(record, ownerRegion));
+      }
+      case 'pm_cancel': {
+        const { op: _op, wallet: _w, ownerRegion, ...p } = req;
+        return pmCancel(p, await this.pmDeps(record, ownerRegion));
+      }
+      case 'pm_redeem':
+        return pmRedeem(await this.pmDeps(record, req.ownerRegion));
+      case 'pm_withdraw':
+        return pmWithdraw({ usd: req.usd }, await this.pmDeps(record, req.ownerRegion));
+      default:
+        throw new MoneyError({ code: 'invalid_input', message: `Unknown request ${req.op}.` });
+    }
+  }
+
+  // The wallet's object: its Polymarket account lives there, for every connection.
+  private walletObject(wallet: string): (req: WalletStoreRequest) => Promise<KeyResponse> {
+    if (this.walletStore) return this.walletStore(wallet);
+    if (!this.env.AGENT_KEYS) throw new Error('AGENT_KEYS is not bound');
+    const call = agentKey(this.env.AGENT_KEYS, `wallet:${wallet.toLowerCase()}`);
+    return (req) => call(req as unknown as KeyRequest);
+  }
+
+  private async walletCall<T>(wallet: string, req: WalletStoreRequest): Promise<T> {
+    const res = await this.walletObject(wallet)(req);
+    if (!res.ok) {
+      throw new MoneyError({
+        code: res.error.code,
+        message: res.error.error,
+        hint: res.error.hint
+      });
+    }
+    return res.value as T;
+  }
+
+  // One connection at a time uses the wallet's Polymarket account.
+  private async withPmLease<T>(record: KeyRecord, fn: () => Promise<T>): Promise<T> {
+    const holder = record.credentialId;
+    const held = await this.walletCall<boolean>(record.wallet, {
+      op: 'wstore_lease',
+      holder,
+      until: this.now().getTime() + PM_LEASE_MS
+    });
+    if (!held) {
+      throw new MoneyError({
+        code: 'rate_limited',
+        message: 'Another connection to this wallet is using Polymarket right now.',
+        hint: 'Try again in a minute.'
+      });
+    }
+    try {
+      return await fn();
+    } finally {
+      await this.walletCall(record.wallet, { op: 'wstore_release', holder }).catch(() => {});
+    }
+  }
+
+  // Only the wallet's object answers these: never a connection's own.
+  private async walletStoreOp(req: WalletStoreRequest): Promise<unknown> {
+    if (await this.storage.get('record')) {
+      throw new MoneyError({ code: 'invalid_input', message: 'Not a wallet store.' });
+    }
+    const name = (n: string) => `w:${n}`;
+    switch (req.op) {
+      case 'wstore_get':
+        return (await this.storage.get<string>(name(req.name))) ?? null;
+      case 'wstore_put':
+        await this.storage.put(name(req.name), req.value);
+        return true;
+      case 'wstore_put_new': {
+        const existing = await this.storage.get<string>(name(req.name));
+        if (existing) return existing;
+        await this.storage.put(name(req.name), req.value);
+        return req.value;
+      }
+      case 'wstore_lease': {
+        const lease = await this.storage.get<{ holder: string; until: number }>('lease');
+        if (lease && lease.holder !== req.holder && lease.until > this.now().getTime()) {
+          return false;
+        }
+        await this.storage.put('lease', { holder: req.holder, until: req.until });
+        return true;
+      }
+      case 'wstore_release': {
+        const lease = await this.storage.get<{ holder: string; until: number }>('lease');
+        if (lease?.holder === req.holder) await this.storage.put('lease', null);
+        return true;
+      }
+    }
+  }
+
+  // --- earning ------------------------------------------------------------------
+
+  private earnDeps(): EarnDeps {
+    return {
+      trailsKey: this.env.TRAILS_API_KEY ?? '',
+      rpcUrl: (id: number) => rpcUrl(id, this.env.INDEXER_ACCESS_KEY),
+      ...this.earnOverrides
+    };
+  }
+
+  // Through Trails, paid with the key like a trade: from whichever covered
+  // chain holds the stablecoin, into the vault, the shares minted to the wallet.
+  private async earnDeposit(record: KeyRecord, req: Extract<KeyRequest, { op: 'earn_deposit' }>) {
+    const { vault, amount, call } = await depositCall(
+      { vault: req.vault, amount: req.amount, chain: req.chain, wallet: getAddress(record.wallet) },
+      this.earnDeps()
+    );
+    const deps = await this.deps(record);
+    const { trade } = await quoteSwap(
+      {
+        from: vault.asset.symbol,
+        to: vault.asset.symbol,
+        toAmount: amount,
+        toChain: String(vault.chainId),
+        call
+      },
+      deps
+    );
+    const done = await executeSwap(deps, trade.intentId, { send: true });
+    return {
+      deposited: { amount, token: vault.asset.symbol, vault: vault.name, chain: vault.chain },
+      rateToday: `${vault.apy}% a year, not fixed`,
+      ...describeTrade(done)
+    };
+  }
+
+  // Sends an approved owner action with the owner's sign-in from connecting.
+  // If that has run out, nothing is marked: the owner signs in on the page.
+  private async ownerRun(record: KeyRecord, id: string) {
+    const sealed = await this.storage.get<string>('owner-session');
+    const signInNeeded = () =>
+      new MoneyError({
+        code: 'owner_signin_needed',
+        message: 'Sign in on this page to approve it: the sign-in from connecting has run out.'
+      });
+    if (!sealed) throw signInNeeded();
+    const snapshot = await openSealed<OwnerSnapshot>(await this.sealer(), 'owner-session', sealed);
+    const oms = this.ownerOms
+      ? this.ownerOms(snapshot)
+      : omsFromSnapshot(this.publishableKey(), snapshot);
+    const save = async () =>
+      this.storage.put('owner-session', await seal(await this.sealer(), 'owner-session', snapshot));
+    try {
+      await oms.wallet.listWallets();
+    } catch (error) {
+      const status = httpStatus(error);
+      if (status === 401 || status === 403 || mapOmsError(error).code === 'session_expired') {
+        await this.storage.put('owner-session', null);
+        throw signInNeeded();
+      }
+      throw error;
+    }
+    const deps = await this.deps(record);
+    const txs = await beginOwnerAction(this.storage, id, this.now(), (f) =>
+      ensureOn(deps, { chainId: f.chainId, symbol: f.symbol, amount: BigInt(f.amount) })
+    );
+    let outcome: { result: unknown } | { error: ReturnType<MoneyError['toJSON']> };
+    try {
+      outcome = {
+        result: await runAsOwner({ oms, wallet: record.wallet, ...txs })
+      };
+    } catch (error) {
+      console.error('[agent-key] owner run', error);
+      outcome = {
+        error:
+          error instanceof MoneyError
+            ? error.toJSON()
+            : new MoneyError({
+                code: 'upstream_error',
+                message: error instanceof Error ? error.message : 'It failed.'
+              }).toJSON()
+      };
+    }
+    await save();
+    return this.viewAction(await endOwnerAction(this.storage, id, outcome, this.now()));
   }
 
   // --- the key -------------------------------------------------------------------
@@ -627,6 +852,24 @@ export class AgentKey {
   }
 
   private async revoke(record: KeyRecord): Promise<{ revoked: boolean }> {
+    // The owner's kept sign-in goes first: signed out at OMS, not only forgotten.
+    const sealed = await this.storage.get<string>('owner-session');
+    if (sealed) {
+      try {
+        const snapshot = await openSealed<OwnerSnapshot>(
+          await this.sealer(),
+          'owner-session',
+          sealed
+        );
+        const oms = this.ownerOms
+          ? this.ownerOms(snapshot)
+          : omsFromSnapshot(this.publishableKey(), snapshot);
+        await oms.wallet.signOut();
+      } catch {
+        // Already gone at OMS, or unreachable: it's deleted with the rest below.
+      }
+      await this.storage.put('owner-session', null);
+    }
     const key = await this.privateKey();
     let revoked = Date.parse(record.expiresAt) <= this.now().getTime();
     if (key && !revoked) {
@@ -750,21 +993,36 @@ export class AgentKey {
     };
   }
 
-  // Polymarket: the connection's own trading key and account, kept sealed
-  // here, funded from the allowance through Polymarket's bridge.
+  // Polymarket: the wallet's trading key and account, sealed in the wallet's
+  // object, funded from this connection's allowance through Polymarket's bridge.
   private async pmDeps(record: KeyRecord, ownerRegion: OwnerRegion | undefined) {
     const sealer = await this.sealer();
-    const storage = this.storage;
+    const wallet = record.wallet;
     const deps = await this.deps(record);
     const USDC = getAddress('0x3c499c542cef5e3811e1192ce70d8cc03d5c3359');
     return {
       store: {
         get: async (name: string) => {
-          const sealed = await storage.get<string>(name);
+          const sealed = await this.walletCall<string | null>(wallet, { op: 'wstore_get', name });
           return sealed ? openSealed<string>(sealer, name, sealed) : null;
         },
-        put: async (name: string, value: string) =>
-          storage.put(name, await seal(sealer, name, value))
+        put: async (name: string, value: string) => {
+          await this.walletCall(wallet, {
+            op: 'wstore_put',
+            name,
+            value: await seal(sealer, name, value)
+          });
+        },
+        putNew: async (name: string, value: string) =>
+          openSealed<string>(
+            sealer,
+            name,
+            await this.walletCall<string>(wallet, {
+              op: 'wstore_put_new',
+              name,
+              value: await seal(sealer, name, value)
+            })
+          )
       },
       walletAddress: getAddress(record.wallet),
       ownerRegion: ownerRegion ?? { country: null, region: null },

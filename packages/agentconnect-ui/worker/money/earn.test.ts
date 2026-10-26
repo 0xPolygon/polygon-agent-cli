@@ -1,9 +1,9 @@
-import { decodeFunctionData, erc20Abi, erc4626Abi } from 'viem';
+import { decodeFunctionData, erc4626Abi } from 'viem';
 import { describe, expect, it } from 'vitest';
 
 import type { EarnDeps } from './earn.ts';
 
-import { depositTxs, listVaults, withdrawTxs } from './earn.ts';
+import { depositCall, listVaults, withdrawTxs } from './earn.ts';
 import { WALLET } from './test-fakes.ts';
 
 const VAULT = '0x00000000000000000000000000000000000000f1';
@@ -52,18 +52,14 @@ describe('earn', () => {
     ]);
   });
 
-  it('deposits with an approve then a deposit to the wallet', async () => {
-    const { txs } = await depositTxs(
+  it('deposits for the wallet with one call to the vault', async () => {
+    const { vault, call } = await depositCall(
       { vault: VAULT, amount: '50', chain: 'katana', wallet: WALLET },
       deps([market()])
     );
-    expect(txs.chainId).toBe(747474);
-    const [approve, deposit] = txs.transactions;
-    expect(decodeFunctionData({ abi: erc20Abi, data: approve.data })).toMatchObject({
-      functionName: 'approve',
-      args: [expect.stringMatching(/f1$/i), 50_000_000n]
-    });
-    expect(decodeFunctionData({ abi: erc4626Abi, data: deposit.data })).toMatchObject({
+    expect(vault.chainId).toBe(747474);
+    expect(call.to.toLowerCase()).toBe(VAULT.toLowerCase());
+    expect(decodeFunctionData({ abi: erc4626Abi, data: call.data })).toMatchObject({
       functionName: 'deposit',
       args: [50_000_000n, WALLET]
     });
@@ -83,7 +79,7 @@ describe('earn', () => {
 
   it("refuses a vault Trails doesn't list, and more than is deposited", async () => {
     await expect(
-      depositTxs(
+      depositCall(
         {
           vault: '0x00000000000000000000000000000000000000f2',
           amount: '1',

@@ -152,8 +152,9 @@ export function tokenUnits(amount: string, decimals: number): bigint {
 
 // Checks Trails' quote before anything is saved: the deposit must be exactly a
 // transfer of the quoted amount of the source token to the intent's address on
-// the source chain, the output must go to the wallet with no contract call, and
-// the minimum output must honour the slippage asked for.
+// the source chain, the output must go to the wallet with no contract call (or
+// exactly the call asked for, such as a vault deposit for the wallet), and the
+// minimum output must honour the slippage asked for.
 export function validateDeposit(params: {
   intent: Pick<
     Intent,
@@ -175,18 +176,29 @@ export function validateDeposit(params: {
   slippage: number;
   // An exact-output trade: what it must deliver. `amount` is then the quoted input.
   exactOutput?: bigint;
+  // The one contract call the output may go to (approved for it first).
+  call?: DestinationCall;
 }): void {
-  const { intent, walletAddress } = params;
+  const { intent, walletAddress, call } = params;
   if (!intent.intentId || !/^[\w-]+$/.test(intent.intentId)) throw invalidQuote('bad intent id');
   if (!same(intent.ownerAddress, walletAddress)) throw invalidQuote('owner is not the wallet');
   const request = intent.quoteRequest;
-  if (!request || !same(request.destinationToAddress, walletAddress)) {
+  if (!request || !same(request.destinationToAddress, call?.to ?? walletAddress)) {
     throw invalidQuote('output goes to another address');
   }
-  if (
+  if (BigInt(request.destinationCallValue ?? 0) !== 0n) {
+    throw invalidQuote('the call sends native value');
+  }
+  if (call) {
+    if (
+      !same(request.destinationApproveAddress, call.to) ||
+      !same(request.destinationCallData, call.data)
+    ) {
+      throw invalidQuote('the contract call differs from the request');
+    }
+  } else if (
     (request.destinationCallData && request.destinationCallData !== '0x') ||
-    request.destinationApproveAddress ||
-    BigInt(request.destinationCallValue ?? 0) !== 0n
+    request.destinationApproveAddress
   ) {
     throw invalidQuote('the output would be used in a contract call');
   }
@@ -271,6 +283,12 @@ function checkDepositCall(params: {
   if (amount !== params.amount) throw fail('deposit amount differs from the quote');
 }
 
+// A contract call Trails makes with the output, approving `to` for it first.
+export interface DestinationCall {
+  to: string;
+  data: string;
+}
+
 export interface QuoteParams {
   from: string;
   to: string;
@@ -284,6 +302,8 @@ export interface QuoteParams {
   chain?: string;
   toChain?: string;
   slippage?: number;
+  // Set by this worker only (a vault deposit), never from an agent's arguments.
+  call?: DestinationCall;
 }
 
 /**
@@ -308,7 +328,9 @@ export async function quoteSwap(
     const token = resolveSupportedSymbol({ chainId, symbol: params.from });
     if (!token) continue;
     // Not a trade at all: the token is already where it's wanted.
-    if (chainId === toChainId && target && same(token.address, target.address)) continue;
+    if (!params.call && chainId === toChainId && target && same(token.address, target.address)) {
+      continue;
+    }
     const balance = await deps.balanceOf({ chainId, token: token.address });
     if (balance > 0n) candidates.push({ chainId, balance });
   }
@@ -368,7 +390,11 @@ async function quoteOn(
   const destinationChainId = chainOf(params.toChain, originChainId);
   const origin = coveredToken(originChainId, params.from);
   const destination = coveredToken(destinationChainId, params.to);
-  if (originChainId === destinationChainId && same(origin.address, destination.address)) {
+  if (
+    !params.call &&
+    originChainId === destinationChainId &&
+    same(origin.address, destination.address)
+  ) {
     throw new MoneyError({
       code: 'invalid_input',
       message: 'The source and destination are the same token on the same chain.'
@@ -438,7 +464,10 @@ async function quoteOn(
       originTokenAddress: origin.address,
       destinationChainId,
       destinationTokenAddress: destination.address,
-      destinationToAddress: deps.walletAddress,
+      destinationToAddress: params.call?.to ?? deps.walletAddress,
+      ...(params.call
+        ? { destinationApproveAddress: params.call.to, destinationCallData: params.call.data }
+        : {}),
       ...(exactOutput === undefined
         ? { originTokenAmount: amount, tradeType: TradeType.EXACT_INPUT }
         : { destinationTokenAmount: exactOutput, tradeType: TradeType.EXACT_OUTPUT }),
@@ -462,7 +491,8 @@ async function quoteOn(
     destination: { chainId: destinationChainId, address: destination.address },
     amount,
     slippage,
-    ...(exactOutput !== undefined ? { exactOutput } : {})
+    ...(exactOutput !== undefined ? { exactOutput } : {}),
+    ...(params.call ? { call: params.call } : {})
   });
 
   const warnings: string[] = [];

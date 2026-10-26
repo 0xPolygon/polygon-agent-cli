@@ -194,7 +194,7 @@ const TOOLS = [
     name: 'earn_deposit',
     title: 'Deposit to earn',
     description:
-      "Deposits stablecoins from the wallet into a vault from earn_vaults. It runs from the owner's wallet, so it always answers pending_approval with a link: the owner signs in there to approve it. The stablecoin must already be on the vault's chain (bridge with swap_quote first).",
+      "Deposits stablecoins from the wallet into a vault from earn_vaults, from the allowance. Trails takes the stablecoin from whichever chain the wallet holds it on and deposits it into the vault; the vault's shares go to the wallet.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -210,7 +210,7 @@ const TOOLS = [
     name: 'earn_withdraw',
     title: 'Withdraw from a vault',
     description:
-      'Withdraws stablecoins from a vault back to the wallet: an amount, or "all". Like deposits, the owner approves it on a link.',
+      'Withdraws stablecoins from a vault back to the wallet: an amount, or "all". It runs from the owner\'s wallet, so it always answers pending_approval with a link for the owner to approve.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -578,8 +578,8 @@ async function callTool(
     return { value: pendingApproval(res.value, props.keyId, origin) };
   }
   const res = await key(request);
-  // Earn runs from the owner's own wallet, whatever the app: always approved first.
-  if (res.ok && (request.op === 'earn_deposit' || request.op === 'earn_withdraw')) {
+  // A withdrawal runs from the owner's own wallet, whatever the app: always approved first.
+  if (res.ok && request.op === 'earn_withdraw') {
     return { value: pendingApproval(res.value, props.keyId, origin) };
   }
   return res.ok ? { value: res.value } : { value: res.error, isError: true };

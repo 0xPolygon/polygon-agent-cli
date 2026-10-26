@@ -1,12 +1,13 @@
-// Polymarket for a connection, in session mode: a port of the CLI's polymarket
-// commands (lib/polymarket and commands/polymarket). The connection keeps its
-// own trading key, an EOA that controls a Polymarket Deposit Wallet which
+// Polymarket for an agent wallet, in session mode: a port of the CLI's
+// polymarket commands (lib/polymarket and commands/polymarket). The wallet has
+// one trading key, an EOA that controls a Polymarket Deposit Wallet which
 // Polymarket's relayer deploys and runs gaslessly, authorized by a builder API
-// key minted from the same key. The only spend from the agent wallet is one
-// USDC transfer to the Deposit Wallet's bridge address, within the allowance.
+// key minted from the same key; every connection to the wallet uses it. The
+// only spend from the agent wallet is one USDC transfer to the Deposit
+// Wallet's bridge address, within the connection's allowance.
 //
-// Calls for one connection run one at a time (its Durable Object), so the
-// pending-deposit record needs no lock of its own.
+// Calls run one at a time under the wallet's lease (the caller holds it), so
+// the pending-deposit record needs no lock of its own.
 
 import type { Address } from 'viem';
 
@@ -26,6 +27,8 @@ export interface PolymarketStore {
   // There is no delete: an empty string means cleared.
   get(name: string): Promise<string | null>;
   put(name: string, value: string): Promise<void>;
+  // Stores `value` unless one is there already; returns what's stored.
+  putNew?(name: string, value: string): Promise<string>;
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -459,7 +462,7 @@ const clearPending = (deps: PolymarketDeps) => deps.store.put(KEYS.deposit, '');
 function keyMissing(acct: StoredAccount): MoneyError {
   return refuse(
     'key_missing',
-    `The trading key for this connection's Polymarket wallet ${acct.wallet} is missing, so it can't be controlled. A new key would control a different wallet, so none is made.`,
+    `The trading key for this wallet's Polymarket account ${acct.wallet} is missing, so it can't be controlled. A new key would control a different wallet, so none is made.`,
     { hint: 'Ask the owner to contact support before using Polymarket here again.' }
   );
 }
@@ -472,6 +475,8 @@ async function ensureKey(deps: PolymarketDeps): Promise<`0x${string}`> {
   if (key) return key as `0x${string}`;
   if (existing) throw keyMissing(existing);
   const fresh = generatePrivateKey();
+  // Two connections setting up at once keep whichever key was stored first.
+  if (deps.store.putNew) return (await deps.store.putNew(KEYS.key, fresh)) as `0x${string}`;
   await deps.store.put(KEYS.key, fresh);
   return fresh;
 }
@@ -507,7 +512,7 @@ async function tradingClient(
 ): Promise<{ sdk: PmSdk; client: SecureClient; account: StoredAccount }> {
   const account = await loadAccount(deps);
   if (!account) {
-    throw refuse('not_set_up', 'This connection has no Polymarket account yet.', {
+    throw refuse('not_set_up', 'This wallet has no Polymarket account yet.', {
       hint: 'A first deposit (at least $2) sets it up.'
     });
   }

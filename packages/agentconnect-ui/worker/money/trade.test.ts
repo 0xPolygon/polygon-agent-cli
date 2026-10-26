@@ -258,4 +258,58 @@ describe('exact-output quotes', () => {
       quoteSwap({ from: 'USDC', to: 'USDT', toAmount: '5', chain: 'polygon' }, deps)
     ).rejects.toMatchObject({ code: 'upstream_invalid_quote' });
   });
+
+  describe('a vault deposit (a destination call)', () => {
+    const VAULT = '0x00000000000000000000000000000000000000f1';
+    const call = { to: VAULT, data: '0x6e553f65aa' };
+    const callIntent = (request: Record<string, unknown>) =>
+      intent({
+        destinationTokenAddress: USDC,
+        quoteRequest: {
+          destinationToAddress: VAULT,
+          destinationApproveAddress: VAULT,
+          destinationCallData: call.data,
+          destinationTokenAmount: 5_000_000n,
+          tradeType: 'EXACT_OUTPUT',
+          ...request
+        },
+        quote: { fromAmount: 10_000_000n, toAmount: 5_000_000n, toAmountMin: 5_000_000n }
+      });
+    const ask = { from: 'USDC', to: 'USDC', toAmount: '5', chain: 'polygon', call };
+
+    it('quotes the same token on the same chain when it ends in the call', async () => {
+      const { deps } = setup(callIntent({}));
+      const { trade } = await quoteSwap(ask, deps);
+      expect(trade.request?.call).toEqual(call);
+    });
+
+    it('refuses a quote whose call differs from the one asked for', async () => {
+      const { deps } = setup(callIntent({ destinationCallData: '0x6e553f65bb' }));
+      expect(await code(quoteSwap(ask, deps))).toBe('upstream_invalid_quote');
+    });
+
+    it('refuses a quote that approves another contract', async () => {
+      const { deps } = setup(
+        callIntent({ destinationApproveAddress: '0x00000000000000000000000000000000000000ee' })
+      );
+      expect(await code(quoteSwap(ask, deps))).toBe('upstream_invalid_quote');
+    });
+
+    it('refuses a call no one asked for', async () => {
+      // A swap to WETH whose quote would hand the output to a contract call.
+      const { deps } = setup(
+        intent({
+          quoteRequest: {
+            destinationToAddress: WALLET,
+            destinationApproveAddress: VAULT,
+            destinationCallData: call.data,
+            originTokenAmount: 10_000_000n
+          }
+        })
+      );
+      expect(await code(quoteSwap({ from: 'USDC', to: 'ETH', amount: '10' }, deps))).toBe(
+        'upstream_invalid_quote'
+      );
+    });
+  });
 });

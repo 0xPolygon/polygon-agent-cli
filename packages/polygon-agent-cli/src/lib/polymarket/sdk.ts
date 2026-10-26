@@ -7,6 +7,7 @@ import type * as SdkNode from '@polymarket/client/node';
 import type * as SdkViem from '@polymarket/client/viem';
 
 import { CliError } from '../errors.ts';
+import { getReadRpcUrl, resolveNetwork } from '../utils.ts';
 
 export type Sdk = {
   root: typeof SdkRoot;
@@ -29,6 +30,20 @@ export async function loadSdk(): Promise<Sdk> {
   rootRef = root;
   cached = { root, viem, node, actions };
   return cached;
+}
+
+// Polymarket's production config, reading Polygon through our node gateway
+// rather than the SDK's public default, when the project has an access key.
+export function environment(root: Sdk['root']): { environment?: SdkRoot.EnvironmentConfig } {
+  // Test doubles of the SDK may leave the function out.
+  return typeof root.forkEnvironmentConfig === 'function' && process.env.SEQUENCE_PROJECT_ACCESS_KEY
+    ? {
+        environment: root.forkEnvironmentConfig({
+          name: 'production',
+          rpc: getReadRpcUrl(resolveNetwork('polygon'))
+        })
+      }
+    : {};
 }
 
 // Class checks use `instanceof`: the SDK's static `isError` matches any
