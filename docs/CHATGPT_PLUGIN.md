@@ -5,7 +5,7 @@ The ChatGPT plugin is `plugins/open-money-agent-chatgpt/`: `plugin.json` (listin
 registration) and the logo. It has no skills. ChatGPT connections get the `openai` profile
 (`worker/profiles.ts`): every MCP tool except funding Polymarket and betting, and every spend
 waits for the owner to approve it on agents.polygon.technology (`/approve`), so ChatGPT itself
-never moves money. Earn withdrawals run from the owner's wallet with the sign-in kept from connecting.
+never moves money. Earn withdrawals also ask the owner to sign in again.
 
 Build the ZIP:
 

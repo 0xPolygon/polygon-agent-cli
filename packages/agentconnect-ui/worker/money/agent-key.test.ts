@@ -4,7 +4,6 @@ import type { RemoteAccessClient } from '@polygonlabs/oms-wallet';
 
 import type { KeyRecord, KeyRequest, KeyResponse, KeyStorage } from './agent-key.ts';
 
-import { proposeAction } from './actions.ts';
 import { AgentKey } from './agent-key.ts';
 import { buildPlan, planToJson } from './plan.ts';
 import { httpError, PRICES, START, WALLET } from './test-fakes.ts';
@@ -224,108 +223,6 @@ describe('AgentKey', () => {
       const s = store();
       await s.ask({ op: 'register', wallet: WALLET, days: 30, appName: 'Claude' });
       expect(await raw(s, { op: 'wstore_get', name: 'pm-key' })).toMatchObject({ ok: false });
-    });
-  });
-
-  describe("the owner's kept sign-in", () => {
-    const snapshot = { key: 'ab'.repeat(32), storage: { session: 'x' } };
-
-    async function connected(listWallets: () => Promise<unknown>) {
-      const storage = memoryStorage();
-      const key = new AgentKey(
-        { storage },
-        { CREDENTIALS_KEY: 'test-secret-test-secret-test-secret', OMS_PUBLISHABLE_KEY: 'pk_test' }
-      );
-      key.now = () => START;
-      key.clientFor = () =>
-        ({
-          registerCredential: async () => ({ credentialId: 'cred-1' }),
-          revokeCredential: async () => {},
-          listSessions: async () => []
-        }) as unknown as RemoteAccessClient;
-      const sent: string[] = [];
-      let signedOut = false;
-      key.ownerOms = () =>
-        ({
-          wallet: {
-            listWallets: async () => {
-              await listWallets();
-              return [{ id: 'w1', address: WALLET, keyOrigin: 'generated' }];
-            },
-            walletAddress: WALLET,
-            useWallet: async () => {},
-            sendTransaction: async (tx: { to: string }) => {
-              sent.push(tx.to);
-              return { txnHash: '0xhash' };
-            },
-            signOut: async () => void (signedOut = true)
-          }
-        }) as never;
-      const ask = async (req: KeyRequest) =>
-        (await (
-          await key.fetch(
-            new Request('https://agent-key/', { method: 'POST', body: JSON.stringify(req) })
-          )
-        ).json()) as KeyResponse;
-      await ask({ op: 'register', wallet: WALLET, days: 30, appName: 'Claude' });
-      const action = await proposeAction({
-        storage,
-        request: { op: 'earn_withdraw' },
-        title: 'Withdraw 1 USDC from a vault',
-        details: [],
-        appName: 'Claude',
-        owner: {
-          chainId: 137,
-          transactions: [{ to: '0x00000000000000000000000000000000000000f1', data: '0x' }]
-        },
-        now: START
-      });
-      return { storage, ask, sent, signedOut: () => signedOut, id: action.id };
-    }
-
-    it('approves an owner action with one click while it holds', async () => {
-      const c = await connected(async () => {});
-      expect(await c.ask({ op: 'action', wallet: WALLET, id: c.id })).toMatchObject({
-        value: { ownerSignIn: true }
-      });
-      await c.ask({ op: 'keep_owner', wallet: WALLET, snapshot });
-      // Sealed, never in the clear.
-      expect(c.storage.data.get('owner-session')).toMatch(/^v1\./);
-      expect(await c.ask({ op: 'action', wallet: WALLET, id: c.id })).toMatchObject({
-        value: { ownerSignIn: false }
-      });
-      expect(await c.ask({ op: 'owner_run', wallet: WALLET, id: c.id })).toMatchObject({
-        ok: true,
-        value: { status: 'done', result: { txHashes: ['0xhash'] } }
-      });
-      expect(c.sent).toEqual(['0x00000000000000000000000000000000000000f1']);
-      // Run once only.
-      expect(await c.ask({ op: 'owner_run', wallet: WALLET, id: c.id })).toMatchObject({
-        ok: false
-      });
-    });
-
-    it('asks for a sign-in, and runs nothing, once it has run out', async () => {
-      const c = await connected(async () => {
-        throw httpError(401);
-      });
-      await c.ask({ op: 'keep_owner', wallet: WALLET, snapshot });
-      expect(await c.ask({ op: 'owner_run', wallet: WALLET, id: c.id })).toMatchObject({
-        ok: false,
-        error: { code: 'owner_signin_needed' }
-      });
-      expect(c.sent).toEqual([]);
-      expect(await c.ask({ op: 'action', wallet: WALLET, id: c.id })).toMatchObject({
-        value: { status: 'pending', ownerSignIn: true }
-      });
-    });
-
-    it('signs out at OMS when the connection is revoked', async () => {
-      const c = await connected(async () => {});
-      await c.ask({ op: 'keep_owner', wallet: WALLET, snapshot });
-      await c.ask({ op: 'revoke', wallet: WALLET });
-      expect(c.signedOut()).toBe(true);
-      expect(c.storage.data.size).toBe(0);
     });
   });
 });

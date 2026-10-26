@@ -852,7 +852,9 @@ export function describeTrade(trade: TradeRecord): Record<string, unknown> {
     to: {
       expected: formatUnits(BigInt(destination.expectedAmount), destination.decimals),
       minimum: formatUnits(BigInt(destination.minAmount), destination.decimals),
-      ...(trade.receivedAmount
+      // After a contract call, Trails' figure is what the call returned (vault
+      // shares), not the token: left out.
+      ...(trade.receivedAmount && !trade.request?.call
         ? { received: formatUnits(BigInt(trade.receivedAmount), destination.decimals) }
         : {}),
       token: destination.symbol,
