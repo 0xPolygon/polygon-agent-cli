@@ -130,10 +130,10 @@ async function readText(res: Response): Promise<string> {
     : text;
 }
 
-function signerBalanceViem(p: { chainId: number; asset: Address; signer: Address }) {
+function signerBalanceViem(p: { chainId: number; asset: Address; signer: Address; rpc?: string }) {
   const chain = CHAINS.find((c) => c.id === p.chainId);
   if (!chain) throw new Error(`No RPC for chain ${p.chainId}`);
-  return createPublicClient({ chain, transport: http() }).readContract({
+  return createPublicClient({ chain, transport: http(p.rpc) }).readContract({
     address: p.asset,
     abi: erc20Abi,
     functionName: 'balanceOf',
@@ -219,7 +219,10 @@ export async function payAndFetch(
   const asset = getAddress(req.asset);
   const amount = BigInt(req.amount);
   const account = privateKeyToAccount(await deps.signerKey());
-  const balanceOf = deps.signerBalance ?? signerBalanceViem;
+  const balanceOf =
+    deps.signerBalance ??
+    ((p: { chainId: number; asset: Address; signer: Address }) =>
+      signerBalanceViem({ ...p, rpc: deps.rpcUrl?.(p.chainId) }));
   const now = deps.now();
   const promised = (await deps.x402.pending())
     .filter(

@@ -50,6 +50,7 @@ interface RawMarket {
 export interface EarnDeps {
   trailsKey: string;
   fetch?: typeof fetch;
+  rpcUrl?: (chainId: number) => string | undefined;
   // Reads from a vault (viem in production).
   read?: (p: {
     chainId: number;
@@ -74,7 +75,10 @@ function chainArg(chain: string | undefined): number[] {
 function reader(deps: EarnDeps) {
   if (deps.read) return deps.read;
   return ({ chainId, address, fn, args }: Parameters<NonNullable<EarnDeps['read']>>[0]) =>
-    createPublicClient({ chain: CHAINS[chainId as 747474 | 137], transport: http() }).readContract({
+    createPublicClient({
+      chain: CHAINS[chainId as 747474 | 137],
+      transport: http(deps.rpcUrl?.(chainId))
+    }).readContract({
       address,
       abi: [...erc4626Abi, ...erc20Abi],
       functionName: fn as never,
