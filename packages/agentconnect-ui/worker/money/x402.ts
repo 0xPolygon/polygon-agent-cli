@@ -21,6 +21,7 @@ import { chainLabel, findSupportedToken } from './tokens.ts';
 export const MAX_AUTHORIZATION_SECONDS = 15 * 60;
 const PAID_REQUEST_TIMEOUT_MS = 120_000;
 const FUNDS_WAIT_MS = 60_000;
+const SETTLE_SLACK_MS = 4_000;
 // The body the agent gets back, at most.
 const MAX_BODY_CHARS = 50_000;
 const CHAINS = [polygon, base, mainnet, arbitrum, optimism];
@@ -254,6 +255,10 @@ export async function payAndFetch(
       }
       await deps.sleep(2_000);
     }
+    // Our RPC seeing the funds doesn't mean the service's facilitator does yet:
+    // it checks the signer's balance on its own node, and rejects the
+    // authorization if it lags (as the CLI found).
+    await deps.sleep(SETTLE_SLACK_MS);
   }
 
   // Sign only the requirement that was valued and funded.
