@@ -267,7 +267,6 @@ describe('exact-output quotes', () => {
         destinationTokenAddress: USDC,
         quoteRequest: {
           destinationToAddress: VAULT,
-          destinationApproveAddress: VAULT,
           destinationCallData: call.data,
           destinationTokenAmount: 5_000_000n,
           tradeType: 'EXACT_OUTPUT',
@@ -288,7 +287,7 @@ describe('exact-output quotes', () => {
       expect(await code(quoteSwap(ask, deps))).toBe('upstream_invalid_quote');
     });
 
-    it('refuses a quote that approves another contract', async () => {
+    it('refuses a quote that adds an approval of its own', async () => {
       const { deps } = setup(
         callIntent({ destinationApproveAddress: '0x00000000000000000000000000000000000000ee' })
       );

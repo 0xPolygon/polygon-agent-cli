@@ -681,9 +681,23 @@ export class AgentKey {
       deps
     );
     const done = await executeSwap(deps, trade.intentId, { send: true });
+    const deposit = { amount, token: vault.asset.symbol, vault: vault.name, chain: vault.chain };
+    if (done.state === 'completed') {
+      return {
+        deposited: deposit,
+        rateToday: `${vault.apy}% a year, not fixed`,
+        ...describeTrade(done)
+      };
+    }
+    // Not deposited (yet): say so, with where the money is.
     return {
-      deposited: { amount, token: vault.asset.symbol, vault: vault.name, chain: vault.chain },
-      rateToday: `${vault.apy}% a year, not fixed`,
+      notDeposited: deposit,
+      next:
+        done.state === 'refunded'
+          ? "The vault didn't take it, so Trails sent the stablecoin back to the wallet."
+          : done.state === 'failed'
+            ? 'It failed; check the wallet before trying again.'
+            : `Still on its way: check with swap_status and intent_id ${done.intentId}.`,
       ...describeTrade(done)
     };
   }

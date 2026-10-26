@@ -1,3 +1,4 @@
+import { HYDRATE_PROXY_ADDRESS } from '0xtrails/hydrate';
 import { decodeFunctionData, erc4626Abi } from 'viem';
 import { describe, expect, it } from 'vitest';
 
@@ -52,17 +53,17 @@ describe('earn', () => {
     ]);
   });
 
-  it('deposits for the wallet with one call to the vault', async () => {
+  it("deposits for the wallet through Trails' executor", async () => {
     const { vault, call } = await depositCall(
       { vault: VAULT, amount: '50', chain: 'katana', wallet: WALLET },
       deps([market()])
     );
     expect(vault.chainId).toBe(747474);
-    expect(call.to.toLowerCase()).toBe(VAULT.toLowerCase());
-    expect(decodeFunctionData({ abi: erc4626Abi, data: call.data })).toMatchObject({
-      functionName: 'deposit',
-      args: [50_000_000n, WALLET]
-    });
+    expect(call.to).toBe(HYDRATE_PROXY_ADDRESS);
+    // The vault's deposit, for the wallet, and leftovers swept to the wallet.
+    const data = call.data.toLowerCase();
+    expect(data).toContain(VAULT.slice(2).toLowerCase());
+    expect(data).toContain(WALLET.slice(2).toLowerCase());
   });
 
   it('withdraws everything by redeeming all shares', async () => {
