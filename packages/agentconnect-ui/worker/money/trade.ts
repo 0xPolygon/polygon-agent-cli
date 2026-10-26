@@ -763,7 +763,12 @@ async function waitForIntent(
         ...(receipt.refundTransaction?.txnHash
           ? { refundTxHash: receipt.refundTransaction.txnHash }
           : {}),
-        error: `Trails reported ${status}`
+        error: [
+          `Trails reported ${status}`,
+          receipt.destinationTransaction?.statusReason ?? receipt.originTransaction?.statusReason
+        ]
+          .filter(Boolean)
+          .join(': ')
       });
     }
     if (status && status !== trade.intentStatus) {
