@@ -131,7 +131,15 @@ export type KeyRequest =
   | ({ op: 'pay_service'; wallet: string } & PayParams)
   | { op: 'earn_vaults'; wallet: string; chain?: string }
   | {
-      op: 'earn_deposit' | 'earn_withdraw';
+      op: 'earn_deposit';
+      wallet: string;
+      appName: string;
+      vault: string;
+      amount: string;
+      chain?: string;
+    }
+  | {
+      op: 'earn_withdraw';
       wallet: string;
       appName: string;
       vault: string;
@@ -700,7 +708,12 @@ export class AgentKey {
       await oms.wallet.listWallets();
     } catch (error) {
       const status = httpStatus(error);
-      if (status === 401 || status === 403 || mapOmsError(error).code === 'session_expired') {
+      const mapped = mapOmsError(error);
+      if (
+        status === 401 ||
+        status === 403 ||
+        (mapped instanceof MoneyError && mapped.code === 'session_expired')
+      ) {
         await this.storage.put('owner-session', null);
         throw signInNeeded();
       }

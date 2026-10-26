@@ -225,12 +225,9 @@ export function Approve({ finishing = false }: { finishing?: boolean }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ approve, ...(c ? { c } : {}) })
       });
-      const data = (await res.json().catch(() => ({}))) as Action & {
-        message?: string;
-        error?: unknown;
-      };
+      const data = (await res.json().catch(() => ({}))) as Action & { message?: string };
       // The sign-in kept from connecting ran out: the page asks for one now.
-      if (data.error === 'owner_signin_needed') await load();
+      if ((data as { error?: unknown }).error === 'owner_signin_needed') await load();
       if (!res.ok) throw new Error(data.message ?? 'Something went wrong. Try again.');
       setAction(data);
     } catch (e) {
