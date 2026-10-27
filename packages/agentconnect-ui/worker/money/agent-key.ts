@@ -213,7 +213,7 @@ export type SpendRequest =
       Extract<KeyRequest, { op: 'pm_deposit' | 'pm_buy' | 'pm_sell' | 'earn_deposit' }>
     >;
 
-// Spends, and bets: on platforms where the owner approves each, these wait.
+// Spends, and Polymarket predictions: on platforms where the owner approves each, these wait.
 export const SPEND_OPS: ReadonlySet<string> = new Set([
   'send',
   'swap',
@@ -441,7 +441,7 @@ export class AgentKey {
         { label: 'Note', value: 'Money on Polymarket is outside the allowance' }
       ];
     } else if (request.op === 'pm_buy') {
-      title = `Bet $${request.usd} on "${request.outcome}"`;
+      title = `Predict "${request.outcome}" with $${request.usd} on Polymarket`;
       details = [
         { label: 'Market', value: request.market },
         ...(request.limitPrice !== undefined

@@ -3,7 +3,7 @@ name: open-money-agent
 description: >-
   Open Money Agent: the user's own agent for payments on the Open Money Stack (OMS), spending only
   within a limit they approve. Set up and sign in, balances and funding, buy, sell, swap and
-  bridge tokens, earn yield, token prices, price watches and alerts, Polymarket bets, and paid
+  bridge tokens, earn yield, token prices, price watches and alerts, Polymarket predictions, and paid
   web services (x402). Use for any wallet, crypto, token price, prediction market, paid API or
   payment request.
 ---
@@ -71,7 +71,7 @@ Do the request. If they already asked for something, setup is not the end: carry
 | buy, sell, swap or bridge a token | [trade](references/trade.md) |
 | earn yield, deposit into or withdraw from a vault | [earn](references/earn.md) |
 | watch a price, get alerts, trade when a price is hit | [watches](references/watches.md) |
-| see odds, bet, manage Polymarket positions or winnings | [polymarket](references/polymarket.md) |
+| see odds, make a prediction, manage Polymarket positions or winnings | [polymarket](references/polymarket.md) |
 | use a paid service: web search, scraping, news, inference (x402) | [paid services](references/paid-services.md) |
 | register the agent on-chain, reputation, reviews (ERC-8004) | [identity](references/identity.md) |
 | work on the CLI itself: global install, owner mode, env vars | [developer](references/developer.md) |

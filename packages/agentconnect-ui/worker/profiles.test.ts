@@ -44,12 +44,7 @@ describe('client profiles', () => {
 
   it('has the owner approve each ChatGPT spend, and keeps Muse to reading the wallet', () => {
     expect(PROFILES.openai).toMatchObject({ movesMoney: true, ownerApproves: true });
-    // Everything but funding Polymarket and betting.
-    expect(PROFILES.openai.tools).toEqual(
-      PROFILES.standard.tools.filter(
-        (t) => !['polymarket_deposit', 'polymarket_buy', 'polymarket_sell'].includes(t)
-      )
-    );
+    expect(PROFILES.openai.tools).toEqual(PROFILES.standard.tools);
     expect(PROFILES.muse).toEqual({
       tools: ['get_wallet'],
       movesMoney: false,
