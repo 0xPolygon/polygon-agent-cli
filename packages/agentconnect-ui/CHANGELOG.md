@@ -1,5 +1,20 @@
 # @polygonlabs/agentconnect-ui
 
+## 0.2.0
+
+### Minor Changes
+
+- bf5b39f: The MCP server covers the rest of the agent wallet: paid web services (`pay_service`, x402), earn vaults (`earn_vaults`, `earn_deposit`, `earn_withdraw`) and Polymarket (markets, account, deposit, buy, sell, cancel, redeem, withdraw). Earn deposits are paid from the allowance through Trails; withdrawals run from the owner's wallet, so the owner approves them after signing in. Every connection to a wallet shares one Polymarket account. ChatGPT gets the same tools except funding Polymarket and betting, and every spend from ChatGPT waits for the owner's approval on the site (`/approve`, `get_action`). Polymarket follows its region rules for where the owner is.
+- e81bb48: The MCP server can move money. Connecting an agent now asks the owner for a spending limit (US dollars over up to 30 days), and the agent gets its own key for it, approved by the owner on each chain the way a CLI install's is. New tools: `get_allowance`, `send`, `swap_quote`, `swap` (swaps and bridges) and `swap_status`. ChatGPT connections are recognised by their redirect and stay read-only, as do Muse's. Disconnecting an agent revokes its key. The skill tells assistants that can't run commands what the MCP server can do.
+
+### Patch Changes
+
+- 6c0f8af: The site serves OpenAI's domain check token, and the ChatGPT listing carries its support link and review test cases.
+- 8191bd3: Ready for ChatGPT: the MCP server is named Open Money Agent, `get_wallet` declares its output and that it only reads the owner's wallet, denying a connection names the issuer like every other response, and the site can serve OpenAI's domain check at `/.well-known/openai-apps-challenge`. The plugin package is `plugins/open-money-agent-chatgpt/`.
+- 18744bc: The fund modal shows the agent wallet's short address with a copy button, for sending funds to it directly.
+- 2551ac0: Connecting an MCP client works on both sites the worker serves: each request checks its own site's `/mcp` as the OAuth resource, so ChatGPT's sign-in no longer fails depending on which site was served first. A bad authorization request now goes back to the client as an OAuth error instead of failing. The skill points assistants that can't run commands to the MCP server.
+- d564966: Unknown `/.well-known` paths answer 404 instead of the site's page, so OAuth clients probing for OpenID metadata move on to the metadata the MCP server does serve.
+
 ## 0.1.0
 
 ### Minor Changes
