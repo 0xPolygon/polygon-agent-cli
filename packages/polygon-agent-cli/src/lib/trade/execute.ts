@@ -172,11 +172,7 @@ async function waitForDeposit(params: {
   if (!chain) throw new Error(`No RPC configuration for chain ${trade.origin.chainId}`);
   const client = createPublicClient({
     chain,
-    transport: http(
-      process.env.SEQUENCE_PROJECT_ACCESS_KEY
-        ? getReadRpcUrl(resolveNetwork(trade.origin.chainId))
-        : chain.rpcUrls.default.http[0]
-    )
+    transport: http(getReadRpcUrl(resolveNetwork(trade.origin.chainId)))
   });
   try {
     const receipt = await client.waitForTransactionReceipt({

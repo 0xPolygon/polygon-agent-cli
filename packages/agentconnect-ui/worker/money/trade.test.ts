@@ -1,0 +1,314 @@
+import { encodeFunctionData, erc20Abi } from 'viem';
+import { describe, expect, it } from 'vitest';
+
+import type { TrailsApi } from '@0xtrails/api';
+
+import type { TradeDeps, TradeRecord } from './trade.ts';
+
+import { MoneyError } from './errors.ts';
+import { fakeEngine, START, USDC, WALLET, WETH } from './test-fakes.ts';
+import { describeTrade, ensureOn, executeSwap, quoteSwap, tokenUnits } from './trade.ts';
+
+const DEPOSIT_ADDRESS = '0x00000000000000000000000000000000000000d1';
+
+function intent(overrides: Record<string, unknown> = {}, amount = 10_000_000n) {
+  return {
+    intentId: 'intent-1',
+    ownerAddress: WALLET,
+    originChainId: 137,
+    destinationChainId: 137,
+    originTokenAddress: USDC,
+    destinationTokenAddress: WETH,
+    originIntentAddress: DEPOSIT_ADDRESS,
+    depositTransaction: {
+      chainId: 137,
+      to: USDC,
+      value: 0n,
+      data: encodeFunctionData({
+        abi: erc20Abi,
+        functionName: 'transfer',
+        args: [DEPOSIT_ADDRESS, amount]
+      })
+    },
+    quoteRequest: {
+      destinationToAddress: WALLET,
+      originTokenAmount: amount,
+      tradeType: 'EXACT_INPUT'
+    },
+    quote: {
+      fromAmount: amount,
+      toAmount: 4_000_000_000_000_000n,
+      toAmountMin: 3_990_000_000_000_000n,
+      fromAmountUsd: 10,
+      toAmountUsd: 9.95
+    },
+    fees: { totalFeeUsd: 0.05 },
+    expiresAt: new Date(START.getTime() + 10 * 60_000).toISOString(),
+    ...overrides
+  };
+}
+
+function setup(quoted = intent()) {
+  const fake = fakeEngine({ statuses: [{ status: 'executed', txnHash: `0x${'ab'.repeat(32)}` }] });
+  const trades = new Map<string, TradeRecord>();
+  const trailsCalls: string[] = [];
+  let receipt: { status: string } = { status: 'QUOTED' };
+  const trails = {
+    quoteIntent: async () => {
+      trailsCalls.push('quote');
+      return { intent: quoted };
+    },
+    getIntentReceipt: async () => {
+      trailsCalls.push('receipt');
+      return {
+        intentReceipt: {
+          ...receipt,
+          summary: { destinationTokenAmount: 4_000_000_000_000_000n },
+          destinationTransaction: { txnHash: '0xdest' }
+        }
+      };
+    },
+    executeIntent: async () => {
+      trailsCalls.push('execute');
+      receipt = { status: 'SUCCEEDED' };
+      return { intentStatus: 'EXECUTING' };
+    }
+  } as unknown as TrailsApi;
+  const deps: TradeDeps = {
+    ...fake.deps,
+    trails,
+    trades: {
+      trade: async (id) => trades.get(id) ?? null,
+      putTrade: async (t) => void trades.set(t.intentId, t),
+      trades: async () => [...trades.values()]
+    },
+    waitForReceipt: async () => 'success'
+  };
+  return { fake, deps, trades, trailsCalls };
+}
+
+const code = async (p: Promise<unknown>) => {
+  try {
+    await p;
+  } catch (error) {
+    if (error instanceof MoneyError) return error.code;
+    throw error;
+  }
+  throw new Error('expected a refusal');
+};
+
+describe('tokenUnits', () => {
+  it('reads decimal amounts and refuses too much precision', () => {
+    expect(tokenUnits('1.5', 6)).toBe(1_500_000n);
+    expect(() => tokenUnits('1.1234567', 6)).toThrow(MoneyError);
+    expect(() => tokenUnits('0', 6)).toThrow(MoneyError);
+    expect(() => tokenUnits('-1', 6)).toThrow(MoneyError);
+    expect(() => tokenUnits('1e6', 6)).toThrow(MoneyError);
+  });
+});
+
+describe('swaps', () => {
+  it('quotes without sending, then deposits exactly the quote and executes it', async () => {
+    const { fake, deps, trailsCalls } = setup();
+    const { trade } = await quoteSwap({ from: 'USDC', to: 'ETH', amount: '10' }, deps);
+    expect(trade).toMatchObject({ state: 'quoted', destination: { symbol: 'WETH' } });
+    expect(fake.calls.prepare).toBe(0);
+
+    const done = await executeSwap(deps, trade.intentId, { send: true });
+    expect(done.state).toBe('completed');
+    expect(describeTrade(done)).toMatchObject({
+      status: 'completed',
+      from: { amount: '10', token: 'USDC', chain: 'Polygon' },
+      to: { received: '0.004', token: 'WETH' },
+      txHash: '0xdest'
+    });
+    expect(fake.calls.prepare).toBe(1);
+    expect(fake.calls.prepared[0].data).toBe(intent().depositTransaction.data);
+    expect(trailsCalls).toContain('execute');
+  });
+
+  it('refuses a quote whose deposit goes anywhere but the intent address', async () => {
+    const other = intent();
+    other.depositTransaction = {
+      ...other.depositTransaction,
+      data: encodeFunctionData({
+        abi: erc20Abi,
+        functionName: 'transfer',
+        args: ['0x00000000000000000000000000000000000000ee', 10_000_000n]
+      })
+    };
+    const { deps } = setup(other);
+    expect(await code(quoteSwap({ from: 'USDC', to: 'ETH', amount: '10' }, deps))).toBe(
+      'upstream_invalid_quote'
+    );
+  });
+
+  it('refuses a quote that sends the output elsewhere', async () => {
+    const { deps } = setup(
+      intent({
+        quoteRequest: {
+          destinationToAddress: '0x00000000000000000000000000000000000000ee',
+          originTokenAmount: 10_000_000n
+        }
+      })
+    );
+    expect(await code(quoteSwap({ from: 'USDC', to: 'ETH', amount: '10' }, deps))).toBe(
+      'upstream_invalid_quote'
+    );
+  });
+
+  it('refuses a minimum output below the slippage asked for', async () => {
+    const { deps } = setup(
+      intent({
+        quote: { toAmount: 4_000_000_000_000_000n, toAmountMin: 3_000_000_000_000_000n }
+      })
+    );
+    expect(await code(quoteSwap({ from: 'USDC', to: 'ETH', amount: '10' }, deps))).toBe(
+      'upstream_invalid_quote'
+    );
+  });
+
+  it('only trades covered tokens', async () => {
+    const { deps } = setup();
+    expect(await code(quoteSwap({ from: 'USDC', to: 'PEPE', amount: '10' }, deps))).toBe(
+      'not_covered'
+    );
+  });
+
+  it("won't execute an expired quote", async () => {
+    const { fake, deps } = setup();
+    const { trade } = await quoteSwap({ from: 'USDC', to: 'ETH', amount: '10' }, deps);
+    fake.advance(6 * 60_000);
+    expect(await code(executeSwap(deps, trade.intentId, { send: true }))).toBe('quote_expired');
+    expect(fake.calls.prepare).toBe(0);
+  });
+
+  it('reopens the quote when the deposit was refused before anything was sent', async () => {
+    const { fake, deps, trades } = setup();
+    const { trade } = await quoteSwap({ from: 'USDC', to: 'ETH', amount: '10' }, deps);
+    fake.state.balance = 0n;
+    expect(await code(executeSwap(deps, trade.intentId, { send: true }))).toBe(
+      'insufficient_balance'
+    );
+    expect(trades.get(trade.intentId)?.state).toBe('quoted');
+  });
+
+  it('swap_status never sends', async () => {
+    const { fake, deps } = setup();
+    const { trade } = await quoteSwap({ from: 'USDC', to: 'ETH', amount: '10' }, deps);
+    const status = await executeSwap(deps, trade.intentId, { send: false });
+    expect(status.state).toBe('quoted');
+    expect(fake.calls.prepare).toBe(0);
+  });
+
+  it('says when a quote is unknown', async () => {
+    const { deps } = setup();
+    expect(await code(executeSwap(deps, 'nope', { send: true }))).toBe('quote_not_found');
+  });
+});
+
+describe('topping up a chain', () => {
+  it('does nothing when the wallet already holds enough there', async () => {
+    const { deps, trailsCalls } = setup();
+    expect(await ensureOn(deps, { chainId: 137, symbol: 'USDC', amount: 1_000_000n })).toBeNull();
+    expect(trailsCalls).toEqual([]);
+  });
+
+  it('only tops up stablecoins', async () => {
+    const { deps, fake } = setup();
+    fake.state.balance = 0n;
+    await expect(
+      ensureOn(deps, { chainId: 137, symbol: 'WETH', amount: 1n })
+    ).rejects.toMatchObject({ code: 'insufficient_balance' });
+  });
+
+  it('never starts a second bridge while one to the same place is on its way', async () => {
+    const { deps, fake, trades, trailsCalls } = setup();
+    const { trade } = await quoteSwap({ from: 'USDC', to: 'ETH', amount: '10' }, deps);
+    trades.set(trade.intentId, {
+      ...trade,
+      state: 'executing',
+      destination: { ...trade.destination, token: USDC, symbol: 'USDC', decimals: 6 }
+    });
+    trailsCalls.length = 0;
+    fake.state.balance = 0n;
+    await expect(
+      ensureOn(
+        { ...deps, sleep: async () => undefined },
+        { chainId: 137, symbol: 'USDC', amount: 5_000_000n, waitMs: 0 }
+      )
+    ).rejects.toMatchObject({ code: 'upstream_unavailable' });
+    expect(trailsCalls).not.toContain('quote');
+  });
+});
+
+describe('exact-output quotes', () => {
+  it('refuses a quote that delivers less than asked', async () => {
+    const { deps } = setup(
+      intent({
+        quoteRequest: {
+          destinationToAddress: WALLET,
+          destinationTokenAmount: 5_000_000n,
+          tradeType: 'EXACT_OUTPUT'
+        },
+        quote: { fromAmount: 10_000_000n, toAmount: 4_900_000n, toAmountMin: 4_900_000n }
+      })
+    );
+    await expect(
+      quoteSwap({ from: 'USDC', to: 'USDT', toAmount: '5', chain: 'polygon' }, deps)
+    ).rejects.toMatchObject({ code: 'upstream_invalid_quote' });
+  });
+
+  describe('a vault deposit (a destination call)', () => {
+    const VAULT = '0x00000000000000000000000000000000000000f1';
+    const call = { to: VAULT, data: '0x6e553f65aa' };
+    const callIntent = (request: Record<string, unknown>) =>
+      intent({
+        destinationTokenAddress: USDC,
+        quoteRequest: {
+          destinationToAddress: VAULT,
+          destinationCallData: call.data,
+          destinationTokenAmount: 5_000_000n,
+          tradeType: 'EXACT_OUTPUT',
+          ...request
+        },
+        quote: { fromAmount: 10_000_000n, toAmount: 5_000_000n, toAmountMin: 5_000_000n }
+      });
+    const ask = { from: 'USDC', to: 'USDC', toAmount: '5', chain: 'polygon', call };
+
+    it('quotes the same token on the same chain when it ends in the call', async () => {
+      const { deps } = setup(callIntent({}));
+      const { trade } = await quoteSwap(ask, deps);
+      expect(trade.request?.call).toEqual(call);
+    });
+
+    it('refuses a quote whose call differs from the one asked for', async () => {
+      const { deps } = setup(callIntent({ destinationCallData: '0x6e553f65bb' }));
+      expect(await code(quoteSwap(ask, deps))).toBe('upstream_invalid_quote');
+    });
+
+    it('refuses a quote that adds an approval of its own', async () => {
+      const { deps } = setup(
+        callIntent({ destinationApproveAddress: '0x00000000000000000000000000000000000000ee' })
+      );
+      expect(await code(quoteSwap(ask, deps))).toBe('upstream_invalid_quote');
+    });
+
+    it('refuses a call no one asked for', async () => {
+      // A swap to WETH whose quote would hand the output to a contract call.
+      const { deps } = setup(
+        intent({
+          quoteRequest: {
+            destinationToAddress: WALLET,
+            destinationApproveAddress: VAULT,
+            destinationCallData: call.data,
+            originTokenAmount: 10_000_000n
+          }
+        })
+      );
+      expect(await code(quoteSwap({ from: 'USDC', to: 'ETH', amount: '10' }, deps))).toBe(
+        'upstream_invalid_quote'
+      );
+    });
+  });
+});

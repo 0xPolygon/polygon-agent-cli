@@ -25,7 +25,7 @@ import {
   USDC_E
 } from './gamma.ts';
 import { findTradingKeyWallet, omsSigner, signInAgainCommand } from './oms-key.ts';
-import { loadSdk, mapSdkError } from './sdk.ts';
+import { environment, loadSdk, mapSdkError } from './sdk.ts';
 import { pusdBalanceOf, withdrawAll } from './withdraw.ts';
 
 export type AccountKind = 'deposit-wallet' | 'legacy-proxy';
@@ -99,6 +99,7 @@ async function createClient(p: {
   const { root, node } = await loadSdk();
   try {
     return await root.createSecureClient({
+      ...environment(root),
       signer: p.signer,
       ...(p.acct.kind === 'legacy-proxy' ? { wallet: p.acct.wallet } : {}),
       ...(p.builder ? { apiKey: node.builderApiKey(p.builder) } : {}),
@@ -181,7 +182,11 @@ export async function getTradingClient(wallet: string): Promise<SecureClient> {
 async function mintBuilderCreds(signer: unknown, address: string): Promise<Creds> {
   const { root, actions } = await loadSdk();
   try {
-    const eoaClient = await root.createSecureClient({ signer, wallet: address } as never);
+    const eoaClient = await root.createSecureClient({
+      ...environment(root),
+      signer,
+      wallet: address
+    } as never);
     return (await actions.createBuilderApiKey(eoaClient as never)) as Creds;
   } catch (err) {
     throw mapSdkError(err);
@@ -241,11 +246,7 @@ async function polygonReader() {
   const { getReadRpcUrl, resolveNetwork } = await import('../utils.ts');
   return createPublicClient({
     chain: polygon,
-    transport: http(
-      process.env.SEQUENCE_PROJECT_ACCESS_KEY
-        ? getReadRpcUrl(resolveNetwork(polygon.id))
-        : polygon.rpcUrls.default.http[0]
-    )
+    transport: http(getReadRpcUrl(resolveNetwork(polygon.id)))
   });
 }
 
