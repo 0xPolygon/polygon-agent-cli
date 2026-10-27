@@ -96,6 +96,12 @@
               "prompt": "Put $5 on Yes in the next Fed decision market on Polymarket",
               "tools_triggered": "polymarket_markets, polymarket_buy",
               "expected_behavior": "Nothing is bought. ChatGPT returns a link to approve it on agents.polygon.technology, naming the market, outcome and amount, or says Polymarket isn't available where the user is."
+            },
+            {
+              "description": "Several spends, one approval",
+              "prompt": "Move $10 to Polymarket and put $5 on Yes in the next Fed decision market",
+              "tools_triggered": "polymarket_markets, propose_bundle, get_action",
+              "expected_behavior": "Nothing moves. ChatGPT returns one approval link on agents.polygon.technology listing both steps in order, then waits for the answer. With an unfunded reviewer wallet, it says the wallet doesn't hold enough USDC instead."
             }
           ],
           "negative": [

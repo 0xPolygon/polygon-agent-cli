@@ -189,6 +189,8 @@ export type KeyRequest =
   | { op: 'revoke'; wallet: string }
   // A spend the owner approves first (money/actions.ts): saved, not run.
   | { op: 'propose'; wallet: string; appName: string; request: SpendRequest }
+  // Several spends the owner approves at once, run in order.
+  | { op: 'propose_bundle'; wallet: string; appName: string; steps: SpendRequest[] }
   // `waitMs`: answer once the action is decided and has run, or after that long.
   | { op: 'action'; wallet: string; id: string; waitMs?: number }
   | { op: 'decide'; wallet: string; id: string; approve: boolean };
@@ -202,6 +204,11 @@ export type WalletStoreRequest =
   | { op: 'wstore_put_new'; name: string; value: string }
   | { op: 'wstore_lease'; holder: string; until: number }
   | { op: 'wstore_release'; holder: string };
+
+// What an approval runs: one spend, or several in order.
+type ApprovedRequest = SpendRequest | { op: 'bundle'; steps: SpendRequest[]; titles: string[] };
+
+export const MAX_BUNDLE_STEPS = 5;
 
 // The longest an agent's get_action waits for the owner.
 const MAX_WAIT_MS = 45_000;
@@ -299,13 +306,36 @@ export class AgentKey {
   private async runQueued(): Promise<void> {
     const record = await this.storage.get<KeyRecord>('record');
     if (!record) return;
-    await runQueuedActions<SpendRequest>(this.storage, (request) =>
-      this.dispatch({
-        ...request,
-        ...(request.op === 'swap' ? { approved: true } : {}),
-        wallet: record.wallet
-      } as KeyRequest)
+    await runQueuedActions<ApprovedRequest>(this.storage, (request) =>
+      this.runApproved(record, request)
     );
+  }
+
+  // Runs as if the agent had asked, within the allowance like any spend. A
+  // bundle runs its steps in order and stops at the first that fails.
+  private async runApproved(record: KeyRecord, request: ApprovedRequest): Promise<unknown> {
+    const one = (step: SpendRequest) =>
+      this.dispatch({
+        ...step,
+        ...(step.op === 'swap' ? { approved: true } : {}),
+        wallet: record.wallet
+      } as KeyRequest);
+    if (request.op !== 'bundle') return one(request);
+    const steps: { step: string; result: unknown }[] = [];
+    for (const [i, step] of request.steps.entries()) {
+      try {
+        steps.push({ step: request.titles[i], result: await one(step) });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new MoneyError({
+          code: error instanceof MoneyError ? error.code : 'upstream_error',
+          message: `Step ${i + 1} of ${request.steps.length} (${request.titles[i]}) didn't go through: ${reason}${steps.length ? ' The steps before it did.' : ''} The rest weren't run.`,
+          ...(error instanceof MoneyError && error.hint ? { hint: error.hint } : {}),
+          details: { completed: steps }
+        });
+      }
+    }
+    return { steps };
   }
 
   // Runs what was just approved in the background: an alarm in production (it
@@ -460,6 +490,8 @@ export class AgentKey {
         return this.revoke(record);
       case 'propose':
         return this.propose(record, req.appName, req.request);
+      case 'propose_bundle':
+        return this.proposeBundle(record, req.appName, req.steps);
       case 'action':
         return req.waitMs
           ? this.watchAction(req.id, req.waitMs)
@@ -484,6 +516,53 @@ export class AgentKey {
   // Checks what can be checked now (so the owner isn't asked to approve
   // something that would fail), then saves it for the owner.
   private async propose(record: KeyRecord, appName: string, request: SpendRequest) {
+    const { title, details } = await this.describeSpend(record, request);
+    const action = await proposeAction({
+      storage: this.storage,
+      request,
+      title,
+      details,
+      appName,
+      now: this.now()
+    });
+    return viewAction(action);
+  }
+
+  private async proposeBundle(record: KeyRecord, appName: string, steps: SpendRequest[]) {
+    if (steps.length < 2 || steps.length > MAX_BUNDLE_STEPS) {
+      throw new MoneyError({
+        code: 'invalid_input',
+        message: `A bundle has 2 to ${MAX_BUNDLE_STEPS} steps.`,
+        hint: 'Use the spending tool itself for a single spend.'
+      });
+    }
+    const described = [];
+    for (const [i, step] of steps.entries()) {
+      // Cash a deposit earlier in the bundle brings in isn't there yet.
+      const funded = step.op === 'pm_buy' && steps.slice(0, i).some((s) => s.op === 'pm_deposit');
+      described.push(await this.describeSpend(record, step, { skipCashCheck: funded }));
+    }
+    const titles = described.map((d) => d.title);
+    const action = await proposeAction<ApprovedRequest>({
+      storage: this.storage,
+      request: { op: 'bundle', steps, titles },
+      title: titles.join(', then '),
+      details: described.flatMap((d, i) => [
+        { label: `Step ${i + 1}`, value: d.title },
+        ...d.details.map((x) => ({ label: `${i + 1}. ${x.label}`, value: x.value }))
+      ]),
+      appName,
+      now: this.now()
+    });
+    return viewAction(action);
+  }
+
+  // A spend in the owner's words, after the checks that can be made now.
+  private async describeSpend(
+    record: KeyRecord,
+    request: SpendRequest,
+    opts: { skipCashCheck?: boolean } = {}
+  ): Promise<{ title: string; details: { label: string; value: string }[] }> {
     let title: string;
     let details: { label: string; value: string }[];
     if (request.op === 'send') {
@@ -503,9 +582,11 @@ export class AgentKey {
       ];
     } else if (request.op === 'pm_buy') {
       const { ownerRegion, usd } = request;
-      await this.withPmLease(record, async () =>
-        pmCheckBuy({ usd }, await this.pmDeps(record, ownerRegion))
-      );
+      if (!opts.skipCashCheck) {
+        await this.withPmLease(record, async () =>
+          pmCheckBuy({ usd }, await this.pmDeps(record, ownerRegion))
+        );
+      }
       title = `Predict "${request.outcome}" with $${request.usd} on Polymarket`;
       details = [
         { label: 'Market', value: request.market },
@@ -560,15 +641,7 @@ export class AgentKey {
         { label: 'Fees', value: `$${view.usd.fees.toFixed(2)}` }
       ];
     }
-    const action = await proposeAction({
-      storage: this.storage,
-      request,
-      title,
-      details,
-      appName,
-      now: this.now()
-    });
-    return viewAction(action);
+    return { title, details };
   }
 
   // --- Polymarket -----------------------------------------------------------------
