@@ -239,7 +239,7 @@ const TOOLS = [
     name: 'polymarket_account',
     title: 'Polymarket account',
     description:
-      "The wallet's Polymarket account: cash to bet with (pUSD), positions and their value, open orders, winnings to redeem, a deposit still bridging, and whether Polymarket is available where the owner is.",
+      "The wallet's Polymarket account: cash for predictions (pUSD), positions and their value, open orders, winnings to redeem, a deposit still bridging, and whether Polymarket is available where the owner is.",
     inputSchema: { type: 'object', properties: {} },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true }
   },
@@ -257,7 +257,7 @@ const TOOLS = [
   },
   {
     name: 'polymarket_buy',
-    title: 'Bet on Polymarket',
+    title: 'Make a Polymarket prediction',
     description:
       "Buys shares of an outcome with the Polymarket account's cash. Only on the user's explicit instruction, after telling them the odds. A market order fills now at up to max_price (or fails); limit_price places a resting order instead.",
     inputSchema: {
