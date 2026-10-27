@@ -80,6 +80,14 @@ jobs:
           # The dashboard's Trails key: prices, swaps and bridges for MCP connections.
           TRAILS_API_KEY: ${{ secrets.VITE_TRAILS_API_KEY }}
 
+      # A KV namespace the worker had before (saved details) keeps its data:
+      # wrangler would otherwise try to create it again, and fail.
+      - name: Reuse existing KV namespaces
+        run: node scripts/pin-kv-ids.mjs staging
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_WORKER_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_WORKER_ACCOUNT_ID }}
+
       - name: Deploy to staging
         run: npx -y wrangler@4 deploy --env staging --secrets-file "$RUNNER_TEMP/worker-secrets.json"
         env:
@@ -129,6 +137,14 @@ jobs:
           CREDENTIALS_KEY: ${{ secrets.CREDENTIALS_KEY }}
           INDEXER_ACCESS_KEY: ${{ secrets.VITE_INDEXER_ACCESS_KEY }}
           TRAILS_API_KEY: ${{ secrets.VITE_TRAILS_API_KEY }}
+
+      # A KV namespace the worker had before (saved details) keeps its data:
+      # wrangler would otherwise try to create it again, and fail.
+      - name: Reuse existing KV namespaces
+        run: node scripts/pin-kv-ids.mjs production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_WORKER_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_WORKER_ACCOUNT_ID }}
 
       - name: Deploy to production
         run: npx -y wrangler@4 deploy --env production --secrets-file "$RUNNER_TEMP/worker-secrets.json"
