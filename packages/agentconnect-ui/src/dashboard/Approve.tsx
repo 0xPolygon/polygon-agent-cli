@@ -146,8 +146,8 @@ interface Action {
 }
 
 const DONE: Record<Exclude<Action['status'], 'pending' | 'running'>, string> = {
-  done: 'Approved. Your agent can carry on.',
-  failed: "Approved, but it didn't go through.",
+  done: 'Done.',
+  failed: "Approved, but it didn't go through. Your agent has been told.",
   declined: 'Declined. Nothing was spent.',
   expired: 'This request expired. Nothing was spent.'
 };
@@ -155,7 +155,8 @@ const DONE: Record<Exclude<Action['status'], 'pending' | 'running'>, string> = {
 /**
  * An agent's request to spend, from an app that has the owner approve each one
  * (ChatGPT). The owner, signed in on this site, sees what it does and approves
- * or declines it. Approving runs it here.
+ * or declines it. Approving answers at once: it runs in the background, and the
+ * agent, waiting on it, carries on with the result. The page follows along.
  */
 export function Approve({ finishing = false }: { finishing?: boolean }) {
   const [returning] = useState(() => {
@@ -209,6 +210,13 @@ export function Approve({ finishing = false }: { finishing?: boolean }) {
     })();
     // Runs once, on load.
   }, []);
+
+  // Follows a running action to its result.
+  useEffect(() => {
+    if (action?.status !== 'running') return;
+    const timer = setTimeout(() => void load().catch(() => {}), 2000);
+    return () => clearTimeout(timer);
+  }, [action]);
 
   const signedInHere = async (id: string) => {
     setC(id);
@@ -309,7 +317,12 @@ export function Approve({ finishing = false }: { finishing?: boolean }) {
                   </button>
                 </div>
               ) : action.status === 'running' ? (
-                <span className="text-base text-[var(--slate-600)]">Working on it…</span>
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-base font-medium">Approved. Sending it now…</span>
+                  <span className="text-sm text-[var(--slate-500)]">
+                    You can go back to {action.appName}: it carries on by itself.
+                  </span>
+                </div>
               ) : (
                 <div className="flex flex-col gap-1.5">
                   <span className="text-base font-medium">{DONE[action.status]}</span>

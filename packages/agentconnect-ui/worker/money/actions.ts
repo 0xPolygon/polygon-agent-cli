@@ -11,6 +11,8 @@ import { MoneyError } from './errors.ts';
 
 // How long the owner has to decide.
 export const ACTION_TTL_MS = 15 * 60 * 1000;
+// An approved spend that hasn't reported back by then has lost its result.
+export const RUN_TTL_MS = 30 * 60 * 1000;
 
 export type ActionStatus = 'pending' | 'running' | 'done' | 'failed' | 'declined' | 'expired';
 
@@ -30,6 +32,8 @@ export interface PendingAction<R = unknown> {
   // wallet's other chains, within the allowance, once approved.
   fund?: { chainId: number; symbol: string; amount: string };
   status: ActionStatus;
+  // Approved and waiting to run in the background (the owner isn't kept waiting).
+  queued?: boolean;
   createdAt: string;
   expiresAt: string;
   decidedAt?: string;
@@ -84,12 +88,31 @@ export async function loadAction<R>(
     await storage.put(key(id), expired);
     return expired;
   }
+  if (
+    action.status === 'running' &&
+    action.decidedAt &&
+    Date.parse(action.decidedAt) + RUN_TTL_MS <= now.getTime()
+  ) {
+    const lost: PendingAction<R> = {
+      ...action,
+      status: 'failed',
+      queued: false,
+      error: {
+        error:
+          'No result came back in time. Check the wallet before trying again: it may have gone through.',
+        code: 'upstream_error'
+      }
+    };
+    await storage.put(key(id), lost);
+    return lost;
+  }
   return action;
 }
 
 /**
  * The owner's answer. Approving runs the request once: a decided action is
- * never run again, whatever comes back.
+ * never run again, whatever comes back. With `defer`, approving only queues it
+ * (runQueuedActions runs it), so the owner gets an answer at once.
  */
 export async function decideAction<R>(params: {
   storage: KeyStorage;
@@ -97,6 +120,7 @@ export async function decideAction<R>(params: {
   approve: boolean;
   run: (request: R) => Promise<unknown>;
   now: () => Date;
+  defer?: boolean;
 }): Promise<PendingAction<R>> {
   const action = await loadAction<R>(params.storage, params.id, params.now());
   if (action.status !== 'pending') {
@@ -120,17 +144,43 @@ export async function decideAction<R>(params: {
     await params.storage.put(key(action.id), declined);
     return declined;
   }
+  if (params.defer) {
+    const queued = { ...action, status: 'running' as const, decidedAt, queued: true };
+    await params.storage.put(key(action.id), queued);
+    return queued;
+  }
+  return runAction(params.storage, { ...action, decidedAt }, params.run);
+}
+
+/** Runs the approved actions waiting in the queue, one after another. */
+export async function runQueuedActions<R>(
+  storage: KeyStorage,
+  run: (request: R) => Promise<unknown>
+): Promise<void> {
+  const actions = await storage.list<PendingAction<R>>({ prefix: 'action:' });
+  for (const action of actions.values()) {
+    if (action.status === 'running' && action.queued) await runAction(storage, action, run);
+  }
+}
+
+async function runAction<R>(
+  storage: KeyStorage,
+  action: PendingAction<R>,
+  run: (request: R) => Promise<unknown>
+): Promise<PendingAction<R>> {
+  const decidedAt = action.decidedAt;
   // Marked before running, so nothing can run it a second time.
-  await params.storage.put(key(action.id), { ...action, status: 'running', decidedAt });
+  await storage.put(key(action.id), { ...action, status: 'running', queued: false });
   try {
-    const result = await params.run(action.request);
-    const done = { ...action, status: 'done' as const, decidedAt, result };
-    await params.storage.put(key(action.id), done);
+    const result = await run(action.request);
+    const done = { ...action, status: 'done' as const, queued: false, decidedAt, result };
+    await storage.put(key(action.id), done);
     return done;
   } catch (error) {
     const failed = {
       ...action,
       status: 'failed' as const,
+      queued: false,
       decidedAt,
       error:
         error instanceof MoneyError
@@ -140,7 +190,7 @@ export async function decideAction<R>(params: {
               code: 'upstream_error' as const
             }
     };
-    await params.storage.put(key(action.id), failed);
+    await storage.put(key(action.id), failed);
     return failed;
   }
 }

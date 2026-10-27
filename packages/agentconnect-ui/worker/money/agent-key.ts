@@ -37,6 +37,7 @@ import {
   endOwnerAction,
   loadAction,
   proposeAction,
+  runQueuedActions,
   viewAction
 } from './actions.ts';
 import { depositCall, listVaults, openVaults, positions, withdrawTxs } from './earn.ts';
@@ -188,7 +189,8 @@ export type KeyRequest =
   | { op: 'revoke'; wallet: string }
   // A spend the owner approves first (money/actions.ts): saved, not run.
   | { op: 'propose'; wallet: string; appName: string; request: SpendRequest }
-  | { op: 'action'; wallet: string; id: string }
+  // `waitMs`: answer once the action is decided and has run, or after that long.
+  | { op: 'action'; wallet: string; id: string; waitMs?: number }
   | { op: 'decide'; wallet: string; id: string; approve: boolean };
 
 // What the wallet's own object answers (it has no key): sealed values by name.
@@ -200,6 +202,9 @@ export type WalletStoreRequest =
   | { op: 'wstore_put_new'; name: string; value: string }
   | { op: 'wstore_lease'; holder: string; until: number }
   | { op: 'wstore_release'; holder: string };
+
+// The longest an agent's get_action waits for the owner.
+const MAX_WAIT_MS = 45_000;
 
 // Long enough for a Polymarket deposit's wait for the bridge.
 const PM_LEASE_MS = 5 * 60 * 1000;
@@ -266,19 +271,72 @@ export class AgentKey {
   walletStore?: (wallet: string) => (req: WalletStoreRequest) => Promise<KeyResponse>;
 
   constructor(
-    state: { storage: KeyStorage },
+    state: { storage: KeyStorage & { setAlarm?: (at: number) => Promise<void> } },
     private readonly env: AgentKeyEnv
   ) {
     this.storage = state.storage;
+    this.setAlarm = state.storage.setAlarm?.bind(state.storage);
+  }
+
+  private readonly setAlarm?: (at: number) => Promise<void>;
+
+  // Approved spends run here, after the owner has had their answer.
+  async alarm(): Promise<void> {
+    await this.enqueue(() => this.runQueued());
+  }
+
+  /** Settles once everything queued has run (tests). */
+  idle(): Promise<unknown> {
+    return this.queue;
+  }
+
+  private enqueue<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(fn);
+    this.queue = run.catch(() => undefined);
+    return run;
+  }
+
+  private async runQueued(): Promise<void> {
+    const record = await this.storage.get<KeyRecord>('record');
+    if (!record) return;
+    await runQueuedActions<SpendRequest>(this.storage, (request) =>
+      this.dispatch({
+        ...request,
+        ...(request.op === 'swap' ? { approved: true } : {}),
+        wallet: record.wallet
+      } as KeyRequest)
+    );
+  }
+
+  // Runs what was just approved in the background: an alarm in production (it
+  // outlives the request), the queue otherwise.
+  private async schedule(): Promise<void> {
+    if (this.setAlarm) await this.setAlarm(Date.now());
+    else void this.enqueue(() => this.runQueued());
+  }
+
+  // Waits (up to waitMs) for an action to be decided and to finish running.
+  private async watchAction(id: string, waitMs: number) {
+    const until = this.now().getTime() + Math.min(waitMs, MAX_WAIT_MS);
+    for (;;) {
+      const action = await loadAction(this.storage, id, this.now());
+      if (
+        (action.status !== 'pending' && action.status !== 'running') ||
+        this.now().getTime() >= until
+      ) {
+        return viewAction(action);
+      }
+      await this.sleep(1000);
+    }
   }
 
   async fetch(request: Request): Promise<Response> {
     if (request.method !== 'POST') return new Response(null, { status: 405 });
     const body = (await request.json()) as KeyRequest | WalletStoreRequest;
+    // Reading an action needs no turn: it may wait while one runs.
+    if (body.op === 'action') return Response.json(await this.handle(body));
     // One request at a time, start to finish.
-    const run = this.queue.then(() => this.handle(body));
-    this.queue = run.catch(() => undefined);
-    return Response.json(await run);
+    return Response.json(await this.enqueue(() => this.handle(body)));
   }
 
   private async handle(req: KeyRequest | WalletStoreRequest): Promise<KeyResponse> {
@@ -403,23 +461,23 @@ export class AgentKey {
       case 'propose':
         return this.propose(record, req.appName, req.request);
       case 'action':
-        return viewAction(await loadAction(this.storage, req.id, this.now()));
-      case 'decide':
-        return viewAction(
-          await decideAction<SpendRequest>({
-            storage: this.storage,
-            id: req.id,
-            approve: req.approve,
-            // Runs as if the agent had asked, within the allowance like any spend.
-            run: (request) =>
-              this.dispatch({
-                ...request,
-                ...(request.op === 'swap' ? { approved: true } : {}),
-                wallet: record.wallet
-              } as KeyRequest),
-            now: this.now
-          })
-        );
+        return req.waitMs
+          ? this.watchAction(req.id, req.waitMs)
+          : viewAction(await loadAction(this.storage, req.id, this.now()));
+      case 'decide': {
+        // Approving queues it and answers at once; it runs in the background,
+        // as if the agent had asked, within the allowance like any spend.
+        const action = await decideAction<SpendRequest>({
+          storage: this.storage,
+          id: req.id,
+          approve: req.approve,
+          run: async () => undefined,
+          now: this.now,
+          defer: true
+        });
+        if (action.queued) await this.schedule();
+        return viewAction(action);
+      }
     }
   }
 
