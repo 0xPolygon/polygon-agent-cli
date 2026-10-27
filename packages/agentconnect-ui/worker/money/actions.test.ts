@@ -8,7 +8,9 @@ import {
   decideAction,
   endOwnerAction,
   loadAction,
-  proposeAction
+  proposeAction,
+  RUN_TTL_MS,
+  runQueuedActions
 } from './actions.ts';
 import { MoneyError } from './errors.ts';
 import { START } from './test-fakes.ts';
@@ -18,7 +20,8 @@ function memory(): KeyStorage {
   return {
     get: async <T>(k: string) => data.get(k) as T | undefined,
     put: async (k, v) => void data.set(k, structuredClone(v)),
-    list: async <T>() => new Map() as Map<string, T>,
+    list: async <T>({ prefix }: { prefix: string }) =>
+      new Map([...data].filter(([k]) => k.startsWith(prefix))) as Map<string, T>,
     deleteAll: async () => data.clear()
   };
 }
@@ -34,6 +37,51 @@ const propose = (storage: KeyStorage) =>
   });
 
 describe('actions the owner approves', () => {
+  it('answers an approval at once and runs it in the background, once', async () => {
+    const storage = memory();
+    const action = await propose(storage);
+    let runs = 0;
+    const run = async () => {
+      runs++;
+      return { txHash: '0xabc' };
+    };
+    const decided = await decideAction({
+      storage,
+      id: action.id,
+      approve: true,
+      run,
+      now: () => START,
+      defer: true
+    });
+    expect(decided).toMatchObject({ status: 'running', queued: true });
+    expect(runs).toBe(0);
+    await runQueuedActions(storage, run);
+    await runQueuedActions(storage, run);
+    expect(runs).toBe(1);
+    expect(await loadAction(storage, action.id, START)).toMatchObject({
+      status: 'done',
+      result: { txHash: '0xabc' }
+    });
+  });
+
+  it('reports a background run that never came back as failed', async () => {
+    const storage = memory();
+    const action = await propose(storage);
+    await decideAction({
+      storage,
+      id: action.id,
+      approve: true,
+      run: async () => undefined,
+      now: () => START,
+      defer: true
+    });
+    const later = new Date(START.getTime() + RUN_TTL_MS);
+    expect(await loadAction(storage, action.id, later)).toMatchObject({
+      status: 'failed',
+      error: { code: 'upstream_error' }
+    });
+  });
+
   it('runs an approved request exactly once', async () => {
     const storage = memory();
     const action = await propose(storage);

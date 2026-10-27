@@ -6,7 +6,7 @@
 // (`openai`) gets the same tools, but its apps may not move money themselves:
 // each spend, Polymarket included, waits for the owner to approve it on this
 // site (money/actions.ts).
-// Muse takes no money movement at all. ChatGPT is recognised by its redirect
+// Muse spends within the allowance like a standard client. ChatGPT is recognised by its redirect
 // URI (it registers a new client per install); others are mapped by client id
 // in MCP_CLIENT_PROFILES.
 
@@ -44,14 +44,17 @@ const MONEY = [
   'get_action'
 ] as const;
 
+// Only where the owner approves each spend: several approved at once.
+const BUNDLE = ['propose_bundle'] as const;
+
 export const PROFILES: Record<Profile, ProfilePolicy> = {
   standard: { tools: [...READ, ...MONEY], movesMoney: true, ownerApproves: false },
   openai: {
-    tools: [...READ, ...MONEY],
+    tools: [...READ, ...MONEY, ...BUNDLE],
     movesMoney: true,
     ownerApproves: true
   },
-  muse: { tools: [...READ], movesMoney: false, ownerApproves: false }
+  muse: { tools: [...READ, ...MONEY], movesMoney: true, ownerApproves: false }
 };
 
 const isProfile = (v: unknown): v is Profile => typeof v === 'string' && Object.hasOwn(PROFILES, v);

@@ -42,14 +42,10 @@ describe('client profiles', () => {
     expect(policyOf('nope')).toBe(PROFILES.standard);
   });
 
-  it('has the owner approve each ChatGPT spend, and keeps Muse to reading the wallet', () => {
+  it('has the owner approve each ChatGPT spend, with bundles, and lets Muse spend like a standard client', () => {
     expect(PROFILES.openai).toMatchObject({ movesMoney: true, ownerApproves: true });
-    expect(PROFILES.openai.tools).toEqual(PROFILES.standard.tools);
-    expect(PROFILES.muse).toEqual({
-      tools: ['get_wallet'],
-      movesMoney: false,
-      ownerApproves: false
-    });
+    expect(PROFILES.openai.tools).toEqual([...PROFILES.standard.tools, 'propose_bundle']);
+    expect(PROFILES.muse).toEqual({ ...PROFILES.standard });
   });
 
   it('gives standard clients every tool and an allowance', () => {

@@ -310,6 +310,33 @@ export interface QuoteParams {
  * the wallet holds the token, like Trails does: the destination chain first,
  * then the biggest holding.
  */
+/**
+ * Whether the wallet holds `amount` of a stablecoin on the chains this
+ * connection can spend on, together (a trade can bridge it to where it's
+ * needed). Checked before the owner is asked to approve a spend.
+ */
+export async function requireHeld(
+  params: { symbol: string; amount: string },
+  deps: EngineDeps
+): Promise<void> {
+  const sessions = await getSessions({ deps });
+  let held = 0;
+  for (const chainId of new Set(sessions.filter((x) => !x.expired).map((x) => x.chainId))) {
+    const token = resolveSupportedSymbol({ chainId, symbol: params.symbol });
+    if (!token) continue;
+    held += Number(
+      formatUnits(await deps.balanceOf({ chainId, token: token.address }), token.decimals)
+    );
+  }
+  if (held < Number(params.amount)) {
+    throw new MoneyError({
+      code: 'insufficient_balance',
+      message: `The wallet holds ${held.toFixed(2)} ${params.symbol.toUpperCase()} on the chains this connection can spend on, less than ${params.amount}.`,
+      details: { held: held.toFixed(6), needed: params.amount }
+    });
+  }
+}
+
 export async function quoteSwap(
   params: QuoteParams,
   deps: TradeDeps

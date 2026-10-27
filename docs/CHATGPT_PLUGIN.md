@@ -69,6 +69,7 @@ with the reviewer's empty wallet does. Version 1.2.0 has these:
 | Polymarket markets | What are the odds on the next Fed decision on Polymarket? | Markets and prices, or that Polymarket isn't available there |
 | Polymarket account | What's in my Polymarket account? | Balance and positions, or that there's no account yet |
 | Polymarket prediction | Put $5 on Yes in the next Fed decision market | An approval link naming the market, outcome and amount |
+| Several spends | Move $10 to Polymarket and put $5 on Yes in the next Fed decision market | One approval link listing both steps |
 
 Negative test cases:
 
