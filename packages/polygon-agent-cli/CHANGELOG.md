@@ -1,5 +1,26 @@
 # Change Log
 
+## 0.17.1
+
+### Patch Changes
+
+- bf5b39f: The MCP server covers the rest of the agent wallet: paid web services (`pay_service`, x402), earn vaults (`earn_vaults`, `earn_deposit`, `earn_withdraw`) and Polymarket (markets, account, deposit, buy, sell, cancel, redeem, withdraw). Earn deposits are paid from the allowance through Trails; withdrawals run from the owner's wallet, so the owner approves them after signing in. Every connection to a wallet shares one Polymarket account. ChatGPT gets the same tools except funding Polymarket and betting, and every spend from ChatGPT waits for the owner's approval on the site (`/approve`, `get_action`). Polymarket follows its region rules for where the owner is.
+- e81bb48: The MCP server can move money. Connecting an agent now asks the owner for a spending limit (US dollars over up to 30 days), and the agent gets its own key for it, approved by the owner on each chain the way a CLI install's is. New tools: `get_allowance`, `send`, `swap_quote`, `swap` (swaps and bridges) and `swap_status`. ChatGPT connections are recognised by their redirect and stay read-only, as do Muse's. Disconnecting an agent revokes its key. The skill tells assistants that can't run commands what the MCP server can do.
+- 2551ac0: Connecting an MCP client works on both sites the worker serves: each request checks its own site's `/mcp` as the OAuth resource, so ChatGPT's sign-in no longer fails depending on which site was served first. A bad authorization request now goes back to the client as an OAuth error instead of failing. The skill points assistants that can't run commands to the MCP server.
+- 6d11d23: Polymarket, x402, trade and earn reads use Sequence's node gateway with the project's access key instead of public RPCs that rate-limit.
+
+## 0.17.0
+
+### Minor Changes
+
+- e76475d: `agent deposit --vault <address>` deposits into a specific ERC-4626 vault, such as the Prime, Frontier, and Advanced vaults on Katana that the dashboard offers. The vault must take the `--asset` token; its rate and size come from the Trails Yield API. Katana is now supported for deposits.
+- 0ae28a3: AgentPay is now Open Money Agent. The skill is `skills/open-money-agent/` and the plugin is `open-money-agent` in Claude Code, Codex and Cursor (existing `agentpay` plugin installs need a reinstall under the new name). `workspace init` and `update` install `open-money-agent` and remove the `agentpay` folder they wrote before; `skills show agentpay` still works. The site keeps serving `/agentpay/SKILL.md` and `/agentpay/references/`.
+
+### Patch Changes
+
+- c901f73: The CLI's dashboard links can point at a different site from its login page with `POLYGON_AGENT_CREDENTIALS_URL`.
+- 65768ca: Dashboard links now carry the Polymarket deposit account as `pm`, so the dashboard's Markets tab shows that account's positions.
+
 ## 0.16.0
 
 ### Minor Changes

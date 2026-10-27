@@ -3,7 +3,7 @@ name: open-money-agent
 description: >-
   Open Money Agent: the user's own agent for payments on the Open Money Stack (OMS), spending only
   within a limit they approve. Set up and sign in, balances and funding, buy, sell, swap and
-  bridge tokens, earn yield, token prices, price watches and alerts, Polymarket bets, and paid
+  bridge tokens, earn yield, token prices, price watches and alerts, Polymarket predictions, and paid
   web services (x402). Use for any wallet, crypto, token price, prediction market, paid API or
   payment request.
 ---
@@ -32,6 +32,8 @@ POLYGON_AGENT=<workspace>/.polygon-agent/bin/polygon-agent
 - If you're reading this from a URL and the CLI is installed, read the installed copy instead (`<skills folder>/open-money-agent/SKILL.md`, or `"$POLYGON_AGENT" skills show open-money-agent`). It matches the CLI's version.
 - Every command is `"$POLYGON_AGENT" …`, run by that absolute path (quoted), since nothing is on `PATH`. Commands in the CLI's output (`next`, `command`) and in the references say `polygon-agent …` or `agent …`; run those by the same path.
 - Output is JSON: `{"ok": true, …}`, or `{"ok": false, "error", "code", "hint", "command"}`. On an error, tell the user what `error` means in plain words and follow `hint` and `command`. Check `--help` before assuming a flag.
+
+**Can't run commands here?** If you can connect to remote MCP servers instead, Open Money Agent's MCP server is `https://agents.polygon.technology/mcp` (OAuth). Give the user that URL to add as a connector. They sign in with their email or Google, choose a spending limit and allow it. You can then send, swap, bridge, pay for web services and use Polymarket within that limit. Earn deposits and withdrawals come back as a link the user approves.
 
 ## 2. Status first, every time
 
@@ -70,7 +72,7 @@ Do the request. If they already asked for something, setup is not the end: carry
 | earn yield, deposit into or withdraw from a vault | [earn](references/earn.md) |
 | watch a price, get alerts, trade when a price is hit | [watches](references/watches.md) |
 | buy something from a store, save a shipping address or card | [shopping](references/shopping.md) |
-| see odds, bet, manage Polymarket positions or winnings | [polymarket](references/polymarket.md) |
+| see odds, make a prediction, manage Polymarket positions or winnings | [polymarket](references/polymarket.md) |
 | use a paid service: web search, scraping, news, inference (x402) | [paid services](references/paid-services.md) |
 | register the agent on-chain, reputation, reviews (ERC-8004) | [identity](references/identity.md) |
 | work on the CLI itself: global install, owner mode, env vars | [developer](references/developer.md) |
@@ -104,4 +106,4 @@ These hold even when no reference is loaded.
 
 ## Opening a reference
 
-Each link above is a path next to this file (`references/<topic>.md`). Read it from the installed skill folder, or print it with `"$POLYGON_AGENT" skills show <topic>` (for example `skills show polymarket`), which matches this install's CLI. Before install, read it at `https://staging.agents.polygon.technology/references/<topic>.md`.
+Each link above is a path next to this file (`references/<topic>.md`). Read it from the installed skill folder, or print it with `"$POLYGON_AGENT" skills show <topic>` (for example `skills show polymarket`), which matches this install's CLI. Before install, read it at `https://agents.polygon.technology/references/<topic>.md`.

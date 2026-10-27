@@ -1,4 +1,4 @@
-import { Ban, Eye, MapPin, ShoppingBag } from 'lucide-react';
+import { ArrowLeftRight, Ban, Eye, MapPin, Send, ShoppingBag } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { LogoBadge } from '../App.js';
@@ -29,21 +29,32 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 const inputClass =
   'h-12 border border-[var(--slate-300)] rounded-xl px-3.5 text-base bg-white outline-none focus:border-[var(--purple-500)]';
 
+interface Spending {
+  defaultUsd: number;
+  defaultDays: number;
+  minUsd: number;
+  maxUsd: number;
+  maxDays: number;
+}
+
 interface Consent {
   email: string | null;
   autoPayLimitCents: number | null;
+  // This agent can buy with the saved address and cards.
+  shops: boolean;
   // This agent asks the user to approve every purchase before paying.
   confirmsEachPurchase: boolean;
   // The agent runs on this machine; once allowed, the dashboard opens in front.
   localAgent: boolean;
+  // Set when the agent may move money: the allowance the owner approves.
+  spending?: Spending;
 }
 
 const dollars = (cents: number) => `$${(cents / 100).toFixed(cents % 100 ? 2 : 0)}`;
 
-// What the agent gets, in the owner's words. Moving money stays with the CLI.
-function permissions(limitCents: number | null, confirmsEachPurchase: boolean) {
+// Buying with the owner's saved address and cards, in the owner's words.
+function shopping(limitCents: number | null, confirmsEachPurchase: boolean) {
   return [
-    { icon: Eye, text: 'See your balance and what you hold' },
     { icon: MapPin, text: 'Use your saved address and cards at checkout' },
     {
       icon: ShoppingBag,
@@ -56,10 +67,22 @@ function permissions(limitCents: number | null, confirmsEachPurchase: boolean) {
           : limitCents === 0
             ? 'Buy for you. Every purchase waits for your approval'
             : `Buy for you up to ${dollars(limitCents)} on its own. Anything more waits for your approval`
-    },
-    { icon: Ban, text: "It can't send or withdraw your money" }
+    }
   ];
 }
+
+const usd = (n: number) => `$${n.toLocaleString('en-US')}`;
+
+function spendingPermissions(allowanceUsd: number, days: number) {
+  const period = days === 1 ? 'a day' : `${days} days`;
+  return [
+    { icon: Send, text: `Send and pay up to ${usd(allowanceUsd)} over ${period}` },
+    { icon: ArrowLeftRight, text: 'Swap and bridge tokens within that limit' }
+  ];
+}
+
+const AMOUNTS = [100, 500, 1000, 5000];
+const PERIODS = [7, 30];
 
 /**
  * An agent (an MCP client) asked for access to the agent wallet. The owner
@@ -83,6 +106,10 @@ export function Connect({ finishing = false }: { finishing?: boolean }) {
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(finishing);
   const [error, setError] = useState<string | null>(null);
+  // Before sign-in: whether the agent will ask for an allowance.
+  const [asksToSpend, setAsksToSpend] = useState(false);
+  const [allowanceUsd, setAllowanceUsd] = useState(1000);
+  const [days, setDays] = useState(30);
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -117,19 +144,23 @@ export function Connect({ finishing = false }: { finishing?: boolean }) {
     }
     void fetch(`/api/connect?c=${encodeURIComponent(id)}`)
       .then(async (r) => {
-        const d = (await r.json()) as Partial<Consent> & {
+        const d = (await r.json()) as Omit<Partial<Consent>, 'spending'> & {
           clientName?: string;
           signedIn?: boolean;
           message?: string;
+          spending?: Spending | true;
         };
         if (!r.ok) throw new Error(d.message ?? 'This connect link expired.');
         setClient(d.clientName ?? 'Your agent');
+        if (d.spending) setAsksToSpend(true);
         if (d.signedIn) {
           setConsent({
             email: d.email ?? null,
             autoPayLimitCents: d.autoPayLimitCents ?? null,
+            shops: d.shops === true,
             confirmsEachPurchase: d.confirmsEachPurchase === true,
-            localAgent: d.localAgent === true
+            localAgent: d.localAgent === true,
+            ...(d.spending && d.spending !== true ? { spending: d.spending } : {})
           });
         }
       })
@@ -147,7 +178,8 @@ export function Connect({ finishing = false }: { finishing?: boolean }) {
       try {
         const { redirectTo } = await post<{ redirectTo: string }>('/api/connect/decide', {
           c: id,
-          allow
+          allow,
+          ...(allow && consent?.spending ? { allowanceUsd, days } : {})
         });
         if (!local || redirectTo.startsWith('http')) {
           // This tab hands the agent its sign-in, behind the dashboard.
@@ -167,6 +199,25 @@ export function Connect({ finishing = false }: { finishing?: boolean }) {
   };
 
   const name = client ?? 'Your agent';
+  const spending = consent?.spending;
+  const permissions = [
+    { icon: Eye, text: 'See your balance and what you hold' },
+    ...(spending ? spendingPermissions(allowanceUsd, days) : []),
+    ...(consent?.shops ? shopping(consent.autoPayLimitCents, consent.confirmsEachPurchase) : []),
+    ...(spending ? [] : [{ icon: Ban, text: "It can't send or withdraw your money" }])
+  ];
+  const amountValid =
+    !spending ||
+    (Number.isFinite(allowanceUsd) &&
+      allowanceUsd >= spending.minUsd &&
+      allowanceUsd <= spending.maxUsd);
+
+  // Once the consent screen knows the limits, start from its defaults.
+  useEffect(() => {
+    if (!spending) return;
+    setAllowanceUsd(spending.defaultUsd);
+    setDays(spending.defaultDays);
+  }, [spending?.defaultUsd, spending?.defaultDays]);
 
   return (
     <div className="min-h-[100dvh] flex flex-col bg-[var(--slate-50)] text-[var(--slate-900)]">
@@ -188,7 +239,7 @@ export function Connect({ finishing = false }: { finishing?: boolean }) {
                 )}
               </div>
               <div className="bg-white border border-[var(--slate-200)] rounded-2xl px-4 py-1">
-                {permissions(consent.autoPayLimitCents, consent.confirmsEachPurchase).map((p) => (
+                {permissions.map((p) => (
                   <div
                     key={p.text}
                     className="flex items-center gap-3 py-3.5 text-[15px] border-b last:border-b-0 border-[var(--slate-100)]"
@@ -198,8 +249,72 @@ export function Connect({ finishing = false }: { finishing?: boolean }) {
                   </div>
                 ))}
               </div>
+              {spending && (
+                <div className="flex flex-col gap-3">
+                  <span className="text-sm font-medium text-[var(--slate-600)]">
+                    Spending limit
+                  </span>
+                  <div className="grid grid-cols-4 gap-2">
+                    {AMOUNTS.map((a) => (
+                      <button
+                        key={a}
+                        type="button"
+                        disabled={busy}
+                        onClick={() => setAllowanceUsd(a)}
+                        aria-pressed={allowanceUsd === a}
+                        className={`h-10 rounded-xl border text-sm font-medium ${
+                          allowanceUsd === a
+                            ? 'border-[var(--purple-500)] bg-[var(--purple-50)] text-[var(--purple-700)]'
+                            : 'border-[var(--slate-300)] bg-white'
+                        }`}
+                      >
+                        {usd(a)}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2.5">
+                    <label htmlFor="allowance" className="sr-only">
+                      Other amount in US dollars
+                    </label>
+                    <input
+                      id="allowance"
+                      inputMode="numeric"
+                      value={String(allowanceUsd)}
+                      onChange={(e) =>
+                        setAllowanceUsd(Number(e.target.value.replace(/[^0-9]/g, '')))
+                      }
+                      className={`${inputClass} h-10 flex-1`}
+                    />
+                    <label htmlFor="days" className="sr-only">
+                      Period
+                    </label>
+                    <select
+                      id="days"
+                      value={days}
+                      disabled={busy}
+                      onChange={(e) => setDays(Number(e.target.value))}
+                      className={`${inputClass} h-10`}
+                    >
+                      {PERIODS.filter((d) => d <= spending.maxDays).map((d) => (
+                        <option key={d} value={d}>
+                          over {d} days
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {!amountValid && (
+                    <span className="text-sm text-[var(--red-700)]">
+                      Choose between {usd(spending.minUsd)} and {usd(spending.maxUsd)}.
+                    </span>
+                  )}
+                </div>
+              )}
               <span className="text-[13px] text-[var(--slate-500)] leading-snug">
-                Change your auto-pay limit or disconnect {name} anytime in Settings.
+                {spending
+                  ? `${name} spends from your agent wallet, never past this limit. Disconnect it anytime in Settings to stop it.`
+                  : consent.shops
+                    ? `Change your auto-pay limit or disconnect ${name} anytime in Settings.`
+                    : `Disconnect ${name} anytime in Settings.`}
               </span>
               <div className="grid grid-cols-2 gap-2.5">
                 <button
@@ -212,11 +327,11 @@ export function Connect({ finishing = false }: { finishing?: boolean }) {
                 </button>
                 <button
                   type="button"
-                  disabled={busy}
+                  disabled={busy || !amountValid}
                   onClick={() => void decide(true)}
                   className="btn btn-primary btn-lg h-12"
                 >
-                  {busy ? 'Connecting…' : 'Allow'}
+                  {busy ? (spending ? 'Approving…' : 'Connecting…') : 'Allow'}
                 </button>
               </div>
             </>
@@ -231,7 +346,9 @@ export function Connect({ finishing = false }: { finishing?: boolean }) {
                   Connect {name} to your wallet
                 </h1>
                 <p className="m-0 text-base leading-snug text-[var(--slate-600)]">
-                  Sign in, then choose what it can do.
+                  {asksToSpend
+                    ? 'Sign in, then choose how much it can spend.'
+                    : 'Sign in, then choose what it can do.'}
                 </p>
               </div>
 

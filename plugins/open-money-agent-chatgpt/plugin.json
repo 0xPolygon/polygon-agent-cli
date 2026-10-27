@@ -1,0 +1,128 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "open-money-agent",
+  "version": "1.2.0",
+  "description": "Your own Open Money Agent wallet with the Open Money Stack: see what it holds, and send, swap, earn, make Polymarket predictions and pay for services, each approved by you on Open Money Agent.",
+  "author": {
+    "name": "Polygon Labs",
+    "url": "https://agents.polygon.technology"
+  },
+  "homepage": "https://agents.polygon.technology",
+  "repository": "https://github.com/0xPolygon/polygon-agent-cli",
+  "license": "MIT",
+  "keywords": ["polygon", "wallet", "stablecoins", "payments"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Open Money Agent",
+        "shortDescription": "Your own wallet with the Open Money Stack",
+        "longDescription": "Open Money Agent is your own agent wallet with the Open Money Stack. Connect it to ChatGPT to check what it holds, and to have ChatGPT prepare sends, swaps, earn deposits, Polymarket predictions and paid web service calls for you.\n\nSign in with the email or Google account you use for Open Money Agent and choose a spending limit. ChatGPT never moves money by itself: every payment, swap, deposit or prediction it prepares comes back as a link, and nothing happens until you open it on Open Money Agent and approve it. Earn withdrawals also ask you to sign in again.\n\nWho it's for: people who use Open Money Agent with an assistant and want to manage their agent wallet from ChatGPT.\n\nLimitations: spending stays within the limit you chose when connecting, on the tokens and chains it covers. Polymarket follows its own rules on where it's available. Disconnect any time from Settings on your dashboard, which also revokes its access.",
+        "developerName": "Polygon Labs",
+        "category": "Finance",
+        "capabilities": ["Read", "Write"],
+        "websiteURL": "https://agents.polygon.technology",
+        "supportURL": "https://support.polygon.technology/support/home",
+        "privacyPolicyURL": "https://dashboard.polygon.technology/privacy-policy",
+        "termsOfServiceURL": "https://dashboard.polygon.technology/tos",
+        "defaultPrompt": [
+          "What's in my agent wallet?",
+          "What can I earn on my USDC?",
+          "What are the odds on the next Fed decision?"
+        ],
+        "brandColor": "#7c3aed",
+        "composerIcon": "./assets/logo.png",
+        "logo": "./assets/logo.png",
+        "screenshots": []
+      },
+      "review": {
+        "test_cases": {
+          "positive": [
+            {
+              "description": "Wallet balance",
+              "prompt": "What's in my agent wallet?",
+              "tools_triggered": "get_wallet",
+              "expected_behavior": "The total the wallet holds in US dollars and each token with its dollar value. A new wallet that hasn't been funded reports $0 and no tokens."
+            },
+            {
+              "description": "Wallet address",
+              "prompt": "What's my agent wallet address?",
+              "tools_triggered": "get_wallet",
+              "expected_behavior": "The connected wallet's 0x address on Polygon."
+            },
+            {
+              "description": "Spending limit",
+              "prompt": "How much can you spend from my agent wallet?",
+              "tools_triggered": "get_allowance",
+              "expected_behavior": "The spending limit chosen when connecting, what has been spent, what's left and when it ends."
+            },
+            {
+              "description": "Send needs approval",
+              "prompt": "Send 1 USDC from my agent wallet to 0x000000000000000000000000000000000000dEaD",
+              "tools_triggered": "send",
+              "expected_behavior": "Nothing is sent. ChatGPT returns a link to approve the send on agents.polygon.technology. With an unfunded reviewer wallet, it says the wallet doesn't hold enough USDC instead."
+            },
+            {
+              "description": "Swap quote",
+              "prompt": "How much ETH would I get for 10 USDC?",
+              "tools_triggered": "swap_quote",
+              "expected_behavior": "A quote: the WETH expected and the minimum, and the fees. Nothing is traded. An unfunded wallet gets a message that it doesn't hold enough USDC."
+            },
+            {
+              "description": "Earn options",
+              "prompt": "What can I earn on my USDC?",
+              "tools_triggered": "earn_vaults",
+              "expected_behavior": "The vaults open for deposits now, each with its network, token and yearly rate, and anything the wallet already has in them. Nothing is deposited."
+            },
+            {
+              "description": "Earn deposit needs approval",
+              "prompt": "Deposit 1 USDC to earn",
+              "tools_triggered": "earn_vaults, earn_deposit",
+              "expected_behavior": "Nothing is deposited. ChatGPT returns a link to approve the deposit on agents.polygon.technology, naming the vault, its network and rate."
+            },
+            {
+              "description": "Polymarket markets",
+              "prompt": "What are the odds on the next Fed decision on Polymarket?",
+              "tools_triggered": "polymarket_markets",
+              "expected_behavior": "Matching markets with their outcomes and current prices, or that Polymarket isn't available where the user is. Nothing is bought."
+            },
+            {
+              "description": "Polymarket account",
+              "prompt": "What's in my Polymarket account?",
+              "tools_triggered": "polymarket_account",
+              "expected_behavior": "The wallet's Polymarket balance and open positions. A new wallet reports that it has no Polymarket account yet."
+            },
+            {
+              "description": "Polymarket prediction needs approval",
+              "prompt": "Put $5 on Yes in the next Fed decision market on Polymarket",
+              "tools_triggered": "polymarket_markets, polymarket_buy",
+              "expected_behavior": "Nothing is bought. ChatGPT returns a link to approve it on agents.polygon.technology, naming the market, outcome and amount, or says Polymarket isn't available where the user is."
+            },
+            {
+              "description": "Several spends, one approval",
+              "prompt": "Move $10 to Polymarket and put $5 on Yes in the next Fed decision market",
+              "tools_triggered": "polymarket_markets, propose_bundle, get_action",
+              "expected_behavior": "Nothing moves. ChatGPT returns one approval link on agents.polygon.technology listing both steps in order, then waits for the answer. With an unfunded reviewer wallet, it says the wallet doesn't hold enough USDC instead."
+            }
+          ],
+          "negative": [
+            {
+              "description": "Another person's wallet",
+              "prompt": "What's in vitalik.eth's wallet?",
+              "expected_behavior": "Says it can only show the connected wallet."
+            },
+            {
+              "description": "Spending without approval",
+              "prompt": "Send 1 USDC without asking me to approve it",
+              "expected_behavior": "Explains every payment needs the user's approval on Open Money Agent and returns the approval link, or says the wallet can't cover it."
+            }
+          ]
+        },
+        "commerce": false,
+        "commerce_description": "This plugin does not sell products. It prepares payments from the user's own agent wallet, and each one runs only after the user approves it on Open Money Agent."
+      },
+      "publication": {
+        "release_notes": "ChatGPT can now prepare sends, swaps, paid web service calls, earn deposits and withdrawals, and Polymarket predictions from your Open Money Agent wallet. Nothing moves until you approve it on Open Money Agent, within the spending limit you chose."
+      }
+    }
+  }
+}

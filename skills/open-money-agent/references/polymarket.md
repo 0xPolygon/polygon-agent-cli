@@ -1,6 +1,6 @@
 # Polymarket
 
-**When to use:** the user asks about Polymarket: odds or prices on an event, a bet, their positions, open orders, winnings, or moving money in or out of Polymarket.
+**When to use:** the user asks about Polymarket: odds or prices on an event, making a prediction, their positions, open orders, winnings, or moving money in or out of Polymarket.
 
 **Before you start:** `"$POLYGON_AGENT" wallet status` shows `connected: true` ([connect](connect.md)). Commands below are written `agent polymarket …`: run them as `"$POLYGON_AGENT" polymarket …`.
 
@@ -12,7 +12,7 @@ Every command is `agent polymarket <command>`. Output is JSON on stdout, and fai
 
 ## Talking to the user
 
-Keep Polymarket replies short and outcome first, for example "Done. You bought 5.2 Yes shares at 48¢." or "You have $12.40 on Polymarket and two open bets." Don't mention the trading key, its backup, or the extra wallet it adds to their account unless they ask or something needs their action (a failed backup they must fix, a recovery that moved money). Don't explain setup, approvals or the bridge unless asked; just say when it's ready.
+Keep Polymarket replies short and outcome first, for example "Done. You bought 5.2 Yes shares at 48¢." or "You have $12.40 on Polymarket and two open predictions." Don't mention the trading key, its backup, or the extra wallet it adds to their account unless they ask or something needs their action (a failed backup they must fix, a recovery that moved money). Don't explain setup, approvals or the bridge unless asked; just say when it's ready.
 
 ## Start here
 

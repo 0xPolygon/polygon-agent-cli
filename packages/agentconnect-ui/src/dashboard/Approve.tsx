@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 
 import { LogoBadge } from '../App.js';
-import { usd } from './ui.js';
+import { currentSession } from './signin.js';
 
-// Set while a Google sign-in for an approval is out at the relay; the relay
-// returns to the static `/login`, which reads this to pick up where it left off.
+// Set while a Google sign-in for an approval is out at the relay: the sign-in
+// id and the approval page to come back to.
 export const APPROVE_KEY = 'agentconnect_approve';
 
 export function isApproveReturn(): boolean {
@@ -13,15 +13,6 @@ export function isApproveReturn(): boolean {
   } catch {
     return false;
   }
-}
-
-interface Purchase {
-  merchant: string;
-  merchantUrl: string | null;
-  totalCents: number;
-  items: { name: string; qty: number; priceCents?: number }[];
-  status: string;
-  c: string | null;
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
@@ -38,41 +29,14 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 const inputClass =
   'h-12 border border-[var(--slate-300)] rounded-xl px-3.5 text-base bg-white outline-none focus:border-[var(--purple-500)]';
 
-const DONE: Record<string, string> = {
-  approved: 'Approved. Your agent is paying with a one-time card for this total.',
-  placed: 'Approved. The order is placed.',
-  placing: 'Approved. Your order is being placed.',
-  awaiting_passkey: 'Approved. Confirm with your passkey to pay.',
-  declined: 'Declined. Nothing was charged.',
-  failed: "The purchase didn't go through, and nothing was charged.",
-  canceled: 'Canceled. Nothing was charged.'
-};
-
-/**
- * An agent wants to pay more than the owner's auto-pay limit. The owner signs
- * in, then approves or declines; the agent sees the answer on its next check.
- */
-export function Approve({ finishing = false }: { finishing?: boolean }) {
-  const [saved] = useState<{ r: string; c: string } | null>(() => {
-    try {
-      const raw = sessionStorage.getItem(APPROVE_KEY);
-      return finishing && raw ? (JSON.parse(raw) as { r: string; c: string }) : null;
-    } catch {
-      return null;
-    }
-  });
-  const [r] = useState(
-    () => saved?.r ?? new URLSearchParams(window.location.search).get('r') ?? ''
-  );
-  const [c, setC] = useState<string | null>(saved?.c ?? null);
-  const [purchase, setPurchase] = useState<Purchase | null>(null);
+// Signing in on the approval page: keeps the owner signed in to their wallet
+// until they answer, since some requests run from it.
+function ApproveSignIn({ base, onSignedIn }: { base: string; onSignedIn: (c: string) => void }) {
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
-  const [step, setStep] = useState<'email' | 'code' | 'decide' | 'done'>('email');
-  const [done, setDone] = useState<string | null>(null);
-  const [busy, setBusy] = useState(finishing);
+  const [c, setC] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
     setError(null);
@@ -84,48 +48,200 @@ export function Approve({ finishing = false }: { finishing?: boolean }) {
       setBusy(false);
     }
   };
+  return (
+    <div className="flex flex-col gap-3">
+      {!c ? (
+        <form
+          className="flex flex-col gap-2.5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void run(async () => {
+              setC(
+                (await post<{ c: string }>(`${base}/signin/email/start`, { email: email.trim() })).c
+              );
+            });
+          }}
+        >
+          <label htmlFor="email" className="text-sm font-medium text-[var(--slate-600)]">
+            Email
+          </label>
+          <input
+            id="email"
+            type="email"
+            required
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+            className={inputClass}
+          />
+          <button type="submit" disabled={busy} className="btn btn-primary btn-lg w-full h-12">
+            {busy ? 'Sending code…' : 'Continue with email'}
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() =>
+              void run(async () => {
+                const r = await post<{ c: string; url: string }>(`${base}/signin/google/start`, {});
+                sessionStorage.setItem(
+                  APPROVE_KEY,
+                  JSON.stringify({
+                    c: r.c,
+                    path: window.location.pathname + window.location.search
+                  })
+                );
+                window.location.assign(r.url);
+              })
+            }
+            className="btn btn-secondary btn-lg w-full h-12 bg-white"
+          >
+            Continue with Google
+          </button>
+        </form>
+      ) : (
+        <form
+          className="flex flex-col gap-2.5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void run(async () => {
+              await post(`${base}/signin/email/finish`, { c, code: code.trim() });
+              onSignedIn(c);
+            });
+          }}
+        >
+          <label htmlFor="code" className="text-sm font-medium text-[var(--slate-600)]">
+            Enter the code we sent to {email}
+          </label>
+          <input
+            id="code"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            required
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder="123456"
+            className={`${inputClass} tracking-[0.2em]`}
+          />
+          <button type="submit" disabled={busy} className="btn btn-primary btn-lg w-full h-12">
+            {busy ? 'Signing in…' : 'Continue'}
+          </button>
+        </form>
+      )}
+      {error && <span className="text-sm text-[var(--red-700)] font-medium">{error}</span>}
+    </div>
+  );
+}
+
+interface Action {
+  actionId: string;
+  status: 'pending' | 'running' | 'done' | 'failed' | 'declined' | 'expired';
+  title: string;
+  details: { label: string; value: string }[];
+  appName: string;
+  expiresAt: string;
+  // It runs from the owner's wallet: approving needs a sign-in on this page.
+  ownerSignIn?: boolean;
+  error?: { error: string };
+}
+
+const DONE: Record<Exclude<Action['status'], 'pending' | 'running'>, string> = {
+  done: 'Done.',
+  failed: "Approved, but it didn't go through. Your agent has been told.",
+  declined: 'Declined. Nothing was spent.',
+  expired: 'This request expired. Nothing was spent.'
+};
+
+/**
+ * An agent's request to spend, from an app that has the owner approve each one
+ * (ChatGPT). The owner, signed in on this site, sees what it does and approves
+ * or declines it. Approving answers at once: it runs in the background, and the
+ * agent, waiting on it, carries on with the result. The page follows along.
+ */
+export function Approve({ finishing = false }: { finishing?: boolean }) {
+  const [returning] = useState(() => {
+    if (!finishing) return null;
+    try {
+      const r = JSON.parse(sessionStorage.getItem(APPROVE_KEY) ?? 'null') as {
+        c: string;
+        path: string;
+      } | null;
+      sessionStorage.removeItem(APPROVE_KEY);
+      return r;
+    } catch {
+      return null;
+    }
+  });
+  const params = new URLSearchParams(
+    returning ? new URL(returning.path, window.location.origin).search : window.location.search
+  );
+  const path = `/api/actions/${encodeURIComponent(params.get('k') ?? '')}/${encodeURIComponent(params.get('a') ?? '')}`;
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
+  // The sign-in on this page, kept for approving.
+  const [c, setC] = useState<string | null>(null);
+  const [action, setAction] = useState<Action | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async () => {
+    const res = await fetch(path);
+    const data = (await res.json().catch(() => ({}))) as Action & { message?: string };
+    if (!res.ok) throw new Error(data.message ?? 'This request was not found.');
+    setAction(data);
+  };
 
   useEffect(() => {
-    void fetch(`/api/approve?r=${encodeURIComponent(r)}`)
-      .then(async (res) => {
-        const d = (await res.json()) as Purchase & { message?: string };
-        if (!res.ok) throw new Error(d.message ?? 'This approval link is not valid.');
-        setPurchase(d);
-        if (d.status !== 'pending') {
-          setDone(DONE[d.status] ?? 'This purchase was already decided.');
-          setStep('done');
-        } else if (!saved) {
-          setC(d.c);
+    void (async () => {
+      if (returning) {
+        try {
+          await post(`${path}/signin/google/finish`, {
+            c: returning.c,
+            callbackUrl: window.location.href
+          });
+          setC(returning.c);
+        } catch (e) {
+          setError(e instanceof Error ? e.message : 'That sign-in did not work.');
         }
-      })
-      .catch((e: Error) => setError(e.message));
-    if (finishing && saved) {
-      void run(async () => {
-        sessionStorage.removeItem(APPROVE_KEY);
-        await post('/api/approve/google/finish', {
-          c: saved.c,
-          callbackUrl: window.location.href
-        });
-        window.history.replaceState(null, '', `/approve?r=${saved.r}`);
-        setStep('decide');
-      });
-    }
+        window.history.replaceState(null, '', returning.path);
+      }
+      const s = await currentSession();
+      setSignedIn(!!s);
+      if (s) await load().catch((e: Error) => setError(e.message));
+    })();
     // Runs once, on load.
   }, []);
 
-  const decide = (approve: boolean) =>
-    run(async () => {
-      const res = await post<{ status: string; passkeyUrl?: string | null }>(
-        '/api/approve/decide',
-        { c, approve }
-      );
-      if (res.passkeyUrl) {
-        window.location.assign(res.passkeyUrl);
-        return;
-      }
-      setDone(DONE[res.status] ?? 'Done.');
-      setStep('done');
-    });
+  // Follows a running action to its result.
+  useEffect(() => {
+    if (action?.status !== 'running') return;
+    const timer = setTimeout(() => void load().catch(() => {}), 2000);
+    return () => clearTimeout(timer);
+  }, [action]);
+
+  const signedInHere = async (id: string) => {
+    setC(id);
+    setSignedIn(true);
+    await load().catch((e: Error) => setError(e.message));
+  };
+
+  const decide = async (approve: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approve, ...(c ? { c } : {}) })
+      });
+      const data = (await res.json().catch(() => ({}))) as Action & { message?: string };
+      if (!res.ok) throw new Error(data.message ?? 'Something went wrong. Try again.');
+      setAction(data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div className="min-h-[100dvh] flex flex-col bg-[var(--slate-50)] text-[var(--slate-900)]">
@@ -134,136 +250,94 @@ export function Approve({ finishing = false }: { finishing?: boolean }) {
       </div>
       <div className="flex-1 flex items-center justify-center px-5 py-10">
         <div className="w-full max-w-[420px] flex flex-col gap-6">
-          <div className="flex flex-col gap-2">
-            <span className="text-sm text-[var(--slate-500)]">Your agent wants to pay</span>
-            <h1 className="m-0 text-[40px] leading-none font-bold tracking-[-0.02em]">
-              {purchase ? usd(purchase.totalCents / 100) : '…'}
-            </h1>
-            <span className="text-base text-[var(--slate-600)]">
-              {purchase ? `at ${purchase.merchant}` : ''}
-            </span>
-          </div>
-
-          {purchase && purchase.items.length > 0 && (
-            <div className="bg-white border border-[var(--slate-200)] rounded-2xl px-4 py-1">
-              {purchase.items.map((i) => (
-                <div
-                  key={i.name}
-                  className="flex justify-between gap-3 py-3 text-[15px] border-b last:border-b-0 border-[var(--slate-100)]"
-                >
-                  <span className="min-w-0">
-                    {i.qty > 1 ? `${i.qty} × ` : ''}
-                    {i.name}
+          {signedIn === false ? (
+            <>
+              <h1 className="m-0 text-[28px] leading-[1.2] font-bold tracking-[-0.02em]">
+                Sign in to review your agent&apos;s request
+              </h1>
+              <ApproveSignIn base={path} onSignedIn={(id) => void signedInHere(id)} />
+            </>
+          ) : !action ? (
+            <span className="text-base text-[var(--slate-600)]">{error ? '' : 'Loading…'}</span>
+          ) : (
+            <>
+              <div className="flex flex-col gap-3">
+                <span className="text-sm text-[var(--slate-500)]">
+                  {action.appName} asks you to approve
+                </span>
+                <h1 className="m-0 text-[28px] leading-[1.2] font-bold tracking-[-0.02em]">
+                  {action.title}
+                </h1>
+              </div>
+              {action.details.length > 0 && (
+                <div className="bg-white border border-[var(--slate-200)] rounded-2xl px-4 py-1">
+                  {action.details.map((d) => (
+                    <div
+                      key={d.label}
+                      className="flex justify-between gap-4 py-3.5 text-[15px] border-b last:border-b-0 border-[var(--slate-100)]"
+                    >
+                      <span className="text-[var(--slate-500)]">{d.label}</span>
+                      <span className="font-medium text-right break-all">{d.value}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {action.status === 'pending' && action.ownerSignIn && !c ? (
+                <div className="flex flex-col gap-3">
+                  <span className="text-[15px] text-[var(--slate-600)] leading-snug">
+                    This runs from your wallet. Sign in again to approve it.
                   </span>
-                  {i.priceCents !== undefined && (
-                    <span className="font-bold flex-shrink-0">{usd(i.priceCents / 100)}</span>
+                  <ApproveSignIn base={path} onSignedIn={(id) => setC(id)} />
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void decide(false)}
+                    className="btn btn-secondary btn-lg h-12 bg-white"
+                  >
+                    Decline
+                  </button>
+                </div>
+              ) : action.status === 'pending' ? (
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void decide(false)}
+                    className="btn btn-secondary btn-lg h-12 bg-white"
+                  >
+                    Decline
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void decide(true)}
+                    className="btn btn-primary btn-lg h-12"
+                  >
+                    {busy ? 'Approving…' : 'Approve'}
+                  </button>
+                </div>
+              ) : action.status === 'running' ? (
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-base font-medium">Approved. Sending it now…</span>
+                  <span className="text-sm text-[var(--slate-500)]">
+                    You can go back to {action.appName}: it carries on by itself.
+                  </span>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-base font-medium">{DONE[action.status]}</span>
+                  {action.status === 'failed' && action.error && (
+                    <span className="text-sm text-[var(--slate-600)]">{action.error.error}</span>
+                  )}
+                  {action.status !== 'expired' && (
+                    <span className="text-sm text-[var(--slate-500)]">
+                      You can close this tab and go back to {action.appName}.
+                    </span>
                   )}
                 </div>
-              ))}
-            </div>
-          )}
-
-          {step === 'done' ? (
-            <span className="text-base font-medium">{done}</span>
-          ) : step === 'decide' ? (
-            <div className="grid grid-cols-2 gap-2.5">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void decide(false)}
-                className="btn btn-secondary btn-lg h-12 bg-white"
-              >
-                Decline
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void decide(true)}
-                className="btn btn-primary btn-lg h-12"
-              >
-                {busy ? 'Approving…' : 'Approve'}
-              </button>
-            </div>
-          ) : busy && finishing ? (
-            <span className="text-base text-[var(--slate-600)]">Signing you in…</span>
-          ) : step === 'email' ? (
-            <>
-              <form
-                className="flex flex-col gap-2.5"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  void run(async () => {
-                    await post('/api/approve/email/start', { c, email: email.trim() });
-                    setStep('code');
-                  });
-                }}
-              >
-                <label htmlFor="email" className="text-sm font-medium text-[var(--slate-600)]">
-                  Sign in to approve
-                </label>
-                <input
-                  id="email"
-                  type="email"
-                  required
-                  autoComplete="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  className={inputClass}
-                />
-                <button
-                  type="submit"
-                  disabled={busy || !c}
-                  className="btn btn-primary btn-lg w-full h-12"
-                >
-                  {busy ? 'Sending code…' : 'Continue with email'}
-                </button>
-              </form>
-              <button
-                type="button"
-                disabled={busy || !c}
-                onClick={() =>
-                  void run(async () => {
-                    const { url } = await post<{ url: string }>('/api/approve/google/start', { c });
-                    sessionStorage.setItem(APPROVE_KEY, JSON.stringify({ r, c }));
-                    window.location.assign(url);
-                  })
-                }
-                className="btn btn-secondary btn-lg w-full h-12 bg-white"
-              >
-                Continue with Google
-              </button>
+              )}
             </>
-          ) : (
-            <form
-              className="flex flex-col gap-2.5"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void run(async () => {
-                  await post('/api/approve/email/finish', { c, code: code.trim() });
-                  setStep('decide');
-                });
-              }}
-            >
-              <label htmlFor="code" className="text-sm font-medium text-[var(--slate-600)]">
-                Enter the code we sent to {email}
-              </label>
-              <input
-                id="code"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                required
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                placeholder="123456"
-                className={`${inputClass} tracking-[0.2em]`}
-              />
-              <button type="submit" disabled={busy} className="btn btn-primary btn-lg w-full h-12">
-                {busy ? 'Signing in…' : 'Continue'}
-              </button>
-            </form>
           )}
-
           {error && <span className="text-sm text-[var(--red-700)] font-medium">{error}</span>}
         </div>
       </div>

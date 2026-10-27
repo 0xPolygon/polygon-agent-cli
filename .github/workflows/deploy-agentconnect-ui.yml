@@ -67,7 +67,7 @@ jobs:
       # left out (their endpoints answer 503); wrangler never deletes secrets.
       - name: Write worker secrets
         run: >-
-          node -e 'const keys = ["AGENT_CERT_SECRET", "CREDENTIALS_KEY", "AGENTCARD_CLIENT_ID", "AGENTCARD_CLIENT_SECRET", "INDEXER_ACCESS_KEY"];
+          node -e 'const keys = ["AGENT_CERT_SECRET", "CREDENTIALS_KEY", "AGENTCARD_CLIENT_ID", "AGENTCARD_CLIENT_SECRET", "INDEXER_ACCESS_KEY", "TRAILS_API_KEY"];
           const out = Object.fromEntries(keys.filter((k) => process.env[k]).map((k) => [k, process.env[k]]));
           require("fs").writeFileSync(process.env.RUNNER_TEMP + "/worker-secrets.json", JSON.stringify(out), { mode: 0o600 });'
         env:
@@ -77,6 +77,8 @@ jobs:
           AGENTCARD_CLIENT_SECRET: ${{ secrets.AGENTCARD_CLIENT_SECRET }}
           # The dashboard's indexer key, reused by the MCP get_wallet tool.
           INDEXER_ACCESS_KEY: ${{ secrets.VITE_INDEXER_ACCESS_KEY }}
+          # The dashboard's Trails key: prices, swaps and bridges for MCP connections.
+          TRAILS_API_KEY: ${{ secrets.VITE_TRAILS_API_KEY }}
 
       - name: Deploy to staging
         run: npx -y wrangler@4 deploy --env staging --secrets-file "$RUNNER_TEMP/worker-secrets.json"
@@ -116,8 +118,20 @@ jobs:
           # falls back to the production default in src/config.ts).
           VITE_OIDC_RELAY_URL: ${{ vars.VITE_OIDC_RELAY_URL }}
 
+      # As for staging: sign-in and MCP secrets go up with the deploy.
+      - name: Write worker secrets
+        run: >-
+          node -e 'const keys = ["AGENT_CERT_SECRET", "CREDENTIALS_KEY", "INDEXER_ACCESS_KEY", "TRAILS_API_KEY"];
+          const out = Object.fromEntries(keys.filter((k) => process.env[k]).map((k) => [k, process.env[k]]));
+          require("fs").writeFileSync(process.env.RUNNER_TEMP + "/worker-secrets.json", JSON.stringify(out), { mode: 0o600 });'
+        env:
+          AGENT_CERT_SECRET: ${{ secrets.AGENT_CERT_SECRET }}
+          CREDENTIALS_KEY: ${{ secrets.CREDENTIALS_KEY }}
+          INDEXER_ACCESS_KEY: ${{ secrets.VITE_INDEXER_ACCESS_KEY }}
+          TRAILS_API_KEY: ${{ secrets.VITE_TRAILS_API_KEY }}
+
       - name: Deploy to production
-        run: npx -y wrangler@4 deploy --env production
+        run: npx -y wrangler@4 deploy --env production --secrets-file "$RUNNER_TEMP/worker-secrets.json"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_WORKER_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_WORKER_ACCOUNT_ID }}

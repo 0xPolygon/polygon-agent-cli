@@ -1,5 +1,36 @@
 # @polygonlabs/agentconnect-ui
 
+## 0.2.0
+
+### Minor Changes
+
+- bf5b39f: The MCP server covers the rest of the agent wallet: paid web services (`pay_service`, x402), earn vaults (`earn_vaults`, `earn_deposit`, `earn_withdraw`) and Polymarket (markets, account, deposit, buy, sell, cancel, redeem, withdraw). Earn deposits are paid from the allowance through Trails; withdrawals run from the owner's wallet, so the owner approves them after signing in. Every connection to a wallet shares one Polymarket account. ChatGPT gets the same tools except funding Polymarket and betting, and every spend from ChatGPT waits for the owner's approval on the site (`/approve`, `get_action`). Polymarket follows its region rules for where the owner is.
+- e81bb48: The MCP server can move money. Connecting an agent now asks the owner for a spending limit (US dollars over up to 30 days), and the agent gets its own key for it, approved by the owner on each chain the way a CLI install's is. New tools: `get_allowance`, `send`, `swap_quote`, `swap` (swaps and bridges) and `swap_status`. ChatGPT connections are recognised by their redirect and stay read-only, as do Muse's. Disconnecting an agent revokes its key. The skill tells assistants that can't run commands what the MCP server can do.
+
+### Patch Changes
+
+- 6c0f8af: The site serves OpenAI's domain check token, and the ChatGPT listing carries its support link and review test cases.
+- 8191bd3: Ready for ChatGPT: the MCP server is named Open Money Agent, `get_wallet` declares its output and that it only reads the owner's wallet, denying a connection names the issuer like every other response, and the site can serve OpenAI's domain check at `/.well-known/openai-apps-challenge`. The plugin package is `plugins/open-money-agent-chatgpt/`.
+- 18744bc: The fund modal shows the agent wallet's short address with a copy button, for sending funds to it directly.
+- 2551ac0: Connecting an MCP client works on both sites the worker serves: each request checks its own site's `/mcp` as the OAuth resource, so ChatGPT's sign-in no longer fails depending on which site was served first. A bad authorization request now goes back to the client as an OAuth error instead of failing. The skill points assistants that can't run commands to the MCP server.
+- d564966: Unknown `/.well-known` paths answer 404 instead of the site's page, so OAuth clients probing for OpenID metadata move on to the metadata the MCP server does serve.
+
+## 0.1.0
+
+### Minor Changes
+
+- 050c2e0: Connecting an agent now ends on a consent screen: after signing in (skipped if you're already signed in on the site), you see what the agent can do, including that it can't move your money, and choose Allow or Don't allow. Settings lists your connected agents, each with Disconnect.
+- cf0a8a0: A remote MCP server for the agent wallet at `/mcp`, so agents that can't run the CLI can connect. The owner approves on a connect page with an email code or Google. Its tool, `get_wallet`, gives the address, holdings in dollars, and the dashboard link.
+- c0b1809: Redesign the dashboard as a consumer wallet on the OMS design system: sidebar and phone tab bar, Overview with balance buckets, a 14-day money in and out chart and recent activity, plus Wallet, Markets (Polymarket positions via `?pm=`), Earn (Prime, Frontier, and Advanced: Morpho stablecoin vaults on Katana, assigned by size from the Trails Yield API), Activity, and Settings tabs. Opening the page without a wallet now shows a connect-your-agent screen with a spending limit picker.
+- c1e442f: Sign in on the site itself. Opening agentconnect without a link from your agent now shows sign-in (email code or Google), then your dashboard, and you stay signed in for 30 days. The worker does the sign-in and sets an HttpOnly session cookie, so it works on every domain. Settings has a Sign out button.
+
+### Patch Changes
+
+- faf204d: After allowing a local agent (Claude Code, Codex, Cursor) on the connect page, the owner lands on their dashboard instead of the agent's "you can close this" page.
+- 40e0fc3: Dashboard: ask-your-agent prompts on Overview and Wallet, alongside Markets and Earn. Earn tiers are picked so each riskier tier pays more than the one before it; one that doesn't is left out.
+- eb13f18: MCP client profiles: each connected agent gets a profile from its OAuth client. Muse's profile shows only the tools Muse allows; every other agent works as before. Client registration (`/oauth/register`) is capped at 10 a minute per address.
+- 0ae28a3: AgentPay is now Open Money Agent. The skill is `skills/open-money-agent/` and the plugin is `open-money-agent` in Claude Code, Codex and Cursor (existing `agentpay` plugin installs need a reinstall under the new name). `workspace init` and `update` install `open-money-agent` and remove the `agentpay` folder they wrote before; `skills show agentpay` still works. The site keeps serving `/agentpay/SKILL.md` and `/agentpay/references/`.
+
 ## 0.0.5
 
 ### Patch Changes

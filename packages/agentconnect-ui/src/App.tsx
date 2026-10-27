@@ -7,6 +7,7 @@ import type { Session } from './dashboard/signin.js';
 
 import { parseFundAmount } from './components/FundingScreen.js';
 import { Approve, isApproveReturn } from './dashboard/Approve.js';
+import { ApprovePurchase, isApprovePurchaseReturn } from './dashboard/ApprovePurchase.js';
 import { Connect, isConnectReturn } from './dashboard/Connect.js';
 import { Dashboard } from './dashboard/Dashboard.js';
 import { Onboarding } from './dashboard/Onboarding.js';
@@ -51,7 +52,8 @@ function App() {
   }
 
   if (window.location.pathname === '/approve') {
-    return <Approve />;
+    // A purchase over the auto-pay limit (?r=) or an MCP spend (?k=&a=).
+    return params.has('r') ? <ApprovePurchase /> : <Approve />;
   }
 
   if (window.location.pathname === '/login') {
@@ -62,6 +64,9 @@ function App() {
     }
     if (isApproveReturn() && isRelayReturn(window.location.search)) {
       return <Approve finishing />;
+    }
+    if (isApprovePurchaseReturn() && isRelayReturn(window.location.search)) {
+      return <ApprovePurchase finishing />;
     }
     if (isWebSigninReturn() && isRelayReturn(window.location.search)) {
       return <Onboarding finishing />;

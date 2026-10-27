@@ -1184,7 +1184,10 @@ export const depositCommand: CommandModule = {
       // Pre-flight: verify balance and auto-reserve gas buffer
       try {
         const viemChain = await viemChainForDeposit(chainId);
-        const publicClient = createPublicClient({ chain: viemChain, transport: http() });
+        const publicClient = createPublicClient({
+          chain: viemChain,
+          transport: http(getReadRpcUrl(resolveNetwork(String(chainId))))
+        });
         const [usdcBal, nativeBal] = await Promise.all([
           publicClient.readContract({
             address: asset.address as `0x${string}`,

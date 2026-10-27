@@ -64,12 +64,27 @@ importers:
       '@0xsequence/wallet-primitives':
         specifier: 3.0.0-beta.16
         version: 3.0.0-beta.16(typescript@5.9.3)(zod@3.25.76)
+      '@0xtrails/api':
+        specifier: ^0.18.6
+        version: 0.18.6
       '@cloudflare/workers-oauth-provider':
         specifier: 1.2.3
         version: 1.2.3
       '@polygonlabs/oms-wallet':
         specifier: 0.3.1
         version: 0.3.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
+      '@polymarket/client':
+        specifier: 0.12.0
+        version: 0.12.0(typescript@5.9.3)(viem@2.57.3(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76))
+      '@x402/core':
+        specifier: ^2.28.0
+        version: 2.28.0
+      '@x402/evm':
+        specifier: ^2.28.0
+        version: 2.28.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
+      '@x402/fetch':
+        specifier: ^2.28.0
+        version: 2.28.0
       lucide-react:
         specifier: ^0.564.0
         version: 0.564.0(react@18.3.1)
@@ -6385,6 +6400,21 @@ snapshots:
     dependencies:
       '@polymarket/types': 0.2.0
       zod: 4.6.5
+
+  '@polymarket/client@0.12.0(typescript@5.9.3)(viem@2.57.3(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76))':
+    dependencies:
+      '@msgpack/msgpack': 3.1.3
+      '@polymarket/bindings': 0.12.0
+      '@polymarket/types': 0.2.0
+      it-merge: 3.0.15
+      it-pushable: 3.2.4
+      ky: 1.14.3
+      ox: 0.14.45(typescript@5.9.3)(zod@4.6.5)
+      zod: 4.6.5
+    optionalDependencies:
+      viem: 2.57.3(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
+    transitivePeerDependencies:
+      - typescript
 
   '@polymarket/client@0.12.0(typescript@5.9.3)(viem@2.57.3(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.6.5))':
     dependencies:
