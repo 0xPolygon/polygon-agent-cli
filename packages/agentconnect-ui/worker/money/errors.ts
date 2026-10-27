@@ -64,6 +64,10 @@ export const NOTHING_SENT_CODES: ReadonlySet<MoneyCode> = new Set([
   'price_guard'
 ]);
 
+// What the agent tells the user when the wallet is short.
+export const ADD_FUNDS =
+  'Tell the user the agent wallet needs more funds: they can add some from their dashboard (get_wallet has the link and the address to send to), then try again.';
+
 export class MoneyError extends Error {
   readonly code: MoneyCode;
   readonly hint?: string;
@@ -87,7 +91,9 @@ export class MoneyError extends Error {
     return {
       error: this.message,
       code: this.code,
-      ...(this.hint ? { hint: this.hint } : {}),
+      ...(this.hint || this.code === 'insufficient_balance'
+        ? { hint: this.hint ?? ADD_FUNDS }
+        : {}),
       ...(this.details ? { details: this.details } : {})
     };
   }

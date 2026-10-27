@@ -55,6 +55,7 @@ import {
   pmAccount,
   pmBuy,
   pmCancel,
+  pmCheckBuy,
   pmDeposit,
   pmMarkets,
   pmRedeem,
@@ -70,6 +71,7 @@ import {
   executeApprovedSwap,
   executeSwap,
   quoteSwap,
+  requireHeld,
   tokenUnits
 } from './trade.ts';
 import { payAndFetch } from './x402.ts';
@@ -435,12 +437,17 @@ export class AgentKey {
         { label: 'Network', value: chainLabel(chainId) }
       ];
     } else if (request.op === 'pm_deposit') {
+      await requireHeld({ symbol: 'USDC', amount: request.usd }, await this.deps(record));
       title = `Move $${request.usd} to Polymarket`;
       details = [
         { label: 'From', value: 'USDC on Polygon, from the allowance' },
         { label: 'Note', value: 'Money on Polymarket is outside the allowance' }
       ];
     } else if (request.op === 'pm_buy') {
+      const { ownerRegion, usd } = request;
+      await this.withPmLease(record, async () =>
+        pmCheckBuy({ usd }, await this.pmDeps(record, ownerRegion))
+      );
       title = `Predict "${request.outcome}" with $${request.usd} on Polymarket`;
       details = [
         { label: 'Market', value: request.market },
@@ -458,6 +465,7 @@ export class AgentKey {
         { ...request, wallet: getAddress(record.wallet) },
         this.earnDeps()
       );
+      await requireHeld({ symbol: vault.asset.symbol, amount }, await this.deps(record));
       title = `Deposit ${amount} ${vault.asset.symbol} to earn about ${vault.apy}% a year`;
       details = [
         { label: 'Vault', value: `${vault.name} (${vault.address})` },

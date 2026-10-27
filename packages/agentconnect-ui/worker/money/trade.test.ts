@@ -7,7 +7,14 @@ import type { TradeDeps, TradeRecord } from './trade.ts';
 
 import { MoneyError } from './errors.ts';
 import { fakeEngine, START, USDC, WALLET, WETH } from './test-fakes.ts';
-import { describeTrade, ensureOn, executeSwap, quoteSwap, tokenUnits } from './trade.ts';
+import {
+  describeTrade,
+  ensureOn,
+  executeSwap,
+  quoteSwap,
+  requireHeld,
+  tokenUnits
+} from './trade.ts';
 
 const DEPOSIT_ADDRESS = '0x00000000000000000000000000000000000000d1';
 
@@ -309,6 +316,23 @@ describe('exact-output quotes', () => {
       expect(await code(quoteSwap({ from: 'USDC', to: 'ETH', amount: '10' }, deps))).toBe(
         'upstream_invalid_quote'
       );
+    });
+  });
+});
+
+describe('requireHeld', () => {
+  it('passes when the wallet holds enough, and asks for funds when it does not', async () => {
+    expect(
+      await requireHeld({ symbol: 'USDC', amount: '5' }, fakeEngine({ balance: 5_000_000n }).deps)
+    ).toBeUndefined();
+    const short = await requireHeld(
+      { symbol: 'USDC', amount: '5' },
+      fakeEngine({ balance: 1_000_000n }).deps
+    ).catch((e: unknown) => e);
+    expect(short).toBeInstanceOf(MoneyError);
+    expect((short as MoneyError).toJSON()).toMatchObject({
+      code: 'insufficient_balance',
+      hint: expect.stringMatching(/add some from their dashboard/)
     });
   });
 });

@@ -11,6 +11,7 @@ import {
   parseUsd,
   pmAccount,
   pmBuy,
+  pmCheckBuy,
   pmCancel,
   pmDeposit,
   pmMarkets,
@@ -466,6 +467,16 @@ describe('trading', () => {
       )
     ).toBe('price_guard');
     expect(env.calls.orders).toHaveLength(0);
+  });
+
+  it('checks the pUSD balance before the owner is asked, without trading', async () => {
+    const env = setup();
+    expect(await reason(pmCheckBuy({ usd: '1' }, env.deps))).toBe('not_set_up');
+    await withAccount(env);
+    env.world.pusd = 5_000_000n;
+    expect(await pmCheckBuy({ usd: '5' }, env.deps)).toBeUndefined();
+    env.world.pusd = 0n;
+    expect(await reason(pmCheckBuy({ usd: '3' }, env.deps))).toBe('insufficient_pusd');
   });
 
   it('refuses a bid above the pUSD balance, and a closed market', async () => {
