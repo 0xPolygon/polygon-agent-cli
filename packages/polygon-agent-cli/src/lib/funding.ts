@@ -1,6 +1,6 @@
 // The wallet funding page (Trails on-ramp + swap): the agentconnect dashboard
-// (POLYGON_AGENT_CREDENTIALS_URL, else the login page's host), which reads
-// ?wallet&chain&view&amount. POLYGON_AGENT_FUNDING_UI overrides.
+// (the site that keeps saved details, so its link signs the agent in there),
+// which reads ?wallet&chain&view&amount. POLYGON_AGENT_FUNDING_UI overrides.
 
 import { credentialsBaseUrl } from './oms-client.ts';
 
@@ -41,10 +41,13 @@ export function fundingInfo(params: {
 // status`: the fund view while the wallet is empty, the dashboard after.
 // `polymarketAddress` is the Polymarket deposit (trading) account, where
 // positions live; the dashboard reads it as `pm`.
+// `credentialsToken` is the agent's signed access token; it rides in the URL
+// fragment (never sent to a server) so the page can read and save credentials.
 export function dashboardInfo(params: {
   walletAddress: string;
   funded: boolean;
   polymarketAddress?: string | null;
+  credentialsToken?: string | null;
 }): {
   url: string;
 } {
@@ -54,5 +57,6 @@ export function dashboardInfo(params: {
     view: params.funded ? 'dashboard' : 'fund'
   });
   if (params.polymarketAddress) url += `&pm=${params.polymarketAddress}`;
+  if (params.credentialsToken) url += `#t=${params.credentialsToken}`;
   return { url };
 }

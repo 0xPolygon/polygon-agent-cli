@@ -1,4 +1,4 @@
-import { ArrowLeftRight, Ban, Eye, Send } from 'lucide-react';
+import { ArrowLeftRight, Ban, Eye, MapPin, Send, ShoppingBag } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { LogoBadge } from '../App.js';
@@ -39,24 +39,43 @@ interface Spending {
 
 interface Consent {
   email: string | null;
+  autoPayLimitCents: number | null;
+  // This agent can buy with the saved address and cards.
+  shops: boolean;
+  // This agent asks the user to approve every purchase before paying.
+  confirmsEachPurchase: boolean;
   // The agent runs on this machine; once allowed, the dashboard opens in front.
   localAgent: boolean;
   // Set when the agent may move money: the allowance the owner approves.
   spending?: Spending;
 }
 
-// What the agent gets, in the owner's words.
-const READ_ONLY = [
-  { icon: Eye, text: 'See your balance and what you hold' },
-  { icon: Ban, text: "It can't send or withdraw your money" }
-];
+const dollars = (cents: number) => `$${(cents / 100).toFixed(cents % 100 ? 2 : 0)}`;
+
+// Buying with the owner's saved address and cards, in the owner's words.
+function shopping(limitCents: number | null, confirmsEachPurchase: boolean) {
+  return [
+    { icon: MapPin, text: 'Use your saved address and cards at checkout' },
+    {
+      icon: ShoppingBag,
+      text: confirmsEachPurchase
+        ? limitCents === null || limitCents === 0
+          ? 'Buy for you once you approve the total. You also approve every purchase here'
+          : `Buy for you once you approve the total. Over ${dollars(limitCents)}, you also approve here`
+        : limitCents === null
+          ? 'Buy for you. Bigger purchases wait for your approval'
+          : limitCents === 0
+            ? 'Buy for you. Every purchase waits for your approval'
+            : `Buy for you up to ${dollars(limitCents)} on its own. Anything more waits for your approval`
+    }
+  ];
+}
 
 const usd = (n: number) => `$${n.toLocaleString('en-US')}`;
 
 function spendingPermissions(allowanceUsd: number, days: number) {
   const period = days === 1 ? 'a day' : `${days} days`;
   return [
-    { icon: Eye, text: 'See your balance and what you hold' },
     { icon: Send, text: `Send and pay up to ${usd(allowanceUsd)} over ${period}` },
     { icon: ArrowLeftRight, text: 'Swap and bridge tokens within that limit' }
   ];
@@ -137,6 +156,9 @@ export function Connect({ finishing = false }: { finishing?: boolean }) {
         if (d.signedIn) {
           setConsent({
             email: d.email ?? null,
+            autoPayLimitCents: d.autoPayLimitCents ?? null,
+            shops: d.shops === true,
+            confirmsEachPurchase: d.confirmsEachPurchase === true,
             localAgent: d.localAgent === true,
             ...(d.spending && d.spending !== true ? { spending: d.spending } : {})
           });
@@ -178,7 +200,12 @@ export function Connect({ finishing = false }: { finishing?: boolean }) {
 
   const name = client ?? 'Your agent';
   const spending = consent?.spending;
-  const permissions = spending ? spendingPermissions(allowanceUsd, days) : READ_ONLY;
+  const permissions = [
+    { icon: Eye, text: 'See your balance and what you hold' },
+    ...(spending ? spendingPermissions(allowanceUsd, days) : []),
+    ...(consent?.shops ? shopping(consent.autoPayLimitCents, consent.confirmsEachPurchase) : []),
+    ...(spending ? [] : [{ icon: Ban, text: "It can't send or withdraw your money" }])
+  ];
   const amountValid =
     !spending ||
     (Number.isFinite(allowanceUsd) &&
@@ -285,7 +312,9 @@ export function Connect({ finishing = false }: { finishing?: boolean }) {
               <span className="text-[13px] text-[var(--slate-500)] leading-snug">
                 {spending
                   ? `${name} spends from your agent wallet, never past this limit. Disconnect it anytime in Settings to stop it.`
-                  : `Disconnect ${name} anytime in Settings.`}
+                  : consent.shops
+                    ? `Change your auto-pay limit or disconnect ${name} anytime in Settings.`
+                    : `Disconnect ${name} anytime in Settings.`}
               </span>
               <div className="grid grid-cols-2 gap-2.5">
                 <button

@@ -22,13 +22,16 @@ run_worker_first = [
   "/.well-known/*"
 ]
 
-# Sign-in and MCP. Secrets come from the GitHub environment and are uploaded
+# Credentials API. Secrets come from the GitHub environment and are uploaded
 # with each deploy (see .github/workflows/deploy-agentconnect-ui.yml):
-#   AGENT_CERT_SECRET  random 32+ bytes; signs the owner's session cookie
-#   CREDENTIALS_KEY    random 32+ bytes; seals sign-ins in progress in KV
+#   AGENT_CERT_SECRET  random 32+ bytes; signs agent certificates
+#   CREDENTIALS_KEY    random 32+ bytes; seals saved details in KV
+#   AGENTCARD_CLIENT_ID / AGENTCARD_CLIENT_SECRET  AgentCard client credentials (cards)
 #   INDEXER_ACCESS_KEY the dashboard's indexer key; balances for the MCP server
 #   TRAILS_API_KEY     the dashboard's Trails key; prices, swaps and bridges
-# The MCP server needs the OAUTH_KV namespace; without it /mcp is not served.
+# Saved details live in the CREDENTIALS KV namespace. Without it, or without
+# CREDENTIALS_KEY, the address endpoints answer 503. The MCP server needs the
+# OAUTH_KV namespace; without it /mcp is not served.
 # Connections that move money need the AGENT_KEYS Durable Object: one per
 # connection, holding its key and allowance (worker/money/agent-key.ts).
 
@@ -40,15 +43,22 @@ deleted_classes = ["SessionRelay"]
 [env.staging]
 name = "agentconnect-staging"
 # Its own list: the top-level SessionRelay migration must not apply here. v3
-# added a per-wallet payment lock for card purchases; v4 drops it while cards
-# are built on their own branch. v5 adds each MCP connection's key.
+# added a per-wallet payment lock for card purchases; v4 dropped it while cards
+# were built on their own branch. v5 adds each MCP connection's key, and v6
+# brings the payment lock back (worker/wallet-lock.ts).
 migrations = [
   { tag = "v3", new_sqlite_classes = ["WalletLock"] },
   { tag = "v4", deleted_classes = ["WalletLock"] },
-  { tag = "v5", new_sqlite_classes = ["AgentKey"] }
+  { tag = "v5", new_sqlite_classes = ["AgentKey"] },
+  { tag = "v6", new_sqlite_classes = ["WalletLock"] }
 ]
 
-durable_objects.bindings = [{ name = "AGENT_KEYS", class_name = "AgentKey" }]
+# Each MCP connection's key, and one object per wallet so a payment is claimed
+# once. No route reaches them: only this worker, through the bindings.
+durable_objects.bindings = [
+  { name = "AGENT_KEYS", class_name = "AgentKey" },
+  { name = "WALLET_LOCK", class_name = "WalletLock" }
+]
 
 routes = [
   { pattern = "agentconnect.staging.polygon.technology", custom_domain = true }
@@ -57,8 +67,11 @@ routes = [
 # No migrations: the staging worker never had the SessionRelay class, and
 # Cloudflare refuses to delete a class that doesn't exist.
 
-# MCP: the OAuth provider's clients, grants, and tokens, plus pending sign-ins.
 # No id: wrangler creates the namespace on the first deploy.
+[[env.staging.kv_namespaces]]
+binding = "CREDENTIALS"
+
+# MCP: the OAuth provider's clients, grants, and tokens, plus pending sign-ins.
 [[env.staging.kv_namespaces]]
 binding = "OAUTH_KV"
 
@@ -72,10 +85,19 @@ simple = { limit = 10, period = 60 }
 [env.production]
 name = "agentconnect-production"
 # The SessionRelay class was deleted long ago (wrangler refuses to delete a
-# class that doesn't exist), so only v5: each MCP connection's key.
-migrations = [{ tag = "v5", new_sqlite_classes = ["AgentKey"] }]
+# class that doesn't exist), so only v5: each MCP connection's key, and v6: the
+# per-wallet payment lock for card purchases.
+migrations = [
+  { tag = "v5", new_sqlite_classes = ["AgentKey"] },
+  { tag = "v6", new_sqlite_classes = ["WalletLock"] }
+]
 
-durable_objects.bindings = [{ name = "AGENT_KEYS", class_name = "AgentKey" }]
+# Each MCP connection's key, and one object per wallet so a payment is claimed
+# once. No route reaches them: only this worker, through the bindings.
+durable_objects.bindings = [
+  { name = "AGENT_KEYS", class_name = "AgentKey" },
+  { name = "WALLET_LOCK", class_name = "WalletLock" }
+]
 
 # agents.polygon.technology serves the assistant install guide (/skill.md)
 # and the skills from the same assets.
@@ -88,7 +110,11 @@ routes = [
 [env.production.vars]
 OPENAI_APPS_CHALLENGE = "LbcJ6AV155LnWC_iwegRgAunGaFiXtVaJgIPxJYxuvs"
 
-# MCP and sign-ins in progress, as for staging. No id: created on the first deploy.
+# Saved details, MCP and sign-ins in progress, as for staging. No id: created
+# on the first deploy.
+[[env.production.kv_namespaces]]
+binding = "CREDENTIALS"
+
 [[env.production.kv_namespaces]]
 binding = "OAUTH_KV"
 
