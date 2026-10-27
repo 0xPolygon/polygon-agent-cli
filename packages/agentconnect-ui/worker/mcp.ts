@@ -250,7 +250,7 @@ const TOOLS = [
     name: 'polymarket_account',
     title: 'Polymarket account',
     description:
-      "The wallet's Polymarket account: cash for predictions (pUSD), positions and their value, open orders, winnings to redeem, a deposit still bridging, and whether Polymarket is available where the owner is.",
+      "The wallet's Polymarket account: cash for predictions (pUSD), positions and their value, open orders, winnings to redeem, a deposit still bridging, and whether Polymarket trading is supported from the current location.",
     inputSchema: { type: 'object', properties: {} },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true }
   },

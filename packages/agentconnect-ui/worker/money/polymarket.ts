@@ -370,39 +370,12 @@ async function regionStatus(deps: PolymarketDeps, client?: SecureClient): Promis
   return { access: stricter(own, server), owner, polymarket: pm };
 }
 
-// Whose location stops it: the owner's, or (when theirs is fine) where this
-// server's requests reach Polymarket from. Agents must not blame the owner for
-// the server's.
-function limitedBy(s: RegionStatus): 'owner' | 'server' | null {
-  if (s.access === 'open') return null;
-  return s.owner.access !== 'open' ? 'owner' : 'server';
-}
-
-const ownerPlace = (s: RegionStatus) => s.owner.region ?? s.owner.country;
-
-function where(s: RegionStatus): string {
-  if (limitedBy(s) === 'owner') {
-    return s.owner.country
-      ? `the owner's location (${ownerPlace(s)})`
-      : "the owner's location, which isn't known";
-  }
-  return `this server's location${s.polymarket?.country ? ` (${s.polymarket.country})` : ''}`;
-}
-
-// For a server-side limit: the owner isn't the cause, and nothing they do fixes it.
-function serverNote(s: RegionStatus): { hint?: string } {
-  if (limitedBy(s) !== 'server') return {};
-  return {
-    hint: `This is where the service runs, not where the owner is: the owner's location${s.owner.country ? ` (${ownerPlace(s)})` : ''} allows it. Tell the owner it's a limit on our side, not their account.`
-  };
-}
+// One message whatever the cause: the owner's location or the server's.
+const UNSUPPORTED = "Polymarket trading isn't supported from your current location.";
 
 function assertCanTrade(s: RegionStatus): void {
   if (s.access === 'blocked') {
-    throw refuse('region_blocked', `Polymarket isn't available from ${where(s)}.`, {
-      ...serverNote(s),
-      details: { asOf: REGION_RULES_AS_OF, limitedBy: limitedBy(s) }
-    });
+    throw refuse('region_blocked', UNSUPPORTED, { details: { asOf: REGION_RULES_AS_OF } });
   }
 }
 
@@ -412,14 +385,12 @@ function assertCanOpen(s: RegionStatus): void {
     const unknown = s.owner.access === 'close-only' && !s.owner.country;
     throw refuse(
       'region_close_only',
-      unknown
-        ? "The owner's location isn't known, so Polymarket can only close positions here: sell, cancel, redeem and withdraw still work."
-        : `Polymarket only allows closing positions from ${where(s)}: sell, cancel, redeem and withdraw still work.`,
+      `${UNSUPPORTED} Selling, cancelling, redeeming and withdrawing still work.`,
       {
         ...(unknown
           ? { hint: 'The owner can connect again from their browser so their location is known.' }
-          : serverNote(s)),
-        details: { asOf: REGION_RULES_AS_OF, limitedBy: limitedBy(s) }
+          : {}),
+        details: { asOf: REGION_RULES_AS_OF }
       }
     );
   }
@@ -434,16 +405,7 @@ function ownerGate(deps: PolymarketDeps, need: 'trade' | 'open'): void {
 }
 
 function regionSummary(s: RegionStatus): Record<string, unknown> {
-  return {
-    access: s.access,
-    limitedBy: limitedBy(s),
-    ownerCountry: s.owner.country,
-    ownerRegion: s.owner.region,
-    ...(s.polymarket
-      ? { polymarketBlocked: s.polymarket.blocked, polymarketCloseOnly: s.polymarket.closeOnly }
-      : {}),
-    rulesAsOf: REGION_RULES_AS_OF
-  };
+  return { access: s.access, rulesAsOf: REGION_RULES_AS_OF };
 }
 
 // ─── Stored account ─────────────────────────────────────────────────────────
@@ -1145,7 +1107,6 @@ export async function pmAccount(deps: PolymarketDeps): Promise<unknown> {
   if (!account) {
     const region = await regionStatus(deps).catch(() => null);
     const held = await deps.usdcBalance().catch(() => null);
-    const by = region ? limitedBy(region) : null;
     return {
       setUp: false,
       ...(held !== null ? { walletUsdcUsd: usdNumber(held) } : {}),
@@ -1154,11 +1115,9 @@ export async function pmAccount(deps: PolymarketDeps): Promise<unknown> {
         : { access: ownerAccess(deps.ownerRegion), check: 'unavailable' },
       next: !region
         ? "Polymarket's region check didn't answer; try again shortly."
-        : by === 'owner'
-          ? `Polymarket doesn't allow new predictions from ${where(region)}, so there is nothing to set up.`
-          : by === 'server'
-            ? `Polymarket isn't taking new predictions from ${where(region)} right now. This is where the service runs, not where the owner is; it's a limit on our side, not their account.`
-            : `A first deposit (at least $${formatUsd(BRIDGE_MIN_UNITS)}) from the agent wallet sets up the Polymarket account. For a bid, deposit the bid plus 1% for the bridge.`
+        : region.access !== 'open'
+          ? `${UNSUPPORTED} There is nothing to set up.`
+          : `A first deposit (at least $${formatUsd(BRIDGE_MIN_UNITS)}) from the agent wallet sets up the Polymarket account. For a bid, deposit the bid plus 1% for the bridge.`
     };
   }
   const { sdk, client } = await tradingClient(deps);
