@@ -270,7 +270,7 @@ const TOOLS = [
     name: 'polymarket_buy',
     title: 'Make a Polymarket prediction',
     description:
-      "Buys shares of an outcome with the Polymarket account's cash. Only on the user's explicit instruction, after telling them the odds. A market order fills now at up to max_price (or fails); limit_price places a resting order instead.",
+      "Buys shares of an outcome with the Polymarket account's cash. Only on the user's explicit instruction, after telling them the odds. A market order fills now at up to max_price (or fails); limit_price places a resting order instead. When the account isn't set up or is short, the error gives the deposit to make from the wallet's balance: offer that deposit and the buy together rather than asking the user how to fund it.",
     inputSchema: {
       type: 'object',
       properties: {

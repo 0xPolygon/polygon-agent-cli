@@ -463,6 +463,10 @@ export async function handleActionsApi(req: Request, env: Env, path: string): Pr
 
     const owner = await sessionIdentity(req, env.AGENT_CERT_SECRET);
     if (!owner) return fail(401, 'unauthorized', 'Sign in to answer this request');
+    // The owner is here in person: keep where they are now for Polymarket's rules.
+    if (req.method === 'POST') {
+      await key({ op: 'owner_seen', wallet: owner.wallet, region: ownerRegion(req) });
+    }
     if (req.method === 'GET')
       return answer(await key({ op: 'action', wallet: owner.wallet, id: actionId }));
     if (req.method !== 'POST') return fail(405, 'method_not_allowed', 'Use GET or POST');

@@ -193,7 +193,10 @@ export type KeyRequest =
   | { op: 'propose_bundle'; wallet: string; appName: string; steps: SpendRequest[] }
   // `waitMs`: answer once the action is decided and has run, or after that long.
   | { op: 'action'; wallet: string; id: string; waitMs?: number }
-  | { op: 'decide'; wallet: string; id: string; approve: boolean };
+  | { op: 'decide'; wallet: string; id: string; approve: boolean }
+  // Where the owner's browser was seen last (approving on this site): newer
+  // than the location saved when they connected.
+  | { op: 'owner_seen'; wallet: string; region: OwnerRegion };
 
 // What the wallet's own object answers (it has no key): sealed values by name.
 // `put_new` keeps a value already there and returns it. A lease lets one
@@ -496,6 +499,9 @@ export class AgentKey {
         return req.waitMs
           ? this.watchAction(req.id, req.waitMs)
           : viewAction(await loadAction(this.storage, req.id, this.now()));
+      case 'owner_seen':
+        if (req.region.country) await this.storage.put('ownerRegion', req.region);
+        return null;
       case 'decide': {
         // Approving queues it and answers at once; it runs in the background,
         // as if the agent had asked, within the allowance like any spend.
@@ -1093,7 +1099,8 @@ export class AgentKey {
           )
       },
       walletAddress: getAddress(record.wallet),
-      ownerRegion: ownerRegion ?? { country: null, region: null },
+      ownerRegion: (await this.storage.get<OwnerRegion>('ownerRegion')) ??
+        ownerRegion ?? { country: null, region: null },
       sendUsdc: async ({ to, amount }: { to: `0x${string}`; amount: bigint }) =>
         transfer({
           chainId: 137,
