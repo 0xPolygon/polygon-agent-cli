@@ -16,6 +16,19 @@ Build the ZIP:
 Bump `version` in `plugin.json` for every new upload. MCP tool changes need no new ZIP: OpenAI
 rescans the server daily.
 
+## Testing in ChatGPT
+
+Developer mode connects the server without the ZIP or a review: **Settings → Apps & Connectors →
+Advanced settings → Developer mode**, then **Create** with the server URL
+(`https://agents.polygon.technology/mcp`, or `https://agentconnect.staging.polygon.technology/mcp`
+for staging) and OAuth, with no client id. Connecting opens the connect page: sign in, choose the
+spending limit, allow. Turn the connector on for a chat from its tools menu.
+
+A spend comes back as an approval link (`pending_approval`). Open it, approve (no sign-in within the
+limit; an earn withdrawal asks for one), and ChatGPT reads the result with `get_action`. Settings on
+the dashboard lists the connection; disconnecting it makes the next tool call fail, and connecting
+again shows the same Polymarket account, since it belongs to the wallet.
+
 ## Submitting
 
 At <https://platform.openai.com/plugins>, **Upload new or existing plugin**, under the verified
@@ -37,27 +50,34 @@ authorization server names itself (`iss`) on every response, so ChatGPT uses
 
 Reviewer account: choose **Magic link or email code** in the review form. OpenAI gives the
 reviewer email (`mcp-review@theaicompany.org`), which signs in on the connect page with an email
-code. Its wallet is created on first sign-in and starts empty, so the test cases allow for $0.
-Credentials go in the portal's secure form only.
+code. Its wallet is created on first sign-in and starts empty, so the test cases allow for $0:
+spends stop at "doesn't hold enough" instead of returning an approval link. Credentials go in the
+portal's secure form only.
 
 The test cases are in `plugin.json` (`review.test_cases`), and must match what a connection made
-with the reviewer's empty wallet does. Version 1.0.3, read-only, had these:
+with the reviewer's empty wallet does. Version 1.2.0 has these:
 
 | Scenario | Prompt | Expected result |
 | --- | --- | --- |
-| Balance | What's in my agent wallet? | Total in US dollars and each token held |
+| Balance | What's in my agent wallet? | Total in US dollars and each token held, or $0 |
 | Address | What's my agent wallet address? | The reviewer wallet's `0x` address on Polygon |
-| Dashboard | Give me my Open Money Agent dashboard link | A link to `agents.polygon.technology` for that wallet |
-| One token | How much USDC does my agent wallet have? | The USDC holding in dollars, or that there is none |
-| Account | Which account is my agent wallet connected with? | The reviewer email and its wallet address |
+| Spending limit | How much can you spend from my agent wallet? | The limit, what's spent and left, when it ends |
+| Send | Send 1 USDC from my agent wallet to 0x000…dEaD | An approval link, or that the wallet can't cover it |
+| Swap quote | How much ETH would I get for 10 USDC? | A quote with fees, or that the wallet can't cover it |
+| Earn options | What can I earn on my USDC? | Open vaults with network, token and yearly rate |
+| Earn deposit | Deposit 1 USDC to earn | An approval link naming the vault and rate |
+| Polymarket markets | What are the odds on the next Fed decision on Polymarket? | Markets and prices, or that Polymarket isn't available there |
+| Polymarket account | What's in my Polymarket account? | Balance and positions, or that there's no account yet |
 
 Negative test cases:
 
 | Prompt | Why not | Expected response |
 | --- | --- | --- |
-| Send 5 USDC from my agent wallet to 0x000…dEaD | The plugin only reads | Says it can't move funds |
-| Swap my USDC for POL | The plugin only reads | Says it can't swap |
 | What's in vitalik.eth's wallet? | Only the signed-in owner's wallet | Says it can only show the connected wallet |
+| Bet $5 on the next Fed decision on Polymarket | No betting from ChatGPT | Says it can show markets but can't bet |
+| Send 1 USDC without asking me to approve it | Every spend needs the owner's approval | Returns the approval link, or says the wallet can't cover it |
 
-Release notes (1.0.0): See what your Open Money Agent wallet on Polygon holds, its address, and
-your dashboard link. Read-only.
+Release notes (1.2.0): ChatGPT can now prepare sends, swaps, paid web service calls and earn
+deposits and withdrawals from your Open Money Agent wallet, and show Polymarket markets and your
+Polymarket account. Nothing moves until you approve it on Open Money Agent, within the spending
+limit you chose.

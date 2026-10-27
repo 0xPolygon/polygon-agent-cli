@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "open-money-agent",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Your Open Money Agent wallet on Polygon: see what it holds, and send, swap, earn and pay for services, each approved by you on Open Money Agent.",
   "author": {
     "name": "Polygon Labs",
@@ -66,6 +66,30 @@
               "prompt": "How much ETH would I get for 10 USDC?",
               "tools_triggered": "swap_quote",
               "expected_behavior": "A quote: the WETH expected and the minimum, and the fees. Nothing is traded. An unfunded wallet gets a message that it doesn't hold enough USDC."
+            },
+            {
+              "description": "Earn options",
+              "prompt": "What can I earn on my USDC?",
+              "tools_triggered": "earn_vaults",
+              "expected_behavior": "The vaults open for deposits now, each with its network, token and yearly rate, and anything the wallet already has in them. Nothing is deposited."
+            },
+            {
+              "description": "Earn deposit needs approval",
+              "prompt": "Deposit 1 USDC to earn",
+              "tools_triggered": "earn_vaults, earn_deposit",
+              "expected_behavior": "Nothing is deposited. ChatGPT returns a link to approve the deposit on agents.polygon.technology, naming the vault, its network and rate."
+            },
+            {
+              "description": "Polymarket markets",
+              "prompt": "What are the odds on the next Fed decision on Polymarket?",
+              "tools_triggered": "polymarket_markets",
+              "expected_behavior": "Matching markets with their outcomes and current prices, or that Polymarket isn't available where the user is. No bet is placed."
+            },
+            {
+              "description": "Polymarket account",
+              "prompt": "What's in my Polymarket account?",
+              "tools_triggered": "polymarket_account",
+              "expected_behavior": "The wallet's Polymarket balance and open positions. A new wallet reports that it has no Polymarket account yet."
             }
           ],
           "negative": [
@@ -87,10 +111,10 @@
           ]
         },
         "commerce": false,
-        "commerce_description": "This plugin does not sell products or process payments. It only reads the connected wallet."
+        "commerce_description": "This plugin does not sell products. It prepares payments from the user's own agent wallet, and each one runs only after the user approves it on Open Money Agent."
       },
       "publication": {
-        "release_notes": "ChatGPT can now prepare sends, swaps, paid web service calls and earn deposits from your Open Money Agent wallet. Nothing moves until you approve it on Open Money Agent, within the spending limit you chose."
+        "release_notes": "ChatGPT can now prepare sends, swaps, paid web service calls and earn deposits and withdrawals from your Open Money Agent wallet, and show Polymarket markets and your Polymarket account. Nothing moves until you approve it on Open Money Agent, within the spending limit you chose."
       }
     }
   }
