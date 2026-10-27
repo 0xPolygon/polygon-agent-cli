@@ -292,13 +292,13 @@ const floor2 = (n: number) => Math.floor(n * 100) / 100;
 
 // ─── Region ─────────────────────────────────────────────────────────────────
 
-// Polymarket's published restrictions, as of 2026-10-26:
+// Polymarket's published restrictions, as of 2026-10-27:
 // https://docs.polymarket.com/developers/CLOB/geoblock
-export const REGION_RULES_AS_OF = '2026-10-26';
+export const REGION_RULES_AS_OF = '2026-10-27';
 const BLOCKED_COUNTRIES = new Set(['IR', 'SY', 'CU', 'KP']);
 const BLOCKED_REGIONS = new Set(['UA-43', 'UA-14', 'UA-09']);
 const CLOSE_ONLY_COUNTRIES = new Set([
-  'AU', 'BY', 'BE', 'BI', 'BR', 'CF', 'CD', 'ET', 'FR', 'DE', 'IQ', 'IT', 'LB', 'LY', 'MM', 'NZ',
+  'AR', 'AU', 'BY', 'BE', 'BI', 'BR', 'CF', 'CD', 'ET', 'FR', 'DE', 'IQ', 'IT', 'LB', 'LY', 'MM', 'NZ',
   'NI', 'PL', 'RU', 'SG', 'SO', 'SK', 'SS', 'SD', 'TW', 'TH', 'GB', 'US', 'UM', 'VE', 'YE', 'ZW'
 ]); // prettier-ignore
 const CLOSE_ONLY_REGIONS = new Set(['CA-BC', 'CA-ON', 'CA-AB', 'CA-QC']);
@@ -370,19 +370,38 @@ async function regionStatus(deps: PolymarketDeps, client?: SecureClient): Promis
   return { access: stricter(own, server), owner, polymarket: pm };
 }
 
+// Whose location stops it: the owner's, or (when theirs is fine) where this
+// server's requests reach Polymarket from. Agents must not blame the owner for
+// the server's.
+function limitedBy(s: RegionStatus): 'owner' | 'server' | null {
+  if (s.access === 'open') return null;
+  return s.owner.access !== 'open' ? 'owner' : 'server';
+}
+
+const ownerPlace = (s: RegionStatus) => s.owner.region ?? s.owner.country;
+
 function where(s: RegionStatus): string {
-  if (s.owner.access !== 'open') {
+  if (limitedBy(s) === 'owner') {
     return s.owner.country
-      ? `the owner's location (${s.owner.region ?? s.owner.country})`
+      ? `the owner's location (${ownerPlace(s)})`
       : "the owner's location, which isn't known";
   }
   return `this server's location${s.polymarket?.country ? ` (${s.polymarket.country})` : ''}`;
 }
 
+// For a server-side limit: the owner isn't the cause, and nothing they do fixes it.
+function serverNote(s: RegionStatus): { hint?: string } {
+  if (limitedBy(s) !== 'server') return {};
+  return {
+    hint: `This is where the service runs, not where the owner is: the owner's location${s.owner.country ? ` (${ownerPlace(s)})` : ''} allows it. Tell the owner it's a limit on our side, not their account.`
+  };
+}
+
 function assertCanTrade(s: RegionStatus): void {
   if (s.access === 'blocked') {
     throw refuse('region_blocked', `Polymarket isn't available from ${where(s)}.`, {
-      details: { asOf: REGION_RULES_AS_OF }
+      ...serverNote(s),
+      details: { asOf: REGION_RULES_AS_OF, limitedBy: limitedBy(s) }
     });
   }
 }
@@ -399,8 +418,8 @@ function assertCanOpen(s: RegionStatus): void {
       {
         ...(unknown
           ? { hint: 'The owner can connect again from their browser so their location is known.' }
-          : {}),
-        details: { asOf: REGION_RULES_AS_OF }
+          : serverNote(s)),
+        details: { asOf: REGION_RULES_AS_OF, limitedBy: limitedBy(s) }
       }
     );
   }
@@ -417,6 +436,7 @@ function ownerGate(deps: PolymarketDeps, need: 'trade' | 'open'): void {
 function regionSummary(s: RegionStatus): Record<string, unknown> {
   return {
     access: s.access,
+    limitedBy: limitedBy(s),
     ownerCountry: s.owner.country,
     ownerRegion: s.owner.region,
     ...(s.polymarket
@@ -506,15 +526,57 @@ function environment(sdk: PmSdk, deps: PolymarketDeps): { environment?: unknown 
     : {};
 }
 
-// The client for a recorded account. Never creates anything.
+// What to deposit so a bid can be paid: the bid plus the 1% the bridge may keep
+// (see pmDeposit's wait), in whole cents, and at least the bridge minimum.
+export function depositFor(units: bigint): bigint {
+  const cents = ((units * 101n) / 100n + 9_999n) / 10_000n;
+  const amount = cents * 10_000n;
+  return amount > BRIDGE_MIN_UNITS ? amount : BRIDGE_MIN_UNITS;
+}
+
+// One next step for funding a deposit, from what the agent wallet holds, so the
+// agent can offer it instead of asking the owner what to do.
+async function fundingStep(
+  deps: PolymarketDeps,
+  deposit: bigint
+): Promise<{ hint: string; details: Record<string, unknown> }> {
+  const held = await deps.usdcBalance().catch(() => null);
+  const amount = `$${formatUsd(deposit)}`;
+  const details = {
+    depositUsd: usdNumber(deposit),
+    ...(held !== null ? { walletUsdcUsd: usdNumber(held) } : {})
+  };
+  const then =
+    'then buy. Where the owner approves each spend, propose the deposit and the buy as one bundle.';
+  if (held === null) return { hint: `Deposit ${amount} from the agent wallet, ${then}`, details };
+  if (held >= deposit) {
+    return {
+      hint: `The agent wallet holds $${formatUsd(held)} USDC on Polygon: deposit ${amount}, ${then}`,
+      details
+    };
+  }
+  return {
+    hint: `The agent wallet holds $${formatUsd(held)} USDC on Polygon, short of the ${amount} deposit. A deposit also brings in USDC from the wallet's other networks; without any, the owner adds funds first.`,
+    details
+  };
+}
+
+// The client for a recorded account. Never creates anything. `bidUnits`: the
+// buy it is for, so a missing account says what to deposit.
 async function tradingClient(
-  deps: PolymarketDeps
+  deps: PolymarketDeps,
+  bidUnits?: bigint
 ): Promise<{ sdk: PmSdk; client: SecureClient; account: StoredAccount }> {
   const account = await loadAccount(deps);
   if (!account) {
-    throw refuse('not_set_up', 'This wallet has no Polymarket account yet.', {
-      hint: 'A first deposit (at least $2) sets it up.'
-    });
+    // Suggest a deposit only where it could be used.
+    if (bidUnits !== undefined) assertCanOpen(await regionStatus(deps));
+    const step = await fundingStep(deps, depositFor(bidUnits ?? 0n));
+    throw refuse(
+      'not_set_up',
+      'This wallet has no Polymarket account yet. Its first deposit sets one up.',
+      step
+    );
   }
   const key = await deps.store.get(KEYS.key);
   if (!key) throw keyMissing(account);
@@ -1082,15 +1144,21 @@ export async function pmAccount(deps: PolymarketDeps): Promise<unknown> {
   const account = await loadAccount(deps);
   if (!account) {
     const region = await regionStatus(deps).catch(() => null);
+    const held = await deps.usdcBalance().catch(() => null);
+    const by = region ? limitedBy(region) : null;
     return {
       setUp: false,
+      ...(held !== null ? { walletUsdcUsd: usdNumber(held) } : {}),
       region: region
         ? regionSummary(region)
         : { access: ownerAccess(deps.ownerRegion), check: 'unavailable' },
-      next:
-        region?.access === 'open'
-          ? 'Deposit at least $2 from the agent wallet to set up the Polymarket account and fund it.'
-          : 'Buying on Polymarket is not available for this owner, so there is nothing to set up.'
+      next: !region
+        ? "Polymarket's region check didn't answer; try again shortly."
+        : by === 'owner'
+          ? `Polymarket doesn't allow new predictions from ${where(region)}, so there is nothing to set up.`
+          : by === 'server'
+            ? `Polymarket isn't taking new predictions from ${where(region)} right now. This is where the service runs, not where the owner is; it's a limit on our side, not their account.`
+            : `A first deposit (at least $${formatUsd(BRIDGE_MIN_UNITS)}) from the agent wallet sets up the Polymarket account. For a bid, deposit the bid plus 1% for the bridge.`
     };
   }
   const { sdk, client } = await tradingClient(deps);
@@ -1232,16 +1300,18 @@ export async function pmDeposit(p: { usd: string }, deps: PolymarketDeps): Promi
   };
 }
 
-/** Buys outcome shares: a FAK market order capped at the amount, or a limit order. */
 /** Whether the Polymarket account can pay for a prediction: checked before the owner is asked. */
 export async function pmCheckBuy(p: { usd: string }, deps: PolymarketDeps): Promise<void> {
   const units = parseUsd(p.usd);
   ownerGate(deps, 'open');
-  const { sdk, client } = await tradingClient(deps);
+  const { sdk, client } = await tradingClient(deps, units);
+  // The owner shouldn't approve a buy Polymarket would refuse.
+  assertCanOpen(await regionStatus(deps, client));
   const held = await pusdBalance(sdk, client);
   if (held < units) throw await shortOfFunds(deps, held, units);
 }
 
+/** Buys outcome shares: a FAK market order capped at the amount, or a limit order. */
 export async function pmBuy(
   p: { market: string; outcome: string; usd: string; maxPrice?: number; limitPrice?: number },
   deps: PolymarketDeps
@@ -1256,7 +1326,7 @@ export async function pmBuy(
   const units = parseUsd(p.usd);
   const usd = formatUsd(units);
   ownerGate(deps, 'open');
-  const { sdk, client } = await tradingClient(deps);
+  const { sdk, client } = await tradingClient(deps, units);
   assertCanOpen(await regionStatus(deps, client));
   const r = await resolveOutcome(sdk, client, p.market, p.outcome);
   assertAccepting(r.market);
@@ -1344,11 +1414,14 @@ async function shortOfFunds(
       { hint: `Check the account again in a minute, or bid $${formatUsd(held)} now.`, details }
     );
   }
-  const deposit = shortfall > BRIDGE_MIN_UNITS ? shortfall : BRIDGE_MIN_UNITS;
+  const step = await fundingStep(deps, depositFor(shortfall));
   return refuse(
     'insufficient_pusd',
     `The Polymarket account holds $${formatUsd(held)}, $${formatUsd(shortfall)} short of the $${formatUsd(units)} bid.`,
-    { hint: `Bid $${formatUsd(held)} or less, or deposit $${formatUsd(deposit)} first.`, details }
+    {
+      hint: held > 0n ? `${step.hint} Or bid $${formatUsd(held)} or less.` : step.hint,
+      details: { ...details, ...step.details }
+    }
   );
 }
 

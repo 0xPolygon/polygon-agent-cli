@@ -6,6 +6,7 @@ import type { PmSdk, PolymarketDeps } from './polymarket.ts';
 import { MoneyError } from './errors.ts';
 import {
   builderApiKey,
+  depositFor,
   ownerAccess,
   parseShares,
   parseUsd,
@@ -60,7 +61,10 @@ interface World {
   redeemable: Array<{ conditionId: string; title: string; currentValue: string }>;
 }
 
-function setup(over: Partial<World> = {}, ownerRegion = { country: 'JP', region: null }) {
+function setup(
+  over: Partial<World> = {},
+  ownerRegion: PolymarketDeps['ownerRegion'] = { country: 'JP', region: null }
+) {
   const world: World = {
     pusd: 0n,
     shares: 0n,
@@ -265,6 +269,8 @@ describe('owner location', () => {
     expect(ownerAccess({ country: 'ca', region: 'qc' })).toBe('close-only');
     expect(ownerAccess({ country: 'CA', region: 'CA-NS' })).toBe('open');
     expect(ownerAccess({ country: 'JP', region: null })).toBe('open');
+    expect(ownerAccess({ country: 'PT', region: 'PT-11' })).toBe('open');
+    expect(ownerAccess({ country: 'AR', region: null })).toBe('close-only');
   });
 
   it('treats an unknown country as close-only', () => {
@@ -315,6 +321,32 @@ describe('region gating', () => {
     await expect(
       pmSell({ market: 'will-it-rain', outcome: 'yes', shares: '1' }, deps)
     ).resolves.toMatchObject({ shares: 1 });
+  });
+
+  it("says when the server's location is the limit, not the owner's", async () => {
+    const env = setup({}, { country: 'PT', region: 'PT-11' });
+    await withAccount(env);
+    env.world.geoblock = { blocked: false, country: 'US' };
+    env.world.closedOnly = true;
+    const err = await pmBuy({ market: 'will-it-rain', outcome: 'yes', usd: '1' }, env.deps).catch(
+      (e: MoneyError) => e
+    );
+    expect(err).toBeInstanceOf(MoneyError);
+    expect((err as MoneyError).details).toMatchObject({
+      reason: 'region_close_only',
+      limitedBy: 'server'
+    });
+    expect((err as MoneyError).message).toMatch(/this server's location/);
+    expect((err as MoneyError).hint).toMatch(/not where the owner is.*PT-11/);
+  });
+
+  it("doesn't blame the owner on an account not set up yet", async () => {
+    const env = setup({}, { country: 'PT', region: 'PT-11' });
+    env.world.geoblock = { blocked: true, country: 'US' };
+    const account = (await pmAccount(env.deps)) as { next: string; region: { limitedBy: string } };
+    expect(account.region.limitedBy).toBe('server');
+    expect(account.next).toMatch(/not where the owner is/);
+    expect(await reason(pmCheckBuy({ usd: '1' }, env.deps))).toBe('region_blocked');
   });
 
   it("applies Polymarket's own answer when it is stricter", async () => {
@@ -467,6 +499,29 @@ describe('trading', () => {
       )
     ).toBe('price_guard');
     expect(env.calls.orders).toHaveLength(0);
+  });
+
+  it('names the deposit a first bid needs, from the wallet balance', async () => {
+    const env = setup({ usdc: 5_000_000n });
+    const account = (await pmAccount(env.deps)) as { setUp: boolean; walletUsdcUsd: number };
+    expect(account).toMatchObject({ setUp: false, walletUsdcUsd: 5 });
+    const err = await pmCheckBuy({ usd: '2.2' }, env.deps).catch((e: MoneyError) => e);
+    expect((err as MoneyError).details).toMatchObject({
+      reason: 'not_set_up',
+      depositUsd: 2.23,
+      walletUsdcUsd: 5
+    });
+    expect((err as MoneyError).hint).toMatch(/holds \$5 USDC on Polygon: deposit \$2.23/);
+    env.world.usdc = 1_000_000n;
+    const short = await pmCheckBuy({ usd: '2.2' }, env.deps).catch((e: MoneyError) => e);
+    expect((short as MoneyError).hint).toMatch(/short of the \$2.23 deposit/);
+    expect(env.calls.sends).toHaveLength(0);
+  });
+
+  it('sizes deposits with room for the bridge, at least its minimum', () => {
+    expect(depositFor(0n)).toBe(2_000_000n);
+    expect(depositFor(2_200_000n)).toBe(2_230_000n);
+    expect(depositFor(10_000_000n)).toBe(10_100_000n);
   });
 
   it('checks the pUSD balance before the owner is asked, without trading', async () => {
