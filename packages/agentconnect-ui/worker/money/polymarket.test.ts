@@ -311,19 +311,21 @@ describe('region gating', () => {
     expect(env.calls.orders[0]).toMatchObject({ side: 'SELL', orderType: 'FAK', shares: 3 });
   });
 
-  it('refuses buys when the owner country is unknown, with a clear reason', async () => {
+  it('refuses buys when the owner country is unknown, and says how to fix it', async () => {
     const env = setup({ shares: 1_000_000n });
     await withAccount(env);
     const deps = { ...env.deps, ownerRegion: { country: null, region: null } };
-    await expect(pmBuy({ market: 'will-it-rain', outcome: 'yes', usd: '1' }, deps)).rejects.toThrow(
-      /location isn't known/
+    const err = await pmBuy({ market: 'will-it-rain', outcome: 'yes', usd: '1' }, deps).catch(
+      (e: MoneyError) => e
     );
+    expect((err as MoneyError).message).toMatch(/isn't supported from your current location/);
+    expect((err as MoneyError).hint).toMatch(/connect again/);
     await expect(
       pmSell({ market: 'will-it-rain', outcome: 'yes', shares: '1' }, deps)
     ).resolves.toMatchObject({ shares: 1 });
   });
 
-  it("says when the server's location is the limit, not the owner's", async () => {
+  it('says only that the current location is unsupported, whatever the cause', async () => {
     const env = setup({}, { country: 'PT', region: 'PT-11' });
     await withAccount(env);
     env.world.geoblock = { blocked: false, country: 'US' };
@@ -332,20 +334,24 @@ describe('region gating', () => {
       (e: MoneyError) => e
     );
     expect(err).toBeInstanceOf(MoneyError);
-    expect((err as MoneyError).details).toMatchObject({
-      reason: 'region_close_only',
-      limitedBy: 'server'
-    });
-    expect((err as MoneyError).message).toMatch(/this server's location/);
-    expect((err as MoneyError).hint).toMatch(/not where the owner is.*PT-11/);
+    expect((err as MoneyError).details?.reason).toBe('region_close_only');
+    expect((err as MoneyError).message).toMatch(
+      /^Polymarket trading isn't supported from your current location\./
+    );
+    expect((err as MoneyError).message).not.toMatch(/PT|US|server|owner/);
+    const blocked = setup({}, { country: 'CU', region: null });
+    const cu = await pmCheckBuy({ usd: '1' }, blocked.deps).catch((e: MoneyError) => e);
+    expect((cu as MoneyError).message).toBe(
+      "Polymarket trading isn't supported from your current location."
+    );
   });
 
-  it("doesn't blame the owner on an account not set up yet", async () => {
+  it('reports an unsupported location on an account not set up yet', async () => {
     const env = setup({}, { country: 'PT', region: 'PT-11' });
     env.world.geoblock = { blocked: true, country: 'US' };
-    const account = (await pmAccount(env.deps)) as { next: string; region: { limitedBy: string } };
-    expect(account.region.limitedBy).toBe('server');
-    expect(account.next).toMatch(/not where the owner is/);
+    const account = (await pmAccount(env.deps)) as { next: string; region: object };
+    expect(account.region).toEqual({ access: 'blocked', rulesAsOf: expect.any(String) });
+    expect(account.next).toMatch(/isn't supported from your current location/);
     expect(await reason(pmCheckBuy({ usd: '1' }, env.deps))).toBe('region_blocked');
   });
 
