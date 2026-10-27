@@ -160,6 +160,19 @@ describe('MCP client profiles', () => {
       (body as { result: { tools: { name: string }[] } }).result.tools.map((t) => t.name)
     ).toEqual(['get_wallet']);
   });
+
+  it('lets a Muse connection with an allowance move money', async () => {
+    const { body } = await rpc(
+      env(),
+      { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+      { ...MUSE, keyId: 'k1' }
+    );
+    const names = (body as { result: { tools: { name: string }[] } }).result.tools.map(
+      (t) => t.name
+    );
+    expect(names).toContain('send');
+    expect(names).not.toContain('propose_bundle');
+  });
 });
 
 describe('MCP money tools', () => {
@@ -264,6 +277,49 @@ describe('MCP money tools', () => {
         }
       }
     ]);
+  });
+
+  it('saves several ChatGPT spends for one approval', async () => {
+    const { ns, asked } = keys({
+      ok: true,
+      value: { actionId: 'a2', title: 'Two steps', expiresAt: 'later' }
+    });
+    const r = await call(
+      { ...env(), AGENT_KEYS: ns },
+      'propose_bundle',
+      { ...OPENAI, keyId: 'k1', appName: 'ChatGPT' },
+      {
+        steps: [
+          { tool: 'polymarket_deposit', arguments: { usd: '10' } },
+          { tool: 'polymarket_buy', arguments: { market: 'fed', outcome: 'Yes', usd: '5' } }
+        ]
+      }
+    );
+    expect(r.structuredContent).toMatchObject({ status: 'pending_approval', actionId: 'a2' });
+    expect(asked[0].body).toMatchObject({
+      op: 'propose_bundle',
+      steps: [
+        { op: 'pm_deposit', usd: '10' },
+        { op: 'pm_buy', market: 'fed', outcome: 'Yes', usd: '5' }
+      ]
+    });
+  });
+
+  it("won't put a tool that doesn't spend in a bundle", async () => {
+    const { ns, asked } = keys({ ok: true, value: {} });
+    const r = await call(
+      { ...env(), AGENT_KEYS: ns },
+      'propose_bundle',
+      { ...OPENAI, keyId: 'k1' },
+      {
+        steps: [
+          { tool: 'get_action', arguments: {} },
+          { tool: 'send', arguments: {} }
+        ]
+      }
+    );
+    expect(r.isError).toBe(true);
+    expect(asked).toHaveLength(0);
   });
 
   it('lets ChatGPT read and quote without approval', async () => {

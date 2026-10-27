@@ -359,21 +359,13 @@ describe('connecting an agent (consent)', () => {
     expect(await res.json()).toEqual({ clientName: 'ChatGPT', signedIn: false, spending: true });
   });
 
-  it('keeps Muse to reading the wallet, with no limit to approve', async () => {
-    const { e, signIn, completed } = setup();
-    const keys = agentKeys();
-    e.AGENT_KEYS = keys.ns;
+  it('asks the owner for a spending limit for Muse, like any client that moves money', async () => {
+    const { e, signIn } = setup();
+    e.AGENT_KEYS = agentKeys().ns;
     e.MCP_CLIENT_PROFILES = JSON.stringify({ cli_1: 'muse' });
     const c = await signIn.create({ authRequest: authRequest as never, clientName: 'Muse' });
     const res = await call(e, 'GET', `/api/connect?c=${c}`, { cookie: await cookie() });
-    expect(await res.json()).not.toHaveProperty('spending');
-    await call(e, 'POST', '/api/connect/decide', {
-      cookie: await cookie(),
-      body: { c, allow: true }
-    });
-    expect(completed[0]).toMatchObject({ props: { profile: 'muse' } });
-    expect((completed[0] as { props: object }).props).not.toHaveProperty('keyId');
-    expect(keys.asked).toEqual([]);
+    expect(await res.json()).toHaveProperty('spending');
   });
 
   it("revokes a connection's key when the owner disconnects it", async () => {

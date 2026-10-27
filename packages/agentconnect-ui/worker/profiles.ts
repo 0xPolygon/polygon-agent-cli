@@ -4,8 +4,9 @@
 // `standard` is every client we haven't set up: everything the agent wallet
 // does, within the allowance the owner approves when connecting. ChatGPT
 // (`openai`) gets the same tools, but its apps may not move money themselves:
-// each spend waits for the owner to approve it on this site (money/actions.ts).
-// Muse takes no money movement at all. ChatGPT is recognised by its redirect
+// each spend, Polymarket included, waits for the owner to approve it on this
+// site (money/actions.ts).
+// Muse spends within the allowance like a standard client. ChatGPT is recognised by its redirect
 // URI (it registers a new client per install); others are mapped by client id
 // in MCP_CLIENT_PROFILES.
 
@@ -43,18 +44,17 @@ const MONEY = [
   'get_action'
 ] as const;
 
-// OpenAI's rules count real-money betting apart from moving money: ChatGPT
-// sees Polymarket markets and the account, but can't fund it or bet.
-const BETTING = new Set<string>(['polymarket_deposit', 'polymarket_buy', 'polymarket_sell']);
+// Only where the owner approves each spend: several approved at once.
+const BUNDLE = ['propose_bundle'] as const;
 
 export const PROFILES: Record<Profile, ProfilePolicy> = {
   standard: { tools: [...READ, ...MONEY], movesMoney: true, ownerApproves: false },
   openai: {
-    tools: [...READ, ...MONEY].filter((t) => !BETTING.has(t)),
+    tools: [...READ, ...MONEY, ...BUNDLE],
     movesMoney: true,
     ownerApproves: true
   },
-  muse: { tools: [...READ], movesMoney: false, ownerApproves: false }
+  muse: { tools: [...READ, ...MONEY], movesMoney: true, ownerApproves: false }
 };
 
 const isProfile = (v: unknown): v is Profile => typeof v === 'string' && Object.hasOwn(PROFILES, v);

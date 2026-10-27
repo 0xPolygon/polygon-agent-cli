@@ -1233,6 +1233,15 @@ export async function pmDeposit(p: { usd: string }, deps: PolymarketDeps): Promi
 }
 
 /** Buys outcome shares: a FAK market order capped at the amount, or a limit order. */
+/** Whether the Polymarket account can pay for a prediction: checked before the owner is asked. */
+export async function pmCheckBuy(p: { usd: string }, deps: PolymarketDeps): Promise<void> {
+  const units = parseUsd(p.usd);
+  ownerGate(deps, 'open');
+  const { sdk, client } = await tradingClient(deps);
+  const held = await pusdBalance(sdk, client);
+  if (held < units) throw await shortOfFunds(deps, held, units);
+}
+
 export async function pmBuy(
   p: { market: string; outcome: string; usd: string; maxPrice?: number; limitPrice?: number },
   deps: PolymarketDeps
