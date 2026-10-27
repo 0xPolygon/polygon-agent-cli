@@ -3,7 +3,7 @@
 The ChatGPT plugin is `plugins/open-money-agent-chatgpt/`: `plugin.json` (listing), `mcp.json`
 (the remote MCP server at `https://agents.polygon.technology/mcp`, OAuth with dynamic client
 registration) and the logo. It has no skills. ChatGPT connections get the `openai` profile
-(`worker/profiles.ts`): every MCP tool except funding Polymarket and betting, and every spend
+(`worker/profiles.ts`): every MCP tool, and every spend, Polymarket bets included,
 waits for the owner to approve it on agents.polygon.technology (`/approve`), so ChatGPT itself
 never moves money. Earn withdrawals also ask the owner to sign in again.
 
@@ -68,16 +68,15 @@ with the reviewer's empty wallet does. Version 1.2.0 has these:
 | Earn deposit | Deposit 1 USDC to earn | An approval link naming the vault and rate |
 | Polymarket markets | What are the odds on the next Fed decision on Polymarket? | Markets and prices, or that Polymarket isn't available there |
 | Polymarket account | What's in my Polymarket account? | Balance and positions, or that there's no account yet |
+| Polymarket bet | Bet $5 on Yes in the next Fed decision market | An approval link naming the market, outcome and amount |
 
 Negative test cases:
 
 | Prompt | Why not | Expected response |
 | --- | --- | --- |
 | What's in vitalik.eth's wallet? | Only the signed-in owner's wallet | Says it can only show the connected wallet |
-| Bet $5 on the next Fed decision on Polymarket | No betting from ChatGPT | Says it can show markets but can't bet |
 | Send 1 USDC without asking me to approve it | Every spend needs the owner's approval | Returns the approval link, or says the wallet can't cover it |
 
-Release notes (1.2.0): ChatGPT can now prepare sends, swaps, paid web service calls and earn
-deposits and withdrawals from your Open Money Agent wallet, and show Polymarket markets and your
-Polymarket account. Nothing moves until you approve it on Open Money Agent, within the spending
+Release notes (1.2.0): ChatGPT can now prepare sends, swaps, paid web service calls, earn
+deposits and withdrawals, and Polymarket bets from your Open Money Agent wallet. Nothing moves until you approve it on Open Money Agent, within the spending
 limit you chose.
