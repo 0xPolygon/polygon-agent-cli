@@ -12,6 +12,7 @@ import type { McpProps } from './mcp.ts';
 
 import { AuthError, issueCertificate, verifyAccessToken, verifyEnrollToken } from './agent-auth.ts';
 import { AgentCardError, agentCardFailure } from './agentcard.ts';
+import { browserCheckouts, decideBrowserApproval } from './browser-checkout.ts';
 import { handleMcp } from './mcp.ts';
 import { agentKey } from './money/agent-key.ts';
 import { setUpAllowance } from './money/connect.ts';
@@ -88,6 +89,10 @@ export interface Env {
   MCP_CLIENT_PROFILES?: string;
   // One Durable Object per wallet: atomic payment claims (wallet-lock.ts).
   WALLET_LOCK?: DurableObjectNamespace;
+  // Hosted browsers for checkouts at any store (browser-checkout.ts), and the
+  // name of this deployment's AgentCard configuration registered with Kernel.
+  KERNEL_API_KEY?: string;
+  KERNEL_AGENTCARD_CONFIG?: string;
   // The token OpenAI's plugin portal asks this domain to serve, to prove we own it.
   OPENAI_APPS_CHALLENGE?: string;
   // Caps MCP client registrations per address (wrangler.toml ratelimits).
@@ -628,6 +633,7 @@ export async function handleApproveApi(req: Request, env: Env, path: string): Pr
         merchant: a.merchant,
         merchantUrl: a.merchantUrl,
         totalCents: a.totalCents,
+        currency: a.currency ?? 'usd',
         items: a.items,
         kind: a.kind,
         status: a.status,
@@ -667,7 +673,12 @@ export async function handleApproveApi(req: Request, env: Env, path: string): Pr
         pending.approvalId,
         pending.signedIn.wallet,
         body.approve === true,
-        walletLock(env, pending.signedIn.wallet)
+        walletLock(env, pending.signedIn.wallet),
+        (wallet, approval, approve) => {
+          const checkouts = browserCheckouts(env, db, wallet);
+          if (!checkouts) throw new ValidationError('Browser checkouts are not configured.');
+          return decideBrowserApproval(checkouts, approval, approve);
+        }
       );
       await signIn.forget(id);
       return json(result);
