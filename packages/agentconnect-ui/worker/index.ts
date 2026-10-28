@@ -12,6 +12,7 @@ import type { McpProps } from './mcp.ts';
 
 import { AuthError, issueCertificate, verifyAccessToken, verifyEnrollToken } from './agent-auth.ts';
 import { AgentCardError, agentCardFailure } from './agentcard.ts';
+import { browserCheckouts, decideBrowserApproval, money } from './browser-checkout.ts';
 import { handleMcp } from './mcp.ts';
 import { agentKey } from './money/agent-key.ts';
 import { setUpAllowance } from './money/connect.ts';
@@ -25,6 +26,7 @@ import {
   MIN_ALLOWANCE_USD,
   priceKey
 } from './money/plan.ts';
+import { previewPng, withPreviewTags } from './og-image.ts';
 import { publishableKey } from './oms-config.ts';
 import {
   issueSession,
@@ -88,6 +90,10 @@ export interface Env {
   MCP_CLIENT_PROFILES?: string;
   // One Durable Object per wallet: atomic payment claims (wallet-lock.ts).
   WALLET_LOCK?: DurableObjectNamespace;
+  // Hosted browsers for checkouts at any store (browser-checkout.ts), and the
+  // name of this deployment's AgentCard configuration registered with Kernel.
+  KERNEL_API_KEY?: string;
+  KERNEL_AGENTCARD_CONFIG?: string;
   // The token OpenAI's plugin portal asks this domain to serve, to prove we own it.
   OPENAI_APPS_CHALLENGE?: string;
   // Caps MCP client registrations per address (wrangler.toml ratelimits).
@@ -612,6 +618,13 @@ export async function handleActionsApi(req: Request, env: Env, path: string): Pr
  * approval sees it on its next status check.
  */
 export async function handleApproveApi(req: Request, env: Env, path: string): Promise<Response> {
+  if (path === '/api/approve/preview.png' && req.method === 'GET') {
+    const p = await approvalPreview(env, new URL(req.url).searchParams.get('r') ?? '');
+    if (!p) return new Response('Not found', { status: 404 });
+    return new Response(await previewPng(p.amount, p.merchant), {
+      headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=300' }
+    });
+  }
   const signIn = ownerSignIn(env);
   const db = store(env);
   const cards = agentCard(env);
@@ -628,6 +641,7 @@ export async function handleApproveApi(req: Request, env: Env, path: string): Pr
         merchant: a.merchant,
         merchantUrl: a.merchantUrl,
         totalCents: a.totalCents,
+        currency: a.currency ?? 'usd',
         items: a.items,
         kind: a.kind,
         status: a.status,
@@ -667,7 +681,12 @@ export async function handleApproveApi(req: Request, env: Env, path: string): Pr
         pending.approvalId,
         pending.signedIn.wallet,
         body.approve === true,
-        walletLock(env, pending.signedIn.wallet)
+        walletLock(env, pending.signedIn.wallet),
+        (wallet, approval, approve) => {
+          const checkouts = browserCheckouts(env, db, wallet);
+          if (!checkouts) throw new ValidationError('Browser checkouts are not configured.');
+          return decideBrowserApproval(checkouts, approval, approve);
+        }
       );
       await signIn.forget(id);
       return json(result);
@@ -958,6 +977,29 @@ export async function handleApi(req: Request, env: Env, path: string): Promise<R
   }
 }
 
+/** What an approval link's preview shows: the amount and the store, nothing else. */
+async function approvalPreview(env: Env, id: string) {
+  const db = store(env);
+  const found = db && id ? await approvalForPage(db, id).catch(() => null) : null;
+  if (!found) return null;
+  const a = found.approval;
+  return { id, amount: money(a.totalCents, a.currency ?? 'usd'), merchant: a.merchant };
+}
+
+/** The approval page, with the tags a chat app reads to preview its link. */
+async function approvePage(request: Request, env: Env, url: URL): Promise<Response> {
+  // The site's root is the SPA's index.html (/index.html itself redirects to it).
+  const res = await env.ASSETS.fetch(new Request(new URL('/', url), request));
+  if (!res.ok) return res;
+  const p = await approvalPreview(env, url.searchParams.get('r') ?? '');
+  const html = withPreviewTags(await res.text(), p && { ...p, origin: url.origin });
+  const headers = new Headers(res.headers);
+  headers.delete('content-length');
+  headers.delete('etag');
+  headers.set('cache-control', 'no-store');
+  return new Response(html, { status: 200, headers });
+}
+
 // The site: the SPA (with SPA fallback), the credentials API, and the MCP
 // connect flow. The OAuth provider sits in front of it for /mcp.
 const app = {
@@ -983,6 +1025,8 @@ const app = {
     if (!env.ASSETS) {
       return new Response('ASSETS binding is missing', { status: 500 });
     }
+
+    if (url.pathname === '/approve') return approvePage(request, env, url);
 
     // SPA fallback: serve index.html for non-file paths.
     const res = await env.ASSETS.fetch(request);

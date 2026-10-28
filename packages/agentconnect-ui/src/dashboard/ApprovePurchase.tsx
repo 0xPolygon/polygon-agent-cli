@@ -19,9 +19,27 @@ interface Purchase {
   merchant: string;
   merchantUrl: string | null;
   totalCents: number;
+  // Lowercase ISO code; a checkout at a store abroad can be in its currency.
+  currency?: string;
   items: { name: string; qty: number; priceCents?: number }[];
   status: string;
   c: string | null;
+}
+
+const ZERO_DECIMAL = new Set(['jpy', 'krw', 'vnd', 'clp', 'isk', 'ugx', 'xaf', 'xof', 'pyg']);
+
+/** An amount in the purchase's currency (smallest unit), US dollars when it names none. */
+function money(cents: number, currency = 'usd'): string {
+  if (currency === 'usd') return usd(cents / 100);
+  const units = ZERO_DECIMAL.has(currency) ? cents : cents / 100;
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: currency.toUpperCase()
+    }).format(units);
+  } catch {
+    return `${units} ${currency.toUpperCase()}`;
+  }
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
@@ -137,7 +155,7 @@ export function ApprovePurchase({ finishing = false }: { finishing?: boolean }) 
           <div className="flex flex-col gap-2">
             <span className="text-sm text-[var(--slate-500)]">Your agent wants to pay</span>
             <h1 className="m-0 text-[40px] leading-none font-bold tracking-[-0.02em]">
-              {purchase ? usd(purchase.totalCents / 100) : '…'}
+              {purchase ? money(purchase.totalCents, purchase.currency) : '…'}
             </h1>
             <span className="text-base text-[var(--slate-600)]">
               {purchase ? `at ${purchase.merchant}` : ''}
@@ -156,7 +174,9 @@ export function ApprovePurchase({ finishing = false }: { finishing?: boolean }) 
                     {i.name}
                   </span>
                   {i.priceCents !== undefined && (
-                    <span className="font-bold flex-shrink-0">{usd(i.priceCents / 100)}</span>
+                    <span className="font-bold flex-shrink-0">
+                      {money(i.priceCents, purchase?.currency)}
+                    </span>
                   )}
                 </div>
               ))}

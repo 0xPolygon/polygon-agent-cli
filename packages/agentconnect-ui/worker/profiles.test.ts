@@ -42,11 +42,24 @@ describe('client profiles', () => {
     expect(policyOf('nope')).toBe(PROFILES.standard);
   });
 
-  it('has the owner approve each ChatGPT spend, with bundles, and no shopping', () => {
+  it('has the owner approve each ChatGPT spend, with bundles, and shopping only in our browser', () => {
     expect(PROFILES.openai).toMatchObject({ movesMoney: true, ownerApproves: true });
-    const money = PROFILES.standard.tools.slice(PROFILES.standard.tools.indexOf('get_allowance'));
-    expect(PROFILES.openai.tools).toEqual(['get_wallet', ...money, 'propose_bundle']);
+    const tools = PROFILES.standard.tools;
+    const money = tools.slice(tools.indexOf('get_allowance'));
+    const browser = tools.slice(
+      tools.indexOf('start_browser_checkout'),
+      tools.indexOf('get_allowance')
+    );
+    expect(PROFILES.openai.tools).toEqual([
+      'get_wallet',
+      'get_shipping_address',
+      'save_shipping_address',
+      ...browser,
+      ...money,
+      'propose_bundle'
+    ]);
     expect(PROFILES.openai.tools).not.toContain('buy');
+    expect(PROFILES.openai.tools).not.toContain('authorize_checkout');
   });
 
   it('lets Muse spend like a standard client but confirm each purchase', () => {
@@ -55,6 +68,7 @@ describe('client profiles', () => {
     expect(PROFILES.muse.tools).toContain('confirm_purchase');
     expect(PROFILES.muse.tools).toContain('send');
     expect(PROFILES.muse.tools).not.toContain('authorize_checkout');
+    expect(PROFILES.muse.tools).not.toContain('start_browser_checkout');
     expect(PROFILES.standard.tools).not.toContain('confirm_purchase');
   });
 
@@ -72,6 +86,17 @@ describe('client profiles', () => {
       'get_checkout_card',
       'close_checkout',
       'payment_status',
+      'start_browser_checkout',
+      'browser_look',
+      'browser_click',
+      'browser_type',
+      'browser_select',
+      'browser_press',
+      'browser_scroll',
+      'browser_open',
+      'pay_browser_checkout',
+      'browser_checkout_status',
+      'cancel_browser_checkout',
       'get_allowance',
       'send',
       'swap_quote',

@@ -67,7 +67,7 @@ jobs:
       # left out (their endpoints answer 503); wrangler never deletes secrets.
       - name: Write worker secrets
         run: >-
-          node -e 'const keys = ["AGENT_CERT_SECRET", "CREDENTIALS_KEY", "AGENTCARD_CLIENT_ID", "AGENTCARD_CLIENT_SECRET", "INDEXER_ACCESS_KEY", "TRAILS_API_KEY"];
+          node -e 'const keys = ["AGENT_CERT_SECRET", "CREDENTIALS_KEY", "AGENTCARD_CLIENT_ID", "AGENTCARD_CLIENT_SECRET", "INDEXER_ACCESS_KEY", "TRAILS_API_KEY", "KERNEL_API_KEY"];
           const out = Object.fromEntries(keys.filter((k) => process.env[k]).map((k) => [k, process.env[k]]));
           require("fs").writeFileSync(process.env.RUNNER_TEMP + "/worker-secrets.json", JSON.stringify(out), { mode: 0o600 });'
         env:
@@ -79,6 +79,8 @@ jobs:
           INDEXER_ACCESS_KEY: ${{ secrets.VITE_INDEXER_ACCESS_KEY }}
           # The dashboard's Trails key: prices, swaps and bridges for MCP connections.
           TRAILS_API_KEY: ${{ secrets.VITE_TRAILS_API_KEY }}
+          # Hosted browsers for checkouts at any store (worker/browser-checkout.ts).
+          KERNEL_API_KEY: ${{ secrets.KERNEL_API_KEY }}
 
       # A KV namespace the worker had before (saved details) keeps its data:
       # wrangler would otherwise try to create it again, and fail.
@@ -129,14 +131,17 @@ jobs:
       # As for staging: sign-in and MCP secrets go up with the deploy.
       - name: Write worker secrets
         run: >-
-          node -e 'const keys = ["AGENT_CERT_SECRET", "CREDENTIALS_KEY", "INDEXER_ACCESS_KEY", "TRAILS_API_KEY"];
+          node -e 'const keys = ["AGENT_CERT_SECRET", "CREDENTIALS_KEY", "AGENTCARD_CLIENT_ID", "AGENTCARD_CLIENT_SECRET", "INDEXER_ACCESS_KEY", "TRAILS_API_KEY", "KERNEL_API_KEY"];
           const out = Object.fromEntries(keys.filter((k) => process.env[k]).map((k) => [k, process.env[k]]));
           require("fs").writeFileSync(process.env.RUNNER_TEMP + "/worker-secrets.json", JSON.stringify(out), { mode: 0o600 });'
         env:
           AGENT_CERT_SECRET: ${{ secrets.AGENT_CERT_SECRET }}
           CREDENTIALS_KEY: ${{ secrets.CREDENTIALS_KEY }}
+          AGENTCARD_CLIENT_ID: ${{ secrets.AGENTCARD_CLIENT_ID }}
+          AGENTCARD_CLIENT_SECRET: ${{ secrets.AGENTCARD_CLIENT_SECRET }}
           INDEXER_ACCESS_KEY: ${{ secrets.VITE_INDEXER_ACCESS_KEY }}
           TRAILS_API_KEY: ${{ secrets.VITE_TRAILS_API_KEY }}
+          KERNEL_API_KEY: ${{ secrets.KERNEL_API_KEY }}
 
       # A KV namespace the worker had before (saved details) keeps its data:
       # wrangler would otherwise try to create it again, and fail.

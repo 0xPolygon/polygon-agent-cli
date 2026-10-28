@@ -12,12 +12,16 @@ import { b64urlDecode, b64urlEncode } from './agent-auth.ts';
 // for the total. Checkouts under the limit are kept too, already approved.
 export interface Approval {
   id: string;
-  kind: 'cart' | 'checkout';
+  // `browser`: a checkout our hosted browser runs (browser-checkout.ts).
+  kind: 'cart' | 'checkout' | 'browser';
   merchant: string;
   merchantUrl: string | null;
   totalCents: number;
+  // Lowercase ISO code; absent means USD.
+  currency?: string;
   items: { name: string; qty: number; priceCents?: number }[];
   conversationId: string | null;
+  checkoutId?: string;
   hash: string | null;
   // `placing`: approved, and the worker is placing the cart right now.
   status:
@@ -54,6 +58,32 @@ export interface Quote {
   result?: Record<string, unknown> | null;
 }
 
+// A checkout our hosted browser runs for an agent: the agent clicks through
+// the store, and Kernel's vault holds the card request for the owner to
+// approve with AgentCard (browser-checkout.ts).
+export interface BrowserCheckout {
+  id: string;
+  browserId: string;
+  productUrl: string;
+  description: string;
+  status:
+    | 'browsing'
+    | 'awaiting_approval'
+    | 'paid'
+    | 'declined'
+    | 'expired'
+    | 'failed'
+    | 'canceled';
+  merchant?: string;
+  totalCents?: number;
+  currency?: string;
+  approvalId?: string;
+  paidAt?: string;
+  reason?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface WalletRecord {
   address?: ShippingAddress | null;
   // AgentCard vault users this wallet has linked (a returning user may come
@@ -69,6 +99,7 @@ export interface WalletRecord {
   autoPayLimitCents?: number;
   approvals?: Approval[];
   quotes?: Quote[];
+  browserCheckouts?: BrowserCheckout[];
   agentcardConnection?: {
     userId: string;
     accessToken: string;

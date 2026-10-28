@@ -146,7 +146,7 @@ const MAX_APPROVALS = 50;
 
 const limitOf = (r: { autoPayLimitCents?: number }) =>
   r.autoPayLimitCents ?? DEFAULT_AUTO_PAY_CENTS;
-const randomId = (prefix: string) =>
+export const randomId = (prefix: string) =>
   `${prefix}_${Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, '0')).join('')}`;
 
 function deliveryAddress(
@@ -166,7 +166,7 @@ function deliveryAddress(
 
 const approvalUrl = (origin: string, id: string) => `${origin}/approve?r=${id}`;
 
-async function createApproval(
+export async function createApproval(
   db: CredentialStore,
   wallet: string,
   a: Omit<Approval, 'id' | 'status' | 'createdAt'> & { status?: Approval['status'] }
@@ -687,7 +687,7 @@ export async function approvalStatus(
   }
 }
 
-async function setApproval(
+export async function setApproval(
   db: CredentialStore,
   wallet: string,
   id: string,
@@ -707,6 +707,13 @@ export async function approvalForPage(db: CredentialStore, id: string) {
   return a ? { wallet, approval: a } : null;
 }
 
+/** Decides a browser checkout's approval (browser-checkout.ts), for the wallet that owns it. */
+export type BrowserDecision = (
+  wallet: string,
+  a: Approval,
+  approve: boolean
+) => Promise<{ status: Approval['status']; passkeyUrl?: string | null }>;
+
 /**
  * The owner, signed in on the approval page, decides. Approving a cart places
  * it with the saved card; AgentCard may still ask for their passkey, and then
@@ -718,9 +725,10 @@ export function decideApproval(
   id: string,
   signedInWallet: string,
   approve: boolean,
-  lock: PaymentLock | null = null
+  lock: PaymentLock | null = null,
+  browser: BrowserDecision | null = null
 ): Promise<{ status: Approval['status']; passkeyUrl?: string | null }> {
-  const decide = () => decideApprovalNow(db, cards, id, signedInWallet, approve, lock);
+  const decide = () => decideApprovalNow(db, cards, id, signedInWallet, approve, lock, browser);
   return approve ? once(`approval:${id}:${signedInWallet.toLowerCase()}`, decide) : decide();
 }
 
@@ -730,7 +738,8 @@ async function decideApprovalNow(
   id: string,
   signedInWallet: string,
   approve: boolean,
-  lock: PaymentLock | null
+  lock: PaymentLock | null,
+  browser: BrowserDecision | null
 ): Promise<{ status: Approval['status']; passkeyUrl?: string | null }> {
   const found = await approvalForPage(db, id);
   if (!found || found.wallet.toLowerCase() !== signedInWallet.toLowerCase()) {
@@ -739,6 +748,19 @@ async function decideApprovalNow(
     );
   }
   const { wallet, approval: a } = found;
+  // A browser checkout: approving sends the owner on to AgentCard's own
+  // approval for the held card request (pressing it again just sends them
+  // there again); declining closes the browser, and the request with it.
+  if (a.kind === 'browser') {
+    if (a.status !== 'pending' && a.status !== 'awaiting_passkey') return { status: a.status };
+    if (!browser) throw new ValidationError('Browser checkouts are not configured on this server.');
+    const decided = await browser(wallet, a, approve);
+    await setApproval(db, wallet, id, {
+      status: decided.status,
+      decidedAt: new Date().toISOString()
+    });
+    return decided;
+  }
   if (a.status !== 'pending') return { status: a.status };
   // The first decision wins, approve or decline: the wallet's lock makes that
   // atomic. Later ones get where the approval stands.

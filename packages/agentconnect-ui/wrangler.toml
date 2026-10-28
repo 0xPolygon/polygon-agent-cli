@@ -13,11 +13,13 @@ binding = "ASSETS"
 not_found_handling = "single-page-application"
 # The site's API, the MCP server's OAuth routes and every /.well-known path are
 # handled by the worker, never the SPA fallback: a client probing for metadata
-# we don't serve must get a 404, not the SPA's HTML.
+# we don't serve must get a 404, not the SPA's HTML. /approve is the SPA, with
+# the tags that preview its link in a chat (worker/og-image.ts).
 run_worker_first = [
   "/api/*",
   "/mcp",
   "/authorize",
+  "/approve",
   "/oauth/*",
   "/.well-known/*"
 ]
@@ -64,6 +66,11 @@ routes = [
   { pattern = "agentconnect.staging.polygon.technology", custom_domain = true }
 ]
 
+# The AgentCard client registered with Kernel for browser checkouts, by name
+# (scripts/kernel-agentcard-config.mjs).
+[env.staging.vars]
+KERNEL_AGENTCARD_CONFIG = "agentconnect-staging"
+
 # No migrations: the staging worker never had the SessionRelay class, and
 # Cloudflare refuses to delete a class that doesn't exist.
 
@@ -109,6 +116,8 @@ routes = [
 # The domain check for OpenAI's plugin portal: paste the token it shows here.
 [env.production.vars]
 OPENAI_APPS_CHALLENGE = "LbcJ6AV155LnWC_iwegRgAunGaFiXtVaJgIPxJYxuvs"
+# The AgentCard client registered with Kernel for browser checkouts.
+KERNEL_AGENTCARD_CONFIG = "agentconnect-production"
 
 # Saved details, MCP and sign-ins in progress, as for staging. No id: created
 # on the first deploy.
