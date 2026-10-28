@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { Kernel, VaultItem } from './kernel.ts';
+import type { VaultItem } from './kernel.ts';
 import type { PaymentLock } from './wallet-lock.ts';
 
 import {
@@ -13,6 +13,7 @@ import {
   PROBE,
   SNAPSHOT
 } from './browser-checkout.ts';
+import { Kernel, KernelError } from './kernel.ts';
 import { approvalForPage } from './services.ts';
 import { CredentialStore } from './store.ts';
 
@@ -37,7 +38,7 @@ const PAGE = {
 };
 
 /** Kernel as the service uses it, recording what it was asked. */
-function fakeKernel(opts: { cardFields?: boolean; pageText?: string } = {}) {
+function fakeKernel(opts: { cardFields?: boolean; pageText?: string; unknownUser?: boolean } = {}) {
   const items = new Map<string, VaultItem>();
   const calls: { script: string; args: Record<string, unknown> }[] = [];
   const deleted: string[] = [];
@@ -54,6 +55,10 @@ function fakeKernel(opts: { cardFields?: boolean; pageText?: string } = {}) {
             : '?';
   const kernel = {
     providerConfig: 'agentconnect-test',
+    registered: 0,
+    async ensureProviderConfig() {
+      this.registered++;
+    },
     vault: async (n: string) => ({ id: 'v1', name: n }),
     getItem: async (_v: string, key: string) => items.get(key) ?? null,
     putItem: async (
@@ -61,6 +66,9 @@ function fakeKernel(opts: { cardFields?: boolean; pageText?: string } = {}) {
       key: string,
       item: { type: string; spec: Record<string, unknown> }
     ) => {
+      if (item.type === 'wallet' && opts.unknownUser) {
+        throw new KernelError(400, 'AgentCard user is not connected or accessible');
+      }
       const stored: VaultItem = {
         key,
         type: item.type,
@@ -120,7 +128,7 @@ function fakeKernel(opts: { cardFields?: boolean; pageText?: string } = {}) {
       }
     };
   };
-  return { kernel: kernel as unknown as Kernel, calls, items, deleted, authorize };
+  return { kernel: kernel as unknown as Kernel, fake: kernel, calls, items, deleted, authorize };
 }
 
 async function setup(kernelOpts = {}, linked = true) {
@@ -178,7 +186,7 @@ describe('browser checkouts', () => {
   });
 
   it("imports the owner's AgentCard user and opens the product page", async () => {
-    const { checkouts, items, calls } = await setup();
+    const { checkouts, items, calls, fake } = await setup();
     const { c, page } = await checkouts.start({
       productUrl: 'https://shop.example/p/1',
       description: 'Coffee beans'
@@ -190,10 +198,18 @@ describe('browser checkouts', () => {
       provider_config: { name: 'agentconnect-test' },
       user_id: 'usr_owner'
     });
+    expect(fake.registered).toBe(1);
     expect(calls[0]).toEqual({
       script: 'act',
       args: { action: 'open', url: 'https://shop.example/p/1' }
     });
+  });
+
+  it("says so when AgentCard doesn't know the owner's user", async () => {
+    const { checkouts } = await setup({ unknownUser: true });
+    await expect(
+      checkouts.start({ productUrl: 'https://shop.example/p/1', description: 'Coffee beans' })
+    ).rejects.toThrow(/add the card again/);
   });
 
   it('passes what the agent sends as data, and checks refs and keys', async () => {
@@ -327,5 +343,37 @@ describe('browser checkouts', () => {
     await checkouts.start({ productUrl: 'https://shop.example/q', description: 'y' });
     expect(deleted).toEqual(['b1']);
     expect(await checkouts.status(first.c.id, ORIGIN, 0)).toMatchObject({ status: 'canceled' });
+  });
+});
+
+describe('Kernel', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("registers the deployment's AgentCard client once, named after it", async () => {
+    const bodies: unknown[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)));
+      return new Response('{"message":"exists"}', { status: bodies.length === 1 ? 201 : 409 });
+    });
+    const k = new Kernel('key', 'agentconnect-test', {
+      clientId: 'cb09e0dd-2eaa',
+      clientSecret: 'secret'
+    });
+    expect(k.providerConfig).toBe('agentconnect-test-cb09e0dd');
+    await k.ensureProviderConfig();
+    await k.ensureProviderConfig();
+    expect(bodies).toEqual([
+      {
+        name: 'agentconnect-test-cb09e0dd',
+        provider: 'agentcard',
+        credentials: { client_id: 'cb09e0dd-2eaa', client_secret: 'secret' }
+      }
+    ]);
+    // Another isolate finds it registered already.
+    await new Kernel('key', 'agentconnect-other', {
+      clientId: 'cb09e0dd-2eaa',
+      clientSecret: 'secret'
+    }).ensureProviderConfig();
+    expect(bodies).toHaveLength(2);
   });
 });

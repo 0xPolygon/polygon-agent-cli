@@ -266,14 +266,28 @@ export class BrowserCheckouts {
       await this.kernel.deleteItem(name, WALLET_KEY);
       item = null;
     }
-    item ??= await this.kernel.putItem(name, WALLET_KEY, {
-      type: 'wallet',
-      spec: {
-        provider: 'agentcard',
-        provider_config: { name: this.kernel.providerConfig },
-        user_id: userId
+    if (!item) {
+      await this.kernel.ensureProviderConfig();
+      try {
+        item = await this.kernel.putItem(name, WALLET_KEY, {
+          type: 'wallet',
+          spec: {
+            provider: 'agentcard',
+            provider_config: { name: this.kernel.providerConfig },
+            user_id: userId
+          }
+        });
+      } catch (err) {
+        // AgentCard doesn't know the user under this client: not worth retrying.
+        if (err instanceof KernelError && err.status === 400) {
+          console.error('[kernel wallet]', err.message);
+          throw new ValidationError(
+            "The saved card can't be used for browser checkouts. Ask the owner to add the card again with add_card, then try again."
+          );
+        }
+        throw err;
       }
-    });
+    }
     if (item.state.status !== 'connected') {
       throw new ValidationError(
         `The saved card isn't ready for browser checkouts yet (${item.state.status}).`
@@ -655,10 +669,21 @@ export function browserCheckouts(
   db: CredentialStore,
   wallet: string
 ): BrowserCheckouts | null {
-  if (!env.KERNEL_API_KEY || !env.KERNEL_AGENTCARD_CONFIG) return null;
+  const { KERNEL_API_KEY, KERNEL_AGENTCARD_CONFIG, AGENTCARD_CLIENT_ID, AGENTCARD_CLIENT_SECRET } =
+    env;
+  if (
+    !KERNEL_API_KEY ||
+    !KERNEL_AGENTCARD_CONFIG ||
+    !AGENTCARD_CLIENT_ID ||
+    !AGENTCARD_CLIENT_SECRET
+  )
+    return null;
   return new BrowserCheckouts(
     db,
-    new Kernel(env.KERNEL_API_KEY, env.KERNEL_AGENTCARD_CONFIG),
+    new Kernel(KERNEL_API_KEY, KERNEL_AGENTCARD_CONFIG, {
+      clientId: AGENTCARD_CLIENT_ID,
+      clientSecret: AGENTCARD_CLIENT_SECRET
+    }),
     wallet
   );
 }
