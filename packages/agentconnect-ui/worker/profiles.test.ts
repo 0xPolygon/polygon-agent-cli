@@ -42,7 +42,7 @@ describe('client profiles', () => {
     expect(policyOf('nope')).toBe(PROFILES.standard);
   });
 
-  it('has the owner approve each ChatGPT spend, with bundles, and shopping only in our browser', () => {
+  it('has the owner approve each ChatGPT spend, with bundles, and buying in our browser', () => {
     expect(PROFILES.openai).toMatchObject({ movesMoney: true, ownerApproves: true });
     const tools = PROFILES.standard.tools;
     const money = tools.slice(tools.indexOf('get_allowance'));
@@ -54,12 +54,14 @@ describe('client profiles', () => {
       'get_wallet',
       'get_shipping_address',
       'save_shipping_address',
+      'list_cards',
+      'add_card',
+      'check_card',
       ...browser,
       ...money,
       'propose_bundle'
     ]);
     expect(PROFILES.openai.tools).not.toContain('buy');
-    expect(PROFILES.openai.tools).not.toContain('authorize_checkout');
   });
 
   it('lets Muse spend like a standard client but confirm each purchase', () => {
@@ -67,12 +69,11 @@ describe('client profiles', () => {
     expect(PROFILES.muse.confirmEachPurchase).toBe(true);
     expect(PROFILES.muse.tools).toContain('confirm_purchase');
     expect(PROFILES.muse.tools).toContain('send');
-    expect(PROFILES.muse.tools).not.toContain('authorize_checkout');
     expect(PROFILES.muse.tools).not.toContain('start_browser_checkout');
     expect(PROFILES.standard.tools).not.toContain('confirm_purchase');
   });
 
-  it('gives standard clients every tool and an allowance', () => {
+  it('gives standard clients every tool and an allowance, and one way to buy', () => {
     expect(PROFILES.standard).toMatchObject({ movesMoney: true, ownerApproves: false });
     expect(PROFILES.standard.tools).toEqual([
       'get_wallet',
@@ -81,11 +82,6 @@ describe('client profiles', () => {
       'list_cards',
       'add_card',
       'check_card',
-      'buy',
-      'authorize_checkout',
-      'get_checkout_card',
-      'close_checkout',
-      'payment_status',
       'start_browser_checkout',
       'browser_look',
       'browser_click',

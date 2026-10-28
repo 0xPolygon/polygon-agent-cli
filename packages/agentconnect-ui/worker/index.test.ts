@@ -1025,6 +1025,7 @@ describe('connecting an agent (consent)', () => {
       autoPayLimitCents: 10_000,
       shops: true,
       confirmsEachPurchase: false,
+      approvesEachPurchase: true,
       localAgent: true
     });
     const allow = await call(e, 'POST', '/api/connect/decide', {
