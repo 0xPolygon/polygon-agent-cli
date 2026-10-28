@@ -145,19 +145,27 @@ const SETS = {
   cvc: ['input[autocomplete="cc-csc"]', 'input#verification_value', 'input[name="cvc"]', 'input[name="securityCode"]', 'input[name="cardCvc"]'],
   name: ['input[autocomplete="cc-name"]', 'input#name', 'input[name="ccname"]', 'input[name="cardholderName"]']
 };
+// The field a person types in. Card frames also hold hidden copies for
+// autofill (Shopify's number frame has an aria-hidden expiry), so skip those.
 const find = async (kind) => {
   for (const f of P.frames()) {
     const main = f === P.mainFrame();
     for (const s of SETS[kind]) {
       if (main && !s.includes('autocomplete')) continue;
-      const loc = f.locator(s).first();
-      if ((await loc.count().catch(() => 0)) && (await loc.isVisible().catch(() => false))) return loc;
+      const all = f.locator(s + ':not([aria-hidden="true"]):not([tabindex="-1"]):not([type="hidden"])');
+      const count = await all.count().catch(() => 0);
+      for (let i = 0; i < count; i++) {
+        const loc = all.nth(i);
+        if (!(await loc.isVisible().catch(() => false))) continue;
+        const box = await loc.boundingBox().catch(() => null);
+        if (box && box.width > 4 && box.height > 4) return loc;
+      }
     }
   }
   return null;
 };
 const type = async (loc, value) => {
-  await loc.click({ timeout: 10000 });
+  await loc.click({ timeout: 5000 }).catch(() => loc.focus());
   await loc.press('ControlOrMeta+a').catch(() => {});
   await loc.press('Backspace').catch(() => {});
   await loc.pressSequentially(value, { delay: 60 });
