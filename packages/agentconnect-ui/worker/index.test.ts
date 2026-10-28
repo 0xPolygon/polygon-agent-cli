@@ -1333,6 +1333,95 @@ describe('/.well-known', () => {
   });
 });
 
+describe('opening a browser checkout approval', () => {
+  const spa = { fetch: async () => new Response('<html><head><title>x</title></head></html>') };
+  const AGENTCARD_PAGE = 'https://app.agentcard.test/a/cauth_1';
+
+  async function setupCheckout() {
+    const db = new CredentialStore(kv.kv, 'test-credentials-key');
+    const a = await createApproval(db, WALLET, {
+      kind: 'browser',
+      merchant: 'noordcode.com',
+      merchantUrl: 'https://noordcode.com',
+      totalCents: 3045,
+      currency: 'eur',
+      items: [],
+      conversationId: null,
+      checkoutId: 'bco_1',
+      hash: null
+    });
+    const now = new Date().toISOString();
+    await db.update(WALLET, (r) => ({
+      ...r,
+      browserCheckouts: [
+        {
+          id: 'bco_1',
+          browserId: 'b1',
+          productUrl: 'https://noordcode.com/p',
+          description: 'coffee',
+          status: 'awaiting_approval',
+          approvalId: a.id,
+          createdAt: now,
+          updatedAt: now
+        }
+      ]
+    }));
+    // Kernel holds the store's card request, waiting on AgentCard.
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/items/card-bco_1')) {
+        return Response.json({
+          key: 'card-bco_1',
+          type: 'card',
+          spec: {},
+          state: {
+            status: 'pending_approval',
+            authorization: {
+              id: 'cauth_1',
+              status: 'awaiting_approval',
+              approval_url: AGENTCARD_PAGE,
+              browser_id: 'b1',
+              amount_cents: 3045,
+              currency: 'eur',
+              merchant: 'noordcode.com'
+            }
+          }
+        });
+      }
+      return new Response('unexpected', { status: 599 });
+    });
+    return a;
+  }
+
+  const open = async (id: string, session?: { wallet: string; email: string | null }) =>
+    worker.fetch(
+      new Request(`https://agentconnect.test/approve?r=${id}`, {
+        headers: session
+          ? { Cookie: `${SESSION_COOKIE}=${await issueSession(session, SECRET)}` }
+          : {}
+      }),
+      env({
+        ASSETS: spa as unknown as Fetcher,
+        KERNEL_API_KEY: 'k',
+        KERNEL_AGENTCARD_CONFIG: 'test'
+      }),
+      {} as ExecutionContext
+    );
+
+  it("sends the signed-in owner straight to AgentCard's screen", async () => {
+    const a = await setupCheckout();
+    const res = await open(a.id, { wallet: WALLET, email: null });
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe(AGENTCARD_PAGE);
+  });
+
+  it('shows the page to anyone else, to sign in first', async () => {
+    const a = await setupCheckout();
+    expect((await open(a.id)).status).toBe(200);
+    expect((await open(a.id, { wallet: '0x' + '1'.repeat(40), email: null })).status).toBe(200);
+  });
+});
+
 describe('approval link preview', () => {
   const spa = {
     fetch: async (req: Request) =>
