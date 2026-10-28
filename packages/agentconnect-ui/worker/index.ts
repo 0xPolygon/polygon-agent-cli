@@ -234,10 +234,8 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
       email: who.email,
       autoPayLimitCents: limit,
       // Whether this agent can buy with the owner's saved cards.
-      shops: !!policy?.tools.some((t) => t === 'buy' || t === 'start_browser_checkout'),
+      shops: !!policy?.tools.includes('buy'),
       confirmsEachPurchase: !!policy?.confirmEachPurchase,
-      // Buying in our hosted browser: the owner approves every purchase.
-      approvesEachPurchase: !!policy && !policy.tools.includes('buy'),
       // On the owner's own machine: after allowing, the dashboard opens in front.
       localAgent: isLocalAgent(request?.redirectUri ?? ''),
       // An agent that may move money asks for an allowance to spend from.

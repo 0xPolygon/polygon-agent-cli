@@ -42,23 +42,9 @@ describe('client profiles', () => {
     expect(policyOf('nope')).toBe(PROFILES.standard);
   });
 
-  it('has the owner approve each ChatGPT spend, with bundles, and buying in our browser', () => {
+  it('has the owner approve each ChatGPT spend, with bundles, and buys like a standard client', () => {
     expect(PROFILES.openai).toMatchObject({ movesMoney: true, ownerApproves: true });
-    const tools = PROFILES.standard.tools;
-    const money = tools.slice(tools.indexOf('get_allowance'));
-    const browser = tools.slice(tools.indexOf('start_browser_checkout'), tools.indexOf('buy'));
-    expect(PROFILES.openai.tools).toEqual([
-      'get_wallet',
-      'get_shipping_address',
-      'save_shipping_address',
-      'list_cards',
-      'add_card',
-      'check_card',
-      ...browser,
-      ...money,
-      'propose_bundle'
-    ]);
-    expect(PROFILES.openai.tools).not.toContain('buy');
+    expect(PROFILES.openai.tools).toEqual([...PROFILES.standard.tools, 'propose_bundle']);
   });
 
   it('lets Muse spend like a standard client but confirm each purchase', () => {

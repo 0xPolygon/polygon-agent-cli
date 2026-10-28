@@ -7,7 +7,7 @@
 // purchase), then with buy, then with a one-time card in its own browser.
 // ChatGPT (`openai`) gets the money tools, but its apps may not move money
 // themselves: each spend, Polymarket included, waits for the owner to approve
-// it on this site (money/actions.ts). It buys through our hosted browser too.
+// it on this site (money/actions.ts). It buys like a standard client.
 // Muse spends within the allowance like a standard client, but asks the user
 // before every purchase: buy returns a quote, and only confirm_purchase pays.
 // ChatGPT is recognised by its redirect URI (it registers a new client per
@@ -76,18 +76,21 @@ const MONEY = [
   'get_action'
 ] as const;
 
+// Every agent that buys tries the same ways in the same order (mcp.ts).
+const BUYING = [...SAVED, ...BROWSER, 'buy', ...CHECKOUT, 'payment_status'] as const;
+
 // Only where the owner approves each spend: several approved at once.
 const BUNDLE = ['propose_bundle'] as const;
 
 export const PROFILES: Record<Profile, ProfilePolicy> = {
   standard: {
-    tools: [...READ, ...SAVED, ...BROWSER, 'buy', ...CHECKOUT, 'payment_status', ...MONEY],
+    tools: [...READ, ...BUYING, ...MONEY],
     movesMoney: true,
     ownerApproves: false,
     confirmEachPurchase: false
   },
   openai: {
-    tools: [...READ, ...SAVED, ...BROWSER, ...MONEY, ...BUNDLE],
+    tools: [...READ, ...BUYING, ...MONEY, ...BUNDLE],
     movesMoney: true,
     ownerApproves: true,
     confirmEachPurchase: false
