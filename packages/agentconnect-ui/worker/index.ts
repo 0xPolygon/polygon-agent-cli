@@ -636,7 +636,10 @@ export async function handleApproveApi(req: Request, env: Env, path: string): Pr
       const found = await approvalForPage(db, new URL(req.url).searchParams.get('r') ?? '');
       if (!found) return fail(404, 'not_found', 'This approval link is not valid.');
       const a = found.approval;
-      const c = a.status === 'pending' ? await signIn.create({ approvalId: a.id }) : null;
+      // A browser checkout waiting on AgentCard can be opened there again.
+      const open =
+        a.status === 'pending' || (a.kind === 'browser' && a.status === 'awaiting_passkey');
+      const c = open ? await signIn.create({ approvalId: a.id }) : null;
       // Signed in on this site as the wallet that owns it: no second sign-in.
       const token = c ? readSessionCookie(req) : null;
       const who =

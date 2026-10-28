@@ -22,6 +22,8 @@ interface Purchase {
   // Lowercase ISO code; a checkout at a store abroad can be in its currency.
   currency?: string;
   items: { name: string; qty: number; priceCents?: number }[];
+  // `browser`: a checkout in our hosted browser, approved on AgentCard's own screen.
+  kind?: string;
   status: string;
   c: string | null;
   // Already signed in on this site as the wallet that owns the purchase.
@@ -71,6 +73,8 @@ const DONE: Record<string, string> = {
 /**
  * An agent wants to pay more than the owner's auto-pay limit. The owner signs
  * in, then approves or declines; the agent sees the answer on its next check.
+ * A checkout in our hosted browser is approved or declined on AgentCard's own
+ * screen: once signed in, the owner goes straight there.
  */
 export function ApprovePurchase({ finishing = false }: { finishing?: boolean }) {
   const [saved] = useState<{ r: string; c: string } | null>(() => {
@@ -88,7 +92,7 @@ export function ApprovePurchase({ finishing = false }: { finishing?: boolean }) 
   const [purchase, setPurchase] = useState<Purchase | null>(null);
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
-  const [step, setStep] = useState<'email' | 'code' | 'decide' | 'done'>('email');
+  const [step, setStep] = useState<'email' | 'code' | 'decide' | 'agentcard' | 'done'>('email');
   const [done, setDone] = useState<string | null>(null);
   const [busy, setBusy] = useState(finishing);
   const [error, setError] = useState<string | null>(null);
@@ -105,40 +109,11 @@ export function ApprovePurchase({ finishing = false }: { finishing?: boolean }) 
     }
   };
 
-  useEffect(() => {
-    void fetch(`/api/approve?r=${encodeURIComponent(r)}`)
-      .then(async (res) => {
-        const d = (await res.json()) as Purchase & { message?: string };
-        if (!res.ok) throw new Error(d.message ?? 'This approval link is not valid.');
-        setPurchase(d);
-        if (d.status !== 'pending') {
-          setDone(DONE[d.status] ?? 'This purchase was already decided.');
-          setStep('done');
-        } else if (!saved) {
-          setC(d.c);
-          if (d.signedIn) setStep('decide');
-        }
-      })
-      .catch((e: Error) => setError(e.message));
-    if (finishing && saved) {
-      void run(async () => {
-        sessionStorage.removeItem(APPROVE_PURCHASE_KEY);
-        await post('/api/approve/google/finish', {
-          c: saved.c,
-          callbackUrl: window.location.href
-        });
-        window.history.replaceState(null, '', `/approve?r=${saved.r}`);
-        setStep('decide');
-      });
-    }
-    // Runs once, on load.
-  }, []);
-
-  const decide = (approve: boolean) =>
+  const decide = (approve: boolean, id = c) =>
     run(async () => {
       const res = await post<{ status: string; passkeyUrl?: string | null }>(
         '/api/approve/decide',
-        { c, approve }
+        { c: id, approve }
       );
       if (res.passkeyUrl) {
         window.location.assign(res.passkeyUrl);
@@ -147,6 +122,55 @@ export function ApprovePurchase({ finishing = false }: { finishing?: boolean }) 
       setDone(DONE[res.status] ?? 'Done.');
       setStep('done');
     });
+
+  // Signed in: a browser checkout goes straight to AgentCard, anything else
+  // gets Approve and Decline here.
+  const signedIn = (p: Purchase | null, id: string | null) => {
+    if (p?.kind === 'browser') {
+      setStep('agentcard');
+      void decide(true, id);
+    } else setStep('decide');
+  };
+
+  useEffect(() => {
+    void (async () => {
+      let d: Purchase & { message?: string };
+      try {
+        const res = await fetch(`/api/approve?r=${encodeURIComponent(r)}`);
+        d = (await res.json()) as Purchase & { message?: string };
+        if (!res.ok) throw new Error(d.message ?? 'This approval link is not valid.');
+      } catch (e) {
+        setBusy(false);
+        setError(e instanceof Error ? e.message : 'This approval link is not valid.');
+        return;
+      }
+      setPurchase(d);
+      if (!d.c) {
+        setBusy(false);
+        setDone(DONE[d.status] ?? 'This purchase was already decided.');
+        setStep('done');
+        return;
+      }
+      if (finishing && saved) {
+        let ok = false;
+        await run(async () => {
+          sessionStorage.removeItem(APPROVE_PURCHASE_KEY);
+          await post('/api/approve/google/finish', {
+            c: saved.c,
+            callbackUrl: window.location.href
+          });
+          window.history.replaceState(null, '', `/approve?r=${saved.r}`);
+          ok = true;
+        });
+        setC(saved.c);
+        if (ok) signedIn(d, saved.c);
+        return;
+      }
+      setC(d.c);
+      if (d.signedIn) signedIn(d, d.c);
+    })();
+    // Runs once, on load.
+  }, []);
 
   return (
     <div className="min-h-[100dvh] flex flex-col bg-[var(--slate-50)] text-[var(--slate-900)]">
@@ -207,6 +231,15 @@ export function ApprovePurchase({ finishing = false }: { finishing?: boolean }) 
                 {busy ? 'Approving…' : 'Approve'}
               </button>
             </div>
+          ) : step === 'agentcard' ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void decide(true)}
+              className="btn btn-primary btn-lg w-full h-12"
+            >
+              {busy ? 'Opening AgentCard…' : 'Approve or decline on AgentCard'}
+            </button>
           ) : busy && finishing ? (
             <span className="text-base text-[var(--slate-600)]">Signing you in…</span>
           ) : step === 'email' ? (
@@ -264,7 +297,7 @@ export function ApprovePurchase({ finishing = false }: { finishing?: boolean }) 
                 e.preventDefault();
                 void run(async () => {
                   await post('/api/approve/email/finish', { c, code: code.trim() });
-                  setStep('decide');
+                  signedIn(purchase, c);
                 });
               }}
             >
