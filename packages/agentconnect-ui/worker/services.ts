@@ -707,11 +707,6 @@ export async function approvalForPage(db: CredentialStore, id: string) {
   return a ? { wallet, approval: a } : null;
 }
 
-/**
- * The owner, signed in on the approval page, decides. Approving a cart places
- * it with the saved card; AgentCard may still ask for their passkey, and then
- * `passkeyUrl` is where to send them.
- */
 /** Decides a browser checkout's approval (browser-checkout.ts), for the wallet that owns it. */
 export type BrowserDecision = (
   wallet: string,
@@ -719,6 +714,11 @@ export type BrowserDecision = (
   approve: boolean
 ) => Promise<{ status: Approval['status']; passkeyUrl?: string | null }>;
 
+/**
+ * The owner, signed in on the approval page, decides. Approving a cart places
+ * it with the saved card; AgentCard may still ask for their passkey, and then
+ * `passkeyUrl` is where to send them.
+ */
 export function decideApproval(
   db: CredentialStore,
   cards: AgentCard,

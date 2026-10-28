@@ -13,11 +13,13 @@ binding = "ASSETS"
 not_found_handling = "single-page-application"
 # The site's API, the MCP server's OAuth routes and every /.well-known path are
 # handled by the worker, never the SPA fallback: a client probing for metadata
-# we don't serve must get a 404, not the SPA's HTML.
+# we don't serve must get a 404, not the SPA's HTML. /approve is the SPA, with
+# the tags that preview its link in a chat (worker/og-image.ts).
 run_worker_first = [
   "/api/*",
   "/mcp",
   "/authorize",
+  "/approve",
   "/oauth/*",
   "/.well-known/*"
 ]

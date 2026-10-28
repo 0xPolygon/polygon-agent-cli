@@ -16,7 +16,7 @@ import worker, {
 } from './index.ts';
 import { issueSession, SESSION_COOKIE } from './owner-session.ts';
 import { OwnerSignIn } from './owner-signin.ts';
-import { decideApproval } from './services.ts';
+import { createApproval, decideApproval } from './services.ts';
 import { CredentialStore, SealedKv } from './store.ts';
 import {
   AGENT,
@@ -1326,6 +1326,51 @@ describe('/.well-known', () => {
       );
       expect(res.status).toBe(404);
     }
+  });
+});
+
+describe('approval link preview', () => {
+  const spa = {
+    fetch: async (req: Request) =>
+      new URL(req.url).pathname === '/'
+        ? new Response('<html><head><title>Polygon Agent Wallet</title></head></html>', {
+            headers: { 'content-type': 'text/html' }
+          })
+        : new Response('Not found', { status: 404 })
+  };
+  const get = (path: string) =>
+    worker.fetch(
+      new Request(`https://agentconnect.test${path}`),
+      env({ ASSETS: spa as unknown as Fetcher }),
+      {} as ExecutionContext
+    );
+
+  it('shows the amount and store in the page tags and the image', async () => {
+    const db = new CredentialStore(kv.kv, 'test-credentials-key');
+    const a = await createApproval(db, WALLET, {
+      kind: 'browser',
+      merchant: 'Noordcode',
+      merchantUrl: 'https://noordcode.com',
+      totalCents: 1495,
+      currency: 'eur',
+      items: [],
+      conversationId: null,
+      hash: null
+    });
+    const page = await get(`/approve?r=${a.id}`);
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain('<title>€14.95 at Noordcode</title>');
+    expect(html).toContain(`/api/approve/preview.png?r=${a.id}`);
+    const img = await get(`/api/approve/preview.png?r=${a.id}`);
+    expect(img.headers.get('content-type')).toBe('image/png');
+    expect((await img.arrayBuffer()).byteLength).toBeGreaterThan(1000);
+  });
+
+  it('serves the plain page and no image for an unknown link', async () => {
+    const html = await (await get('/approve?r=apr_nope')).text();
+    expect(html).toContain('<title>Approve a purchase</title>');
+    expect((await get('/api/approve/preview.png?r=apr_nope')).status).toBe(404);
   });
 });
 

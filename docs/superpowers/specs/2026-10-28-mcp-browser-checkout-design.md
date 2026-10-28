@@ -144,6 +144,7 @@ Between tool calls before payment, only the Kernel session id is kept, in the wa
 - **Card.** The wallet's linked AgentCard user. The owner picks the card on AgentCard's approval screen.
 - **Email** is the owner's sign-in email (`McpProps.email`), returned in `ship_to`. No new saved-details field.
 - **Currency** is stored on the approval and shown in the page's currency. Browser checkouts don't count against the auto-pay limit, because they always ask.
+- **Link preview.** A chat app that previews links shows the approval link as a card: the amount large, the store under it, and "Approve with Open Money Agent". The worker serves `/approve` with the page tags (`og:title` "€14.95 at Noordcode", `og:image`) and draws the image at `/api/approve/preview.png?r=` (`worker/og-image.ts`). It draws from glyph bitmaps of the site's font, generated once by `scripts/og-glyphs.py`, and encodes the PNG itself, so the worker carries no font engine or image library. The preview shows only the amount and store, which anyone holding the link could already see. It applies to every approval link, carts included. Whether a preview appears is up to the chat app.
 - **Total check.** The total must appear on the page as a whole amount in a common format. AgentCard also refuses a hint more than one minor unit from the processor's amount.
 
 ## Go-live steps
@@ -151,7 +152,7 @@ Between tool calls before payment, only the Kernel session id is kept, in the wa
 1. Rotate the Kernel API key (it was pasted in chat), then put the new one in the `KERNEL_API_KEY` GitHub environment secret for staging and production. It must be organization-wide. The workflow already uploads it (done in this branch).
 2. Register each deployment's AgentCard client with Kernel once: `node scripts/kernel-agentcard-config.mjs <vars file> agentconnect-staging` (and `agentconnect-production` with the production AgentCard credentials). The names match `KERNEL_AGENTCARD_CONFIG` in `wrangler.toml`.
 3. Devops adds `AGENTCARD_CLIENT_ID` and `AGENTCARD_CLIENT_SECRET` as production secrets. The production job now uploads them (done in this branch).
-4. Upgrade Kernel from the free plan before production: it caps an organization at 3 vaults (one per wallet here) and 5 concurrent browsers.
+4. Upgrade Kernel from the free plan before production: it caps an organization at 3 vaults (one per wallet here, so 3 wallets) and 5 concurrent browsers. Hobbyist ($30 a month) has unlimited vaults and 10 browsers; Start-up ($200) has 150 browsers.
 5. Ask AgentCard:
    - whether vault checkout supports partner approval, so the approval can be ours;
    - whether the charge is capped at the attached `amount`;
