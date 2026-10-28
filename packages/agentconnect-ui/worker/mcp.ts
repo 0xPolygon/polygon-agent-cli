@@ -1283,7 +1283,9 @@ async function handleMessage(env: Env, props: McpProps, msg: Rpc, origin: string
           return rpcResult(
             msg.id,
             toolText(
-              `The checkout browser service refused that (${err.status}). Try again shortly.`,
+              err.status === 429 || err.status >= 500
+                ? `The checkout browser service is busy (${err.status}). Try again shortly.`
+                : `The checkout browser service refused that (${err.status}): ${err.message}`,
               true
             )
           );

@@ -54,13 +54,46 @@ export interface PlaywrightResult {
   error?: string;
 }
 
+// Provider configurations this isolate has registered, by name.
+const registered = new Map<string, Promise<void>>();
+
 export class Kernel {
+  /** Kernel's AgentCard provider configuration for `agentcard`, the deployment's own client. */
+  readonly providerConfig: string;
+
   constructor(
     private readonly apiKey: string,
-    // The AgentCard provider configuration registered with Kernel for this
-    // deployment's AgentCard client (scripts/kernel-agentcard-config.mjs).
-    readonly providerConfig: string
-  ) {}
+    prefix: string,
+    private readonly agentcard: { clientId: string; clientSecret: string }
+  ) {
+    // Named after the client, so the configuration always holds the client
+    // that created the wallet's AgentCard users.
+    this.providerConfig = `${prefix}-${agentcard.clientId.slice(0, 8)}`;
+  }
+
+  /** Registers this deployment's AgentCard client with Kernel, once (a 409 means it already is). */
+  ensureProviderConfig(): Promise<void> {
+    let p = registered.get(this.providerConfig);
+    if (!p) {
+      p = this.call('POST', '/vault-provider-configs', {
+        name: this.providerConfig,
+        provider: 'agentcard',
+        credentials: {
+          client_id: this.agentcard.clientId,
+          client_secret: this.agentcard.clientSecret
+        }
+      }).then(
+        () => undefined,
+        (err) => {
+          if (err instanceof KernelError && err.status === 409) return;
+          registered.delete(this.providerConfig);
+          throw err;
+        }
+      );
+      registered.set(this.providerConfig, p);
+    }
+    return p;
+  }
 
   private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
     const res = await fetch(`${BASE}${path}`, {
