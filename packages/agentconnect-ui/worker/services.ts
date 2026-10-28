@@ -876,17 +876,18 @@ const cardSessions = (r: WalletRecord): string[] =>
 /** A single-use add-a-card link for the wallet. */
 export async function startCardSession(db: CredentialStore, cards: AgentCard, wallet: string) {
   const latest = (await db.get(wallet)).agentcardUsers?.at(-1) ?? null;
+  const ids = { externalUserId: wallet.toLowerCase() };
   let session;
   let returning = !!latest;
   try {
-    session = await cards.createVaultSession(latest);
+    session = await cards.createVaultSession(latest, ids);
   } catch (err) {
     // A passkey-only vault user has no phone or email for the sign-in code.
     // An open session still lets them pick "Unlock with your passkey". A user
     // from the other mode (sandbox vs live) is unknown here: start fresh too.
     const fresh = ['contact_missing', 'connection_not_found'];
     if (!(latest && err instanceof AgentCardError && fresh.includes(err.code))) throw err;
-    session = await cards.createVaultSession(null);
+    session = await cards.createVaultSession(null, ids);
     returning = false;
   }
   await db.update(wallet, (r) => ({

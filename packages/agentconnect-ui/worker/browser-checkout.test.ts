@@ -193,7 +193,7 @@ describe('browser checkouts', () => {
     });
     expect(c).toMatchObject({ status: 'browsing', browserId: 'b1' });
     expect(page).toEqual(PAGE);
-    expect(items.get('agentcard-wallet')?.spec).toEqual({
+    expect(items.get('wallet-usr_owner')?.spec).toEqual({
       provider: 'agentcard',
       provider_config: { name: 'agentconnect-test' },
       user_id: 'usr_owner'
@@ -258,7 +258,7 @@ describe('browser checkouts', () => {
     expect(await pay(checkouts, c.id)).toBeNull();
     expect([...items.values()].find((i) => i.type === 'card')?.spec).toEqual({
       provider: 'agentcard',
-      wallet: 'agentcard-wallet',
+      wallet: 'wallet-usr_owner',
       merchant: 'shop.example',
       amount: 3045,
       currency: 'eur',

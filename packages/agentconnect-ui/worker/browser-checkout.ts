@@ -20,7 +20,9 @@ import { Kernel, KernelError } from './kernel.ts';
 import { createApproval, randomId, setApproval } from './services.ts';
 import { ValidationError } from './shipping.ts';
 
-const WALLET_KEY = 'agentcard-wallet';
+// One wallet item per AgentCard user: Kernel fixes a wallet's user for good,
+// and won't delete one whose card it can't settle (`recovery_required`).
+const walletKey = (userId: string) => `wallet-${userId}`;
 // One card item per checkout. Kernel never lets a card whose outcome it can't
 // tell (`recovery_required`) be reused or deleted, so a stuck one must not
 // block the next checkout.
@@ -261,7 +263,7 @@ export class BrowserCheckouts {
   }
 
   /** The vault holding the owner's AgentCard wallet, imported from their linked card. */
-  private async vault(): Promise<string> {
+  private async vault(): Promise<{ name: string; walletKey: string }> {
     const r = await this.db.get(this.wallet);
     const userId = r.agentcardConnection?.userId ?? r.agentcardUsers?.at(-1);
     if (!userId) {
@@ -271,16 +273,12 @@ export class BrowserCheckouts {
     }
     const name = vaultName(this.wallet);
     await this.kernel.vault(name);
-    let item = await this.kernel.getItem(name, WALLET_KEY);
-    // A wallet's user is fixed in Kernel: a new card user means a new wallet item.
-    if (item && item.spec.user_id !== userId) {
-      await this.kernel.deleteItem(name, WALLET_KEY);
-      item = null;
-    }
+    const key = walletKey(userId);
+    let item = await this.kernel.getItem(name, key);
     if (!item) {
       await this.kernel.ensureProviderConfig();
       try {
-        item = await this.kernel.putItem(name, WALLET_KEY, {
+        item = await this.kernel.putItem(name, key, {
           type: 'wallet',
           spec: {
             provider: 'agentcard',
@@ -304,7 +302,7 @@ export class BrowserCheckouts {
         `The saved card isn't ready for browser checkouts yet (${item.state.status}).`
       );
     }
-    return name;
+    return { name, walletKey: key };
   }
 
   private async run<T>(c: BrowserCheckout, code: string, args: unknown, timeoutSec = 60) {
@@ -345,7 +343,7 @@ export class BrowserCheckouts {
       }
       await this.cancel(open.id);
     }
-    const vault = await this.vault();
+    const { name: vault } = await this.vault();
     const browser = await this.kernel.createBrowser({
       vault,
       timeoutSeconds: BROWSER_TIMEOUT_SEC
@@ -461,10 +459,10 @@ export class BrowserCheckouts {
     if (lock && !(await lock.claim(`browser:${id}`))) {
       return this.status(id, '', 0);
     }
-    const vault = vaultName(this.wallet);
+    const { name: vault, walletKey: wallet } = await this.vault();
     const spec = {
       provider: 'agentcard',
-      wallet: WALLET_KEY,
+      wallet,
       merchant: merchant.slice(0, 120),
       amount: totalCents,
       currency,
