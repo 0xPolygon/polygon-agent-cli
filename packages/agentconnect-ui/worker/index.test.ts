@@ -17,7 +17,7 @@ import worker, {
 } from './index.ts';
 import { issueSession, SESSION_COOKIE } from './owner-session.ts';
 import { OwnerSignIn } from './owner-signin.ts';
-import { createApproval, decideApproval } from './services.ts';
+import { createApproval, decideApproval, setApproval } from './services.ts';
 import { CredentialStore, SealedKv } from './store.ts';
 import {
   AGENT,
@@ -1410,6 +1410,12 @@ describe('approving a purchase', () => {
     expect(theirs.signedIn).toBe(false);
     expect((await signIn.load(theirs.c)).signedIn).toBeUndefined();
     expect((await get()).signedIn).toBe(false);
+
+    // Sent on to AgentCard already: the owner can open it there again.
+    await setApproval(db, WALLET, a.id, { status: 'awaiting_passkey' });
+    expect((await get({ wallet: WALLET, email: null })).c).toBeTruthy();
+    await setApproval(db, WALLET, a.id, { status: 'declined' });
+    expect((await get({ wallet: WALLET, email: null })).c).toBeNull();
   });
 });
 
