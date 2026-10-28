@@ -20,8 +20,13 @@ import { Kernel, KernelError } from './kernel.ts';
 import { createApproval, randomId, setApproval } from './services.ts';
 import { ValidationError } from './shipping.ts';
 
-const WALLET_KEY = 'agentcard-wallet';
-const CARD_KEY = 'checkout-card';
+// One wallet item per AgentCard user: Kernel fixes a wallet's user for good,
+// and won't delete one whose card it can't settle (`recovery_required`).
+const walletKey = (userId: string) => `wallet-${userId}`;
+// One card item per checkout. Kernel never lets a card whose outcome it can't
+// tell (`recovery_required`) be reused or deleted, so a stuck one must not
+// block the next checkout.
+const cardKey = (checkoutId: string) => `card-${checkoutId}`;
 // Idle seconds before Kernel closes the browser.
 const BROWSER_TIMEOUT_SEC = 900;
 // After pressing pay, how long the store has to send its card request.
@@ -258,7 +263,7 @@ export class BrowserCheckouts {
   }
 
   /** The vault holding the owner's AgentCard wallet, imported from their linked card. */
-  private async vault(): Promise<string> {
+  private async vault(): Promise<{ name: string; walletKey: string }> {
     const r = await this.db.get(this.wallet);
     const userId = r.agentcardConnection?.userId ?? r.agentcardUsers?.at(-1);
     if (!userId) {
@@ -268,16 +273,12 @@ export class BrowserCheckouts {
     }
     const name = vaultName(this.wallet);
     await this.kernel.vault(name);
-    let item = await this.kernel.getItem(name, WALLET_KEY);
-    // A wallet's user is fixed in Kernel: a new card user means a new wallet item.
-    if (item && item.spec.user_id !== userId) {
-      await this.kernel.deleteItem(name, WALLET_KEY);
-      item = null;
-    }
+    const key = walletKey(userId);
+    let item = await this.kernel.getItem(name, key);
     if (!item) {
       await this.kernel.ensureProviderConfig();
       try {
-        item = await this.kernel.putItem(name, WALLET_KEY, {
+        item = await this.kernel.putItem(name, key, {
           type: 'wallet',
           spec: {
             provider: 'agentcard',
@@ -301,7 +302,7 @@ export class BrowserCheckouts {
         `The saved card isn't ready for browser checkouts yet (${item.state.status}).`
       );
     }
-    return name;
+    return { name, walletKey: key };
   }
 
   private async run<T>(c: BrowserCheckout, code: string, args: unknown, timeoutSec = 60) {
@@ -342,7 +343,7 @@ export class BrowserCheckouts {
       }
       await this.cancel(open.id);
     }
-    const vault = await this.vault();
+    const { name: vault } = await this.vault();
     const browser = await this.kernel.createBrowser({
       vault,
       timeoutSeconds: BROWSER_TIMEOUT_SEC
@@ -458,28 +459,27 @@ export class BrowserCheckouts {
     if (lock && !(await lock.claim(`browser:${id}`))) {
       return this.status(id, '', 0);
     }
-    const vault = vaultName(this.wallet);
+    const { name: vault, walletKey: wallet } = await this.vault();
     const spec = {
       provider: 'agentcard',
-      wallet: WALLET_KEY,
+      wallet,
       merchant: merchant.slice(0, 120),
       amount: totalCents,
       currency,
       checkout_origin: origin
     };
-    let card = await this.kernel.getItem(vault, CARD_KEY);
-    if (card && card.state.status === 'pending_approval') {
-      throw new ValidationError('Another payment is waiting for the owner. Cancel it first.');
-    }
+    const key = cardKey(id);
+    let card = await this.kernel.getItem(vault, key);
     if (card && !['ready', 'requested'].includes(card.state.status)) {
-      await this.kernel.deleteItem(vault, CARD_KEY);
-      card = null;
+      throw new ValidationError(
+        `This checkout's payment can't be used again (${card.state.status}). Cancel it and start a new checkout.`
+      );
     }
     card = card
-      ? await this.kernel.updateItem(vault, CARD_KEY, { type: 'card', spec })
-      : await this.kernel.putItem(vault, CARD_KEY, { type: 'card', spec });
+      ? await this.kernel.updateItem(vault, key, { type: 'card', spec })
+      : await this.kernel.putItem(vault, key, { type: 'card', spec });
     if (card.state.status === 'requested')
-      card = (await this.kernel.getItem(vault, CARD_KEY, 20)) ?? card;
+      card = (await this.kernel.getItem(vault, key, 20)) ?? card;
     const aliases = card.state.aliases;
     if (card.state.status !== 'ready' || !aliases) {
       throw new ValidationError(
@@ -551,7 +551,7 @@ export class BrowserCheckouts {
       await this.close(c);
       return this.set(c.id, { status: 'declined', reason: 'owner_declined' });
     }
-    const card = await this.kernel.getItem(vaultName(this.wallet), CARD_KEY, 10);
+    const card = await this.kernel.getItem(vaultName(this.wallet), cardKey(c.id), 10);
     const auth = card?.state.authorization;
     const ours =
       auth &&
@@ -656,13 +656,21 @@ export class BrowserCheckouts {
     await this.kernel.deleteBrowser(c.browserId).catch((err) => {
       console.error('[browser-checkout] close', err);
     });
+    // Its card item too, unless Kernel holds a payment on it or needs it kept.
+    const vault = vaultName(this.wallet);
+    const card = await this.kernel.getItem(vault, cardKey(c.id)).catch(() => null);
+    if (card && (card.state.status === 'ready' || card.state.status === 'requested')) {
+      await this.kernel.deleteItem(vault, cardKey(c.id)).catch((err) => {
+        console.error('[browser-checkout] card', err);
+      });
+    }
   }
 
   /** AgentCard's approval link for the owner, once the store's card request is held. */
   async approvalLink(checkoutId: string, waitSec = 15): Promise<string | null> {
     const c = await this.find(checkoutId);
     if (c.status !== 'awaiting_approval') return null;
-    const card = await this.kernel.getItem(vaultName(this.wallet), CARD_KEY, waitSec);
+    const card = await this.kernel.getItem(vaultName(this.wallet), cardKey(c.id), waitSec);
     const auth = card?.state.authorization;
     return auth?.status === 'awaiting_approval' &&
       (!auth.browser_id || auth.browser_id === c.browserId)

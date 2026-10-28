@@ -283,16 +283,22 @@ export class AgentCard {
     }
   }
 
-  /** A single-use add-a-card link. With a known user it signs them in with a code first. */
+  /**
+   * A single-use add-a-card link. With a known user it signs them in with a code
+   * first. `externalUserId` (our wallet address) ties the AgentCard user to the
+   * wallet on AgentCard's side too.
+   */
   createVaultSession(
     userId?: string | null,
-    opts: { autoApproval?: boolean } = { autoApproval: this.cfg.autoApproval }
+    opts: { autoApproval?: boolean; externalUserId?: string } = {}
   ): Promise<VaultSession> {
+    const autoApproval = opts.autoApproval ?? this.cfg.autoApproval;
     return this.call<VaultSession>('POST', '/api/v2/vault_sessions', {
       ...(userId ? { user_id: userId } : {}),
+      ...(opts.externalUserId ? { external_user_id: opts.externalUserId } : {}),
       // Asks the owner, on the vault page, to let us pay with this card without
       // an approval link each time (production credentials only).
-      ...(opts.autoApproval ? { approval_mode: 'partner' } : {})
+      ...(autoApproval ? { approval_mode: 'partner' } : {})
     });
   }
 

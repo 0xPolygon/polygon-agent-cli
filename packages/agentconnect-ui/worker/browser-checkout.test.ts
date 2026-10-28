@@ -111,7 +111,7 @@ function fakeKernel(opts: { cardFields?: boolean; pageText?: string; unknownUser
   };
   /** AgentCard's authorization, as Kernel reports it on the card item. */
   const authorize = (status: string, extra: Record<string, unknown> = {}) => {
-    const card = items.get('checkout-card')!;
+    const card = [...items.values()].find((i) => i.type === 'card')!;
     card.state = {
       ...card.state,
       status: status === 'awaiting_approval' ? 'pending_approval' : 'ready',
@@ -193,7 +193,7 @@ describe('browser checkouts', () => {
     });
     expect(c).toMatchObject({ status: 'browsing', browserId: 'b1' });
     expect(page).toEqual(PAGE);
-    expect(items.get('agentcard-wallet')?.spec).toEqual({
+    expect(items.get('wallet-usr_owner')?.spec).toEqual({
       provider: 'agentcard',
       provider_config: { name: 'agentconnect-test' },
       user_id: 'usr_owner'
@@ -256,9 +256,9 @@ describe('browser checkouts', () => {
       description: 'Coffee beans'
     });
     expect(await pay(checkouts, c.id)).toBeNull();
-    expect(items.get('checkout-card')?.spec).toEqual({
+    expect([...items.values()].find((i) => i.type === 'card')?.spec).toEqual({
       provider: 'agentcard',
-      wallet: 'agentcard-wallet',
+      wallet: 'wallet-usr_owner',
       merchant: 'shop.example',
       amount: 3045,
       currency: 'eur',
@@ -290,6 +290,23 @@ describe('browser checkouts', () => {
       currency: 'eur',
       items: [{ name: 'Coffee beans', qty: 1 }]
     });
+  });
+
+  it("isn't blocked by an earlier checkout's card that Kernel can't settle", async () => {
+    const { checkouts, items, calls } = await setup();
+    const stuck: VaultItem = {
+      key: 'card-bco_old',
+      type: 'card',
+      spec: {},
+      state: { status: 'recovery_required' }
+    };
+    items.set(stuck.key, stuck);
+    const { c } = await checkouts.start({ productUrl: 'https://shop.example/p', description: 'x' });
+    await pay(checkouts, c.id);
+    expect(calls.filter((x) => x.script === 'pay')).toHaveLength(1);
+    expect(items.get(`card-${c.id}`)?.state.status).toBe('ready');
+    // Kernel keeps the stuck one: it's never reused or deleted.
+    expect(items.get('card-bco_old')).toBe(stuck);
   });
 
   it('pays at most once', async () => {

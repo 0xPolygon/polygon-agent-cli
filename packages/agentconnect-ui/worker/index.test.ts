@@ -575,7 +575,10 @@ describe('/api/credentials/cards', () => {
     agentcard.withContact.add('usr_1');
     const again = await start(t);
     expect(again.returning).toBe(true);
-    expect(agentcard.created.at(-1)).toEqual({ user_id: 'usr_1' });
+    expect(agentcard.created.at(-1)).toEqual({
+      user_id: 'usr_1',
+      external_user_id: WALLET.toLowerCase()
+    });
   });
 
   it("falls back to an open session for a passkey-only user, and lists both users' cards", async () => {
@@ -586,7 +589,7 @@ describe('/api/credentials/cards', () => {
 
     const again = await start(t);
     expect(again.returning).toBe(false);
-    expect(agentcard.created.at(-1)).toEqual({});
+    expect(agentcard.created.at(-1)).toEqual({ external_user_id: WALLET.toLowerCase() });
     agentcard.finish(again.sessionId, 'usr_2', '1881');
     await poll(t, again.sessionId);
 
