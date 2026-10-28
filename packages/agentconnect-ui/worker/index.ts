@@ -637,7 +637,16 @@ export async function handleApproveApi(req: Request, env: Env, path: string): Pr
       if (!found) return fail(404, 'not_found', 'This approval link is not valid.');
       const a = found.approval;
       const c = a.status === 'pending' ? await signIn.create({ approvalId: a.id }) : null;
+      // Signed in on this site as the wallet that owns it: no second sign-in.
+      const token = c ? readSessionCookie(req) : null;
+      const who =
+        token && env.AGENT_CERT_SECRET
+          ? await verifySession(token, env.AGENT_CERT_SECRET).catch(() => null)
+          : null;
+      const owner = who && who.wallet.toLowerCase() === found.wallet.toLowerCase() ? who : null;
+      if (c && owner) await signIn.markSignedIn(c, owner);
       return json({
+        signedIn: !!owner,
         merchant: a.merchant,
         merchantUrl: a.merchantUrl,
         totalCents: a.totalCents,
