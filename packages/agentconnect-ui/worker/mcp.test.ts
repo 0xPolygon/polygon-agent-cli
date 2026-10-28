@@ -332,6 +332,17 @@ describe('MCP client profiles', () => {
     expect(body).toMatchObject({ error: { code: -32602 } });
   });
 
+  it('tells a standard connection to buy in our browser first, then with buy', async () => {
+    const { body } = await rpc(env(), { jsonrpc: '2.0', id: 1, method: 'initialize' }, OWNER);
+    const text = (body as { result: { instructions: string } }).result.instructions;
+    const browser = text.indexOf('start every purchase');
+    const buy = text.indexOf('call buy');
+    const own = text.indexOf('authorize_checkout');
+    expect(browser).toBeGreaterThan(-1);
+    expect(buy).toBeGreaterThan(browser);
+    expect(own).toBeGreaterThan(buy);
+  });
+
   it('tells a Muse connection to confirm each purchase', async () => {
     const { body } = await rpc(env(), { jsonrpc: '2.0', id: 1, method: 'initialize' }, MUSE);
     expect((body as { result: { instructions: string } }).result.instructions).toMatch(

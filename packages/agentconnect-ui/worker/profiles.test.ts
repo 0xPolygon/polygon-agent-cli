@@ -42,24 +42,9 @@ describe('client profiles', () => {
     expect(policyOf('nope')).toBe(PROFILES.standard);
   });
 
-  it('has the owner approve each ChatGPT spend, with bundles, and shopping only in our browser', () => {
+  it('has the owner approve each ChatGPT spend, with bundles, and buys like a standard client', () => {
     expect(PROFILES.openai).toMatchObject({ movesMoney: true, ownerApproves: true });
-    const tools = PROFILES.standard.tools;
-    const money = tools.slice(tools.indexOf('get_allowance'));
-    const browser = tools.slice(
-      tools.indexOf('start_browser_checkout'),
-      tools.indexOf('get_allowance')
-    );
-    expect(PROFILES.openai.tools).toEqual([
-      'get_wallet',
-      'get_shipping_address',
-      'save_shipping_address',
-      ...browser,
-      ...money,
-      'propose_bundle'
-    ]);
-    expect(PROFILES.openai.tools).not.toContain('buy');
-    expect(PROFILES.openai.tools).not.toContain('authorize_checkout');
+    expect(PROFILES.openai.tools).toEqual([...PROFILES.standard.tools, 'propose_bundle']);
   });
 
   it('lets Muse spend like a standard client but confirm each purchase', () => {
@@ -67,12 +52,11 @@ describe('client profiles', () => {
     expect(PROFILES.muse.confirmEachPurchase).toBe(true);
     expect(PROFILES.muse.tools).toContain('confirm_purchase');
     expect(PROFILES.muse.tools).toContain('send');
-    expect(PROFILES.muse.tools).not.toContain('authorize_checkout');
     expect(PROFILES.muse.tools).not.toContain('start_browser_checkout');
     expect(PROFILES.standard.tools).not.toContain('confirm_purchase');
   });
 
-  it('gives standard clients every tool and an allowance', () => {
+  it('gives standard clients every tool and an allowance, buying in our browser first', () => {
     expect(PROFILES.standard).toMatchObject({ movesMoney: true, ownerApproves: false });
     expect(PROFILES.standard.tools).toEqual([
       'get_wallet',
@@ -81,11 +65,6 @@ describe('client profiles', () => {
       'list_cards',
       'add_card',
       'check_card',
-      'buy',
-      'authorize_checkout',
-      'get_checkout_card',
-      'close_checkout',
-      'payment_status',
       'start_browser_checkout',
       'browser_look',
       'browser_click',
@@ -97,6 +76,11 @@ describe('client profiles', () => {
       'pay_browser_checkout',
       'browser_checkout_status',
       'cancel_browser_checkout',
+      'buy',
+      'authorize_checkout',
+      'get_checkout_card',
+      'close_checkout',
+      'payment_status',
       'get_allowance',
       'send',
       'swap_quote',

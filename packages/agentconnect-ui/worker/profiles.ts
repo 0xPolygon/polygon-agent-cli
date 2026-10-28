@@ -2,12 +2,12 @@
 // allows it, from the OAuth client it came from, and keeps it for its life.
 //
 // `standard` is every client we haven't set up: everything the agent wallet
-// does, within the allowance the owner approves when connecting, and buying
-// with the saved address and cards (at once under the owner's auto-pay limit).
+// does, within the allowance the owner approves when connecting. It buys in
+// our hosted browser first (any store, any country, the owner approves each
+// purchase), then with buy, then with a one-time card in its own browser.
 // ChatGPT (`openai`) gets the money tools, but its apps may not move money
 // themselves: each spend, Polymarket included, waits for the owner to approve
-// it on this site (money/actions.ts). It shops only through our hosted
-// browser, where the owner approves every purchase too.
+// it on this site (money/actions.ts). It buys like a standard client.
 // Muse spends within the allowance like a standard client, but asks the user
 // before every purchase: buy returns a quote, and only confirm_purchase pays.
 // ChatGPT is recognised by its redirect URI (it registers a new client per
@@ -28,18 +28,16 @@ export interface ProfilePolicy {
 }
 
 const READ = ['get_wallet'] as const;
-// Buying with the saved address and cards.
-const SHOP = [
+// The saved address and cards that buying uses.
+const SAVED = [
   'get_shipping_address',
   'save_shipping_address',
   'list_cards',
   'add_card',
-  'check_card',
-  'buy'
+  'check_card'
 ] as const;
-// Paying at a store's checkout in the agent's own browser, with a one-time card.
-const CHECKOUT = ['authorize_checkout', 'get_checkout_card', 'close_checkout'] as const;
-// Buying at any store in our hosted browser; the owner approves every purchase.
+// The first way to buy: at any store, in our hosted browser; the owner approves
+// every purchase.
 const BROWSER = [
   'start_browser_checkout',
   'browser_look',
@@ -53,6 +51,10 @@ const BROWSER = [
   'browser_checkout_status',
   'cancel_browser_checkout'
 ] as const;
+// Then, if a browser checkout can't finish: buy (AgentCard's Purchase API,
+// stores that take orders directly) and, for an agent with its own browser, a
+// one-time card at the store's checkout.
+const CHECKOUT = ['authorize_checkout', 'get_checkout_card', 'close_checkout'] as const;
 const MONEY = [
   'get_allowance',
   'send',
@@ -74,31 +76,27 @@ const MONEY = [
   'get_action'
 ] as const;
 
+// Every agent that buys tries the same ways in the same order (mcp.ts).
+const BUYING = [...SAVED, ...BROWSER, 'buy', ...CHECKOUT, 'payment_status'] as const;
+
 // Only where the owner approves each spend: several approved at once.
 const BUNDLE = ['propose_bundle'] as const;
 
 export const PROFILES: Record<Profile, ProfilePolicy> = {
   standard: {
-    tools: [...READ, ...SHOP, ...CHECKOUT, 'payment_status', ...BROWSER, ...MONEY],
+    tools: [...READ, ...BUYING, ...MONEY],
     movesMoney: true,
     ownerApproves: false,
     confirmEachPurchase: false
   },
   openai: {
-    tools: [
-      ...READ,
-      'get_shipping_address',
-      'save_shipping_address',
-      ...BROWSER,
-      ...MONEY,
-      ...BUNDLE
-    ],
+    tools: [...READ, ...BUYING, ...MONEY, ...BUNDLE],
     movesMoney: true,
     ownerApproves: true,
     confirmEachPurchase: false
   },
   muse: {
-    tools: [...READ, ...SHOP, 'confirm_purchase', 'payment_status', ...MONEY],
+    tools: [...READ, ...SAVED, 'buy', 'confirm_purchase', 'payment_status', ...MONEY],
     movesMoney: true,
     ownerApproves: false,
     confirmEachPurchase: true
