@@ -9,6 +9,8 @@ import { AuthorizationError, OAuthProvider } from '@cloudflare/workers-oauth-pro
 
 import type { AgentIdentity, OmsIdTokenConfig } from './agent-auth.ts';
 import type { McpProps } from './mcp.ts';
+import type { BrowserDecision } from './services.ts';
+import type { CredentialStore } from './store.ts';
 
 import { AuthError, issueCertificate, verifyAccessToken, verifyEnrollToken } from './agent-auth.ts';
 import { AgentCardError, agentCardFailure } from './agentcard.ts';
@@ -694,11 +696,7 @@ export async function handleApproveApi(req: Request, env: Env, path: string): Pr
         pending.signedIn.wallet,
         body.approve === true,
         walletLock(env, pending.signedIn.wallet),
-        (wallet, approval, approve) => {
-          const checkouts = browserCheckouts(env, db, wallet);
-          if (!checkouts) throw new ValidationError('Browser checkouts are not configured.');
-          return decideBrowserApproval(checkouts, approval, approve);
-        }
+        browserDecision(env, db)
       );
       await signIn.forget(id);
       return json(result);
@@ -998,8 +996,60 @@ async function approvalPreview(env: Env, id: string) {
   return { id, amount: money(a.totalCents, a.currency ?? 'usd'), merchant: a.merchant };
 }
 
+/** How the owner's decision reaches a browser checkout (browser-checkout.ts). */
+const browserDecision =
+  (env: Env, db: CredentialStore): BrowserDecision =>
+  (wallet, approval, approve) => {
+    const checkouts = browserCheckouts(env, db, wallet);
+    if (!checkouts) throw new ValidationError('Browser checkouts are not configured.');
+    return decideBrowserApproval(checkouts, approval, approve);
+  };
+
+/**
+ * The owner, signed in on this site, opening a browser checkout's approval
+ * link: AgentCard's own screen, where they approve or decline. Opening it pays
+ * nothing (only the owner's passkey there does), so a plain page load may.
+ * Null when the page should show instead (signing in, or AgentCard not ready).
+ */
+async function agentCardHandoff(request: Request, env: Env, id: string): Promise<string | null> {
+  const db = store(env);
+  const cards = agentCard(env);
+  const token = readSessionCookie(request);
+  if (!db || !cards || !token || !env.AGENT_CERT_SECRET || !id) return null;
+  const who = await verifySession(token, env.AGENT_CERT_SECRET).catch(() => null);
+  const found = who ? await approvalForPage(db, id).catch(() => null) : null;
+  if (!who || !found || who.wallet.toLowerCase() !== found.wallet.toLowerCase()) return null;
+  const a = found.approval;
+  if (a.kind !== 'browser' || (a.status !== 'pending' && a.status !== 'awaiting_passkey')) {
+    return null;
+  }
+  try {
+    const decided = await decideApproval(
+      db,
+      cards,
+      a.id,
+      found.wallet,
+      true,
+      walletLock(env, found.wallet),
+      browserDecision(env, db)
+    );
+    return decided.passkeyUrl ?? null;
+  } catch (err) {
+    // Not ready yet: the page says so and lets them try again.
+    if (!(err instanceof ValidationError)) console.error('[approve handoff]', err);
+    return null;
+  }
+}
+
 /** The approval page, with the tags a chat app reads to preview its link. */
 async function approvePage(request: Request, env: Env, url: URL): Promise<Response> {
+  const handoff = await agentCardHandoff(request, env, url.searchParams.get('r') ?? '');
+  if (handoff) {
+    return new Response(null, {
+      status: 302,
+      headers: { location: handoff, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' }
+    });
+  }
   // The site's root is the SPA's index.html (/index.html itself redirects to it).
   const res = await env.ASSETS.fetch(new Request(new URL('/', url), request));
   if (!res.ok) return res;
