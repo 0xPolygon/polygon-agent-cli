@@ -2,9 +2,9 @@
 // allows it, from the OAuth client it came from, and keeps it for its life.
 //
 // `standard` is every client we haven't set up: everything the agent wallet
-// does, within the allowance the owner approves when connecting. It buys only
-// through our hosted browser, at any store in any country, and the owner
-// approves every purchase.
+// does, within the allowance the owner approves when connecting. It buys in
+// our hosted browser first (any store, any country, the owner approves each
+// purchase), then with buy, then with a one-time card in its own browser.
 // ChatGPT (`openai`) gets the money tools, but its apps may not move money
 // themselves: each spend, Polymarket included, waits for the owner to approve
 // it on this site (money/actions.ts). It buys through our hosted browser too.
@@ -36,7 +36,7 @@ const SAVED = [
   'add_card',
   'check_card'
 ] as const;
-// The one way to buy: at any store, in our hosted browser; the owner approves
+// The first way to buy: at any store, in our hosted browser; the owner approves
 // every purchase.
 const BROWSER = [
   'start_browser_checkout',
@@ -51,6 +51,10 @@ const BROWSER = [
   'browser_checkout_status',
   'cancel_browser_checkout'
 ] as const;
+// Then, if a browser checkout can't finish: buy (AgentCard's Purchase API,
+// stores that take orders directly) and, for an agent with its own browser, a
+// one-time card at the store's checkout.
+const CHECKOUT = ['authorize_checkout', 'get_checkout_card', 'close_checkout'] as const;
 const MONEY = [
   'get_allowance',
   'send',
@@ -77,7 +81,7 @@ const BUNDLE = ['propose_bundle'] as const;
 
 export const PROFILES: Record<Profile, ProfilePolicy> = {
   standard: {
-    tools: [...READ, ...SAVED, ...BROWSER, ...MONEY],
+    tools: [...READ, ...SAVED, ...BROWSER, 'buy', ...CHECKOUT, 'payment_status', ...MONEY],
     movesMoney: true,
     ownerApproves: false,
     confirmEachPurchase: false

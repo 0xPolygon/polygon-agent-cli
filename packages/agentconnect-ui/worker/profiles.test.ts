@@ -46,10 +46,7 @@ describe('client profiles', () => {
     expect(PROFILES.openai).toMatchObject({ movesMoney: true, ownerApproves: true });
     const tools = PROFILES.standard.tools;
     const money = tools.slice(tools.indexOf('get_allowance'));
-    const browser = tools.slice(
-      tools.indexOf('start_browser_checkout'),
-      tools.indexOf('get_allowance')
-    );
+    const browser = tools.slice(tools.indexOf('start_browser_checkout'), tools.indexOf('buy'));
     expect(PROFILES.openai.tools).toEqual([
       'get_wallet',
       'get_shipping_address',
@@ -73,7 +70,7 @@ describe('client profiles', () => {
     expect(PROFILES.standard.tools).not.toContain('confirm_purchase');
   });
 
-  it('gives standard clients every tool and an allowance, and one way to buy', () => {
+  it('gives standard clients every tool and an allowance, buying in our browser first', () => {
     expect(PROFILES.standard).toMatchObject({ movesMoney: true, ownerApproves: false });
     expect(PROFILES.standard.tools).toEqual([
       'get_wallet',
@@ -93,6 +90,11 @@ describe('client profiles', () => {
       'pay_browser_checkout',
       'browser_checkout_status',
       'cancel_browser_checkout',
+      'buy',
+      'authorize_checkout',
+      'get_checkout_card',
+      'close_checkout',
+      'payment_status',
       'get_allowance',
       'send',
       'swap_quote',

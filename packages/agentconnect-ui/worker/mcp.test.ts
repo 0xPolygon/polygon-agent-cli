@@ -91,6 +91,10 @@ describe('MCP server', () => {
       'list_cards',
       'add_card',
       'check_card',
+      'buy',
+      'authorize_checkout',
+      'get_checkout_card',
+      'close_checkout',
       'start_browser_checkout',
       'browser_look',
       'browser_click',
@@ -101,7 +105,8 @@ describe('MCP server', () => {
       'browser_open',
       'pay_browser_checkout',
       'browser_checkout_status',
-      'cancel_browser_checkout'
+      'cancel_browser_checkout',
+      'payment_status'
     ]);
   });
 
@@ -121,6 +126,10 @@ describe('MCP server', () => {
       'list_cards',
       'add_card',
       'check_card',
+      'buy',
+      'authorize_checkout',
+      'get_checkout_card',
+      'close_checkout',
       'start_browser_checkout',
       'browser_look',
       'browser_click',
@@ -132,6 +141,7 @@ describe('MCP server', () => {
       'pay_browser_checkout',
       'browser_checkout_status',
       'cancel_browser_checkout',
+      'payment_status',
       'get_allowance',
       'send',
       'swap_quote',
@@ -211,7 +221,7 @@ describe('MCP server', () => {
   });
 
   it('reports bad input as a tool error, not a protocol error', async () => {
-    const r = await shop(env(), 'buy', { conversation_id: 'c' }, MUSE);
+    const r = await shop(env(), 'buy', { conversation_id: 'c' });
     expect(r.isError).toBe(true);
     expect(r.content[0].text).toMatch(/ask is required/);
   });
@@ -316,10 +326,21 @@ describe('MCP client profiles', () => {
   it('refuses a hidden tool called by name', async () => {
     const { body } = await rpc(
       env(),
-      { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'start_browser_checkout' } },
+      { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'authorize_checkout' } },
       MUSE
     );
     expect(body).toMatchObject({ error: { code: -32602 } });
+  });
+
+  it('tells a standard connection to buy in our browser first, then with buy', async () => {
+    const { body } = await rpc(env(), { jsonrpc: '2.0', id: 1, method: 'initialize' }, OWNER);
+    const text = (body as { result: { instructions: string } }).result.instructions;
+    const browser = text.indexOf('start every purchase');
+    const buy = text.indexOf('call buy');
+    const own = text.indexOf('authorize_checkout');
+    expect(browser).toBeGreaterThan(-1);
+    expect(buy).toBeGreaterThan(browser);
+    expect(own).toBeGreaterThan(buy);
   });
 
   it('tells a Muse connection to confirm each purchase', async () => {
@@ -329,17 +350,11 @@ describe('MCP client profiles', () => {
     );
   });
 
-  it('has a standard connection buy only in our browser', async () => {
-    const { body } = await rpc(
-      env(),
-      { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'buy' } },
-      OWNER
-    );
-    expect(body).toMatchObject({ error: { code: -32602 } });
-    const init = await rpc(env(), { jsonrpc: '2.0', id: 1, method: 'initialize' }, OWNER);
-    const text = (init.body as { result: { instructions: string } }).result.instructions;
-    expect(text).toMatch(/only way to buy/);
-    expect(text).not.toMatch(/call buy/);
+  it('pays at once under the limit for a standard connection', async () => {
+    const buys = cardService();
+    const r = await shop(await cardEnv(), 'buy', { ask: 'AA batteries' });
+    expect(r.structuredContent).toMatchObject({ autoPay: true, orderId: 'ord_1' });
+    expect(buys).toHaveLength(2);
   });
 
   it('quotes for Muse and charges nothing', async () => {
