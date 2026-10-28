@@ -24,6 +24,8 @@ interface Purchase {
   items: { name: string; qty: number; priceCents?: number }[];
   status: string;
   c: string | null;
+  // Already signed in on this site as the wallet that owns the purchase.
+  signedIn?: boolean;
 }
 
 const ZERO_DECIMAL = new Set(['jpy', 'krw', 'vnd', 'clp', 'isk', 'ugx', 'xaf', 'xof', 'pyg']);
@@ -114,6 +116,7 @@ export function ApprovePurchase({ finishing = false }: { finishing?: boolean }) 
           setStep('done');
         } else if (!saved) {
           setC(d.c);
+          if (d.signedIn) setStep('decide');
         }
       })
       .catch((e: Error) => setError(e.message));

@@ -8,6 +8,7 @@ import worker, {
   agentName,
   handleAgentsApi,
   handleApi,
+  handleApproveApi,
   handleConnectApi,
   isLocalAgent,
   limitRegistration,
@@ -1371,6 +1372,44 @@ describe('approval link preview', () => {
     const html = await (await get('/approve?r=apr_nope')).text();
     expect(html).toContain('<title>Approve a purchase</title>');
     expect((await get('/api/approve/preview.png?r=apr_nope')).status).toBe(404);
+  });
+});
+
+describe('approving a purchase', () => {
+  it('skips sign-in for the owner signed in on the site, and only for them', async () => {
+    const e = env({ OAUTH_KV: fakeKv().kv });
+    const db = new CredentialStore(kv.kv, 'test-credentials-key');
+    const a = await createApproval(db, WALLET, {
+      kind: 'browser',
+      merchant: 'Noordcode',
+      merchantUrl: 'https://noordcode.com',
+      totalCents: 3045,
+      currency: 'eur',
+      items: [],
+      conversationId: null,
+      hash: null
+    });
+    const get = async (session?: { wallet: string; email: string | null }) => {
+      const cookie = session ? `${SESSION_COOKIE}=${await issueSession(session, SECRET)}` : null;
+      const res = await handleApproveApi(
+        new Request(`https://agentconnect.test/api/approve?r=${a.id}`, {
+          headers: cookie ? { Cookie: cookie } : {}
+        }),
+        e,
+        '/api/approve'
+      );
+      return (await res.json()) as { signedIn: boolean; c: string };
+    };
+    const signIn = new OwnerSignIn(new SealedKv(e.OAUTH_KV!, 'test-credentials-key'), 'pk_test');
+
+    const mine = await get({ wallet: WALLET, email: 'owner@example.com' });
+    expect(mine.signedIn).toBe(true);
+    expect((await signIn.load(mine.c)).signedIn).toMatchObject({ wallet: WALLET });
+
+    const theirs = await get({ wallet: '0x' + '1'.repeat(40), email: null });
+    expect(theirs.signedIn).toBe(false);
+    expect((await signIn.load(theirs.c)).signedIn).toBeUndefined();
+    expect((await get()).signedIn).toBe(false);
   });
 });
 
