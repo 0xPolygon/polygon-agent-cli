@@ -596,6 +596,8 @@ export class BrowserCheckouts {
     for (;;) {
       let c = await this.find(id);
       if (WAITING.includes(c.status)) c = await this.refresh(c);
+      // A store that answers late still turns an unconfirmed checkout paid.
+      else if (c.status === 'unconfirmed') c = await this.confirm(c);
       if (!WAITING.includes(c.status) || Date.now() >= until) return this.view(c, origin);
       await new Promise((r) => setTimeout(r, c.status === 'confirming' ? 3000 : 1500));
     }
@@ -641,7 +643,11 @@ export class BrowserCheckouts {
         });
       }
       return this.confirm(
-        await this.set(c.id, { status: 'confirming', approvedAt: new Date().toISOString() })
+        await this.set(c.id, {
+          status: 'confirming',
+          approvedAt: new Date().toISOString(),
+          authId: auth.id
+        })
       );
     }
     if (c.approvalId) {
@@ -658,6 +664,24 @@ export class BrowserCheckouts {
 
   /** After the owner approved: the store's answer, once its page shows one. */
   private async confirm(c: BrowserCheckout): Promise<BrowserCheckout> {
+    // Some stores ask for the card again once the first one is in (Noordcode's
+    // Shopify checkout does): the owner approves that request too.
+    const card = await this.kernel.getItem(vaultName(this.wallet), cardKey(c.id)).catch(() => null);
+    const auth = card?.state.authorization;
+    if (
+      auth &&
+      auth.id !== c.authId &&
+      approvable(auth) &&
+      (!auth.browser_id || auth.browser_id === c.browserId)
+    ) {
+      if (c.approvalId)
+        await setApproval(this.db, this.wallet, c.approvalId, { status: 'pending' });
+      return this.set(c.id, {
+        status: 'awaiting_approval',
+        approvalExpiresAt: auth.expires_at,
+        askedAgain: true
+      });
+    }
     const page = await this.run<{ url: string; text: string }>(c, PROBE, {}).catch(() => null);
     // The browser closed (now unconfirmed), or didn't answer this time.
     if (!page) return this.find(c.id);
@@ -707,7 +731,7 @@ export class BrowserCheckouts {
           status: 'pending_approval',
           approval_url: `${origin}/approve?r=${c.approvalId}`,
           expires_in_minutes: minutes,
-          next: `Send the owner approval_url on its own line, for them to open in their own browser, where they're signed in: never open it in a browser you run or a private window. Then call browser_checkout_status again right away. Each call waits up to 25 seconds: keep calling it, without ending your turn or waiting for the owner to reply, until the status changes or the approval expires in ${minutes} minutes. Owners often take a few minutes.`
+          next: `${c.askedAgain ? 'The store asked for the card again, so the owner approves once more, on the same link. ' : ''}Send the owner approval_url on its own line, for them to open in their own browser, where they're signed in: never open it in a browser you run or a private window. Then call browser_checkout_status again right away. Each call waits up to 25 seconds: keep calling it, without ending your turn or waiting for the owner to reply, until the status changes or the approval expires in ${minutes} minutes. Owners often take a few minutes.`
         };
       }
       case 'confirming':

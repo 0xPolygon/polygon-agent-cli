@@ -87,6 +87,9 @@ export interface BrowserCheckout {
   approvalExpiresAt?: string;
   // Set when the card was sent to the store, and what the store said.
   approvedAt?: string;
+  // The authorization the owner approved, and whether the store asked for the card again.
+  authId?: string;
+  askedAgain?: boolean;
   orderNumber?: string;
   storeMessage?: string;
   reason?: string;

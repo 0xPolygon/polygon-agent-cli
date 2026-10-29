@@ -409,6 +409,59 @@ describe('browser checkouts', () => {
     await expect(checkouts.look(c.id)).resolves.toEqual(PAGE);
   });
 
+  it('asks the owner again when the store asks for the card a second time', async () => {
+    const { checkouts, authorize, db, store } = await setup();
+    const { c } = await checkouts.start({ productUrl: 'https://shop.example/p', description: 'x' });
+    await pay(checkouts, c.id);
+    authorize('approved');
+    expect(await checkouts.status(c.id, ORIGIN, 0)).toMatchObject({ status: 'confirming' });
+    const approvalId = (await checkouts.find(c.id)).approvalId!;
+    // Noordcode's checkout sends a second card request after the first is in.
+    authorize('awaiting_approval', {
+      id: 'auth_2',
+      expires_at: new Date(Date.now() + 14 * 60_000).toISOString()
+    });
+    const again = await checkouts.status(c.id, ORIGIN, 0);
+    expect(again).toMatchObject({
+      status: 'pending_approval',
+      approval_url: `${ORIGIN}/approve?r=${approvalId}`,
+      next: expect.stringMatching(/asked for the card again/)
+    });
+    const approval = (await approvalForPage(db, approvalId))!.approval;
+    expect(approval.status).toBe('pending');
+    expect(await decideBrowserApproval(checkouts, approval, true)).toEqual({
+      status: 'awaiting_passkey',
+      passkeyUrl: APPROVAL
+    });
+    authorize('approved', { id: 'auth_2' });
+    expect(await checkouts.status(c.id, ORIGIN, 0)).toMatchObject({ status: 'confirming' });
+    store.url = 'https://shop.example/checkouts/cn/1/thank-you';
+    store.text = 'Your order is confirmed. Order #1042';
+    expect(await checkouts.status(c.id, ORIGIN, 0)).toMatchObject({
+      status: 'paid',
+      order_number: '1042'
+    });
+  });
+
+  it('turns an unconfirmed checkout paid when the store answers late', async () => {
+    const { checkouts, authorize, db, store } = await setup();
+    const { c } = await checkouts.start({ productUrl: 'https://shop.example/p', description: 'x' });
+    await pay(checkouts, c.id);
+    authorize('approved');
+    await checkouts.status(c.id, ORIGIN, 0);
+    const long = new Date(Date.now() - 6 * 60_000).toISOString();
+    await db.update(WALLET, (r) => ({
+      ...r,
+      browserCheckouts: r.browserCheckouts!.map((x) => ({ ...x, approvedAt: long }))
+    }));
+    expect(await checkouts.status(c.id, ORIGIN, 0)).toMatchObject({ status: 'unconfirmed' });
+    store.text = 'Thank you for your order. Confirmation #ZZ9K2';
+    expect(await checkouts.status(c.id, ORIGIN, 0)).toMatchObject({
+      status: 'paid',
+      order_number: 'ZZ9K2'
+    });
+  });
+
   it('reports the store refusing the payment, with its message', async () => {
     const { checkouts, authorize, db, store, deleted } = await setup();
     const { c } = await checkouts.start({ productUrl: 'https://shop.example/p', description: 'x' });
