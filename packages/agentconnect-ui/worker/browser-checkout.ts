@@ -344,7 +344,10 @@ export class BrowserCheckouts {
     if (!description || description.length > 300) {
       throw new ValidationError('description is required: what the owner wants, in a sentence.');
     }
-    for (const open of (await this.list()).filter((x) => OPEN.includes(x.status))) {
+    for (let open of (await this.list()).filter((x) => OPEN.includes(x.status))) {
+      // One that expired, or was decided, since the agent last asked doesn't block.
+      if (open.status === 'awaiting_approval') open = await this.refresh(open, 0);
+      if (!OPEN.includes(open.status)) continue;
       if (open.status === 'awaiting_approval') {
         throw new ValidationError(
           `Checkout ${open.id} is waiting for the owner's approval. Call browser_checkout_status, or cancel_browser_checkout first.`
@@ -552,7 +555,7 @@ export class BrowserCheckouts {
     }
   }
 
-  private async refresh(c: BrowserCheckout): Promise<BrowserCheckout> {
+  private async refresh(c: BrowserCheckout, waitSec = 10): Promise<BrowserCheckout> {
     const approval = c.approvalId
       ? ((await this.db.get(this.wallet)).approvals ?? []).find((a) => a.id === c.approvalId)
       : undefined;
@@ -560,7 +563,7 @@ export class BrowserCheckouts {
       await this.close(c);
       return this.set(c.id, { status: 'declined', reason: 'owner_declined' });
     }
-    const card = await this.kernel.getItem(vaultName(this.wallet), cardKey(c.id), 10);
+    const card = await this.kernel.getItem(vaultName(this.wallet), cardKey(c.id), waitSec);
     const auth = card?.state.authorization;
     const ours =
       auth &&
@@ -630,7 +633,7 @@ export class BrowserCheckouts {
       case 'expired':
         return {
           ...base,
-          next: 'The approval expired before the owner decided. Nothing was charged.'
+          next: "The approval expired before the owner decided. Nothing was charged. If the owner still wants it, start again with start_browser_checkout and the same steps, and send them the new approval link. Don't ask first: they already asked for it."
         };
       case 'failed':
         return {
