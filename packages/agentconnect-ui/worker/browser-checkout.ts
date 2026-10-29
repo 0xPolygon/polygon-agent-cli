@@ -612,7 +612,7 @@ export class BrowserCheckouts {
           ...base,
           status: 'pending_approval',
           approval_url: `${origin}/approve?r=${c.approvalId}`,
-          next: 'Send the owner approval_url on its own line, then call browser_checkout_status again right away: it waits for their decision. Keep calling it while it says pending_approval.'
+          next: "Send the owner approval_url on its own line, for them to open in their own browser, where they're signed in: never open it in a browser you run or a private window. Then call browser_checkout_status again right away: it waits for their decision. Keep calling it while it says pending_approval."
         };
       case 'paid': {
         const page = await this.snapshot(c, 2500).catch(() => null);
