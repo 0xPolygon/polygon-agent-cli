@@ -69,16 +69,26 @@ export interface BrowserCheckout {
   status:
     | 'browsing'
     | 'awaiting_approval'
+    // The owner approved and the card went to the store: waiting for its answer.
+    | 'confirming'
     | 'paid'
     | 'declined'
     | 'expired'
     | 'failed'
+    // Approved, but the store showed neither a confirmation nor an error in time.
+    | 'unconfirmed'
     | 'canceled';
   merchant?: string;
   totalCents?: number;
   currency?: string;
   approvalId?: string;
   paidAt?: string;
+  // When AgentCard's approval runs out, once the store has asked for the card.
+  approvalExpiresAt?: string;
+  // Set when the card was sent to the store, and what the store said.
+  approvedAt?: string;
+  orderNumber?: string;
+  storeMessage?: string;
   reason?: string;
   createdAt: string;
   updatedAt: string;

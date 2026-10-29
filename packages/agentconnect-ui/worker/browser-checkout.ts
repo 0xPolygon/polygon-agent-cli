@@ -32,8 +32,17 @@ const cardKey = (checkoutId: string) => `card-${checkoutId}`;
 const BROWSER_TIMEOUT_SEC = 900;
 // After pressing pay, how long the store has to send its card request.
 const NO_REQUEST_MS = 3 * 60_000;
+// After the owner approves, how long the store has to confirm the order or
+// refuse the payment (the bank may ask the owner to verify in their app).
+const CONFIRM_MS = 5 * 60_000;
+// AgentCard's approval lifetime, when Kernel hasn't told us its expiry.
+const APPROVAL_MS = 15 * 60_000;
 const MAX_KEPT = 20;
 const OPEN: BrowserCheckout['status'][] = ['browsing', 'awaiting_approval'];
+// Waiting on the owner or the store: status keeps checking.
+const WAITING: BrowserCheckout['status'][] = ['awaiting_approval', 'confirming'];
+// Their browser is still open for browser_look.
+const LOOKABLE: BrowserCheckout['status'][] = [...OPEN, 'confirming', 'paid', 'unconfirmed'];
 
 /**
  * Whether the owner can still approve: Kernel keeps reporting an authorization
@@ -238,6 +247,33 @@ export function pageShowsAmount(text: string, cents: number, currency: string): 
   });
 }
 
+// What a store shows once it has answered the payment. Shopify confirms on a
+// thank-you page ("Your order is confirmed", "Confirmation #…") and refuses in
+// place, on the checkout page ("Your payment couldn't be verified").
+const CONFIRMED_URL = /\/(thank[-_]?you|orders?\/|order[-_]?(confirmation|received|complete))/i;
+const CONFIRMED_TEXT =
+  /thank you for your (order|purchase)|your order (is|has been) (confirmed|placed|received)|order confirmed/i;
+const REFUSED_TEXT =
+  /[^.\n]*(payment (couldn['’]t|could not|wasn['’]t|was not) be (verified|processed|completed)|card (was|has been) declined|(payment|transaction) (was )?declined|payment (failed|was unsuccessful))[^.\n]*\.?/i;
+const ORDER_NUMBER =
+  /\b(?:order|confirmation)\s*(?:number|no\.?|#)\s*:?\s*#?\s*([A-Z0-9][A-Z0-9-]{3,})/i;
+
+/** The store's answer to the payment, if the page shows one yet. */
+export function storeOutcome(page: {
+  url: string;
+  text: string;
+}):
+  | { kind: 'confirmed'; orderNumber: string | null }
+  | { kind: 'refused'; message: string }
+  | null {
+  if (CONFIRMED_URL.test(new URL(page.url).pathname) || CONFIRMED_TEXT.test(page.text)) {
+    return { kind: 'confirmed', orderNumber: ORDER_NUMBER.exec(page.text)?.[1] ?? null };
+  }
+  const refused = REFUSED_TEXT.exec(page.text);
+  if (refused) return { kind: 'refused', message: refused[0].trim().slice(0, 300) };
+  return null;
+}
+
 type Page = { url: string; title: string; text: string; elements: string[] };
 
 export class BrowserCheckouts {
@@ -320,7 +356,11 @@ export class BrowserCheckouts {
       res = await this.kernel.playwright(c.browserId, code, args, timeoutSec);
     } catch (err) {
       if (err instanceof KernelError && (err.status === 404 || err.status === 410)) {
-        await this.set(c.id, { status: 'failed', reason: 'browser_closed' });
+        // A paid checkout stays paid; one the store hadn't answered can't be told now.
+        if (OPEN.includes(c.status))
+          await this.set(c.id, { status: 'failed', reason: 'browser_closed' });
+        if (c.status === 'confirming')
+          await this.set(c.id, { status: 'unconfirmed', reason: 'browser_closed' });
         throw new ValidationError(
           'The browser for this checkout has closed (it times out after 15 idle minutes). Start a new checkout.'
         );
@@ -378,8 +418,14 @@ export class BrowserCheckouts {
     return { c, page: await this.snapshot(c) };
   }
 
+  /** The page as it stands: while browsing, and after paying, to read the store's answer. */
   async look(id: string) {
-    const c = await this.browsing(id);
+    const c = await this.find(id);
+    if (!LOOKABLE.includes(c.status)) {
+      throw new ValidationError(
+        `This checkout is ${c.status.replace('_', ' ')}, and its browser is closed.`
+      );
+    }
     return this.snapshot(c, 300);
   }
 
@@ -543,19 +589,20 @@ export class BrowserCheckouts {
 
   /**
    * Where a checkout is. Waits up to `waitMs` for the store's card request,
-   * the owner's decision, and the payment.
+   * the owner's decision, and the store's answer.
    */
   async status(id: string, origin: string, waitMs = 25_000) {
     const until = Date.now() + waitMs;
     for (;;) {
       let c = await this.find(id);
-      if (c.status === 'awaiting_approval') c = await this.refresh(c);
-      if (c.status !== 'awaiting_approval' || Date.now() >= until) return this.view(c, origin);
-      await new Promise((r) => setTimeout(r, 1500));
+      if (WAITING.includes(c.status)) c = await this.refresh(c);
+      if (!WAITING.includes(c.status) || Date.now() >= until) return this.view(c, origin);
+      await new Promise((r) => setTimeout(r, c.status === 'confirming' ? 3000 : 1500));
     }
   }
 
   private async refresh(c: BrowserCheckout, waitSec = 10): Promise<BrowserCheckout> {
+    if (c.status === 'confirming') return this.confirm(c);
     const approval = c.approvalId
       ? ((await this.db.get(this.wallet)).approvals ?? []).find((a) => a.id === c.approvalId)
       : undefined;
@@ -577,18 +624,25 @@ export class BrowserCheckouts {
       }
       return c;
     }
-    if (approvable(auth)) return c;
+    if (approvable(auth)) {
+      return auth.expires_at && auth.expires_at !== c.approvalExpiresAt
+        ? this.set(c.id, { approvalExpiresAt: auth.expires_at })
+        : c;
+    }
+    // Approved means the card reached the store, not that the store took it.
     if (auth.status === 'approved') {
       if (c.approvalId) {
         await setApproval(this.db, this.wallet, c.approvalId, {
-          status: 'placed',
+          status: 'placing',
           result: {
             chargedKind: auth.charged_kind ?? null,
             delivered: auth.replay_delivered ?? null
           }
         });
       }
-      return this.set(c.id, { status: 'paid' });
+      return this.confirm(
+        await this.set(c.id, { status: 'confirming', approvedAt: new Date().toISOString() })
+      );
     }
     if (c.approvalId) {
       await setApproval(this.db, this.wallet, c.approvalId, {
@@ -602,6 +656,39 @@ export class BrowserCheckouts {
     });
   }
 
+  /** After the owner approved: the store's answer, once its page shows one. */
+  private async confirm(c: BrowserCheckout): Promise<BrowserCheckout> {
+    const page = await this.run<{ url: string; text: string }>(c, PROBE, {}).catch(() => null);
+    // The browser closed (now unconfirmed), or didn't answer this time.
+    if (!page) return this.find(c.id);
+    const outcome = storeOutcome(page);
+    if (outcome?.kind === 'confirmed') {
+      if (c.approvalId) {
+        const prior = ((await this.db.get(this.wallet)).approvals ?? []).find(
+          (a) => a.id === c.approvalId
+        )?.result;
+        await setApproval(this.db, this.wallet, c.approvalId, {
+          status: 'placed',
+          result: { ...prior, orderNumber: outcome.orderNumber }
+        });
+      }
+      return this.set(c.id, { status: 'paid', orderNumber: outcome.orderNumber ?? undefined });
+    }
+    if (outcome?.kind === 'refused') {
+      if (c.approvalId) await setApproval(this.db, this.wallet, c.approvalId, { status: 'failed' });
+      await this.close(c);
+      return this.set(c.id, {
+        status: 'failed',
+        reason: 'store_refused',
+        storeMessage: outcome.message
+      });
+    }
+    if (Date.now() - Date.parse(c.approvedAt ?? c.updatedAt) > CONFIRM_MS) {
+      return this.set(c.id, { status: 'unconfirmed', reason: 'no_store_answer' });
+    }
+    return c;
+  }
+
   private async view(c: BrowserCheckout, origin: string) {
     const base = {
       checkout_id: c.id,
@@ -610,21 +697,41 @@ export class BrowserCheckouts {
       total: c.totalCents !== undefined && c.currency ? money(c.totalCents, c.currency) : null
     };
     switch (c.status) {
-      case 'awaiting_approval':
+      case 'awaiting_approval': {
+        const expires =
+          Date.parse(c.approvalExpiresAt ?? '') ||
+          Date.parse(c.paidAt ?? c.updatedAt) + APPROVAL_MS;
+        const minutes = Math.max(1, Math.ceil((expires - Date.now()) / 60_000));
         return {
           ...base,
           status: 'pending_approval',
           approval_url: `${origin}/approve?r=${c.approvalId}`,
-          next: "Send the owner approval_url on its own line, for them to open in their own browser, where they're signed in: never open it in a browser you run or a private window. Then call browser_checkout_status again right away: it waits for their decision. Keep calling it while it says pending_approval."
-        };
-      case 'paid': {
-        const page = await this.snapshot(c, 2500).catch(() => null);
-        return {
-          ...base,
-          page,
-          next: "The owner approved and the card was charged. Read the page: tell the owner the store's order number or confirmation if it shows one, or call browser_look in a few seconds if it's still processing. Never pay again."
+          expires_in_minutes: minutes,
+          next: `Send the owner approval_url on its own line, for them to open in their own browser, where they're signed in: never open it in a browser you run or a private window. Then call browser_checkout_status again right away. Each call waits up to 25 seconds: keep calling it, without ending your turn or waiting for the owner to reply, until the status changes or the approval expires in ${minutes} minutes. Owners often take a few minutes.`
         };
       }
+      case 'confirming':
+        return {
+          ...base,
+          next: 'The owner approved and the card went to the store, which is confirming the payment (their bank may ask them to verify it in their banking app). Call browser_checkout_status again right away, and keep calling it until it says paid or failed. Never pay again.'
+        };
+      case 'paid': {
+        const page = await this.snapshot(c, 1000).catch(() => null);
+        return {
+          ...base,
+          order_number: c.orderNumber ?? null,
+          page,
+          next: c.orderNumber
+            ? `The store confirmed the order, number ${c.orderNumber}. Tell the owner, with what they bought and the total. Never pay again.`
+            : 'The store confirmed the order. Tell the owner, with the confirmation the page shows. Never pay again.'
+        };
+      }
+      case 'unconfirmed':
+        return {
+          ...base,
+          reason: c.reason ?? null,
+          next: 'The owner approved and the card went to the store, but the store showed neither an order confirmation nor an error. Tell the owner to check their email and card for the order. Never pay again.'
+        };
       case 'declined':
         return {
           ...base,
@@ -639,7 +746,11 @@ export class BrowserCheckouts {
         return {
           ...base,
           reason: c.reason ?? null,
-          next: 'The payment did not go through. Tell the owner; never retry on your own.'
+          store_message: c.storeMessage ?? null,
+          next:
+            c.reason === 'store_refused'
+              ? "The store refused the payment, so there's no order. Tell the owner what it said (store_message): if their bank asked them to verify the payment, it was declined there or timed out. Never retry on your own; if they want it, start a new checkout."
+              : 'The payment did not go through. Tell the owner; never retry on your own.'
         };
       default:
         return base;
@@ -648,7 +759,8 @@ export class BrowserCheckouts {
 
   async cancel(id: string) {
     const c = await this.find(id);
-    if (c.status === 'paid') return this.view(c, '');
+    // Past approval, the card is with the store: closing can't take it back.
+    if (c.status === 'paid' || c.status === 'confirming') return this.view(c, '');
     await this.close(c);
     if (c.approvalId && c.status === 'awaiting_approval') {
       await setApproval(this.db, this.wallet, c.approvalId, { status: 'canceled' });
@@ -742,6 +854,8 @@ export function money(cents: number, currency: string): string {
 
 // A finished checkout's status (as the agent sees it), as its approval's.
 const SETTLED: Record<string, Approval['status']> = {
+  confirming: 'placing',
+  unconfirmed: 'placing',
   paid: 'placed',
   declined: 'declined',
   expired: 'failed',
