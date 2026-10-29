@@ -275,9 +275,9 @@ const TOOLS = [
   },
   {
     name: 'start_browser_checkout',
-    title: 'Start a checkout at any store',
+    title: 'Buy from any online store',
     description:
-      "The first way to buy anything: opens a product page in a browser we run, to buy it at any online store with the owner's saved card. Give the product page link and a one-line description of what the owner wants. Answers checkout_id, the page (text and elements with refs), and ship_to (the saved address and email for the checkout form). Every purchase waits for the owner's approval.",
+      "Use this whenever the owner wants to buy, order or purchase something online, or shares a product link, before anything else, your own browser included: it pays with the owner's saved card, which your browser doesn't have. Works at any online store, in any country. Opens the product page in a browser we run. Give the product page link and a one-line description of what the owner wants. Answers checkout_id, the page (text and elements with refs), and ship_to (the saved address and email for the checkout form). Every purchase waits for the owner's approval.",
     inputSchema: {
       type: 'object',
       properties: {
