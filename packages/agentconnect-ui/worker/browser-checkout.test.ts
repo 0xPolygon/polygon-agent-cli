@@ -354,6 +354,23 @@ describe('browser checkouts', () => {
     expect(deleted).toContain('b1');
   });
 
+  it('treats an approval past its expiry as expired, though Kernel still says awaiting', async () => {
+    const { checkouts, authorize, db, deleted } = await setup();
+    const { c } = await checkouts.start({ productUrl: 'https://shop.example/p', description: 'x' });
+    await pay(checkouts, c.id);
+    authorize('awaiting_approval', { expires_at: new Date(Date.now() - 1000).toISOString() });
+    const approvalId = (await checkouts.find(c.id)).approvalId!;
+    const approval = (await approvalForPage(db, approvalId))!.approval;
+    expect(await decideBrowserApproval(checkouts, approval, true)).toEqual({ status: 'failed' });
+    expect(await checkouts.status(c.id, ORIGIN, 0)).toMatchObject({ status: 'expired' });
+    expect(deleted).toContain('b1');
+    expect((await approvalForPage(db, approvalId))?.approval.status).toBe('failed');
+    // and a new checkout can start
+    await expect(
+      checkouts.start({ productUrl: 'https://shop.example/q', description: 'y' })
+    ).resolves.toBeTruthy();
+  });
+
   it('keeps one checkout open at a time', async () => {
     const { checkouts, deleted } = await setup();
     const first = await checkouts.start({ productUrl: 'https://shop.example/p', description: 'x' });
