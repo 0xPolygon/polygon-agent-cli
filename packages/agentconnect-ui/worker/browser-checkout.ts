@@ -13,6 +13,7 @@
 // reaches them as JSON data, never as code.
 
 import type { Env } from './index.ts';
+import type { AgentCardAuthorization } from './kernel.ts';
 import type { Approval, BrowserCheckout, CredentialStore } from './store.ts';
 import type { PaymentLock } from './wallet-lock.ts';
 
@@ -33,6 +34,14 @@ const BROWSER_TIMEOUT_SEC = 900;
 const NO_REQUEST_MS = 3 * 60_000;
 const MAX_KEPT = 20;
 const OPEN: BrowserCheckout['status'][] = ['browsing', 'awaiting_approval'];
+
+/**
+ * Whether the owner can still approve: Kernel keeps reporting an authorization
+ * as awaiting approval after it has expired, and AgentCard's page can't pay it.
+ */
+const approvable = (auth: AgentCardAuthorization) =>
+  auth.status === 'awaiting_approval' &&
+  (!auth.expires_at || Date.parse(auth.expires_at) > Date.now());
 const KEYS = new Set([
   'Enter',
   'Tab',
@@ -565,7 +574,7 @@ export class BrowserCheckouts {
       }
       return c;
     }
-    if (auth.status === 'awaiting_approval') return c;
+    if (approvable(auth)) return c;
     if (auth.status === 'approved') {
       if (c.approvalId) {
         await setApproval(this.db, this.wallet, c.approvalId, {
@@ -672,8 +681,7 @@ export class BrowserCheckouts {
     if (c.status !== 'awaiting_approval') return null;
     const card = await this.kernel.getItem(vaultName(this.wallet), cardKey(c.id), waitSec);
     const auth = card?.state.authorization;
-    return auth?.status === 'awaiting_approval' &&
-      (!auth.browser_id || auth.browser_id === c.browserId)
+    return auth && approvable(auth) && (!auth.browser_id || auth.browser_id === c.browserId)
       ? (auth.approval_url ?? null)
       : null;
   }
@@ -729,6 +737,15 @@ export function money(cents: number, currency: string): string {
   }
 }
 
+// A finished checkout's status (as the agent sees it), as its approval's.
+const SETTLED: Record<string, Approval['status']> = {
+  paid: 'placed',
+  declined: 'declined',
+  expired: 'failed',
+  failed: 'failed',
+  canceled: 'canceled'
+};
+
 /** The owner's decision on the approval page, for a browser checkout. */
 export async function decideBrowserApproval(
   checkouts: BrowserCheckouts,
@@ -740,6 +757,9 @@ export async function decideBrowserApproval(
     await checkouts.decline(a.checkoutId);
     return { status: 'declined' };
   }
+  // Settles one that expired, or was decided, since the agent last asked.
+  const settled = (await checkouts.status(a.checkoutId, '', 0)).status;
+  if (settled in SETTLED) return { status: SETTLED[settled] };
   const url = await checkouts.approvalLink(a.checkoutId);
   if (!url) {
     throw new ValidationError(
