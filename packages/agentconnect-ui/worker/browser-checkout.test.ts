@@ -11,7 +11,8 @@ import {
   pageShowsAmount,
   PAY,
   PROBE,
-  SNAPSHOT
+  SNAPSHOT,
+  storeOutcome
 } from './browser-checkout.ts';
 import { Kernel, KernelError } from './kernel.ts';
 import { approvalForPage } from './services.ts';
@@ -42,6 +43,11 @@ function fakeKernel(opts: { cardFields?: boolean; pageText?: string; unknownUser
   const items = new Map<string, VaultItem>();
   const calls: { script: string; args: Record<string, unknown> }[] = [];
   const deleted: string[] = [];
+  // The store's page as the probe reads it; tests change it after approval.
+  const store = {
+    url: PAGE.url,
+    text: opts.pageText ?? 'Subtotal €29,00 Shipping €1,45 Total €30,45'
+  };
   let browsers = 0;
   const name = (code: string) =>
     code === SNAPSHOT
@@ -91,7 +97,8 @@ function fakeKernel(opts: { cardFields?: boolean; pageText?: string; unknownUser
     deleteItem: async (_v: string, key: string) => void items.delete(key),
     createBrowser: async () => ({ session_id: `b${++browsers}` }),
     deleteBrowser: async (id: string) => void deleted.push(id),
-    playwright: async (_b: string, code: string, args: Record<string, unknown>) => {
+    playwright: async (b: string, code: string, args: Record<string, unknown>) => {
+      if (deleted.includes(b)) throw new KernelError(404, 'browser not found');
       const script = name(code);
       calls.push({ script, args });
       if (script === 'snapshot') return { success: true, result: PAGE };
@@ -99,8 +106,8 @@ function fakeKernel(opts: { cardFields?: boolean; pageText?: string; unknownUser
         return {
           success: true,
           result: {
-            url: PAGE.url,
-            text: opts.pageText ?? 'Subtotal €29,00 Shipping €1,45 Total €30,45',
+            url: store.url,
+            text: store.text,
             cardFields: opts.cardFields ?? true
           }
         };
@@ -128,7 +135,15 @@ function fakeKernel(opts: { cardFields?: boolean; pageText?: string; unknownUser
       }
     };
   };
-  return { kernel: kernel as unknown as Kernel, fake: kernel, calls, items, deleted, authorize };
+  return {
+    kernel: kernel as unknown as Kernel,
+    fake: kernel,
+    calls,
+    items,
+    deleted,
+    authorize,
+    store
+  };
 }
 
 async function setup(kernelOpts = {}, linked = true) {
@@ -174,6 +189,38 @@ describe('amounts on the page', () => {
   it("doesn't match an amount inside a longer one", () => {
     expect(pageShowsAmount('Total €130.45', 3045, 'eur')).toBe(false);
     expect(pageShowsAmount('Total €30.450', 3045, 'eur')).toBe(false);
+  });
+});
+
+describe("the store's answer", () => {
+  it('reads a confirmation and its order number', () => {
+    expect(
+      storeOutcome({
+        url: 'https://shop.example/checkouts/cn/abc/thank-you',
+        text: 'Thank you, Alex! Confirmation #QX7K2PLM'
+      })
+    ).toEqual({ kind: 'confirmed', orderNumber: 'QX7K2PLM' });
+    expect(
+      storeOutcome({
+        url: 'https://shop.example/x',
+        text: 'Thank you for your order. Order number: 10045'
+      })
+    ).toEqual({ kind: 'confirmed', orderNumber: '10045' });
+  });
+
+  it('reads a refusal', () => {
+    expect(
+      storeOutcome({ url: PAGE.url, text: 'Payment\nYour card was declined. Try another card.' })
+    ).toEqual({ kind: 'refused', message: 'Your card was declined.' });
+  });
+
+  it('reads nothing into a checkout page still waiting', () => {
+    expect(
+      storeOutcome({
+        url: 'https://noordcode.com/checkouts/cn/hWNIX/en-nl/',
+        text: 'Email Used for your order confirmation and cart reminders Order summary Pay now €30.45'
+      })
+    ).toBeNull();
   });
 });
 
@@ -334,15 +381,94 @@ describe('browser checkouts', () => {
     expect(await checkouts.status(c.id, ORIGIN, 0)).toMatchObject({ status: 'declined' });
   });
 
-  it('reports a paid checkout with the page, and marks its approval placed', async () => {
-    const { checkouts, authorize, db } = await setup();
+  it("waits for the store's confirmation before saying paid", async () => {
+    const { checkouts, authorize, db, store } = await setup();
     const { c } = await checkouts.start({ productUrl: 'https://shop.example/p', description: 'x' });
     await pay(checkouts, c.id);
     authorize('approved', { charged_kind: 'captured', replay_delivered: true });
-    const status = await checkouts.status(c.id, ORIGIN, 0);
-    expect(status).toMatchObject({ status: 'paid', page: PAGE });
     const approvalId = (await checkouts.find(c.id)).approvalId!;
-    expect((await approvalForPage(db, approvalId))?.approval.status).toBe('placed');
+    // Approved only means the card reached the store.
+    expect(await checkouts.status(c.id, ORIGIN, 0)).toMatchObject({
+      status: 'confirming',
+      next: expect.stringMatching(/keep calling/)
+    });
+    expect((await approvalForPage(db, approvalId))?.approval.status).toBe('placing');
+    // The page is there to read meanwhile.
+    await expect(checkouts.look(c.id)).resolves.toEqual(PAGE);
+    store.url = 'https://shop.example/checkouts/cn/1/thank-you';
+    store.text = 'Thank you, Alex! Your order is confirmed. Confirmation #QX7K2PLM';
+    expect(await checkouts.status(c.id, ORIGIN, 0)).toMatchObject({
+      status: 'paid',
+      order_number: 'QX7K2PLM',
+      page: PAGE
+    });
+    expect((await approvalForPage(db, approvalId))?.approval).toMatchObject({
+      status: 'placed',
+      result: { chargedKind: 'captured', delivered: true, orderNumber: 'QX7K2PLM' }
+    });
+    await expect(checkouts.look(c.id)).resolves.toEqual(PAGE);
+  });
+
+  it('reports the store refusing the payment, with its message', async () => {
+    const { checkouts, authorize, db, store, deleted } = await setup();
+    const { c } = await checkouts.start({ productUrl: 'https://shop.example/p', description: 'x' });
+    await pay(checkouts, c.id);
+    store.text =
+      'Payment All transactions are secure and encrypted. Your payment couldn’t be verified. Try again or use a different payment method. Pay now €30,45';
+    authorize('approved', { charged_kind: 'captured', replay_delivered: true });
+    expect(await checkouts.status(c.id, ORIGIN, 0)).toMatchObject({
+      status: 'failed',
+      reason: 'store_refused',
+      store_message: 'Your payment couldn’t be verified.'
+    });
+    const approvalId = (await checkouts.find(c.id)).approvalId!;
+    expect((await approvalForPage(db, approvalId))?.approval.status).toBe('failed');
+    expect(deleted).toContain('b1');
+  });
+
+  it("says when the store never answered, and doesn't call it failed", async () => {
+    const { checkouts, authorize, db } = await setup();
+    const { c } = await checkouts.start({ productUrl: 'https://shop.example/p', description: 'x' });
+    await pay(checkouts, c.id);
+    authorize('approved');
+    await checkouts.status(c.id, ORIGIN, 0);
+    const long = new Date(Date.now() - 6 * 60_000).toISOString();
+    await db.update(WALLET, (r) => ({
+      ...r,
+      browserCheckouts: r.browserCheckouts!.map((x) => ({ ...x, approvedAt: long }))
+    }));
+    expect(await checkouts.status(c.id, ORIGIN, 0)).toMatchObject({
+      status: 'unconfirmed',
+      next: expect.stringMatching(/check their email/)
+    });
+  });
+
+  it("doesn't close a checkout the store is still confirming", async () => {
+    const { checkouts, authorize, deleted } = await setup();
+    const { c } = await checkouts.start({ productUrl: 'https://shop.example/p', description: 'x' });
+    await pay(checkouts, c.id);
+    authorize('approved');
+    await checkouts.status(c.id, ORIGIN, 0);
+    expect(await checkouts.cancel(c.id)).toMatchObject({ status: 'confirming' });
+    expect(deleted).toEqual([]);
+    const approvalId = (await checkouts.find(c.id)).approvalId!;
+    const db = (checkouts as unknown as { db: CredentialStore }).db;
+    const approval = (await approvalForPage(db, approvalId))!.approval;
+    expect(await decideBrowserApproval(checkouts, approval, true)).toEqual({ status: 'placing' });
+  });
+
+  it('tells the agent how long to keep checking for the approval', async () => {
+    const { checkouts, authorize } = await setup();
+    const { c } = await checkouts.start({ productUrl: 'https://shop.example/p', description: 'x' });
+    await pay(checkouts, c.id);
+    authorize('awaiting_approval', {
+      expires_at: new Date(Date.now() + 9.5 * 60_000).toISOString()
+    });
+    expect(await checkouts.status(c.id, ORIGIN, 0)).toMatchObject({
+      status: 'pending_approval',
+      expires_in_minutes: 10,
+      next: expect.stringMatching(/without ending your turn.*10 minutes/)
+    });
   });
 
   it('reports a card AgentCard declined, and closes the browser', async () => {
