@@ -371,6 +371,23 @@ describe('browser checkouts', () => {
     ).resolves.toBeTruthy();
   });
 
+  it("starts a new checkout when the last one's approval expired unseen", async () => {
+    const { checkouts, authorize } = await setup();
+    const { c } = await checkouts.start({ productUrl: 'https://shop.example/p', description: 'x' });
+    await pay(checkouts, c.id);
+    authorize('awaiting_approval');
+    await expect(
+      checkouts.start({ productUrl: 'https://shop.example/q', description: 'y' })
+    ).rejects.toThrow(/waiting for the owner's approval/);
+    authorize('awaiting_approval', { expires_at: new Date(Date.now() - 1000).toISOString() });
+    const next = await checkouts.start({ productUrl: 'https://shop.example/q', description: 'y' });
+    expect(next.c.id).not.toBe(c.id);
+    expect(await checkouts.status(c.id, ORIGIN, 0)).toMatchObject({
+      status: 'expired',
+      next: expect.stringMatching(/start again with start_browser_checkout/)
+    });
+  });
+
   it('keeps one checkout open at a time', async () => {
     const { checkouts, deleted } = await setup();
     const first = await checkouts.start({ productUrl: 'https://shop.example/p', description: 'x' });
