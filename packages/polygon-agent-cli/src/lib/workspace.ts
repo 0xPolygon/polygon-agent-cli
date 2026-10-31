@@ -4,7 +4,7 @@
 //
 //   <root>/bin/polygon-agent   wrapper the skills call
 //   <root>/cli/                npm install --prefix of @polygonlabs/agent-cli
-//   <root>/node/               optional Node runtime (setup.md installs it if needed)
+//   <root>/node/               optional Node runtime (the install reference installs it if needed)
 //   <root>/state/              CLI state, including install.json
 //   <root>/.gitignore          "*"
 
