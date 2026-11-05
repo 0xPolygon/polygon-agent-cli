@@ -1,5 +1,23 @@
 # @polygonlabs/agentconnect-ui
 
+## 0.2.1
+
+### Patch Changes
+
+- a167de5: ChatGPT connections get the Polymarket tools too: funding the account and making or selling predictions. Polymarket is described as making predictions throughout. Like every spend from ChatGPT, each one waits for the owner's approval on the site. The ChatGPT plugin listing (1.2.0) describes the wallet as the owner's own with the Open Money Stack, has review cases for earn and Polymarket, and the guide covers testing the MCP server in ChatGPT's developer mode.
+- f263670: Polymarket region refusals say only "Polymarket trading isn't supported from your current location." They no longer name a country or say whether the owner's location or the service's is the limit, and `polymarket_account` reports just `access` and `rulesAsOf` for the region.
+- b5baa34: Polymarket refusals say whose location is the limit. When the owner's location allows trading but Polymarket won't take new predictions from where the service runs, the error and `polymarket_account` say so (`limitedBy: 'server'`) and tell the agent it isn't the owner's account, instead of "not available for this owner". A buy is checked against Polymarket's region rules before the owner is asked to approve it.
+
+  A buy on an account that isn't set up or is short of cash names the deposit to make (the bid plus 1% for the bridge, at least $2) and what the agent wallet holds, so the agent can offer the deposit and the buy together. `polymarket_account` shows the wallet's USDC before the account exists.
+
+  The owner's location is updated whenever they answer a request on this site, not only when they connect. Argentina is added to Polymarket's close-only countries.
+
+- f1ffd7b: Earn deposits, Polymarket deposits and Polymarket predictions check the wallet before the owner is asked to approve them, like sends: a wallet that can't cover it gets an answer at once instead of an approval link that fails. Whenever the wallet is short, the agent is told to ask the user to add funds from their dashboard.
+
+  Approving a spend answers at once: it runs in the background (a Durable Object alarm) and the approval page follows it to the result. The agent no longer needs another prompt: `get_action` waits up to about 45 seconds for the owner's answer and the result, and agents are told to call it right after showing the link and again while it's pending, so they carry on as soon as the owner approves, or tell the user if it failed.
+
+  ChatGPT can put several spends in one approval (`propose_bundle`, 2 to 5 steps run in order, stopping at the first that fails), e.g. funding Polymarket and then making a prediction. Muse connections can move money: they ask for an allowance when connecting and spend within it, like any other client.
+
 ## 0.2.0
 
 ### Minor Changes
