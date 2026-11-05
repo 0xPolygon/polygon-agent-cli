@@ -145,7 +145,7 @@ agent polymarket buy 0xdf8e...d4a8 yes 5          # by conditionId
 
 An entry title that matches the whole input wins over reading a trailing `yes` or `no` as the side: if an event has entries "Vote" and "Vote No", then `"Vote No"` is the "Vote No" entry's yes side, and `"Vote No no"` is its no side. Partial names match when only one entry contains them. `outcome_not_found` and `ambiguous_market` carry `details.choices`, the valid names. Pick one and retry.
 
-The `markets` listing has no slug field. Take the `conditionId` from it, or find slugs through `event` and `market`.
+Each `markets` entry carries its `slug`, which works as a `<ref>` anywhere a conditionId does.
 
 ## Trading
 
