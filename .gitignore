@@ -4,7 +4,8 @@ dist/
 .env.local
 *.log
 .DS_Store
-/.idea/workspace.xml
+/.idea/
+/.claude/worktrees/
 .nx/
 */**/.nx
 .gstack/
