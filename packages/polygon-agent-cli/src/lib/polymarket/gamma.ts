@@ -8,6 +8,7 @@ import { CliError } from '../errors.ts';
 export interface Market {
   id: string;
   conditionId: string;
+  slug: string | null;
   question: string;
   // 'v1' (CTF) or 'v2' (Polymarket V2). Decides which Gamma id field holds the token ids.
   version: string;
@@ -167,6 +168,7 @@ export function parseMarket(m: any): Market {
   return {
     id: m.id,
     conditionId: m.conditionId,
+    slug: m.slug || null,
     question: m.question,
     version,
     yesTokenId: tokenIds[0] || null,

@@ -16,6 +16,7 @@ import {
 const V1_MARKET = {
   id: '5009042',
   conditionId: '0xe8b24aac1400d5d57d3657de489f705b0737c108aea5fe9b5a6e102c1c2fe5d8',
+  slug: 'epl-bri-whu-2026-10-10-bri',
   question: 'Will Brighton & Hove Albion FC win on 2026-10-10?',
   version: 'v1',
   clobTokenIds: '["1066", "8181"]',
@@ -70,6 +71,12 @@ describe('parseMarket', () => {
     const m = parseMarket({ ...V1_MARKET, version: 'v9' });
     expect(m.yesTokenId).toBeNull();
     expect(m.noTokenId).toBeNull();
+  });
+
+  it('returns the market slug, or null when Gamma omits it', () => {
+    expect(parseMarket(V1_MARKET).slug).toBe('epl-bri-whu-2026-10-10-bri');
+    const { slug: _omit, ...bare } = V1_MARKET;
+    expect(parseMarket(bare).slug).toBeNull();
   });
 
   it('treats a market without a version as v1', () => {
