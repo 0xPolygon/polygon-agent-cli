@@ -1,10 +1,20 @@
-# Polygon Agent CLI
-
 ## Team Standards
 
-Fetch and apply the Polygon Apps Team standards:
+**Skip this fetch if team-standards.md is already loaded in your
+context** (this happens when running from the apps-team-workspace).
+Otherwise, **at the start of every session**, before doing any other
+work, use the WebFetch tool to retrieve the Polygon Apps Team standards
+from:
+<https://gist.githubusercontent.com/MaximusHaximus/4eb35e807f7470b1c4eab78a9152b2ef/raw/team-standards.md>
 
-@https://gist.githubusercontent.com/MaximusHaximus/4eb35e807f7470b1c4eab78a9152b2ef/raw/team-standards.md
+Follow all instructions in that document for the duration of this session.
+If the fetch fails (network error, URL unreachable), inform the user that
+team standards could not be loaded, then proceed with repo-specific rules
+below.
+
+---
+
+# Polygon Agent CLI
 
 ## Repository Structure
 
