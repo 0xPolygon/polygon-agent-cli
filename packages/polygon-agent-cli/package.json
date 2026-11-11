@@ -18,7 +18,9 @@
   },
   "files": [
     "dist",
-    "contracts"
+    "contracts",
+    "CHANGELOG.md",
+    "MIGRATION.md"
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
