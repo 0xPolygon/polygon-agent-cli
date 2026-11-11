@@ -21,3 +21,5 @@ dist/
 # Cloudflare Wrangler local secrets
 .dev.vars
 .dev.vars.*
+
+coverage/

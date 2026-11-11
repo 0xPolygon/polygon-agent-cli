@@ -60,4 +60,8 @@ Worker tests (`worker/`) call handlers and Durable Object classes in Node with f
 
 ## Coverage
 
-Coverage is measured per package; see each package's vitest config.
+Coverage is measured for the CLI package (`packages/polygon-agent-cli`) on every test run (`pnpm test` runs vitest with `--coverage`). The floors in that package's `vitest.config.ts` are the measured baseline, not targets: a run that drops below a floor fails.
+
+- Raise a floor in the same pull request that adds tests. Floors are never rewritten automatically.
+- The directories that handle money (session, trade, polymarket, owner, the transaction helpers and `operations`) have their own floors, so a gain elsewhere cannot hide a loss there.
+- The other two packages (`agentconnect-ui`, `oidc-relay`) are not measured yet.
