@@ -14,9 +14,14 @@ const REQUIRED = ['@polygonlabs/agent-cli', '@polygonlabs/agentconnect-ui'];
 const base = process.env.BASE_REF || 'main';
 const baseRef = `origin/${base}`;
 
-const changedFiles = execFileSync('git', ['diff', '--name-only', `${baseRef}...HEAD`], {
-  encoding: 'utf8'
-})
+const changedFiles = execFileSync(
+  'git',
+  // --no-renames: a file moved out of skills/ must still count as a skills change.
+  ['diff', '--name-only', '--no-renames', `${baseRef}...HEAD`],
+  {
+    encoding: 'utf8'
+  }
+)
   .split('\n')
   .filter(Boolean);
 
@@ -33,6 +38,11 @@ const status = spawnSync(
   ['exec', 'changeset', 'status', `--since=${baseRef}`, `--output=${outputPath}`],
   { stdio: ['ignore', 'inherit', 'inherit'] }
 );
+
+if (status.error || status.status === null) {
+  console.error('::error::could not run `changeset status`');
+  process.exit(1);
+}
 
 let released = new Set();
 if (status.status === 0 && existsSync(outputPath)) {
