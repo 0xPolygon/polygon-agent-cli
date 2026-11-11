@@ -5,6 +5,8 @@ export interface Recorded {
   method: string;
   path: string;
   headerNames: string[];
+  // The credential the wallet-service signature names; never the signature itself.
+  signer: string | null;
   body: string | null;
   faked: boolean;
 }
@@ -28,6 +30,7 @@ export async function outbound(req: Request): Promise<Response> {
     method: req.method,
     path: url.pathname + url.search,
     headerNames: [...req.headers.keys()].sort(),
+    signer: /cred="([^"]*)"/.exec(req.headers.get('oms-wallet-signature') ?? '')?.[1] ?? null,
     body,
     faked
   });

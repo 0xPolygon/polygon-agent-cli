@@ -58,11 +58,17 @@ All tests run in a Workers runtime through `@cloudflare/vitest-pool-workers`, co
 
 Worker tests (`worker/`) call handlers and Durable Object classes in Node with fakes for storage and the wallet client. SPA tests (`src/`) cover the login state machine, URL handling and dashboard helpers.
 
+The package's `vitest.config.ts` has two projects. `node` runs the tests above. `workers` runs `worker/**/*.workers.test.ts` in a Workers runtime through `@cloudflare/vitest-pool-workers`: the real worker, a real SQLite-backed Durable Object, real KV and the real OAuth provider, with secrets generated for each run.
+
+- All outbound requests in that runtime go to one handler, `worker/test-outbound/index.ts`. It answers by hostname, records every request and refuses any host it does not know, so nothing reaches the network. To let a test reach another service, add that host there; do not mock modules.
+- Tests call the worker with `SELF.fetch` and the key object through its own `fetch`, the way production does.
+- Known limit: in this version of the test runtime a module loaded on demand inside a Durable Object never finishes loading. The key object loads its money dependencies that way, so sending, swapping, paying, earning, Polymarket and the approved run cannot be tested there yet. The ledger marks those rows as gaps.
+
 ## Coverage
 
-Coverage is measured for the CLI package (`packages/polygon-agent-cli`) and the relay (`packages/oidc-relay`) on every test run (`pnpm test` runs vitest with `--coverage`). The floors in each package's `vitest.config.ts` are the measured baseline, not targets: a run that drops below a floor fails.
+Coverage is measured for all three packages on every test run (`pnpm test` runs vitest with `--coverage`). The floors in each package's `vitest.config.ts` are the measured baseline, not targets: a run that drops below a floor fails.
 
 - Raise a floor in the same pull request that adds tests. Floors are never rewritten automatically.
 - The directories that handle money (session, trade, polymarket, owner, the transaction helpers and `operations`) have their own floors, so a gain elsewhere cannot hide a loss there.
 - The relay is measured with the istanbul provider, because v8 coverage is not available inside the Workers runtime.
-- `agentconnect-ui` is not measured yet.
+- `agentconnect-ui` is measured across both of its test projects, also with istanbul, with a separate floor for `worker/money`.

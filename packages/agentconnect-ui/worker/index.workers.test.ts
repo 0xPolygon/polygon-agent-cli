@@ -32,11 +32,14 @@ beforeEach(async () => {
 });
 
 describe('worker routes in the Workers runtime', { timeout: 30_000 }, () => {
-  it('serves OAuth metadata and fails closed on an unknown outbound host', async () => {
+  it('serves OAuth metadata without any outbound call', async () => {
     const res = await SELF.fetch(`${SITE}/.well-known/oauth-authorization-server`);
     expect(res.status).equal(200);
     expect(await res.json()).property('authorization_endpoint', `${SITE}/authorize`);
+    expect(await (await control('/log')).json()).deep.equal([]);
+  });
 
+  it("refuses unknown hosts in the test runtime's outbound handler", async () => {
     expect((await fetch('https://unlisted.test/')).status).equal(599);
     const log = (await (await control('/log')).json()) as { host: string; faked: boolean }[];
     expect(log.map((c) => [c.host, c.faked])).deep.equal([['unlisted.test', false]]);
@@ -74,6 +77,7 @@ describe('worker routes in the Workers runtime', { timeout: 30_000 }, () => {
       body: decline
     });
     expect(otherSite.status).equal(401);
+    expect(await pending()).property('status', 'pending');
 
     const done = await SELF.fetch(url, {
       method: 'POST',

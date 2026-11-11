@@ -1,6 +1,8 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { deriveKey, openSealed } from '../store.ts';
+
 interface KeyReply {
   ok: boolean;
   value?: unknown;
@@ -10,6 +12,7 @@ interface Recorded {
   host: string;
   path: string;
   body: string | null;
+  signer: string | null;
 }
 
 const WALLET = `0x${'ab'.repeat(20)}`;
@@ -52,8 +55,19 @@ describe('a connection key in a real Durable Object', { timeout: 30_000 }, () =>
     expect((await register(name)).ok).equal(true);
     const sealed = await stored(name, 'key');
     expect(sealed).a('string');
-    expect(sealed).match(/^v1\./);
-    expect(sealed).not.match(/^[0-9a-f]{64}$/);
+    const sealedText = String(sealed);
+    // Opens with the deployment's own secret, to a raw key that the stored text does not contain.
+    const raw = await openSealed<string>(
+      await deriveKey(env.CREDENTIALS_KEY),
+      'agent-key',
+      sealedText
+    );
+    expect(raw).match(/^[0-9a-f]{64}$/);
+    expect(sealedText.includes(raw)).equal(false);
+    const wrongKey = await deriveKey(`${env.CREDENTIALS_KEY}-other`);
+    let opened = true;
+    await openSealed(wrongKey, 'agent-key', sealedText).catch(() => (opened = false));
+    expect(opened).equal(false);
 
     const again = await register(name);
     expect(again.ok).equal(false);
@@ -72,8 +86,13 @@ describe('a connection key in a real Durable Object', { timeout: 30_000 }, () =>
     expect(await storedKeys(name)).length(0);
     const after = await op(name, { op: 'status', wallet: WALLET });
     expect(after.error).property('code', 'not_connected');
-    const revokeCall = (await readLog()).find((c) => c.path === '/v1/Waas/RevokeCredential');
+    const calls = await readLog();
+    const registerCall = calls.find((c) => c.path === '/v1/Waas/RegisterCredential');
+    const revokeCall = calls.find((c) => c.path === '/v1/Waas/RevokeCredential');
     expect(revokeCall).property('body', JSON.stringify({ credentialId: 'cred-test-1' }));
+    // The key that registered is the key that revokes.
+    expect(registerCall?.signer).a('string');
+    expect(revokeCall?.signer).equal(registerCall?.signer);
   });
 
   it('keeps the key when the wallet service refuses the revoke', async () => {
@@ -98,6 +117,8 @@ describe('a connection key in a real Durable Object', { timeout: 30_000 }, () =>
     const revoked = await op(name, { op: 'revoke', wallet: WALLET });
     expect(revoked.value).property('revoked', true);
     expect(await storedKeys(name)).length(0);
+    const revokes = (await readLog()).filter((c) => c.path === '/v1/Waas/RevokeCredential');
+    expect(revokes.map((c) => c.host)).deep.equal([WALLET_SERVICE]);
   });
 
   it('keeps wallet store entries first-wins, leases exclusive and objects separate', async () => {
@@ -112,6 +133,11 @@ describe('a connection key in a real Durable Object', { timeout: 30_000 }, () =>
     expect((await op(store, { op: 'wstore_lease', holder: 'b', until })).value).equal(false);
     await op(store, { op: 'wstore_release', holder: 'a' });
     expect((await op(store, { op: 'wstore_lease', holder: 'b', until })).value).equal(true);
+
+    // A lease that ran out can be taken over.
+    const stale = `wallet:${'ef'.repeat(20)}`;
+    await op(stale, { op: 'wstore_lease', holder: 'a', until: Date.now() - 1000 });
+    expect((await op(stale, { op: 'wstore_lease', holder: 'b', until })).value).equal(true);
 
     const elsewhere = await op(`wallet:${OTHER_WALLET}`, { op: 'wstore_get', name: 'account' });
     expect(elsewhere.value).equal(null);
@@ -136,6 +162,10 @@ describe('a connection key in a real Durable Object', { timeout: 30_000 }, () =>
     expect(again.error).property('code', 'invalid_input');
     const view = await op(name, { op: 'action', wallet: WALLET, id: actionId });
     expect(view.value).property('status', 'declined');
+    // Declined, not queued: only a queued action is ever run (an alarm fires on its own here).
+    const record = await stored(name, `action:${actionId}`);
+    expect(record).property('status', 'declined');
+    expect(record).not.property('queued');
 
     const paths = (await readLog()).map((c) => c.path);
     expect(paths).deep.equal(['/v1/Waas/RegisterCredential']);
