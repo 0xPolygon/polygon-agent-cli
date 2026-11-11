@@ -1,12 +1,9 @@
 name: Deploy OIDC Relay to Cloudflare
 
-# Mirrors the connector-ui deploy: merge to `staging` -> deploy the staging
-# worker; production deploys run from release tags
-# (deploy-oidc-relay-release.yml). The relay has no build step and
+# Merge to `staging` -> deploy the staging worker; production deploys run from
+# release tags (deploy-oidc-relay-release.yml). The relay has no build step and
 # no runtime deps, so we deploy it straight with wrangler (run via npx because
 # wrangler is intentionally NOT a workspace dependency — see packages/oidc-relay).
-# Reuses the same Cloudflare credentials as connector-ui (CF_WORKER_* org/env
-# secrets) and the same staging/production GitHub environments.
 
 on:
   push:

@@ -1,12 +1,10 @@
 name: Deploy agentconnect UI to Cloudflare
 
-# Builds the funding/dashboard SPA and deploys it to the agentconnect domain
-# (replacing the retired connector-ui): merge to `staging` -> staging; production
-# deploys run from release tags (deploy-agentconnect-ui-release.yml). wrangler
-# runs via npx (not a workspace dep, to respect the repo trust policy); the
-# `[assets]` worker serves the built SPA and
-# the wrangler.toml v2 migration drops connector-ui's SessionRelay Durable Object.
-# Reuses the same CF_WORKER_* + VITE_* secrets/environments as connector-ui.
+# Builds the funding/dashboard SPA and deploys it to the agentconnect domain:
+# merge to `staging` -> staging; production deploys run from release tags
+# (deploy-agentconnect-ui-release.yml). wrangler runs via npx (not a workspace
+# dep, to respect the repo trust policy); the `[assets]` worker serves the
+# built SPA.
 
 on:
   push:
