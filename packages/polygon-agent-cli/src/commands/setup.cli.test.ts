@@ -58,9 +58,15 @@ describe('agent setup', { timeout: 30_000 }, () => {
     expect(accessKey?.authorization).equal('Bearer jwt-test');
     expect(accessKey?.body).deep.equal({ projectID: 7 });
 
-    const configPath = path.join(home, 'builder.json');
-    expect(fs.statSync(configPath).mode & 0o777).equal(0o600);
-    const stored = fs.readFileSync(configPath, 'utf8');
+    // One handle for both checks, so mode and contents are of the same file.
+    const fd = fs.openSync(path.join(home, 'builder.json'), 'r');
+    let stored = '';
+    try {
+      expect(fs.fstatSync(fd).mode & 0o777).equal(0o600);
+      stored = fs.readFileSync(fd, 'utf8');
+    } finally {
+      fs.closeSync(fd);
+    }
     expect(stored).not.match(/0x[0-9a-fA-F]{64}/);
     expect(JSON.parse(stored)).property('privateKey').property('encrypted').a('string');
     expect(tripwireHits()).deep.equal([]);
