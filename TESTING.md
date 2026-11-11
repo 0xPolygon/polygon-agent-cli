@@ -27,13 +27,7 @@ pnpm --filter @polygonlabs/agentconnect-ui run test
 
 No test moves real funds or calls a hosted wallet, swap or market service. Those services are faked in process, so a passing suite says the code handles the responses its authors wrote down, not that a hosted service still answers that way.
 
-Behaviour that needs a hosted service is listed as a gap in [docs/COVERAGE.md](docs/COVERAGE.md) rather than covered by a mock. Mocks are kept to a minimum: a test that mocks so much that it asserts little is labelled `weak` in the ledger and is not counted as coverage.
-
-## The ledger
-
-[docs/COVERAGE.md](docs/COVERAGE.md) has one row per command, tool, route or lifecycle, with what the tests assert and what they do not. Its legend defines the verdicts: `unit`, `weak`, `GAP`, and the tiers `A`, `A+` and `C` that rows can name.
-
-Update the row in the same pull request that adds or removes a test, so the ledger never describes tests that are not there. A row's verdict only improves when a test earns it.
+Not covered by any test: behaviour that needs a hosted wallet, swap, price or market service (sending and swapping for real, balances, prices, market trading), and the worker's money operations inside its Durable Object. These are known gaps, left open rather than covered with mocks. Some older command tests mock most of what they call and mainly assert that the mocks were called; treat those as weak evidence.
 
 ## Writing tests
 
