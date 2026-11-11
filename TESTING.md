@@ -9,7 +9,7 @@ Two further suffixes are reserved so that tests which need a different runner ca
 - `*.cli.test.ts` for subprocess tests of the built CLI.
 - `*.workers.test.ts` for tests that run in a Workers runtime.
 
-The package sections below say which of these each package uses.
+They are conventions only. No test uses either suffix today.
 
 ## How to run
 
@@ -27,7 +27,13 @@ pnpm --filter @polygonlabs/agentconnect-ui run test
 
 No test moves real funds or calls a hosted wallet, swap or market service. Those services are faked in process, so a passing suite says the code handles the responses its authors wrote down, not that a hosted service still answers that way.
 
-Not covered by any test: behaviour that needs a hosted wallet, swap, price or market service (sending and swapping for real, balances, prices, market trading), and the worker's money operations inside its Durable Object. These are known gaps, left open rather than covered with mocks. Some older command tests mock most of what they call and mainly assert that the mocks were called; treat those as weak evidence.
+Behaviour that needs a hosted service is listed as a gap in [docs/COVERAGE.md](docs/COVERAGE.md) rather than covered by a mock. Mocks are kept to a minimum: a test that mocks so much that it asserts little is labelled `weak` in the ledger and is not counted as coverage.
+
+## The ledger
+
+[docs/COVERAGE.md](docs/COVERAGE.md) has one row per command, tool, route or lifecycle, with what the tests assert and what they do not. Its legend defines the verdicts: `unit`, `weak`, `GAP`, and the tiers `A`, `A+` and `C` that rows can name.
+
+Update the row in the same pull request that adds or removes a test, so the ledger never describes tests that are not there. A row's verdict only improves when a test earns it.
 
 ## Writing tests
 
@@ -46,7 +52,7 @@ Unit tests under `src/`, mostly in-process. Many use a real temporary filesystem
 
 ### `@polygonlabs/oidc-relay` (`packages/oidc-relay`)
 
-All tests run in a Workers runtime through `@cloudflare/vitest-pool-workers`, configured from the package's own `wrangler.toml`, so the `LoginSession` Durable Object and its storage are real. `src/relay.workers.test.ts` calls the fetch handler with `SELF.fetch` and uses no mocks; the worker makes no outbound calls. Storage is shared across the tests in a file, so each test uses its own session id. The expiry alarm is fired with `runDurableObjectAlarm` rather than by waiting.
+Unit tests for the request validators and for the login-session logic over an in-memory store. The fetch handler and the Durable Object class are not exercised.
 
 ### `@polygonlabs/agentconnect-ui` (`packages/agentconnect-ui`)
 
@@ -54,9 +60,8 @@ Worker tests (`worker/`) call handlers and Durable Object classes in Node with f
 
 ## Coverage
 
-Coverage is measured for the CLI package (`packages/polygon-agent-cli`) and the relay (`packages/oidc-relay`) on every test run (`pnpm test` runs vitest with `--coverage`). The floors in each package's `vitest.config.ts` are the measured baseline, not targets: a run that drops below a floor fails.
+Coverage is measured for the CLI package (`packages/polygon-agent-cli`) on every test run (`pnpm test` runs vitest with `--coverage`). The floors in that package's `vitest.config.ts` are the measured baseline, not targets: a run that drops below a floor fails.
 
 - Raise a floor in the same pull request that adds tests. Floors are never rewritten automatically.
 - The directories that handle money (session, trade, polymarket, owner, the transaction helpers and `operations`) have their own floors, so a gain elsewhere cannot hide a loss there.
-- The relay is measured with the istanbul provider, because v8 coverage is not available inside the Workers runtime.
-- `agentconnect-ui` is not measured yet.
+- The other two packages (`agentconnect-ui`, `oidc-relay`) are not measured yet.
