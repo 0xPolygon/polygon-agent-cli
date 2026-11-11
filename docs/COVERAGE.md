@@ -15,8 +15,6 @@ One row per command, tool, route or lifecycle, recording what the tests prove to
 | `A+` | Tier used by the ledger: the built CLI run as a subprocess against a local fake server. |
 | `C` | Tier used by the ledger: tests in a Workers runtime with a real Durable Object or KV. |
 
-No row uses `A`, `A+` or `C` today.
-
 **Columns:** Surface | Command / op | Moves money | Verdict | Where (repo-relative test files) | Asserted | Not asserted, and why.
 
 ## CLI: setup and settings
