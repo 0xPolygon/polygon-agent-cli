@@ -86,8 +86,8 @@ jobs:
           ref: ${{ needs.test.outputs.sha }}
           persist-credentials: false
 
-      # Deploy scripts come from the workflow's own commit, so older tags that predate
-      # them can still be redeployed.
+      # Deploy scripts come from the workflow's own commit, not the tag's. A tag from before
+      # wrangler was a dependency of the package is not redeployed: the script stops.
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           path: .release-scripts
