@@ -34,8 +34,10 @@ const realReadCommand = processInfo.readCommand;
 
 // Resolves once `ps` shows the child's waiter command line: right after spawn
 // it can still read as the parent's, which would make the waiter look dead.
+// Process start can take seconds under load, hence the deadline and describe timeouts.
 async function untilWaiterVisible(pid: number, id: string): Promise<void> {
-  for (let waited = 0; waited < 5_000; waited += 20) {
+  const deadline = Date.now() + 40_000;
+  while (Date.now() < deadline) {
     try {
       const words = realReadCommand(pid).trim().split(/\s+/);
       if (words.includes('--browser-waiter') && words.includes(id)) return;
@@ -106,7 +108,7 @@ describe('result file', () => {
   });
 });
 
-describe('waiterAlive', () => {
+describe('waiterAlive', { timeout: 60_000 }, () => {
   it('is true for a running waiter and false for a dead one or none', async () => {
     expect(waiterAlive(wallet, 'r1')).toBe(false);
     writePid({ wallet, id: 'r1', pid: await fakeWaiter('r1'), emailCommand: 'retry' });
@@ -142,7 +144,7 @@ describe('waiterAlive', () => {
   });
 });
 
-describe('without ps', () => {
+describe('without ps', { timeout: 60_000 }, () => {
   const real = { ...processInfo };
   afterEach(() => Object.assign(processInfo, real));
 
@@ -174,7 +176,7 @@ describe('without ps', () => {
   });
 });
 
-describe('liveWaiters and clearWaiterFiles', () => {
+describe('liveWaiters and clearWaiterFiles', { timeout: 60_000 }, () => {
   it('lists running waiters from the pid files, and clears every file', async () => {
     writePid({ wallet, id: 'a1', pid: await fakeWaiter('a1') });
     writePid({ wallet, id: 'b2', pid: deadPid() });
@@ -187,7 +189,7 @@ describe('liveWaiters and clearWaiterFiles', () => {
   });
 });
 
-describe('waitForResult', () => {
+describe('waitForResult', { timeout: 60_000 }, () => {
   it('returns the result once written', async () => {
     writePid({ wallet, id: 'r1', pid: await fakeWaiter('r1') });
     let polls = 0;
@@ -237,7 +239,7 @@ describe('waitForResult', () => {
   });
 });
 
-describe('latestWaiterRequest', () => {
+describe('latestWaiterRequest', { timeout: 60_000 }, () => {
   it('finds the newest request with a waiter or a result', async () => {
     expect(latestWaiterRequest(wallet)).toBeNull();
     writePid({ wallet, id: 'old', pid: deadPid() });

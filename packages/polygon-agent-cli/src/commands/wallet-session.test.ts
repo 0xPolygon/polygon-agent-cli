@@ -364,7 +364,8 @@ const realReadCommand = processInfo.readCommand;
 // Resolves once `ps` shows the child's waiter command line: right after spawn
 // it can still read as the parent's, which would make the waiter look dead.
 async function untilWaiterVisible(pid: number, id: string): Promise<void> {
-  for (let waited = 0; waited < 5_000; waited += 20) {
+  const deadline = Date.now() + 40_000;
+  while (Date.now() < deadline) {
     try {
       const words = realReadCommand(pid).trim().split(/\s+/);
       if (words.includes('--browser-waiter') && words.includes(id)) return;
@@ -1222,7 +1223,7 @@ describe('logout and removal of a session wallet', () => {
   });
 });
 
-describe('browser sign-in', () => {
+describe('browser sign-in', { timeout: 60_000 }, () => {
   // A pid that certainly belonged to a process that has exited.
   function deadPid(): number {
     return spawnSync(process.execPath, ['-e', '']).pid;

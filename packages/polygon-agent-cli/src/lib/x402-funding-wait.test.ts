@@ -60,14 +60,15 @@ beforeEach(() => {
   chain.logs = [];
 });
 
-describe('waitForSignerFunds', () => {
+// Each case really waits out the 3s deadline; under load the 5s default is too tight.
+describe('waitForSignerFunds', { timeout: 30_000 }, () => {
   it('accepts a mined top-up after an earlier authorization took its own share', async () => {
     // The top-up landed and the earlier authorization settled meanwhile.
     chain.balance = 20_000n;
     chain.mined = true;
     chain.logs = [transferLog({ token: params.token, to: params.owner, value: 20_000n })];
     await expect(waitForSignerFunds(params)).resolves.toBeUndefined();
-  }, 10_000);
+  });
 
   it("a mined transaction whose transfer to the signer didn't happen proves nothing", async () => {
     // The relayed wallet call succeeded, but its inner transfer moved nothing.
@@ -76,12 +77,12 @@ describe('waitForSignerFunds', () => {
     await expect(waitForSignerFunds({ ...params, atLeast: 50_000n })).rejects.toMatchObject({
       code: 'upstream_unavailable'
     });
-  }, 10_000);
+  });
 
   it("doesn't count promised funds while the top-up isn't mined", async () => {
     chain.balance = 20_000n;
     await expect(waitForSignerFunds(params)).rejects.toMatchObject({
       code: 'upstream_unavailable'
     });
-  }, 10_000);
+  });
 });
