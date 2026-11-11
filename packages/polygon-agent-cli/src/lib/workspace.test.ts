@@ -19,7 +19,8 @@ import {
 } from './workspace.ts';
 
 function tmpDir(prefix: string): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  // realpath: macOS tmpdir is a /var symlink to /private/var
+  return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
 }
 
 const SKILL =
