@@ -94,9 +94,10 @@ release, so what is live is always a tagged, tested version. Staging is deployed
 from the `staging` branch by `deploy-agentconnect-ui.yml` and
 `deploy-oidc-relay.yml`.
 
-The Wrangler versions used for production deploys are pinned in
-`.github/scripts/wrangler-deploy.sh`, so a deploy does not change when a new
-Wrangler release appears.
+A deploy does not change when a new Wrangler release appears. For
+`@polygonlabs/agentconnect-ui`, Wrangler is a devDependency at an exact version
+and the deploy runs the copy from the lockfile. For `@polygonlabs/oidc-relay`,
+the version is pinned in `.github/scripts/wrangler-deploy.sh`.
 
 ### Redeploying or rolling back
 

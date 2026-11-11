@@ -50,9 +50,11 @@ Each package's README (where present) is the entry point for that package.
 - Every write from the agent wallet goes through the one primitive in `src/lib/tx-dispatch.ts`.
   Add new spend paths there rather than calling the wallet client directly. Owner requests
   (`src/lib/owner/`) are the exception: they run as the owner, after the owner signs in.
-- `wrangler` is deliberately not a workspace dependency, to respect the repo's supply-chain trust
-  policy (`pnpm-workspace.yaml`); it runs through `npx`, and production deploys pin exact versions
-  in `.github/scripts/wrangler-deploy.sh`. Don't add it to a `package.json`.
+- `wrangler` is a devDependency of `packages/agentconnect-ui` at an exact version. Its production
+  deploy runs `pnpm exec wrangler` after a frozen install, so the lockfile decides what runs and
+  the supply-chain settings in `pnpm-workspace.yaml` cover it. Change the version there, not in a
+  script. `packages/oidc-relay` is still on wrangler 3, which is not a dependency: its deploy runs
+  it through `npx` at the exact version in `.github/scripts/wrangler-deploy.sh`.
 
 ## Testing
 
@@ -111,7 +113,8 @@ Read `packages/agentconnect-ui/worker/index.ts` first; it routes everything.
   in `wrangler.toml`. Secrets are GitHub environment secrets uploaded
   with each deploy; see the deploy workflows in `.github/workflows/`. Vite's dev server does not run
   the Worker; run it locally with
-  `npx wrangler@4 dev --env staging --port 8787 --local-upstream localhost:8787`, which reads
+  `pnpm exec wrangler dev --env staging --port 8787 --local-upstream localhost:8787` (from
+  `packages/agentconnect-ui`), which reads
   secrets from the gitignored `.dev.vars.staging` (never committed).
 
 ## Releases and deploys

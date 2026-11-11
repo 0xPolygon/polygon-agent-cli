@@ -76,7 +76,6 @@ commit; merging a feature PR does not deploy it. See
 [`docs/RELEASING.md`](../../docs/RELEASING.md) for the release flow, redeploys
 and rollbacks.
 
-The Worker has no build step and no runtime dependencies, so Wrangler is run
-through `npx` rather than being a workspace dependency. Production deploys pin
-its version in `.github/scripts/wrangler-deploy.sh`. Bindings and per-environment
+Wrangler is not a dependency of this package: it is run through `npx`, and
+production deploys pin its exact version in `.github/scripts/wrangler-deploy.sh`. Bindings and per-environment
 settings are in `wrangler.toml`; production uses a custom domain.
