@@ -13,8 +13,9 @@ dist/
 # Build and dev artifacts
 .wrangler/
 *.tsbuildinfo
+.impeccable/
 
-# Superpowers scratch (plans/specs live in docs/superpowers, not here)
+# Superpowers scratch
 .superpowers/
 .entire/
 

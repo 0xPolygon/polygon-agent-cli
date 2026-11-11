@@ -1,19 +1,3 @@
-## Team Standards
-
-**Skip this fetch if team-standards.md is already loaded in your
-context** (this happens when running from the apps-team-workspace).
-Otherwise, **at the start of every session**, before doing any other
-work, use the WebFetch tool to retrieve the Polygon Apps Team standards
-from:
-<https://gist.githubusercontent.com/MaximusHaximus/4eb35e807f7470b1c4eab78a9152b2ef/raw/team-standards.md>
-
-Follow all instructions in that document for the duration of this session.
-If the fetch fails (network error, URL unreachable), inform the user that
-team standards could not be loaded, then proceed with repo-specific rules
-below.
-
----
-
 # Polygon Agent CLI
 
 ## Repository Structure
@@ -46,7 +30,7 @@ Codex (`.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json`) and Curs
 `assets` are symlinks to the root folders, so a skill edit needs no plugin change. The manifests
 carry no `version`, so installs update with each commit. Check with `claude plugin validate .`.
 ChatGPT has its own package, `plugins/open-money-agent-chatgpt/`: the MCP server, which gives
-ChatGPT only `get_wallet` (its `openai` profile), and no skills (ChatGPT plugins may not move funds). It has a `version`, bumped for each upload; how to
+ChatGPT the `openai` profile (`worker/profiles.ts`), and no skills. It has a `version`, bumped for each upload; how to
 build and submit it is in `docs/CHATGPT_PLUGIN.md`.
 
 ## Development
@@ -73,7 +57,6 @@ build and submit it is in `docs/CHATGPT_PLUGIN.md`.
 
 - Site sign-in: the dashboard's own sign-in (email code or Google) runs in the worker (`/api/session/*`, reusing `worker/owner-signin.ts`) and sets an HttpOnly `agentconnect_session` cookie (`worker/owner-session.ts`, HMAC with `AGENT_CERT_SECRET`, 30 days). Requests that change something with the cookie must carry this site's `Origin`. Opening `/` signed in shows that wallet's dashboard: the wallet of the method signed in with (OMS gives each sign-in method its own wallet).
 - The CLI's dashboard links use `POLYGON_AGENT_CREDENTIALS_URL` (default: the login page's site), so sign-in and the dashboard can run on different deployments.
-- Saved details (the shipping address, agent sign-in with `at1` tokens) and cards and buying (AgentCard vault, `agent buy`, approvals, the auto-pay limit, the per-wallet payment lock) are built on the `cards` branch, not on staging. Staging's wrangler migration `v4` deleted the `WalletLock` Durable Object class, so bringing it back takes a new migration tag.
 - MCP: the worker serves a remote MCP server at `/mcp` (`worker/mcp.ts`, stateless JSON-RPC) behind `@cloudflare/workers-oauth-provider` (`/authorize`, `/oauth/token`, `/oauth/register`, `/.well-known/*`; `OAUTH_KV` binding). `/authorize` hands off to the SPA's `/connect` page, where the owner signs in by email code or Google (skipped when already signed in on the site), then sees a consent screen (what the agent can do) and allows or denies (`/api/connect/decide`; deny returns `access_denied`). Settings lists connected agents (`/api/agents`, the provider's grants; owner session cookie only) with Disconnect (`revokeGrant`, which also revokes the connection's key). the worker does that OMS sign-in itself (`worker/owner-signin.ts`, state sealed in KV for 10 minutes) because the OMS project only accepts browser calls from the production origin. Tools: `get_wallet` (address, balances, dashboard link) and, for profiles that move money, `get_allowance`, `send`, `swap_quote`, `swap` (swaps and bridges through Trails), `swap_status`, `pay_service` (x402), `earn_vaults`, `earn_deposit`, `earn_withdraw`, the `polymarket_*` tools and `get_action`. Only a connection with a key (`props.keyId`) sees anything but `get_wallet`.
 - MCP money movement (`worker/money/`): a connection that moves money gets its own session key, like a CLI install's. On the consent screen the owner picks an allowance (USD over 1 to 30 days, default $1,000 over 30) and must sign in on the page, even when signed in on the site: the OMS session is kept (sealed) until they decide, then the worker plans the allowance (`plan.ts`, same rules and token table as the CLI's session mode; `tokens.test.ts` checks the tables match), registers the key, approves the plan for it on each chain as the owner, reads it back and keeps only what matches (`connect.ts`), and signs out. Each key lives in its own Durable Object (`agent-key.ts`, binding `AGENT_KEYS`, migration `v5`, id in the grant's `props.keyId` and `metadata.keyId`), sealed with `CREDENTIALS_KEY`, with its nonce, approved plan, transfer records and trades; it runs one request at a time. `engine.ts` is the CLI's transfer engine (records before sending, settles before the next, never resends) and `trade.ts` its Trails swap flow (deposit checked against the quote). Spending is ERC-20 transfers of covered tokens only, as in the CLI.
   - x402 (`x402.ts`): the connection's own x402 signer key (sealed in its Durable Object) signs an EIP-3009 authorization for the price the service asks, never over `max_usd`; the wallet funds it with one transfer for whatever it's short. Leftovers stay with the signer.
