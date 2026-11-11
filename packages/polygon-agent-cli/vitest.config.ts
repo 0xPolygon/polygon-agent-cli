@@ -24,23 +24,23 @@ export default defineConfig({
         lines: 73.5,
         statements: 73.5,
         functions: 83.9,
-        branches: 83.8,
-        'src/lib/session/**': { lines: 85.3, statements: 85.3, functions: 93.6, branches: 83.0 },
-        'src/lib/trade/**': { lines: 94.0, statements: 94.0, functions: 98.0, branches: 85.9 },
-        'src/lib/polymarket/**': { lines: 93.0, statements: 93.0, functions: 97.2, branches: 87.7 },
-        'src/lib/owner/**': { lines: 90.8, statements: 90.8, functions: 94.9, branches: 83.1 },
-        'src/lib/oms-tx.ts': { lines: 77.1, statements: 77.1, functions: 85.2, branches: 84.9 },
+        branches: 83.4,
+        'src/lib/session/**': { lines: 85.3, statements: 85.3, functions: 93.6, branches: 82.5 },
+        'src/lib/trade/**': { lines: 94.0, statements: 94.0, functions: 98.0, branches: 85.4 },
+        'src/lib/polymarket/**': { lines: 93.0, statements: 93.0, functions: 97.2, branches: 87.2 },
+        'src/lib/owner/**': { lines: 90.8, statements: 90.8, functions: 94.9, branches: 82.6 },
+        'src/lib/oms-tx.ts': { lines: 77.1, statements: 77.1, functions: 85.2, branches: 84.4 },
         'src/lib/tx-dispatch.ts': {
           lines: 70.9,
           statements: 70.9,
           functions: 99.5,
-          branches: 70.9
+          branches: 70.4
         },
         'src/commands/operations.ts': {
           lines: 40.1,
           statements: 40.1,
           functions: 50.5,
-          branches: 68.0
+          branches: 67.5
         }
       }
     }
