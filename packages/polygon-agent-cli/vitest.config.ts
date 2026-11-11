@@ -13,11 +13,13 @@ export default defineConfig({
   // Tests that stub HOME must never reach a developer's real state folder.
   test: {
     env: { POLYGON_AGENT_HOME: '' },
+    // Builds the CLI once so *.cli.test.ts can run the real binary.
+    globalSetup: ['./src/test-harness/global-setup.ts'],
     // Floors are the measured baseline, not targets: raise them in the PR that adds tests.
     coverage: {
       provider: 'v8',
       include: ['src/**/*.{ts,tsx}'],
-      exclude: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'src/**/*.d.ts'],
+      exclude: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'src/**/*.d.ts', 'src/test-harness/**'],
       reporter: ['text-summary', 'json-summary'],
       reportsDirectory: 'coverage',
       thresholds: {
