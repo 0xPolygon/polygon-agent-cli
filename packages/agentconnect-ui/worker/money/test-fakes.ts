@@ -64,7 +64,7 @@ export function fakeEngine(overrides: Partial<FakeState> = {}, allowanceUsd = 10
     used: 0n,
     limit: 100_000_000n,
     sponsored: true,
-    expiresAt: '2026-11-05T00:00:00Z',
+    expiresAt: '2099-01-01T00:00:00Z',
     statuses: [{ status: 'executed', txnHash: '0xhash' }],
     balance: 1_000_000_000n,
     ...overrides
@@ -119,7 +119,7 @@ export function fakeEngine(overrides: Partial<FakeState> = {}, allowanceUsd = 10
     },
     client,
     walletAddress: WALLET,
-    keyExpiresAt: '2026-11-06T00:00:00Z',
+    keyExpiresAt: '2099-01-02T00:00:00Z',
     balanceOf: async () => state.balance,
     usdPrice: async () => 2500,
     sleep: async (ms) => {
