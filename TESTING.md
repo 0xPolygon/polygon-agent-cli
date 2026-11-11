@@ -38,7 +38,7 @@ Update the row in the same pull request that adds or removes a test, so the ledg
 ## Writing tests
 
 - Import `describe`, `it`, `expect` and the hooks from `vitest`. Do not install `chai` separately.
-- Assertions are Chai-style through `expect`; assert on values and state, not only that a mock was called.
+- Assertions use vitest's standard `expect` matchers; no particular chain style is enforced in this repo. Assert on values and state, not only that a mock was called.
 - Do not hard-code calendar dates that are compared with the real clock. Freeze time (`vi.useFakeTimers`, `vi.setSystemTime`) or build dates relative to now.
 - Point state at a temp directory with `POLYGON_AGENT_HOME` so a test never touches a real install.
 - Set timeouts as options on `describe` or `it`, for example `describe('name', { timeout: 30000 }, ...)`, not in config or on the command line.
