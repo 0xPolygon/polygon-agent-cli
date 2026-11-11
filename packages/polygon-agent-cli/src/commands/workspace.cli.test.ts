@@ -25,6 +25,17 @@ const bundledSkill = path.resolve(
   'SKILL.md'
 );
 
+// The copy the build puts in the published package.
+const shippedSkill = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+  '..',
+  'dist',
+  'skills',
+  'open-money-agent',
+  'SKILL.md'
+);
+
 function mode(file: string): number {
   return fs.statSync(file).mode & 0o777;
 }
@@ -79,11 +90,13 @@ describe('workspace init', { timeout: 30_000 }, () => {
 });
 
 describe('skills show', { timeout: 30_000 }, () => {
-  it('prints the bundled skill unchanged', async () => {
+  it('prints the skill unchanged, and the build ships the same file', async () => {
     resetTripwire();
     const result = await runCli({ args: ['skills', 'show', 'open-money-agent'] });
     expect(result.exitCode).equal(0);
     expect(result.stdout).equal(fs.readFileSync(bundledSkill, 'utf8'));
+    // Run from a checkout, the CLI reads the repo's skills folder, so check the built copy too.
+    expect(fs.readFileSync(shippedSkill, 'utf8')).equal(result.stdout);
     expect(tripwireHits()).deep.equal([]);
   });
 });

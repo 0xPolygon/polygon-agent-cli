@@ -93,6 +93,12 @@ describe('agent x402-pay', { timeout: 60_000 }, () => {
     expect(result.stdoutJson).property('payment').property('amount').equal('1000');
     expect(result.stdoutJson).property('priceUsd').equal(0.001);
     expect(result.stdoutJson).nested.property('transactions[0].to').equal(USDC);
+    // The one transaction is an ERC-20 transfer of the asked amount to the signer.
+    const word = (hex: string) => hex.toLowerCase().padStart(64, '0');
+    expect(result.stdoutJson).property('transactions').length(1);
+    expect(result.stdoutJson)
+      .nested.property('transactions[0].data')
+      .equal(`0xa9059cbb${word(signer.slice(2))}${word((1000).toString(16))}`);
     expect(service.requests).length(1);
     expect(service.requests[0]).not.property('payment-signature');
     expect(service.requests[0]).not.property('x-payment');

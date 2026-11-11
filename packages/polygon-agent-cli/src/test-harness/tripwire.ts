@@ -7,8 +7,9 @@ export interface Tripwire {
   close: () => Promise<void>;
 }
 
-// A proxy that records and refuses everything: a child pointed at it cannot
-// reach the network, and "made no call" becomes an assertion on `hits`.
+// A proxy that records and refuses what reaches it, so "made no call" becomes an
+// assertion on `hits`. It sees fetch, Node's default http(s) agent and the global
+// WebSocket; a library with its own agent or a raw socket goes around it unseen.
 export async function startTripwire(): Promise<Tripwire> {
   const hits: string[] = [];
   const server = http.createServer((req, res) => {

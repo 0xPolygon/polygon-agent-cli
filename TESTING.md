@@ -46,7 +46,7 @@ Unit tests under `src/`, mostly in-process. Many use a real temporary filesystem
 
 `*.cli.test.ts` files run the built binary as a separate process (`src/test-harness/cli.ts`). The test run builds the CLI once, then each test starts `dist/index.js` with its own temporary HOME and state folder and an allowlisted environment, and reads stdout, stderr, the exit code and the files left on disk.
 
-- Every child is pointed at a local proxy that records and refuses outbound requests. Assert `tripwireHits()` is empty, so "made no network call" is checked, not assumed.
+- Every child is pointed at a local proxy that records and refuses outbound requests. Assert `tripwireHits()` is empty, so "made no network call" is checked, not assumed. The proxy sees `fetch`, Node's default `http`/`https` agent and the global `WebSocket`; a library that brings its own agent or opens a raw socket is not seen and not blocked.
 - A command that needs an upstream is given a local stand-in server on `127.0.0.1` through the command's own URL setting (`src/test-harness/fake-builder.ts`, `fake-x402.ts`). Nothing in these tests is mocked in-process.
 - Subprocess tests do not add to the coverage numbers, which are measured in-process.
 
