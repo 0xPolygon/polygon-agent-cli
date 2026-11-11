@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // The published dist/ is built by esbuild, so tsc only emits declarations elsewhere.
+    "outDir": "out-tsc/lib",
+    "tsBuildInfoFile": "out-tsc/lib/tsconfig.lib.tsbuildinfo",
+    "rootDir": "src",
+    "jsx": "react-jsx",
+    "jsxImportSource": "react"
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/test-harness/**"]
+}

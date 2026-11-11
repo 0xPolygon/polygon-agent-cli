@@ -1,8 +1,8 @@
 {
-  "extends": "../../tsconfig.json",
-  "compilerOptions": {
-    "jsx": "react-jsx",
-    "jsxImportSource": "react"
-  },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "vitest.config.ts"]
+  "extends": "../../tsconfig.base.json",
+  // esbuild (scripts/build.mjs) reads jsx from this file; dropping it changes the published bundle.
+  "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "react" },
+  "files": [],
+  "include": [],
+  "references": [{ "path": "./tsconfig.lib.json" }, { "path": "./tsconfig.spec.json" }]
 }

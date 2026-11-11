@@ -1,0 +1,10 @@
+{
+  "extends": ["@tsconfig/node24", "@tsconfig/node-ts"],
+  "compilerOptions": {
+    "composite": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": true,
+    "noUncheckedSideEffectImports": true,
+    "resolveJsonModule": true
+  }
+}
