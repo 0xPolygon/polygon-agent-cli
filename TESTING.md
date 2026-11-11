@@ -9,7 +9,7 @@ Two further suffixes are reserved so that tests which need a different runner ca
 - `*.cli.test.ts` for subprocess tests of the built CLI.
 - `*.workers.test.ts` for tests that run in a Workers runtime.
 
-They are conventions only. No test uses either suffix today.
+The package sections below say which of these each package uses.
 
 ## How to run
 
