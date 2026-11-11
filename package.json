@@ -12,9 +12,11 @@
   "packageManager": "pnpm@10.30.3",
   "scripts": {
     "prepare": "husky",
-    "lint": "concurrently --group --prefix-colors auto 'pnpm:lint:ts' 'pnpm:typecheck' 'prettier --check .'",
+    "lint": "concurrently --group --prefix-colors auto 'pnpm:lint:md' 'pnpm:lint:ts' 'pnpm:typecheck' 'prettier --check .'",
+    "lint:md": "markdownlint-cli2 \"**/*.md\"",
     "lint:ts": "eslint .",
-    "format": "pnpm run format:ts && prettier --write .",
+    "format": "pnpm run format:md && pnpm run format:ts && prettier --write .",
+    "format:md": "markdownlint-cli2 --fix \"**/*.md\"",
     "format:ts": "eslint . --fix",
     "build": "pnpm -r --if-present run build",
     "typecheck": "pnpm -r run typecheck",
@@ -40,6 +42,7 @@
     "eslint": "^10.0.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.2.7",
+    "markdownlint-cli2": "^0.21.0",
     "prettier": "^3.0.0",
     "tsx": "^4.21.0",
     "typescript": "^5.8.3"

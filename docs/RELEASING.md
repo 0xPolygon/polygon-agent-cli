@@ -8,7 +8,7 @@ Releases run through the shared `0xPolygon/pipelines` GitHub Actions workflows.
 
 Every PR that changes a published package should include a changeset. Run:
 
-```
+```sh
 pnpm changeset
 ```
 
@@ -72,7 +72,7 @@ Commit messages do **not** drive version bumps (changesets do), but the repo
 still enforces the [conventional commit](https://www.conventionalcommits.org/)
 format via a commitlint hook (Husky):
 
-```
+```text
 type(optional-scope): description
 ```
 
@@ -124,4 +124,4 @@ directly and pick the change up immediately.
 ## Viewing releases
 
 Published releases and their changelogs:
-https://github.com/0xPolygon/polygon-agent-cli/releases
+<https://github.com/0xPolygon/polygon-agent-cli/releases>

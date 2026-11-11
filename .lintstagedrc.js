@@ -8,5 +8,8 @@ export default {
   },
   '*.{json,yaml,yml,css,html}': (files) => {
     return files.length > 0 ? `prettier --write ${files.join(' ')}` : [];
+  },
+  '*.md': (files) => {
+    return files.length > 0 ? `markdownlint-cli2 --fix ${files.join(' ')}` : [];
   }
 };
