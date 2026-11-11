@@ -25,6 +25,7 @@ describe('relay in the Workers runtime', { timeout: 10_000 }, () => {
 
     const preflight = await SELF.fetch(`${base}/api/login/action`, { method: 'OPTIONS' });
     expect(preflight.status).equal(204);
+    expect(preflight.headers.get('access-control-allow-origin')).equal('*');
     expect(preflight.headers.get('access-control-allow-headers')).equal('Content-Type');
   });
 
@@ -85,6 +86,10 @@ describe('relay in the Workers runtime', { timeout: 10_000 }, () => {
 
     await post('/api/login/action', { session: a, action: { type: 'google' } });
     expect(await (await nextAction(b)).json()).deep.equal({ state: 'pending' });
+
+    // Registering again with an invalid context drops the one stored before.
+    expect((await register(a, { purpose: 'nonsense' })).status).equal(204);
+    expect(await (await getStatus(a)).json()).deep.equal({ status: 'awaiting-method' });
   });
 
   it('hands an action over once, then refuses actions after the login finishes', async () => {
@@ -111,7 +116,10 @@ describe('relay in the Workers runtime', { timeout: 10_000 }, () => {
       status: { status: 'done', walletAddress: '0x0000000000000000000000000000000000000001' }
     });
     expect(done.status).equal(204);
-    expect(await (await getStatus(session)).json()).property('status', 'done');
+    expect(await (await getStatus(session)).json()).deep.equal({
+      status: 'done',
+      walletAddress: '0x0000000000000000000000000000000000000001'
+    });
 
     const after = await post('/api/login/action', { session, action: { type: 'google' } });
     expect(after.status).equal(410);
