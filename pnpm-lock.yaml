@@ -152,6 +152,9 @@ importers:
       vitest:
         specifier: ^3.0.0
         version: 3.2.7(@types/debug@4.1.13)(@types/node@22.19.13)(lightningcss@1.32.0)(terser@5.46.1)
+      wrangler:
+        specifier: ^4.154.0
+        version: 4.154.0(@cloudflare/workers-types@4.20260317.1)(@types/node@22.19.13)(bufferutil@4.1.0)(utf-8-validate@6.0.6)
 
   packages/polygon-agent-cli:
     dependencies:

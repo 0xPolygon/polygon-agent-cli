@@ -50,11 +50,11 @@ Each package's README (where present) is the entry point for that package.
 - Every write from the agent wallet goes through the one primitive in `src/lib/tx-dispatch.ts`.
   Add new spend paths there rather than calling the wallet client directly. Owner requests
   (`src/lib/owner/`) are the exception: they run as the owner, after the owner signs in.
-- `wrangler` is a devDependency of `packages/agentconnect-ui`. Its production deploy runs
-  `pnpm exec wrangler` after a frozen install, so the lockfile decides what runs and the
-  supply-chain settings in `pnpm-workspace.yaml` cover it. Change the version in the package and
-  the lockfile, not in a script. `packages/oidc-relay` is still on wrangler 3, which is not a dependency: its deploy runs
-  it through `npx` at the exact version in `.github/scripts/wrangler-deploy.sh`.
+- `wrangler` is a devDependency of `packages/agentconnect-ui` and `packages/oidc-relay`. Their
+  deploys run `pnpm exec wrangler` after a frozen install, so the lockfile decides what runs and
+  the supply-chain settings in `pnpm-workspace.yaml` cover it. Change the version in the package
+  and the lockfile, not in a script. The relay's `deploy*` and `dev` package scripts still fetch
+  wrangler 3 with `npx`.
 
 ## Testing
 
