@@ -66,6 +66,9 @@ Vitest, per package. Tiers, layout and conventions are in `TESTING.md`.
 - The default is a session-mode connection: the owner signs in once to approve a limited allowance
   for the install's own key, then the owner sign-in is revoked, so a stolen install can spend only
   what that allowance covers. A full owner session is the exception and is opt-in.
+- Each sign-in method has its own wallet: the wallet provider gives a Google sign-in and an email
+  sign-in different wallets, even for the same person, and the dashboard shows the wallet of the
+  method used. Don't assume one owner means one wallet.
 - The CLI needs no setup step: it ships a default publishable key and provisions a project and
   access key on first login. Overrides exist for developers on their own project; the flags and
   environment variables are defined in `src/commands/` and `src/lib/config.ts`.
@@ -90,10 +93,17 @@ Read `packages/agentconnect-ui/worker/index.ts` first; it routes everything.
   (`plan.ts`) deliberately mirrors the CLI's session mode and `tokens.test.ts` guards that the
   token tables match. The transfer engine (`engine.ts`) records before it sends and never resends,
   so a retry cannot double-spend.
+- **Connecting keeps only what it can verify** (`worker/money/connect.ts`): after the owner approves
+  an allowance for the connection's key on each chain, the Worker reads the approval back through
+  the key and keeps only what matches the plan; anything else is revoked while the owner is still
+  signed in. The CLI's session login follows the same steps.
 - **Why a withdrawal always needs the owner** (`earn.ts`, `owner-run.ts`): session keys can only
   transfer tokens, so a withdrawal runs from the owner's own wallet and cannot be covered by an
   allowance. Approvals (`money/actions.ts`) expire, run once, and the Worker never keeps an owner
   sign-in past the owner's answer.
+- **Polymarket access: the stricter rule wins** (`worker/money/polymarket.ts`): the owner's
+  location recorded when connecting and Polymarket's own availability check are both evaluated, and
+  the more restrictive result applies. An unknown location can only close positions.
 - **Fixed destinations.** Deposit calls and funding targets are set by the Worker (from the code,
   the quote, or the service being paid), never from agent-supplied arguments (`earn.ts`,
   `trade.ts`, `polymarket.ts`).
@@ -111,27 +121,31 @@ deploys of both Workers come from release tags, not from merges to `main`.
 
 ## Repo-specific adaptations of the team standards
 
-These are agreed departures from the team standards for this repo. A standard not listed here
-applies as written.
+"Team standards" means the maintainers' internal engineering standards, which are not published
+with this repo; nothing here asks you to go and find them. These are the agreed departures from
+them for this repo. A standard not listed here applies as written.
 
-- **Service logging (CLI)** → the CLI's contract is machine-readable JSON on stdout/stderr through
-  its output helpers in `packages/polygon-agent-cli/src/lib/errors.ts`; it does not use a service
-  logger. New code avoids bare `console.*` outside those helpers. *Why:* the output is the API the
-  calling agent parses; structured service logs would corrupt it.
+- **Service logging (CLI)** → non-interactive output goes only through the JSON output helpers in
+  `packages/polygon-agent-cli/src/lib/errors.ts`; when run in a terminal the CLI draws its
+  interactive views instead (`src/ui/`). Both are the contract, and the CLI does not use a service
+  logger. New code avoids bare `console.*` outside those two paths. *Why:* the JSON output is the
+  API the calling agent parses; structured service logs would corrupt it.
 - **Service logging and HTTP middleware (Workers)** → no Node service logger or Express middleware;
-  new Worker code logs structured JSON through a small helper over `console`. *Why:* the Workers runtime has neither
-  Node streams nor an Express request cycle.
+  new Worker code logs structured JSON through a small helper over `console`. *Why:* the Workers
+  runtime has neither Node streams nor an Express request cycle.
 - **Error type (CLI)** → the CLI keeps its own `CliError` with stable `code` values at the user
   boundary. *Why:* callers branch on the code; a cause chain is not part of the contract.
 - **Environment validation (Workers)** → no env-validation library; the typed bindings interface
-  (`Env`) is the schema, and new code checks the bindings it needs once rather than at each use. *Why:* Worker config arrives as bindings per request, not `process.env`.
+  (`Env`) is the schema, and new code checks the bindings it needs once rather than at each use.
+  *Why:* Worker config arrives as bindings per request, not `process.env`.
 - **`NODE_ENV` and dotenv conventions** → not applicable. *Why:* there is no deployed Node
   service, only a CLI and two Workers.
 - **Container, cluster, health-endpoint and cloud secret-manager rules** → not applicable. Secrets
   are GitHub environment secrets uploaded with the Worker deploy. *Why:* nothing here runs in a
   container or cluster.
-- **No `tsx`** → kept for the CLI's `dev` script only. *Why:* its sources include JSX, which
-  Node's native type stripping does not handle; the shipped artefact is an esbuild bundle.
+- **No `tsx`** → `tsx` is used only by dev-time scripts (the CLI's `dev` script and the root
+  runner script); it never reaches the shipped bundle. *Why:* the CLI's sources include JSX, which
+  Node's native type stripping does not handle.
 - **Library build scripts and `exports` conventions** → not used by the CLI. *Why:* it is a
   bin-only package bundled by esbuild with no importable API.
 - **Named exports only** → the Workers' module entry (`export default { fetch }`) is
@@ -141,6 +155,7 @@ applies as written.
   the Worker's request paths.
 - **tsconfig layout for `agentconnect-ui`** → the SPA and the Worker need different `lib`/`types`
   sets, so each has its own config under the package's hub `tsconfig.json`.
-- **Test assertion style** → tests use Vitest's `toBe`-style matchers, not the Chai chain style.
+- **Test assertion style** → the team's Chai-chain style rule is not applied here; tests use
+  Vitest's standard matchers.
 - **Dependency-update automation** → none is configured.
 - **Licence** → MIT.
