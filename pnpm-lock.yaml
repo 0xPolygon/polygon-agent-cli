@@ -101,6 +101,9 @@ importers:
         specifier: ^2.57.3
         version: 2.57.3(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
     devDependencies:
+      '@cloudflare/vitest-pool-workers':
+        specifier: 0.12.21
+        version: 0.12.21(@cloudflare/workers-types@4.20260317.1)(@vitest/runner@3.2.7)(@vitest/snapshot@3.2.7)(bufferutil@4.1.0)(utf-8-validate@6.0.6)(vitest@3.2.7(@types/debug@4.1.13)(@types/node@22.19.13)(lightningcss@1.32.0)(terser@5.46.1))
       '@cloudflare/workers-types':
         specifier: ^4
         version: 4.20260317.1

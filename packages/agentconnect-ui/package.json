@@ -36,6 +36,7 @@
     "viem": "^2.57.3"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.12.21",
     "@cloudflare/workers-types": "^4",
     "@tailwindcss/vite": "^4.1.18",
     "@types/react": "^18.3.3",
