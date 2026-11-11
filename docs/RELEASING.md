@@ -95,8 +95,8 @@ from the `staging` branch by `deploy-agentconnect-ui.yml` and
 `deploy-oidc-relay.yml`.
 
 A deploy does not change when a new Wrangler release appears. For
-`@polygonlabs/agentconnect-ui`, Wrangler is a devDependency at an exact version
-and the deploy runs the copy from the lockfile. For `@polygonlabs/oidc-relay`,
+`@polygonlabs/agentconnect-ui`, Wrangler is a devDependency and the deploy runs the
+version recorded in the lockfile. For `@polygonlabs/oidc-relay`,
 the version is pinned in `.github/scripts/wrangler-deploy.sh`.
 
 ### Redeploying or rolling back
