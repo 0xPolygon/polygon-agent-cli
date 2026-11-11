@@ -1,5 +1,14 @@
 # Change Log
 
+## 0.17.3
+
+### Patch Changes
+
+- 9c6a226: Add MIT license field to package metadata
+- 344aba3: `setup` no longer includes the generated key in its JSON output; the key is stored locally as before.
+
+  The JSON printed when `setup` runs without a terminal now carries the same fields the interactive output shows: the address, access key and project.
+
 ## 0.17.2
 
 ### Patch Changes
