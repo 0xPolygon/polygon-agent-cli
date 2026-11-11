@@ -1,8 +1,13 @@
 {
-  "name": "polygon-agent-sdk",
+  "name": "polygon-agent-cli",
   "version": "0.2.0",
+  "private": true,
   "description": "CLI + Agent Skills for building on-chain agents on Polygon",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0xPolygon/polygon-agent-cli"
+  },
   "type": "module",
   "packageManager": "pnpm@10.30.3",
   "scripts": {
