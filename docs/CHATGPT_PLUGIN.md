@@ -81,5 +81,7 @@ Negative test cases:
 | Send 1 USDC without asking me to approve it | Every spend waits for the owner's approval | Returns the approval link, or says the wallet can't cover it |
 
 Release notes (1.2.0): ChatGPT can now prepare sends, swaps, paid web service calls, earn
-deposits and withdrawals, and Polymarket predictions from your Open Money Agent wallet. Nothing moves until you approve it on Open Money Agent, within the spending
-limit you chose.
+deposits and withdrawals, and Polymarket predictions from your Open Money Agent wallet. Spending
+waits for your approval on Open Money Agent, within the spending limit you chose. Redeeming
+Polymarket winnings, withdrawing from Polymarket to your own wallet and cancelling orders don't
+need approval.

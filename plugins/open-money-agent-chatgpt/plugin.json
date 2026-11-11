@@ -16,7 +16,7 @@
       "interface": {
         "displayName": "Open Money Agent",
         "shortDescription": "Your own wallet with the Open Money Stack",
-        "longDescription": "Open Money Agent is your own agent wallet with the Open Money Stack. Connect it to ChatGPT to check what it holds, and to have ChatGPT prepare sends, swaps, earn deposits, Polymarket predictions and paid web service calls for you.\n\nSign in with the email or Google account you use for Open Money Agent and choose a spending limit. ChatGPT never moves money by itself: every payment, swap, deposit or prediction it prepares comes back as a link, and nothing happens until you open it on Open Money Agent and approve it. Earn withdrawals also ask you to sign in again.\n\nWho it's for: people who use Open Money Agent with an assistant and want to manage their agent wallet from ChatGPT.\n\nLimitations: spending stays within the limit you chose when connecting, on the tokens and chains it covers. Polymarket follows its own rules on where it's available. Disconnect any time from Settings on your dashboard, which also revokes its access.",
+        "longDescription": "Open Money Agent is your own agent wallet with the Open Money Stack. Connect it to ChatGPT to check what it holds, and to have ChatGPT prepare sends, swaps, earn deposits, Polymarket predictions and paid web service calls for you.\n\nSign in with the email or Google account you use for Open Money Agent and choose a spending limit. ChatGPT never spends by itself: every payment, swap, deposit or prediction it prepares comes back as a link, and nothing is spent until you open it on Open Money Agent and approve it. Earn withdrawals also ask you to sign in again. Redeeming Polymarket winnings, withdrawing from Polymarket to your own wallet and cancelling orders don't need approval.\n\nWho it's for: people who use Open Money Agent with an assistant and want to manage their agent wallet from ChatGPT.\n\nLimitations: spending stays within the limit you chose when connecting, on the tokens and chains it covers. Polymarket follows its own rules on where it's available. Disconnect any time from Settings on your dashboard, which also revokes its access.",
         "developerName": "Polygon Labs",
         "category": "Finance",
         "capabilities": ["Read", "Write"],
@@ -121,7 +121,7 @@
         "commerce_description": "This plugin does not sell products. It prepares payments from the user's own agent wallet, and each one runs only after the user approves it on Open Money Agent."
       },
       "publication": {
-        "release_notes": "ChatGPT can now prepare sends, swaps, paid web service calls, earn deposits and withdrawals, and Polymarket predictions from your Open Money Agent wallet. Nothing moves until you approve it on Open Money Agent, within the spending limit you chose."
+        "release_notes": "ChatGPT can now prepare sends, swaps, paid web service calls, earn deposits and withdrawals, and Polymarket predictions from your Open Money Agent wallet. Spending waits for your approval on Open Money Agent, within the spending limit you chose. Redeeming Polymarket winnings, withdrawing from Polymarket to your own wallet and cancelling orders don't need approval."
       }
     }
   }
