@@ -139,7 +139,7 @@ Tools registered in `packages/agentconnect-ui/worker/mcp.ts`. The tests call the
 
 | Surface | Command / op | Moves money | Verdict | Where | Asserted | Not asserted, and why |
 |---|---|---|---|---|---|---|
-| Worker MCP | `get_wallet` | no | unit | `packages/agentconnect-ui/worker/mcp.test.ts` | Answers for the signed-in wallet only; the only tool listed for a connection with no allowance. | Balance reads from the real service. |
+| Worker MCP | `get_wallet` | no | unit | `packages/agentconnect-ui/worker/mcp.test.ts` | Returns the signed-in wallet's address, owner and dashboard link; the only tool listed for a connection with no allowance. | A request for another wallet being refused; balance reads from the real service. |
 | Worker MCP | `get_allowance` | no | unit | `packages/agentconnect-ui/worker/mcp.test.ts` | Forwards a `status` request to a fake key object, and ChatGPT may call it without approval. | What the key object does with it. |
 | Worker MCP | `send` | yes | unit | `packages/agentconnect-ui/worker/mcp.test.ts`<br>`packages/agentconnect-ui/worker/money/engine.test.ts` | Forwarded to the connection's own key with its wallet; refused without an allowance; engine caps (USD, on-chain, holdings, covered tokens), never-resend, deadline. | The tool wired through the real key object to the engine; a real transfer. |
 | Worker MCP | `swap_quote` | no | unit | `packages/agentconnect-ui/worker/money/trade.test.ts` | Quote validation, exact-output quotes, funding top-up, held-balance checks, against a faked swap service. | The tool-to-key dispatch; a real quote. |
