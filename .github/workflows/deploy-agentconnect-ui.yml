@@ -2,9 +2,9 @@ name: Deploy agentconnect UI to Cloudflare
 
 # Builds the funding/dashboard SPA and deploys it to the agentconnect domain:
 # merge to `staging` -> staging; production deploys run from release tags
-# (deploy-agentconnect-ui-release.yml). wrangler runs via npx (not a workspace
-# dep, to respect the repo trust policy); the `[assets]` worker serves the
-# built SPA.
+# (deploy-agentconnect-ui-release.yml). wrangler is a devDependency of the
+# package, so the deploy runs the version in the lockfile; the `[assets]`
+# worker serves the built SPA.
 
 on:
   push:
@@ -76,7 +76,7 @@ jobs:
           TRAILS_API_KEY: ${{ secrets.VITE_TRAILS_API_KEY }}
 
       - name: Deploy to staging
-        run: npx -y wrangler@4 deploy --env staging --secrets-file "$RUNNER_TEMP/worker-secrets.json"
+        run: pnpm exec wrangler deploy --env staging --secrets-file "$RUNNER_TEMP/worker-secrets.json"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_WORKER_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_WORKER_ACCOUNT_ID }}

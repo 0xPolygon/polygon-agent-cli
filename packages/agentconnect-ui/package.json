@@ -16,8 +16,7 @@
     "typecheck": "tsc -b",
     "lint": "eslint .",
     "test": "vitest run",
-    "deploy:staging": "npx -y wrangler@4 deploy --env staging",
-    "deploy:production": "npx -y wrangler@4 deploy --env production"
+    "deploy:staging": "wrangler deploy --env staging"
   },
   "dependencies": {
     "0xtrails": "^0.18.6",
