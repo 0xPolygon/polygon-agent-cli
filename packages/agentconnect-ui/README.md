@@ -42,6 +42,9 @@ From the repo root, install once with `pnpm install`, then:
 - `pnpm --filter @polygonlabs/agentconnect-ui run dev` starts Vite on port
   4444. This serves the SPA only: Vite does not run the Worker, so anything
   that calls `/api/*` or `/mcp` has no backend behind it locally.
+- `npx wrangler@4 dev --env staging --port 8787 --local-upstream localhost:8787`,
+  run from this package, runs the Worker locally. It reads its secrets from
+  `.dev.vars.staging`, which is gitignored and never committed.
 - `pnpm --filter @polygonlabs/agentconnect-ui run test` runs Vitest over both
   halves (`src/**`, `worker/**` and `skills-index.test.ts`). Worker tests run
   in Node, with the Workers runtime module replaced by
