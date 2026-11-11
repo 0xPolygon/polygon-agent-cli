@@ -1,6 +1,7 @@
 // Pairing-session logic for the browser login flow. Pure logic over a minimal
 // storage interface so it is unit-testable without the Workers runtime; the
-// Durable Object wrapper lives in relay.ts wiring (Task 2).
+// Durable Object wrapper (LoginSession) is at the bottom of this file and is
+// routed to by relay.ts.
 //
 // One pending action slot, latest wins: the page waits for a status change
 // before offering the next input, so at most one action is meaningfully in

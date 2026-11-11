@@ -1,19 +1,20 @@
 // Browser-login pairing relay (Cloudflare Worker + Durable Object).
 //
-// Purpose: let a CLI on ANY machine (including a remote server / openclaw) drive
-// a browser-based login. The CLI arms a pairing session, the browser page polls
-// for status and submits the chosen login method (Google, email, OTP), and the
-// CLI polls for that input. The OMS relay now owns the Google OAuth callback
-// itself; this relay only carries pairing state between the CLI and the page,
-// including the `oidc-callback` action the page submits once the OMS relay
-// returns the browser to it.
+// Purpose: let the CLI on ANY machine (including a remote server) complete a
+// browser-based login. The CLI arms a pairing session under a random session id;
+// the login page in the user's browser polls that session for status and submits
+// the user's input (login method, email, OTP, or the OAuth return URL); the CLI
+// polls for that input. The relay only carries pairing state between the two. It
+// does not perform authentication itself.
 //
-// Endpoints (all under /api/login):
-//   POST /register  { session }                              (CLI: arm a pairing session)
-//   POST /action  { session, action }                         (browser: submit user input)
-//   GET  /next-action?session=  -> { state, action? }         (CLI: poll for input, one-time read)
-//   POST /status  { session, ...LoginStatus }                 (CLI: publish state)
-//   GET  /status?session=  -> LoginStatus                     (browser: poll state, repeat-readable)
+// Each session is one Durable Object (see login-session.ts) that expires on its
+// own after a fixed time. Endpoints:
+//   GET  / or /health                                         (liveness check)
+//   POST /api/login/register  { session, context? }           (CLI: arm a pairing session)
+//   POST /api/login/action  { session, action }               (browser: submit user input)
+//   GET  /api/login/next-action?session=  -> { state, action? }  (CLI: poll for input, one-time read)
+//   POST /api/login/status  { session, status }               (CLI: publish state)
+//   GET  /api/login/status?session=  -> LoginStatus           (browser: poll state, repeat-readable)
 
 import type { LoginAction } from './login-session.ts';
 
