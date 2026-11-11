@@ -43,12 +43,13 @@ Each package's README (where present) is the entry point for that package.
   `engines` in the CLI's `package.json`, so don't use newer-only APIs in CLI code).
 - pnpm version: `packageManager` in the root `package.json`. Use that exact version; a different one
   rewrites the lockfile.
-- Scripts live in each `package.json`; the root ones fan out with `pnpm -r`.
+- Scripts live in each `package.json`; most root ones fan out with `pnpm -r`.
 - The CLI is yargs with the `CommandModule` builder/handler pattern. Commands are in
   `packages/polygon-agent-cli/src/commands/`, shared code in `src/lib/`, and ambient declarations
   for untyped dependencies in `src/types.d.ts`.
-- Every transaction the CLI submits goes through the one primitive in `src/lib/tx-dispatch.ts`.
-  Add new spend paths there rather than calling the wallet client directly.
+- Every write from the agent wallet goes through the one primitive in `src/lib/tx-dispatch.ts`.
+  Add new spend paths there rather than calling the wallet client directly. Owner requests
+  (`src/lib/owner/`) are the exception: they run as the owner, after the owner signs in.
 - `wrangler` is deliberately not a workspace dependency, to respect the repo's supply-chain trust
   policy (`pnpm-workspace.yaml`); it runs through `npx`, and production deploys pin exact versions
   in `.github/scripts/wrangler-deploy.sh`. Don't add it to a `package.json`.
@@ -80,8 +81,9 @@ Read `packages/agentconnect-ui/worker/index.ts` first; it routes everything.
 - **MCP connector** (`worker/mcp.ts`): stateless JSON-RPC behind the Cloudflare OAuth provider. The
   consent flow is handled by the SPA's connect page. A connection without a key can only read.
 - **Client profiles** (`worker/profiles.ts`) define each client's tool allow-list, whether
-  connecting asks for an allowance, and whether its spends wait for the owner's approval. Add a
-  client by adding its mapping to a profile there, not by special-casing tools.
+  connecting asks for an allowance, and whether its spends wait for the owner's approval. A client
+  is matched to a profile by `profileForClient` there (configured client ids first, then redirect
+  URIs); give a client different rules through a profile, not by special-casing tools.
 - **Why a money-moving connection gets its own key in its own Durable Object**
   (`worker/money/agent-key.ts`): the blast radius of any one connection is its own allowance, and
   the object serialises requests so a nonce or transfer record can't race. Allowance planning
@@ -92,12 +94,15 @@ Read `packages/agentconnect-ui/worker/index.ts` first; it routes everything.
   transfer tokens, so a withdrawal runs from the owner's own wallet and cannot be covered by an
   allowance. Approvals (`money/actions.ts`) expire, run once, and the Worker never keeps an owner
   sign-in past the owner's answer.
-- **Fixed destinations.** Deposit calls and funding targets come from the quote or the code, never
-  from agent-supplied arguments (`earn.ts`, `trade.ts`, `polymarket.ts`).
+- **Fixed destinations.** Deposit calls and funding targets are set by the Worker (from the code,
+  the quote, or the service being paid), never from agent-supplied arguments (`earn.ts`,
+  `trade.ts`, `polymarket.ts`).
 - Worker config is typed bindings (`Env` in `worker/index.ts`); bindings are declared
   in `wrangler.toml`. Secrets are GitHub environment secrets uploaded
-  with each deploy; see the deploy workflows in `.github/workflows/`. Local runs use a gitignored
-  `.dev.vars` file, never committed.
+  with each deploy; see the deploy workflows in `.github/workflows/`. Vite's dev server does not run
+  the Worker; run it locally with
+  `npx wrangler@4 dev --env staging --port 8787 --local-upstream localhost:8787`, which reads
+  secrets from the gitignored `.dev.vars.staging` (never committed).
 
 ## Releases and deploys
 
@@ -114,12 +119,12 @@ applies as written.
   logger. New code avoids bare `console.*` outside those helpers. *Why:* the output is the API the
   calling agent parses; structured service logs would corrupt it.
 - **Service logging and HTTP middleware (Workers)** → no Node service logger or Express middleware;
-  new Worker code writes structured JSON through `console`. *Why:* the Workers runtime has neither
+  new Worker code logs structured JSON through a small helper over `console`. *Why:* the Workers runtime has neither
   Node streams nor an Express request cycle.
 - **Error type (CLI)** → the CLI keeps its own `CliError` with stable `code` values at the user
   boundary. *Why:* callers branch on the code; a cause chain is not part of the contract.
 - **Environment validation (Workers)** → no env-validation library; the typed bindings interface
-  is the schema. *Why:* Worker config arrives as bindings per request, not `process.env`.
+  (`Env`) is the schema, and new code checks the bindings it needs once rather than at each use. *Why:* Worker config arrives as bindings per request, not `process.env`.
 - **`NODE_ENV` and dotenv conventions** → not applicable. *Why:* there is no deployed Node
   service, only a CLI and two Workers.
 - **Container, cluster, health-endpoint and cloud secret-manager rules** → not applicable. Secrets
