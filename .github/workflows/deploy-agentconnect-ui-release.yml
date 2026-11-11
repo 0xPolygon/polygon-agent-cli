@@ -1,0 +1,132 @@
+name: Deploy agentconnect UI (release)
+
+# Production deploys run from this package's release tag, pushed by the changesets release,
+# and only after the PR-CI checks pass on the tagged commit. To redeploy or roll back, run it
+# from main with an earlier release tag. Staging is deployed by the branch-triggered workflow.
+
+on:
+  push:
+    tags:
+      - '@polygonlabs/agentconnect-ui@[0-9]*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to deploy, e.g. @polygonlabs/agentconnect-ui@1.2.3'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-agentconnect-ui-production
+  cancel-in-progress: false
+  # Keep every waiting run: by default a newer run replaces the one already waiting.
+  queue: max
+
+jobs:
+  test:
+    name: Test release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      sha: ${{ steps.release.outputs.sha }}
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify release tag
+        id: release
+        run: .github/scripts/verify-release-tag.sh @polygonlabs/agentconnect-ui packages/agentconnect-ui
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
+      - name: Check out the tagged commit
+        run: git checkout --detach "$RELEASE_SHA"
+        env:
+          RELEASE_SHA: ${{ steps.release.outputs.sha }}
+
+      # Same checks as PR CI (shared ci action plus the build), run on the release's tree.
+      - uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4.2.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          check-latest: true
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Typecheck
+        run: pnpm run --if-present typecheck
+
+      - name: Test
+        run: pnpm run --if-present test
+
+      - name: Build
+        run: pnpm run --if-present build
+
+  deploy:
+    name: Deploy (production)
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    steps:
+      # By SHA, so this ships exactly the commit that was tested.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ needs.test.outputs.sha }}
+          persist-credentials: false
+
+      # Deploy scripts come from the workflow's own commit, so older tags that predate
+      # them can still be redeployed.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          path: .release-scripts
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4.2.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          check-latest: true
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm --filter @polygonlabs/agentconnect-ui run build
+        env:
+          VITE_TRAILS_API_KEY: ${{ secrets.VITE_TRAILS_API_KEY }}
+          VITE_INDEXER_ACCESS_KEY: ${{ secrets.VITE_INDEXER_ACCESS_KEY }}
+          VITE_PROJECT_ACCESS_KEY: ${{ secrets.VITE_PROJECT_ACCESS_KEY }}
+          # Login-page relay base URL (per-environment GitHub variable; empty
+          # falls back to the production default in src/config.ts).
+          VITE_OIDC_RELAY_URL: ${{ vars.VITE_OIDC_RELAY_URL }}
+
+      # Sign-in and MCP secrets go up with the deploy.
+      - name: Write worker secrets
+        run: node .release-scripts/.github/scripts/write-worker-secrets.mjs
+        env:
+          AGENT_CERT_SECRET: ${{ secrets.AGENT_CERT_SECRET }}
+          CREDENTIALS_KEY: ${{ secrets.CREDENTIALS_KEY }}
+          INDEXER_ACCESS_KEY: ${{ secrets.VITE_INDEXER_ACCESS_KEY }}
+          TRAILS_API_KEY: ${{ secrets.VITE_TRAILS_API_KEY }}
+
+      - name: Deploy to production
+        run: .release-scripts/.github/scripts/wrangler-deploy.sh packages/agentconnect-ui --secrets-file "$RUNNER_TEMP/worker-secrets.json" --message "$RELEASE_TAG"
+        env:
+          RELEASE_TAG: ${{ needs.test.outputs.tag }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_WORKER_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_WORKER_ACCOUNT_ID }}
