@@ -21,6 +21,8 @@ permissions:
 concurrency:
   group: deploy-oidc-relay-production
   cancel-in-progress: false
+  # Keep every waiting run: by default a newer run replaces the one already waiting.
+  queue: max
 
 jobs:
   test:
