@@ -9,6 +9,7 @@
     "deploy:staging": "npx -y wrangler@3 deploy --env staging",
     "deploy:production": "npx -y wrangler@3 deploy --env production",
     "dev": "npx -y wrangler@3 dev",
+    "lint": "eslint .",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
