@@ -1,3 +1,4 @@
+#!/bin/sh
 # Require at least one changeset per push — mirrors the changeset-check CI gate so
 # the gap is caught locally while there is still time to amend it into the right commit.
 # Skip on changeset-release/* branches (automated version-bump PRs have no code to describe).
