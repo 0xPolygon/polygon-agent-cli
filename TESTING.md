@@ -48,7 +48,13 @@ Update the row in the same pull request that adds or removes a test, so the ledg
 
 ### `@polygonlabs/agent-cli` (`packages/polygon-agent-cli`)
 
-Unit tests under `src/`, mostly in-process. Many use a real temporary filesystem for state and replace the wallet SDK, price and swap services with stand-ins. A few spawn real child processes (lock and waiter tests). There are no subprocess tests of the built binary.
+Unit tests under `src/`, mostly in-process. Many use a real temporary filesystem for state and replace the wallet SDK, price and swap services with stand-ins. A few spawn real child processes (lock and waiter tests).
+
+`*.cli.test.ts` files run the built binary as a separate process (`src/test-harness/cli.ts`). The test run builds the CLI once, then each test starts `dist/index.js` with its own temporary HOME and state folder and an allowlisted environment, and reads stdout, stderr, the exit code and the files left on disk.
+
+- Every child is pointed at a local proxy that records and refuses outbound requests. Assert `tripwireHits()` is empty, so "made no network call" is checked, not assumed.
+- A command that needs an upstream is given a local stand-in server on `127.0.0.1` through the command's own URL setting (`src/test-harness/fake-builder.ts`, `fake-x402.ts`). Nothing in these tests is mocked in-process.
+- Subprocess tests do not add to the coverage numbers, which are measured in-process; the ledger records what they prove.
 
 ### `@polygonlabs/oidc-relay` (`packages/oidc-relay`)
 
