@@ -53,8 +53,7 @@ Each package's README (where present) is the entry point for that package.
 - `wrangler` is a devDependency of `packages/agentconnect-ui` and `packages/oidc-relay`. Their
   deploys run `pnpm exec wrangler` after a frozen install, so the lockfile decides what runs and
   the supply-chain settings in `pnpm-workspace.yaml` cover it. Change the version in the package
-  and the lockfile, not in a script. The relay's `deploy*` and `dev` package scripts still fetch
-  wrangler 3 with `npx`.
+  and the lockfile, not in a script.
 
 ## Testing
 

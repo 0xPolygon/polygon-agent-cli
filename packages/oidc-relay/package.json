@@ -5,10 +5,8 @@
   "type": "module",
   "description": "Public OIDC handoff relay (Cloudflare Worker) so the CLI can complete browser login from any machine, local or remote.",
   "scripts": {
-    "deploy": "npx -y wrangler@3 deploy",
-    "deploy:staging": "npx -y wrangler@3 deploy --env staging",
-    "deploy:production": "npx -y wrangler@3 deploy --env production",
-    "dev": "npx -y wrangler@3 dev",
+    "deploy:staging": "wrangler deploy --env staging",
+    "dev": "wrangler dev",
     "lint": "eslint .",
     "test": "vitest run",
     "typecheck": "tsc -b"
