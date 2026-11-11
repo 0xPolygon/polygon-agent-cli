@@ -37,7 +37,10 @@ Releases are automated by the **Release** workflow
    - publishes every public package to npm via **OIDC trusted publishing**
      (no long-lived npm token),
    - creates a per-package git tag (e.g. `@polygonlabs/agent-cli@0.12.0`),
-   - creates a GitHub Release with the changelog as the body.
+   - creates a GitHub Release with the changelog as the body,
+   - for `@polygonlabs/agentconnect-ui` and `@polygonlabs/oidc-relay`, the new
+     tag also triggers that service's production deploy once its tests pass
+     (see [Private packages](#private-packages)).
 
 Private packages (`"private": true`) are versioned and git-tagged but never
 published to npm.
@@ -80,9 +83,41 @@ Commits that don't follow the format are rejected locally.
 
 `@polygonlabs/agentconnect-ui` (the browser-login web app) and
 `@polygonlabs/oidc-relay` (the login pairing relay) are marked
-`"private": true` and are never published to npm. They deploy as Cloudflare
-Workers via their own `deploy-*` workflows; Changesets only versions and
-git-tags them.
+`"private": true` and are never published to npm. Changesets versions and
+git-tags them, and they are deployed as Cloudflare Workers **from their release
+tags** by `deploy-agentconnect-ui-release.yml` and
+`deploy-oidc-relay-release.yml`. Each runs the same checks as PR CI on the
+tagged commit, then deploys to the `production` environment.
+
+Merging a feature PR does not deploy production: production follows the
+release, so what is live is always a tagged, tested version. Staging is deployed
+from the `staging` branch by `deploy-agentconnect-ui.yml` and
+`deploy-oidc-relay.yml`.
+
+The Wrangler versions used for production deploys are pinned in
+`.github/scripts/wrangler-deploy.sh`, so a deploy does not change when a new
+Wrangler release appears.
+
+### Redeploying or rolling back
+
+Go to **Actions**, pick the service's release workflow, choose **Run workflow**
+from `main`, and set `tag` to an earlier release tag. It re-runs the checks on
+that tree, then deploys it, so a tag whose checks no longer pass cannot be
+redeployed this way.
+
+For an immediate rollback, use the Worker's deployment history in Cloudflare.
+That restores the code only: Durable Object migrations and newly created KV
+namespaces do not roll back.
+
+Never move or recreate a release tag. A tag is the record of what was deployed.
+
+### Skills changes
+
+A change under `skills/` needs changesets for both `@polygonlabs/agent-cli` and
+`@polygonlabs/agentconnect-ui`; the "Require skills changesets" check enforces
+this on PRs. The site serves the skills and the CLI bundles them, so both must
+release for a change to reach users. Plugins and `npx skills add` read `main`
+directly and pick the change up immediately.
 
 ## Viewing releases
 
