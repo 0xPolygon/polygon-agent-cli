@@ -15,34 +15,24 @@ fi
 dir="$1"
 shift
 
-# Exits 0 when the package depends on wrangler and 3 when it does not. Any other status means
-# package.json could not be read, which must stop the deploy rather than look like "no".
-wrangler_dependency_status() {
-  node -e '
-    const pkg = JSON.parse(require("node:fs").readFileSync("package.json", "utf8"));
-    process.exit(pkg.devDependencies?.wrangler || pkg.dependencies?.wrangler ? 0 : 3);
-  '
-}
-
 case "$dir" in
   packages/agentconnect-ui)
     cd "$dir"
+    # Exits 3 when package.json was read and has no wrangler dependency. Any other failure
+    # means it could not be read, which must stop the deploy too.
     status=0
-    wrangler_dependency_status || status=$?
-    case "$status" in
-      0)
-        exec pnpm exec wrangler deploy --env production "$@"
-        ;;
-      3)
-        # Redeploying a release tag from before wrangler was a dependency of the package: use
-        # the version those releases were deployed with.
-        exec npx -y "wrangler@4.154.0" deploy --env production "$@"
-        ;;
-      *)
-        echo "::error::could not read ${dir}/package.json to choose how to run wrangler"
-        exit 1
-        ;;
-    esac
+    node -e '
+      const pkg = JSON.parse(require("node:fs").readFileSync("package.json", "utf8"));
+      process.exit(pkg.devDependencies?.wrangler || pkg.dependencies?.wrangler ? 0 : 3);
+    ' || status=$?
+    if [ "$status" -eq 3 ]; then
+      echo "::error::this release predates deploys that run wrangler from the lockfile; roll back from the Worker's deployment history in Cloudflare instead"
+      exit 1
+    elif [ "$status" -ne 0 ]; then
+      echo "::error::could not read ${dir}/package.json to check for the wrangler dependency"
+      exit 1
+    fi
+    exec pnpm exec wrangler deploy --env production "$@"
     ;;
   packages/oidc-relay)
     cd "$dir"

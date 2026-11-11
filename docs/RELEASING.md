@@ -104,9 +104,12 @@ the version is pinned in `.github/scripts/wrangler-deploy.sh`.
 Go to **Actions**, pick the service's release workflow, choose **Run workflow**
 from `main`, and set `tag` to an earlier release tag. It re-runs the checks on
 that tree, then deploys it, so a tag whose checks no longer pass cannot be
-redeployed this way.
+redeployed this way. Neither can an `@polygonlabs/agentconnect-ui` tag from
+before Wrangler was a dependency of the package: the deploy stops with an error
+rather than fetch Wrangler at deploy time.
 
-For an immediate rollback, use the Worker's deployment history in Cloudflare.
+For an immediate rollback, or to go back to a release that cannot be
+redeployed, use the Worker's deployment history in Cloudflare.
 That restores the code only: Durable Object migrations and newly created KV
 namespaces do not roll back.
 
