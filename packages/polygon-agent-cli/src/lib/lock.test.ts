@@ -57,7 +57,9 @@ function deadPid(): number {
   );
 }
 
-describe('withLock', () => {
+// Process start can take seconds on a busy machine, and several tests spawn
+// processes (deadPid included), so the 5s default is too tight.
+describe('withLock', { timeout: 60_000 }, () => {
   it('runs fn, returns its result and releases the lock', async () => {
     const dir = lockDir();
     expect(await withLock({ dir, fn: () => 42 })).toBe(42);
@@ -266,11 +268,33 @@ function launch(params: { role: string; base: string; pause?: boolean; holdMs?: 
 }
 
 async function waitFor(file: string): Promise<void> {
-  const deadline = Date.now() + 10_000;
+  const deadline = Date.now() + 40_000;
   while (!fs.existsSync(file)) {
     if (Date.now() > deadline) throw new Error(`Timed out waiting for ${file}`);
     await new Promise((r) => setTimeout(r, 10));
   }
+}
+
+// Starts one process per role, all at the point of judging the lock free, then
+// releases them together so they truly race however slowly each one started.
+// The winner holds the lock until every other process has been refused.
+async function raceForLock(params: { base: string; roles: string[] }): Promise<string[]> {
+  const { base, roles } = params;
+  let refused = 0;
+  const runs = roles.map((role) =>
+    launch({ role, base, pause: true }).then((outcome) => {
+      if (outcome !== 'ran') refused++;
+      return outcome;
+    })
+  );
+  for (const role of roles) await waitFor(path.join(base, `${role}.ready`));
+  for (const role of roles) fs.writeFileSync(path.join(base, `${role}.go`), '');
+  const deadline = Date.now() + 40_000;
+  while (refused < roles.length - 1 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  for (const role of roles) fs.writeFileSync(path.join(base, `${role}.finish`), '');
+  return Promise.all(runs);
 }
 
 // in/out lines never overlap: every "in X" is followed by "out X".
@@ -282,17 +306,14 @@ function expectNoOverlap(log: string): void {
   }
 }
 
-describe('withLock across processes', () => {
+describe('withLock across processes', { timeout: 60_000 }, () => {
   afterEach(() => {
     for (const child of children.splice(0)) child.kill();
   });
 
   it('lets exactly one of two concurrent processes in', async () => {
     const base = tmpDir();
-    const results = await Promise.all([
-      launch({ role: 'A', base, holdMs: 500 }),
-      launch({ role: 'B', base, holdMs: 500 })
-    ]);
+    const results = await raceForLock({ base, roles: ['A', 'B'] });
     expect(results.sort()).toEqual(['LockHeldError', 'ran']);
     expectNoOverlap(fs.readFileSync(path.join(base, 'log'), 'utf8'));
   });
@@ -359,9 +380,7 @@ describe('withLock across processes', () => {
   it('many processes racing to recover a stale lock never overlap', async () => {
     const base = tmpDir();
     writeHolder({ dir: path.join(base, 'update.lock'), generation: 1, pid: deadPid() });
-    const results = await Promise.all(
-      ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].map((role) => launch({ role, base, holdMs: 300 }))
-    );
+    const results = await raceForLock({ base, roles: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'] });
     expect(results.filter((r) => r === 'ran').length).toBeGreaterThanOrEqual(1);
     expect(results.every((r) => r === 'ran' || r === 'LockHeldError')).toBe(true);
     expectNoOverlap(fs.readFileSync(path.join(base, 'log'), 'utf8'));
