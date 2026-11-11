@@ -6,5 +6,5 @@ export default defineConfig([
   ...recommended({ globals: 'browser' }),
   ...typescript({ tsconfigRootDir: import.meta.dirname }),
   ...frontend(),
-  { ignores: ['dist/**'] }
+  { ignores: ['dist/**', 'out-tsc/**'] }
 ]);

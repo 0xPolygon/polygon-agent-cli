@@ -54,12 +54,13 @@ From the repo root, install once with `pnpm install`, then:
 
 ## Type checking
 
-There are four tsconfigs: `tsconfig.app.json` (SPA), `tsconfig.worker.json`
-(Worker), `tsconfig.node.json` (Vite config and skill index) and a root
-`tsconfig.json` that only references the other three.
+There are four tsconfigs: `tsconfig.lib.json` (SPA), `tsconfig.worker.json`
+(Worker), `tsconfig.spec.json` (tests, the Vite and Vitest configs and the
+skill index) and a `tsconfig.json` that only references the other three.
 
 The SPA and the Worker need different `lib` and `types` settings, which is why
-they are separate projects. `pnpm run build` runs `tsc -b`, which checks all
+they are separate projects, and tests are kept apart so neither can use
+test-only code and types. `pnpm run build` runs `tsc -b`, which checks all
 three, before `vite build`.
 
 ## Deploying

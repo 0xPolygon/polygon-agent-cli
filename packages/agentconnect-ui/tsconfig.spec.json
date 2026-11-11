@@ -1,0 +1,39 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "out-tsc/spec",
+    "tsBuildInfoFile": "out-tsc/spec/tsconfig.spec.tsbuildinfo",
+    // worker/money/tokens.test.ts imports the CLI's token table, so the project root is packages/.
+    "rootDir": "..",
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["@cloudflare/workers-types", "node"],
+    "jsx": "react-jsx",
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": false,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    // A test fake uses a constructor parameter property.
+    "erasableSyntaxOnly": false
+  },
+  "include": [
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "worker/**/*.test.ts",
+    "worker/test-*.ts",
+    "worker/test-env.d.ts",
+    "worker/test-outbound/**/*.ts",
+    "worker/money/test-fakes.ts",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "skills-index.ts",
+    "skills-index.test.ts",
+    "../polygon-agent-cli/src/lib/session/tokens.ts"
+  ],
+  "references": [{ "path": "./tsconfig.lib.json" }, { "path": "./tsconfig.worker.json" }]
+}

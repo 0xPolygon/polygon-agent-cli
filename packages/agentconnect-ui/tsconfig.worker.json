@@ -1,19 +1,30 @@
 {
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    // wrangler bundles the Worker at deploy; tsc only typechecks and emits declarations elsewhere.
+    "outDir": "out-tsc/worker",
+    "tsBuildInfoFile": "out-tsc/worker/tsconfig.worker.tsbuildinfo",
+    "rootDir": "worker",
     "target": "ES2022",
     "lib": ["ES2023"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "types": ["@cloudflare/workers-types"],
-    "skipLibCheck": true,
     "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "moduleDetection": "force",
-    "noEmit": true,
-    "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    // Several Worker classes use constructor parameter properties.
+    "erasableSyntaxOnly": false
   },
-  "include": ["worker"]
+  "include": ["worker"],
+  "exclude": [
+    "worker/**/*.test.ts",
+    "worker/test-*.ts",
+    "worker/test-env.d.ts",
+    "worker/test-outbound/**",
+    "worker/money/test-fakes.ts"
+  ]
 }
