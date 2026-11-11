@@ -21,7 +21,7 @@ new_classes = ["LoginSession"]
 tag = "v3"
 deleted_classes = ["OidcHandoff"]
 
-# Staging: a workers.dev URL is fine to start; swap to a custom domain for prod.
+# Staging is served from a workers.dev URL; production uses a custom domain.
 [env.staging]
 name = "oidc-relay-staging"
 workers_dev = true
@@ -45,9 +45,8 @@ deleted_classes = ["OidcHandoff"]
 [env.production]
 name = "oidc-relay-production"
 workers_dev = false
-# Custom domain provisioned by wrangler on deploy (polygon.technology zone must be
-# on this Cloudflare account). The Sequence/OMS allowlist target is now the
-# agentconnect `omsRelayReturnUri`, not this worker (see design doc).
+# Custom domain provisioned by wrangler on deploy; the zone must be on the same
+# Cloudflare account as the Worker.
 routes = [{ pattern = "oidc-relay.polygon.technology", custom_domain = true }]
 
 [[env.production.durable_objects.bindings]]
