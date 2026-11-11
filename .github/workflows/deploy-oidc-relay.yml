@@ -2,8 +2,8 @@ name: Deploy OIDC Relay to Cloudflare
 
 # Merge to `staging` -> deploy the staging worker; production deploys run from
 # release tags (deploy-oidc-relay-release.yml). The relay has no build step and
-# no runtime deps, so we deploy it straight with wrangler (run via npx because
-# wrangler is intentionally NOT a workspace dependency — see packages/oidc-relay).
+# no runtime deps, so we deploy it straight with wrangler. wrangler is a
+# devDependency of the package, so the deploy runs the version in the lockfile.
 
 on:
   push:
@@ -36,12 +36,20 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
+      - uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
+
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .nvmrc
+          cache: pnpm
+
+      # wrangler runs from the lockfile, so it has to be installed first.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: .
 
       - name: Deploy to staging
-        run: npx -y wrangler@3 deploy --env staging
+        run: pnpm exec wrangler deploy --env staging
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_WORKER_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_WORKER_ACCOUNT_ID }}

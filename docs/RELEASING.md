@@ -94,19 +94,17 @@ release, so what is live is always a tagged, tested version. Staging is deployed
 from the `staging` branch by `deploy-agentconnect-ui.yml` and
 `deploy-oidc-relay.yml`.
 
-A deploy does not change when a new Wrangler release appears. For
-`@polygonlabs/agentconnect-ui`, Wrangler is a devDependency and the deploy runs the
-version recorded in the lockfile. For `@polygonlabs/oidc-relay`,
-the version is pinned in `.github/scripts/wrangler-deploy.sh`.
+A deploy does not change when a new Wrangler release appears. In
+both packages Wrangler is a devDependency, and the deploy runs the version
+recorded in the lockfile.
 
 ### Redeploying or rolling back
 
 Go to **Actions**, pick the service's release workflow, choose **Run workflow**
 from `main`, and set `tag` to an earlier release tag. It re-runs the checks on
 that tree, then deploys it, so a tag whose checks no longer pass cannot be
-redeployed this way. Neither can an `@polygonlabs/agentconnect-ui` tag from
-before Wrangler was a dependency of the package: the deploy stops with an error
-rather than fetch Wrangler at deploy time.
+redeployed this way. Neither can a tag from before Wrangler was a dependency of
+its package: the deploy step fails because that tree has no Wrangler to run.
 
 For an immediate rollback, or to go back to a release that cannot be
 redeployed, use the Worker's deployment history in Cloudflare.

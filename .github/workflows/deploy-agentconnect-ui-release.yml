@@ -87,7 +87,7 @@ jobs:
           persist-credentials: false
 
       # Deploy scripts come from the workflow's own commit, not the tag's. A tag from before
-      # wrangler was a dependency of the package is not redeployed: the script stops.
+      # wrangler was a dependency of the package is not redeployed: the deploy step fails.
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           path: .release-scripts
