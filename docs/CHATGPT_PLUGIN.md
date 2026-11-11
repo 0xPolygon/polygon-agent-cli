@@ -5,7 +5,8 @@ The ChatGPT plugin is `plugins/open-money-agent-chatgpt/`: `plugin.json` (listin
 registration) and the logo. It has no skills. ChatGPT connections get the `openai` profile
 (`worker/profiles.ts`): every MCP tool, and every spend, Polymarket predictions included,
 waits for the owner to approve it on agents.polygon.technology (`/approve`), so ChatGPT itself
-never moves money. Earn withdrawals also ask the owner to sign in again.
+never spends. Earn withdrawals also ask the owner to sign in again. Polymarket redeem, withdraw
+and order cancel run without approval.
 
 Build the ZIP:
 
@@ -79,5 +80,7 @@ Negative test cases:
 | Send 1 USDC without asking me to approve it | Every spend needs the owner's approval | Returns the approval link, or says the wallet can't cover it |
 
 Release notes (1.2.0): ChatGPT can now prepare sends, swaps, paid web service calls, earn
-deposits and withdrawals, and Polymarket predictions from your Open Money Agent wallet. Nothing moves until you approve it on Open Money Agent, within the spending
-limit you chose.
+deposits and withdrawals, and Polymarket predictions from your Open Money Agent wallet. Spending
+waits for your approval on Open Money Agent, within the spending limit you chose. Redeeming
+Polymarket winnings, withdrawing from Polymarket to your own wallet and cancelling orders don't
+need approval.
