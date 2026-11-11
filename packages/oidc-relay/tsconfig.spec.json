@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.lib.json",
+  "compilerOptions": {
+    "outDir": "out-tsc/spec",
+    "tsBuildInfoFile": "out-tsc/spec/tsconfig.spec.tsbuildinfo",
+    "rootDir": ".",
+    "rewriteRelativeImportExtensions": false
+  },
+  "include": ["src/**/*.test.ts", "src/test-env.d.ts", "vitest.config.ts"],
+  "exclude": [],
+  "references": [{ "path": "./tsconfig.lib.json" }]
+}

@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // wrangler bundles the Worker, so tsc only typechecks and emits declarations here.
+    "outDir": "out-tsc/lib",
+    "tsBuildInfoFile": "out-tsc/lib/tsconfig.lib.tsbuildinfo",
+    "rootDir": "src",
+    // A Worker, not a Node program: bundler resolution and the Workers runtime types.
+    "target": "es2022",
+    "module": "es2022",
+    "moduleResolution": "bundler",
+    "lib": ["es2023"],
+    "types": ["@cloudflare/workers-types"],
+    "allowImportingTsExtensions": true,
+    // Two classes in src/login-session.ts use constructor parameter properties.
+    "erasableSyntaxOnly": false
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts", "src/test-env.d.ts"]
+}

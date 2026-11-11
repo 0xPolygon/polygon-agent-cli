@@ -1,15 +1,8 @@
 {
-  "compilerOptions": {
-    "target": "es2022",
-    "module": "es2022",
-    "moduleResolution": "bundler",
-    "lib": ["es2023"],
-    "types": ["@cloudflare/workers-types"],
-    "strict": true,
-    "skipLibCheck": true,
-    "noEmit": true,
-    "esModuleInterop": true,
-    "allowImportingTsExtensions": true
-  },
-  "include": ["src/**/*.ts", "vitest.config.ts"]
+  // wrangler's esbuild reads this file; keep the code-affecting options identical to the pre-split
+  // config. Project options live in tsconfig.lib.json / tsconfig.spec.json.
+  "compilerOptions": { "target": "es2022", "strict": true },
+  "files": [],
+  "include": [],
+  "references": [{ "path": "./tsconfig.lib.json" }, { "path": "./tsconfig.spec.json" }]
 }
