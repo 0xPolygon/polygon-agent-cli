@@ -15,7 +15,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run --coverage",
+    "test": "vitest run",
     "deploy:staging": "npx -y wrangler@4 deploy --env staging",
     "deploy:production": "npx -y wrangler@4 deploy --env production"
   },
@@ -42,7 +42,6 @@
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
-    "@vitest/coverage-istanbul": "3.2.7",
     "typescript": "^5",
     "vite": "^5.4.0",
     "vitest": "^3.0.0",

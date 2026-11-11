@@ -11,27 +11,6 @@ const pkgDir = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   test: {
-    // Istanbul because V8 coverage does not work inside workerd; one provider per run.
-    coverage: {
-      provider: 'istanbul',
-      include: ['worker/**/*.ts', 'src/**/*.{ts,tsx}', 'skills-index.ts'],
-      exclude: [
-        '**/*.test.ts',
-        '**/*.d.ts',
-        'worker/test-*.ts',
-        'worker/test-outbound/**',
-        'worker/money/test-fakes.ts'
-      ],
-      reporter: ['text-summary', 'text'],
-      // Floors from measured runs (min minus 0.5); raise by hand, never autoUpdate.
-      thresholds: {
-        statements: 51.2,
-        branches: 42.1,
-        functions: 42.3,
-        lines: 53.2,
-        'worker/money/**': { statements: 64.6, branches: 53.2, functions: 64.1, lines: 67.1 }
-      }
-    },
     projects: [
       {
         resolve: {

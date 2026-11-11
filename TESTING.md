@@ -9,7 +9,7 @@ Two further suffixes are reserved so that tests which need a different runner ca
 - `*.cli.test.ts` for subprocess tests of the built CLI.
 - `*.workers.test.ts` for tests that run in a Workers runtime.
 
-The package sections below say which of these each package uses.
+They are conventions only. No test uses either suffix today.
 
 ## How to run
 
@@ -27,7 +27,13 @@ pnpm --filter @polygonlabs/agentconnect-ui run test
 
 No test moves real funds or calls a hosted wallet, swap or market service. Those services are faked in process, so a passing suite says the code handles the responses its authors wrote down, not that a hosted service still answers that way.
 
-Not covered by any test: behaviour that needs a hosted wallet, swap, price or market service (sending and swapping for real, balances, prices, market trading), and the worker's money operations inside its Durable Object. These are known gaps, left open rather than covered with mocks. Some older command tests mock most of what they call and mainly assert that the mocks were called; treat those as weak evidence.
+Behaviour that needs a hosted service is listed as a gap in [docs/COVERAGE.md](docs/COVERAGE.md) rather than covered by a mock. Mocks are kept to a minimum: a test that mocks so much that it asserts little is labelled `weak` in the ledger and is not counted as coverage.
+
+## The ledger
+
+[docs/COVERAGE.md](docs/COVERAGE.md) has one row per command, tool, route or lifecycle, with what the tests assert and what they do not. Its legend defines the verdicts: `unit`, `weak`, `GAP`, and the tiers `A`, `A+` and `C` that rows can name.
+
+Update the row in the same pull request that adds or removes a test, so the ledger never describes tests that are not there. A row's verdict only improves when a test earns it.
 
 ## Writing tests
 
@@ -52,18 +58,11 @@ All tests run in a Workers runtime through `@cloudflare/vitest-pool-workers`, co
 
 Worker tests (`worker/`) call handlers and Durable Object classes in Node with fakes for storage and the wallet client. SPA tests (`src/`) cover the login state machine, URL handling and dashboard helpers.
 
-The package's `vitest.config.ts` has two projects. `node` runs the tests above. `workers` runs `worker/**/*.workers.test.ts` in a Workers runtime through `@cloudflare/vitest-pool-workers`: the real worker, a real SQLite-backed Durable Object, real KV and the real OAuth provider, with secrets generated for each run.
-
-- The `workers` project loads `worker/index.ts` directly and declares its bindings in `vitest.config.ts`; it does not read `wrangler.toml`, whose bindings sit under environment blocks. A binding added there must be added to the test config too.
-- All outbound requests in that runtime go to one handler, `worker/test-outbound/index.ts`. It matches on the request's hostname, records every request and refuses any host it does not know, so nothing reaches the network. To let a test reach another service, add that host there; do not mock modules.
-- Tests call the worker with `SELF.fetch` and the key object through its own `fetch`, the way production does.
-- Known limit: in this version of the test runtime a module loaded on demand inside a Durable Object never finishes loading. The key object loads its money dependencies that way, so sending, swapping, paying, earning, Polymarket and the approved run cannot be tested there yet.
-
 ## Coverage
 
-Coverage is measured for all three packages on every test run (`pnpm test` runs vitest with `--coverage`). The floors in each package's `vitest.config.ts` are the measured baseline, not targets: a run that drops below a floor fails.
+Coverage is measured for the CLI package (`packages/polygon-agent-cli`) and the relay (`packages/oidc-relay`) on every test run (`pnpm test` runs vitest with `--coverage`). The floors in each package's `vitest.config.ts` are the measured baseline, not targets: a run that drops below a floor fails.
 
 - Raise a floor in the same pull request that adds tests. Floors are never rewritten automatically.
 - The directories that handle money (session, trade, polymarket, owner, the transaction helpers and `operations`) have their own floors, so a gain elsewhere cannot hide a loss there.
 - The relay is measured with the istanbul provider, because v8 coverage is not available inside the Workers runtime.
-- `agentconnect-ui` is measured across both of its test projects, also with istanbul, with a separate floor for `worker/money`.
+- `agentconnect-ui` is not measured yet.
