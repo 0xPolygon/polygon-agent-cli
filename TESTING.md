@@ -51,3 +51,7 @@ Unit tests for the request validators and for the login-session logic over an in
 ### `@polygonlabs/agentconnect-ui` (`packages/agentconnect-ui`)
 
 Worker tests (`worker/`) call handlers and Durable Object classes in Node with fakes for storage and the wallet client. SPA tests (`src/`) cover the login state machine, URL handling and dashboard helpers.
+
+## What comes next
+
+The suite today covers what can be tested without real funds. The intended next step is end-to-end tests of the money flows on a testnet, with a funded testnet wallet, once the hosted services the CLI depends on offer a testnet or sandbox path. Until then those flows are not covered.
