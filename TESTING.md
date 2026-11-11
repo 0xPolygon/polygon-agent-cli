@@ -54,7 +54,8 @@ Worker tests (`worker/`) call handlers and Durable Object classes in Node with f
 
 The package's `vitest.config.ts` has two projects. `node` runs the tests above. `workers` runs `worker/**/*.workers.test.ts` in a Workers runtime through `@cloudflare/vitest-pool-workers`: the real worker, a real SQLite-backed Durable Object, real KV and the real OAuth provider, with secrets generated for each run.
 
-- All outbound requests in that runtime go to one handler, `worker/test-outbound/index.ts`. It answers by hostname, records every request and refuses any host it does not know, so nothing reaches the network. To let a test reach another service, add that host there; do not mock modules.
+- The `workers` project loads `worker/index.ts` directly and declares its bindings in `vitest.config.ts`; it does not read `wrangler.toml`, whose bindings sit under environment blocks. A binding added there must be added to the test config too.
+- All outbound requests in that runtime go to one handler, `worker/test-outbound/index.ts`. It matches on the request's hostname, records every request and refuses any host it does not know, so nothing reaches the network. To let a test reach another service, add that host there; do not mock modules.
 - Tests call the worker with `SELF.fetch` and the key object through its own `fetch`, the way production does.
 - Known limit: in this version of the test runtime a module loaded on demand inside a Durable Object never finishes loading. The key object loads its money dependencies that way, so sending, swapping, paying, earning, Polymarket and the approved run cannot be tested there yet.
 
