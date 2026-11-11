@@ -25,7 +25,7 @@ pnpm --filter @polygonlabs/agentconnect-ui run test
 
 ## What the suite does and does not prove
 
-No test moves real funds or calls a hosted wallet, swap or market service. Those services are faked in process, so a passing suite says the code handles the responses its authors wrote down, not that a hosted service still answers that way.
+No test moves real funds or calls a hosted wallet, swap or market service. Those services are replaced by stand-ins (in-process fakes, or local servers for the subprocess tests), so a passing suite says the code handles the responses its authors wrote down, not that a hosted service still answers that way.
 
 Not covered by any test: behaviour that needs a hosted wallet, swap, price or market service (sending and swapping for real, balances, prices, market trading), and the worker's money operations inside its Durable Object. These are known gaps, left open rather than covered with mocks. Some older command tests mock most of what they call and mainly assert that the mocks were called; treat those as weak evidence.
 
