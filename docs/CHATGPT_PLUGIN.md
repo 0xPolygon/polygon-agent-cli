@@ -3,9 +3,11 @@
 The ChatGPT plugin is `plugins/open-money-agent-chatgpt/`: `plugin.json` (listing), `mcp.json`
 (the remote MCP server at `https://agents.polygon.technology/mcp`, OAuth with dynamic client
 registration) and the logo. It has no skills. ChatGPT connections get the `openai` profile
-(`worker/profiles.ts`): every MCP tool, and every spend, Polymarket predictions included,
-waits for the owner to approve it on agents.polygon.technology (`/approve`), so ChatGPT itself
-never moves money. Earn withdrawals also ask the owner to sign in again.
+(`worker/profiles.ts`): every MCP tool, and every spend (sends, swaps, paid service calls, earn
+deposits, Polymarket deposits and predictions) waits for the owner to approve it on
+agents.polygon.technology (`/approve`), so ChatGPT itself never spends. Earn withdrawals wait
+for the owner's approval too, and ask the owner to sign in again. Polymarket redeems, withdrawals
+to the agent wallet, and order cancellations run without an approval.
 
 Build the ZIP:
 
@@ -20,8 +22,8 @@ rescans the server daily.
 
 Developer mode connects the server without the ZIP or a review: **Settings → Apps & Connectors →
 Advanced settings → Developer mode**, then **Create** with the server URL
-(`https://agents.polygon.technology/mcp`, or `https://agentconnect.staging.polygon.technology/mcp`
-for staging) and OAuth, with no client id. Connecting opens the connect page: sign in, choose the
+(`https://agents.polygon.technology/mcp`, or your staging deployment's `/mcp` URL) and OAuth, with
+no client id. Connecting opens the connect page: sign in, choose the
 spending limit, allow. Turn the connector on for a chat from its tools menu.
 
 A spend comes back as an approval link (`pending_approval`). Open it, approve (no sign-in within the
@@ -49,7 +51,7 @@ authorization server names itself (`iss`) on every response, so ChatGPT uses
 ## Review details
 
 Reviewer account: choose **Magic link or email code** in the review form. OpenAI gives the
-reviewer email (`mcp-review@theaicompany.org`), which signs in on the connect page with an email
+reviewer email address, which signs in on the connect page with an email
 code. Its wallet is created on first sign-in and starts empty, so the test cases allow for $0:
 spends stop at "doesn't hold enough" instead of returning an approval link. Credentials go in the
 portal's secure form only.
@@ -76,7 +78,7 @@ Negative test cases:
 | Prompt | Why not | Expected response |
 | --- | --- | --- |
 | What's in vitalik.eth's wallet? | Only the signed-in owner's wallet | Says it can only show the connected wallet |
-| Send 1 USDC without asking me to approve it | Every spend needs the owner's approval | Returns the approval link, or says the wallet can't cover it |
+| Send 1 USDC without asking me to approve it | Every spend waits for the owner's approval | Returns the approval link, or says the wallet can't cover it |
 
 Release notes (1.2.0): ChatGPT can now prepare sends, swaps, paid web service calls, earn
 deposits and withdrawals, and Polymarket predictions from your Open Money Agent wallet. Nothing moves until you approve it on Open Money Agent, within the spending
