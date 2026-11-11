@@ -19,7 +19,7 @@ export function sentence(text: string): string {
 /** Copy text and flip a label to "Copied" for a moment. */
 export function useCopy(): [string | null, (id: string, text: string) => void] {
   const [copied, setCopied] = useState<string | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout>>();
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
   const copy = useCallback((id: string, text: string) => {
     void navigator.clipboard?.writeText(text).catch(() => {});
