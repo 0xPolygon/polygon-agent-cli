@@ -27,3 +27,9 @@ jobs:
       - if: "!startsWith(github.head_ref, 'changeset-release/')"
         run: pnpm run --if-present build
         shell: bash
+
+  drift-check:
+    # A separate PR-check status, so a codegen drift failure is identifiable at
+    # a glance. It runs each package's `codegen-drift-check` script where one
+    # exists, and is a fast green check while no package has one.
+    uses: 0xPolygon/pipelines/.github/workflows/apps-codegen-drift-check.yml@main
