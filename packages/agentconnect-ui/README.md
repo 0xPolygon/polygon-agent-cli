@@ -42,7 +42,7 @@ From the repo root, install once with `pnpm install`, then:
 - `pnpm --filter @polygonlabs/agentconnect-ui run dev` starts Vite on port
   4444. This serves the SPA only: Vite does not run the Worker, so anything
   that calls `/api/*` or `/mcp` has no backend behind it locally.
-- `npx wrangler@4 dev --env staging --port 8787 --local-upstream localhost:8787`,
+- `pnpm exec wrangler dev --env staging --port 8787 --local-upstream localhost:8787`,
   run from this package, runs the Worker locally. It reads its secrets from
   `.dev.vars.staging`, which is gitignored and never committed.
 - `pnpm --filter @polygonlabs/agentconnect-ui run test` runs Vitest over both
@@ -71,7 +71,7 @@ described in [`docs/RELEASING.md`](../../docs/RELEASING.md), including
 redeploys and rollbacks.
 
 Deploys run through the GitHub workflows, which supply the build-time keys and
-the Worker secrets and pin the Wrangler version; deploy through them rather
+the Worker secrets and run the Wrangler version in the lockfile; deploy through them rather
 than from a laptop.
 
 ## Changing skills
