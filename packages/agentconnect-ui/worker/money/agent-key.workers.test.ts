@@ -1,5 +1,5 @@
 import { env, runInDurableObject } from 'cloudflare:test';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { deriveKey, openSealed } from '../store.ts';
 
@@ -13,6 +13,7 @@ interface Recorded {
   path: string;
   body: string | null;
   signer: string | null;
+  faked: boolean;
 }
 
 const WALLET = `0x${'ab'.repeat(20)}`;
@@ -49,6 +50,11 @@ beforeEach(async () => {
   await control('/reset', { method: 'POST' });
 });
 
+// A refused host answers 599, which the code under test may swallow; fail on it here.
+afterEach(async () => {
+  expect((await readLog()).filter((c) => !c.faked).map((c) => c.host)).deep.equal([]);
+});
+
 describe('a connection key in a real Durable Object', { timeout: 30_000 }, () => {
   it('seals its key once and refuses to replace it or serve another wallet', async () => {
     const name = freshName();
@@ -74,8 +80,10 @@ describe('a connection key in a real Durable Object', { timeout: 30_000 }, () =>
     expect(again.error).property('code', 'invalid_input');
     expect((await stored(name, 'key')) === sealed).equal(true);
 
-    const other = await op(name, { op: 'status', wallet: OTHER_WALLET });
+    // Revoke works for the key's own wallet (next test), so this refusal is the wallet check.
+    const other = await op(name, { op: 'revoke', wallet: OTHER_WALLET });
     expect(other.error).property('code', 'not_connected');
+    expect(await storedKeys(name)).include.members(['key', 'record']);
   });
 
   it('forgets everything when the wallet service confirms the revoke', async () => {
@@ -131,6 +139,9 @@ describe('a connection key in a real Durable Object', { timeout: 30_000 }, () =>
     const until = Date.now() + 60_000;
     expect((await op(store, { op: 'wstore_lease', holder: 'a', until })).value).equal(true);
     expect((await op(store, { op: 'wstore_lease', holder: 'b', until })).value).equal(false);
+    // Only the holder can release it.
+    await op(store, { op: 'wstore_release', holder: 'b' });
+    expect((await op(store, { op: 'wstore_lease', holder: 'b', until })).value).equal(false);
     await op(store, { op: 'wstore_release', holder: 'a' });
     expect((await op(store, { op: 'wstore_lease', holder: 'b', until })).value).equal(true);
 
@@ -143,7 +154,7 @@ describe('a connection key in a real Durable Object', { timeout: 30_000 }, () =>
     expect(elsewhere.value).equal(null);
   });
 
-  it('declines an approval for good and never runs it', async () => {
+  it('declines an approval for good and does not queue it to run', async () => {
     const name = freshName();
     await register(name);
     const proposed = await op(name, {

@@ -147,5 +147,13 @@ describe('worker routes in the Workers runtime', { timeout: 30_000 }, () => {
     expect(back.origin + back.pathname).equal('http://localhost:9/cb');
     expect(back.searchParams.get('error')).equal('access_denied');
     expect(back.searchParams.get('state')).equal('state-1');
+
+    // The denied request is forgotten: the same link cannot be answered again.
+    const again = await SELF.fetch(`${SITE}/api/connect/decide`, {
+      method: 'POST',
+      headers: { cookie: await sessionCookie(), origin: SITE },
+      body: deny
+    });
+    expect(again.status).equal(400);
   });
 });
