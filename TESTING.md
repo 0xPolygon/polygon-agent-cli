@@ -9,7 +9,7 @@ Two further suffixes are reserved so that tests which need a different runner ca
 - `*.cli.test.ts` for subprocess tests of the built CLI.
 - `*.workers.test.ts` for tests that run in a Workers runtime.
 
-The package sections below say which of these each package uses.
+They are conventions only. No test uses either suffix today.
 
 ## How to run
 
@@ -25,9 +25,15 @@ pnpm --filter @polygonlabs/agentconnect-ui run test
 
 ## What the suite does and does not prove
 
-No test moves real funds or calls a hosted wallet, swap or market service. Those services are replaced by stand-ins (in-process fakes, or local servers for the subprocess tests), so a passing suite says the code handles the responses its authors wrote down, not that a hosted service still answers that way.
+No test moves real funds or calls a hosted wallet, swap or market service. Those services are faked in process, so a passing suite says the code handles the responses its authors wrote down, not that a hosted service still answers that way.
 
-Not covered by any test: behaviour that needs a hosted wallet, swap, price or market service (sending and swapping for real, balances, prices, market trading), and the worker's money operations inside its Durable Object. These are known gaps, left open rather than covered with mocks. Some older command tests mock most of what they call and mainly assert that the mocks were called; treat those as weak evidence.
+Behaviour that needs a hosted service is listed as a gap in [docs/COVERAGE.md](docs/COVERAGE.md) rather than covered by a mock. Mocks are kept to a minimum: a test that mocks so much that it asserts little is labelled `weak` in the ledger and is not counted as coverage.
+
+## The ledger
+
+[docs/COVERAGE.md](docs/COVERAGE.md) has one row per command, tool, route or lifecycle, with what the tests assert and what they do not. Its legend defines the verdicts: `unit`, `weak`, `GAP`, and the tiers `A`, `A+` and `C` that rows can name.
+
+Update the row in the same pull request that adds or removes a test, so the ledger never describes tests that are not there. A row's verdict only improves when a test earns it.
 
 ## Writing tests
 
@@ -42,13 +48,7 @@ Not covered by any test: behaviour that needs a hosted wallet, swap, price or ma
 
 ### `@polygonlabs/agent-cli` (`packages/polygon-agent-cli`)
 
-Unit tests under `src/`, mostly in-process. Many use a real temporary filesystem for state and replace the wallet SDK, price and swap services with stand-ins. A few spawn real child processes (lock and waiter tests).
-
-`*.cli.test.ts` files run the built binary as a separate process (`src/test-harness/cli.ts`). The test run builds the CLI once, then each test starts `dist/index.js` with its own temporary HOME and state folder and an allowlisted environment, and reads stdout, stderr, the exit code and the files left on disk.
-
-- Every child is pointed at a local proxy that records and refuses outbound requests. Assert `tripwireHits()` is empty, so "made no network call" is checked, not assumed. The proxy sees `fetch`, Node's default `http`/`https` agent and the global `WebSocket`; a library that brings its own agent or opens a raw socket is not seen and not blocked.
-- A command that needs an upstream is given a local stand-in server on `127.0.0.1` through the command's own URL setting (`src/test-harness/fake-builder.ts`, `fake-x402.ts`). Nothing in these tests is mocked in-process.
-- Subprocess tests do not add to the coverage numbers, which are measured in-process.
+Unit tests under `src/`, mostly in-process. Many use a real temporary filesystem for state and replace the wallet SDK, price and swap services with stand-ins. A few spawn real child processes (lock and waiter tests). There are no subprocess tests of the built binary.
 
 ### `@polygonlabs/oidc-relay` (`packages/oidc-relay`)
 
