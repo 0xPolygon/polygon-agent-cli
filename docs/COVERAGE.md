@@ -177,28 +177,28 @@ Routes in `worker/index.ts` that move or approve money.
 
 ## Durable Object lifecycles
 
-State machines in the worker and the relay. The tests run the classes in Node with in-memory storage, not in a Workers runtime.
+State machines in the worker and the relay.
 
-**Totals (2 rows):** unit 2
+**Totals (2 rows):** unit 1, C 1
 
 | Surface | Command / op | Moves money | Verdict | Where | Asserted | Not asserted, and why |
 |---|---|---|---|---|---|---|
 | DO | `AgentKey` (register, approve, spend, revoke, alarm queue) | yes | unit | `packages/agentconnect-ui/worker/money/agent-key.test.ts`<br>`packages/agentconnect-ui/worker/money/engine.test.ts`<br>`packages/agentconnect-ui/worker/money/actions.test.ts` | Sealed key registered once, other wallets refused, sessions kept only if they match the plan, forgotten on revoke, one request at a time, wallet-store put-new and lease. | Most request ops (spend, swap, earn, Polymarket, decide), the alarm run, real storage. |
-| DO | `LoginSession` (register, action, status, alarm expiry) | no | unit | `packages/oidc-relay/src/login-session.test.ts` | Core logic: expired before register, one-time action reads, latest action wins, terminal status, `deleteAll` expiry, context handling. | The Durable Object class itself and its alarm; real storage. |
+| DO | `LoginSession` (register, action, status, alarm expiry) | no | C | `packages/oidc-relay/src/relay.workers.test.ts`<br>`packages/oidc-relay/src/login-session.test.ts` | In the Workers runtime with real storage: sessions are isolated by id; registering sets an expiry alarm about ten minutes out; when the alarm fires the stored session is cleared, status reads `expired` and no alarm remains. Core logic also unit-tested. | — |
 
 ## oidc-relay routes
 
-Routes in `packages/oidc-relay/src/relay.ts`. No test calls the fetch handler; only validators and the session logic beneath it are tested.
+Routes in `packages/oidc-relay/src/relay.ts`. The Workers-runtime tests call the worker's fetch handler against the real `LoginSession` Durable Object, with no mocks; the validators and session logic beneath also have unit tests.
 
-**Totals (8 rows):** unit 5, GAP 3
+**Totals (8 rows):** C 8
 
 | Surface | Command / op | Moves money | Verdict | Where | Asserted | Not asserted, and why |
 |---|---|---|---|---|---|---|
-| Relay | `OPTIONS *` | no | GAP: no test yet | — | — | No test calls the handler. |
-| Relay | `GET /` and `GET /health` | no | GAP: no test yet | — | — | No test calls the handler. |
-| Relay | `POST /api/login/register` | no | unit | `packages/oidc-relay/src/login-session.test.ts` | Register arms the session; valid context stored, invalid dropped. | The route: JSON parsing, session id validation, status codes, CORS. |
-| Relay | `POST /api/login/action` | no | unit | `packages/oidc-relay/src/relay.test.ts`<br>`packages/oidc-relay/src/login-session.test.ts` | Action validators (callback URL allowlist, lookalike hosts, length) and one-time action reads. | The route: parsing, status codes, CORS. |
-| Relay | `GET /api/login/next-action` | no | unit | `packages/oidc-relay/src/login-session.test.ts` | Pending, action and expired states; one-time read. | The route: parsing, status codes, CORS. |
-| Relay | `POST /api/login/status` | no | unit | `packages/oidc-relay/src/login-session.test.ts` | Status parsing and normalisation, terminal status, set before register. | The route: parsing, status codes, CORS. |
-| Relay | `GET /api/login/status` | no | unit | `packages/oidc-relay/src/login-session.test.ts` | Repeat-readable status round trip. | The route: parsing, status codes, CORS. |
-| Relay | 404 fallback | no | GAP: no test yet | — | — | No test calls the handler. |
+| Relay | `OPTIONS *` | no | C | `packages/oidc-relay/src/relay.workers.test.ts` | Preflight answers 204 with the allowed headers. | Preflight on every individual path. |
+| Relay | `GET /` and `GET /health` | no | C | `packages/oidc-relay/src/relay.workers.test.ts` | `/health` answers 200 with its JSON body and the CORS header. | `GET /` is not requested separately. |
+| Relay | `POST /api/login/register` | no | C | `packages/oidc-relay/src/relay.workers.test.ts`<br>`packages/oidc-relay/src/login-session.test.ts` | Invalid JSON and a malformed session id answer 400, with CORS on the error; a valid register answers 204 and arms the session; an invalid context is dropped, not rejected. | — |
+| Relay | `POST /api/login/action` | no | C | `packages/oidc-relay/src/relay.workers.test.ts`<br>`packages/oidc-relay/src/relay.test.ts` | Unknown action type and a callback on a foreign host answer 400; 410 `expired` before register; 204 once registered; 410 `finished` after the login is done. | — |
+| Relay | `GET /api/login/next-action` | no | C | `packages/oidc-relay/src/relay.workers.test.ts`<br>`packages/oidc-relay/src/login-session.test.ts` | An action is handed over once, then `pending`; another session never sees it; a malformed session id answers 400. | — |
+| Relay | `POST /api/login/status` | no | C | `packages/oidc-relay/src/relay.workers.test.ts`<br>`packages/oidc-relay/src/login-session.test.ts` | An invalid status answers 400; a valid `done` answers 204 and is read back. | A status posted before register. |
+| Relay | `GET /api/login/status` | no | C | `packages/oidc-relay/src/relay.workers.test.ts`<br>`packages/oidc-relay/src/login-session.test.ts` | Status and context read back per session; an unknown session reads `expired`; a malformed session id answers 400 with an error status. | — |
+| Relay | 404 fallback | no | C | `packages/oidc-relay/src/relay.workers.test.ts` | An unknown path answers 404. | — |

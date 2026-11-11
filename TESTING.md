@@ -52,7 +52,7 @@ Unit tests under `src/`, mostly in-process. Many use a real temporary filesystem
 
 ### `@polygonlabs/oidc-relay` (`packages/oidc-relay`)
 
-Unit tests for the request validators and for the login-session logic over an in-memory store. The fetch handler and the Durable Object class are not exercised.
+All tests run in a Workers runtime through `@cloudflare/vitest-pool-workers`, configured from the package's own `wrangler.toml`, so the `LoginSession` Durable Object and its storage are real. `src/relay.workers.test.ts` calls the fetch handler with `SELF.fetch` and uses no mocks; the worker makes no outbound calls. Storage is shared across the tests in a file, so each test uses its own session id. The expiry alarm is fired with `runDurableObjectAlarm` rather than by waiting.
 
 ### `@polygonlabs/agentconnect-ui` (`packages/agentconnect-ui`)
 
@@ -60,8 +60,9 @@ Worker tests (`worker/`) call handlers and Durable Object classes in Node with f
 
 ## Coverage
 
-Coverage is measured for the CLI package (`packages/polygon-agent-cli`) on every test run (`pnpm test` runs vitest with `--coverage`). The floors in that package's `vitest.config.ts` are the measured baseline, not targets: a run that drops below a floor fails.
+Coverage is measured for the CLI package (`packages/polygon-agent-cli`) and the relay (`packages/oidc-relay`) on every test run (`pnpm test` runs vitest with `--coverage`). The floors in each package's `vitest.config.ts` are the measured baseline, not targets: a run that drops below a floor fails.
 
 - Raise a floor in the same pull request that adds tests. Floors are never rewritten automatically.
 - The directories that handle money (session, trade, polymarket, owner, the transaction helpers and `operations`) have their own floors, so a gain elsewhere cannot hide a loss there.
-- The other two packages (`agentconnect-ui`, `oidc-relay`) are not measured yet.
+- The relay is measured with the istanbul provider, because v8 coverage is not available inside the Workers runtime.
+- `agentconnect-ui` is not measured yet.
