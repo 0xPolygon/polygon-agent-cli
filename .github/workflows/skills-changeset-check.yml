@@ -1,0 +1,42 @@
+# Skills ship inside two release artifacts: the CLI bundles `skills/` at build time and the
+# agentconnect-ui site serves them. Neither changes for users until it is released, so a skills
+# change needs a changeset that releases both packages.
+#
+# No `paths:` filter on purpose: if this check is made required, a path-filtered workflow would
+# never report on PRs that don't touch skills, and those PRs would be blocked forever. The script
+# exits early when `skills/` is untouched.
+name: Skills changeset check
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  skills-changeset:
+    name: Require skills changesets
+    if: "!startsWith(github.head_ref, 'changeset-release/')"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check skills changesets
+        run: node .github/scripts/check-skills-changeset.mjs
+        env:
+          BASE_REF: ${{ github.base_ref }}
