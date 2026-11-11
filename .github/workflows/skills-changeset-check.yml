@@ -17,7 +17,8 @@ permissions:
 jobs:
   skills-changeset:
     name: Require skills changesets
-    if: "!startsWith(github.head_ref, 'changeset-release/')"
+    # Only the release PR's own branch in this repository is exempt.
+    if: github.head_ref != 'changeset-release/main' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

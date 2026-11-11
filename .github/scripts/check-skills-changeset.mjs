@@ -17,12 +17,13 @@ const baseRef = `origin/${base}`;
 const changedFiles = execFileSync(
   'git',
   // --no-renames: a file moved out of skills/ must still count as a skills change.
-  ['diff', '--name-only', '--no-renames', `${baseRef}...HEAD`],
+  // -z: git quotes paths with non-ASCII or special characters unless NUL-separated.
+  ['diff', '--name-only', '--no-renames', '-z', `${baseRef}...HEAD`],
   {
     encoding: 'utf8'
   }
 )
-  .split('\n')
+  .split('\0')
   .filter(Boolean);
 
 if (!changedFiles.some((file) => file.startsWith('skills/'))) {
