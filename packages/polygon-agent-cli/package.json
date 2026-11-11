@@ -23,13 +23,13 @@
     "MIGRATION.md"
   ],
   "scripts": {
-    "build": "node scripts/build.mjs",
+    "build": "pnpm run typecheck && node scripts/build.mjs",
     "prepublishOnly": "pnpm run build",
     "dev": "tsx src/index.ts",
     "lint": "eslint .",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist node_modules *.tsbuildinfo"
+    "typecheck": "tsc -b",
+    "clean": "rm -rf dist out-tsc node_modules *.tsbuildinfo"
   },
   "dependencies": {
     "@0xsequence/network": "^2.3.47",
