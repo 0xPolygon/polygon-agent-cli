@@ -18,7 +18,8 @@ function argumentsOf(command: string, cwd: string): string[] {
     .filter(Boolean);
 }
 
-describe('swap preview continuation commands', () => {
+// Each case launches a real shell, which can take seconds on a busy machine.
+describe('swap preview continuation commands', { timeout: 60_000 }, () => {
   it('preserves a named token address instead of substituting its resolved symbol', () => {
     const from = '0x1234567890123456789012345678901234567890';
     const command = previewSwapCommand({

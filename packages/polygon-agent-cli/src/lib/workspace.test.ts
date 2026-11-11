@@ -19,7 +19,8 @@ import {
 } from './workspace.ts';
 
 function tmpDir(prefix: string): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  // realpath: macOS tmpdir is a /var symlink to /private/var
+  return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
 }
 
 const SKILL =
@@ -223,7 +224,8 @@ describe('initWorkspace', () => {
   });
 });
 
-describe('the wrapper', () => {
+// Three real shell+node launches; start can take seconds on a busy machine.
+describe('the wrapper', { timeout: 60_000 }, () => {
   it('runs the installed CLI with the workspace state folder and passes arguments through', () => {
     const root = path.join(tmpDir('pa ws '), '.polygon-agent');
     const { wrapper } = initWorkspace({ root, version: '1.0.0', sourceDir: null });
