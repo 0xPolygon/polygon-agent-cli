@@ -13,6 +13,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "dev:worker": "wrangler dev --env staging --port 8787 --local-upstream localhost:4444",
     "typecheck": "tsc -b",
     "lint": "eslint .",
     "test": "vitest run",

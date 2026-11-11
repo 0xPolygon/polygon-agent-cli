@@ -6,5 +6,6 @@ export default defineConfig([
   ...recommended({ globals: 'browser' }),
   ...typescript({ tsconfigRootDir: import.meta.dirname }),
   ...frontend(),
-  { ignores: ['dist/**', 'out-tsc/**'] }
+  // `.wrangler/` holds `pnpm dev:worker`'s temporary bundles.
+  { ignores: ['dist/**', 'out-tsc/**', '.wrangler/**'] }
 ]);
