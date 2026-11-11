@@ -60,7 +60,7 @@ beforeEach(() => {
   chain.logs = [];
 });
 
-// Each case really waits out the 3s deadline; under load the 5s default is too tight.
+// Each case really waits 3-4s (the deadline or the settle pause); under load 5s is too tight.
 describe('waitForSignerFunds', { timeout: 30_000 }, () => {
   it('accepts a mined top-up after an earlier authorization took its own share', async () => {
     // The top-up landed and the earlier authorization settled meanwhile.

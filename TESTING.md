@@ -9,7 +9,7 @@ Two further suffixes are reserved so that tests which need a different runner ca
 - `*.cli.test.ts` for subprocess tests of the built CLI.
 - `*.workers.test.ts` for tests that run in a Workers runtime.
 
-The package sections below say which of these each package uses.
+`*.network.test.ts` files call live services and are skipped unless `RUN_NETWORK_TESTS=1` is set.
 
 ## How to run
 
@@ -25,7 +25,7 @@ pnpm --filter @polygonlabs/agentconnect-ui run test
 
 ## What the suite does and does not prove
 
-No test moves real funds or calls a hosted wallet, swap or market service. Those services are faked in process, so a passing suite says the code handles the responses its authors wrote down, not that a hosted service still answers that way.
+No test moves real funds, and outside the opt-in network tests none calls a hosted wallet, swap or market service. Those services are faked in process, so a passing suite says the code handles the responses its authors wrote down, not that a hosted service still answers that way.
 
 Not covered by any test: behaviour that needs a hosted wallet, swap, price or market service (sending and swapping for real, balances, prices, market trading), and the worker's money operations inside its Durable Object. These are known gaps, left open rather than covered with mocks. Some older command tests mock most of what they call and mainly assert that the mocks were called; treat those as weak evidence.
 
@@ -42,7 +42,7 @@ Not covered by any test: behaviour that needs a hosted wallet, swap, price or ma
 
 ### `@polygonlabs/agent-cli` (`packages/polygon-agent-cli`)
 
-Unit tests under `src/`, mostly in-process. Many use a real temporary filesystem for state and replace the wallet SDK, price and swap services with stand-ins. A few spawn real child processes (lock and waiter tests). There are no subprocess tests of the built binary.
+Unit tests under `src/`, mostly in-process. Many use a real temporary filesystem for state and replace the wallet SDK, price and swap services with stand-ins. A few spawn real child processes or shells (for example the lock and waiter tests). There are no subprocess tests of the built binary.
 
 ### `@polygonlabs/oidc-relay` (`packages/oidc-relay`)
 
