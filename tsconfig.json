@@ -1,5 +1,9 @@
 {
   "extends": "./tsconfig.base.json",
   "files": [],
-  "references": [{ "path": "packages/polygon-agent-cli" }, { "path": "packages/oidc-relay" }]
+  "references": [
+    { "path": "packages/polygon-agent-cli" },
+    { "path": "packages/oidc-relay" },
+    { "path": "packages/agentconnect-ui" }
+  ]
 }
