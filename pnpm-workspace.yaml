@@ -14,3 +14,8 @@ trustPolicy: no-downgrade
 trustPolicyExclude:
   - 'semver@5.7.2 || 6.3.1'
   - 'vite'
+
+overrides:
+  '@noble/curves': 1.9.7
+  '@noble/hashes': 1.8.0
+  slow-redact: 0.3.1
