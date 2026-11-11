@@ -115,7 +115,6 @@ export const setupCommand: CommandModule<object, SetupArgs> = {
           JSON.stringify(
             {
               ok: true,
-              privateKey,
               eoaAddress,
               accessKey,
               projectId: project.id,
