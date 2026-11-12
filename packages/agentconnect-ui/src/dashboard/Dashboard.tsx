@@ -24,7 +24,7 @@ import type { Page } from './AppSidebar.js';
 import type { Vault } from './earn.js';
 import type { Position } from './markets.js';
 import type { Session } from './signin.js';
-import type { AgentContext, Loadable } from './tabs.js';
+import type { AgentContext, Loadable } from './types.js';
 
 import { AgentPromptBox } from '../components/AgentPromptBox.js';
 import { AmountChips } from '../components/AmountChips.js';
@@ -39,18 +39,15 @@ import { ConnectedAgents } from './ConnectedAgents.js';
 import { fetchPolygonRates, fetchVaultBalances, fetchVaults } from './earn.js';
 import { fetchPositions, fetchPredictionCash } from './markets.js';
 import { ProfileMenu } from './ProfileMenu.js';
+import { OVERVIEW_PROMPTS, WALLET_PROMPTS } from './prompts.js';
 import { signOut } from './signin.js';
-import {
-  ActivityTab,
-  AskAgent,
-  EarnTab,
-  MarketsTab,
-  OVERVIEW_PROMPTS,
-  OverviewTab,
-  SettingsTab,
-  WALLET_PROMPTS,
-  WalletTab
-} from './tabs.js';
+import { ActivityTab } from './tabs/ActivityTab.js';
+import { AskAgent } from './tabs/AskAgent.js';
+import { EarnTab } from './tabs/EarnTab.js';
+import { MarketsTab } from './tabs/MarketsTab.js';
+import { OverviewTab } from './tabs/OverviewTab.js';
+import { SettingsTab } from './tabs/SettingsTab.js';
+import { WalletTab } from './tabs/WalletTab.js';
 import { TopBar } from './TopBar.js';
 
 type OverviewSection = 'tokens' | 'history' | 'agents';
