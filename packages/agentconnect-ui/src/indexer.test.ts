@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ActivityItem } from './indexer';
 
-import { classifyToken, dailyFlow, priceReceipts } from './indexer';
+import { classifyToken, dailyFlow, fetchActivity, priceReceipts } from './indexer';
 
 describe('classifyToken', () => {
   it('treats Aave aTokens as earning', () => {
@@ -30,7 +30,8 @@ describe('dailyFlow', () => {
     symbol: 'USDC',
     qty: usd,
     usd,
-    counterparty: '0x'
+    counterparty: '0x',
+    address: '0x'
   });
 
   it('buckets by local day, oldest first, ending today', () => {
@@ -87,5 +88,64 @@ describe('priceReceipts', () => {
 
   it('only prices on Polygon', async () => {
     expect((await priceReceipts(1, [{ address: VAULT, raw: 1n }])).size).toBe(0);
+  });
+});
+
+describe('fetchActivity token address', () => {
+  const ME = '0x1111111111111111111111111111111111111111';
+  const OTHER = '0x00000000000000000000000000000000000000dd';
+  const USDC = '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359';
+  const ZERO = '0x0000000000000000000000000000000000000000';
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  const activityWith = async (transfers: object[]) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              page: { more: false },
+              transactions: [{ txnHash: '0xabc', timestamp: '2026-11-03T10:00:00Z', transfers }]
+            })
+          )
+      )
+    );
+    return fetchActivity(ME);
+  };
+  const receive = {
+    transferType: 'RECEIVE',
+    from: OTHER,
+    to: ME,
+    amounts: ['5000000'],
+    amountsUSD: ['5'],
+    contractType: 'ERC20',
+    contractInfo: { symbol: 'USDC', decimals: 6 }
+  };
+
+  it('carries the token contract address, lowercased', async () => {
+    const [item] = await activityWith([
+      { ...receive, contractAddress: USDC.toUpperCase().replace('0X', '0x') }
+    ]);
+    expect(item?.address).toBe(USDC);
+  });
+
+  it('keeps the zero address for native transfers', async () => {
+    const [item] = await activityWith([
+      {
+        ...receive,
+        contractType: 'NATIVE',
+        contractAddress: ZERO,
+        contractInfo: { symbol: 'POL', decimals: 18 }
+      }
+    ]);
+    expect(item?.address).toBe(ZERO);
+    expect(item?.symbol).toBe('POL');
+  });
+
+  it('uses an empty address when the record has none', async () => {
+    const [item] = await activityWith([receive]);
+    expect(item?.address).toBe('');
   });
 });

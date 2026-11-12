@@ -252,6 +252,7 @@ export interface ActivityItem {
   qty: number;
   usd: number;
   counterparty: string;
+  address: string;
 }
 
 interface RawTransfer {
@@ -261,6 +262,7 @@ interface RawTransfer {
   amounts?: string[];
   amountsUSD?: string[];
   contractType?: string;
+  contractAddress?: string;
   contractInfo?: { symbol?: string; decimals?: number };
 }
 
@@ -303,7 +305,8 @@ export async function fetchActivity(
         symbol,
         qty,
         usd,
-        counterparty: (direction === 'in' ? t.from : t.to) ?? ''
+        counterparty: (direction === 'in' ? t.from : t.to) ?? '',
+        address: t.contractAddress?.toLowerCase() ?? ''
       });
     }
   }

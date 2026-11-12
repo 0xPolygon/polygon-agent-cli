@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ActivityItem, Holding } from '../indexer';
 
-import { activityType, filterHoldings } from './derive.js';
+import { activityType, filterHoldings, logoAddresses, logosByAddress } from './derive.js';
 
 const holding = (symbol: string, name: string): Holding => ({
   address: `0x${symbol.toLowerCase()}`,
@@ -20,7 +20,8 @@ const transfer = (txnHash: string, direction: ActivityItem['direction']): Activi
   symbol: 'USDC',
   qty: 5,
   usd: 5,
-  counterparty: '0x0000000000000000000000000000000000000001'
+  counterparty: '0x0000000000000000000000000000000000000001',
+  address: '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359'
 });
 
 describe('filterHoldings', () => {
@@ -79,5 +80,30 @@ describe('activityType', () => {
     const sent = transfer('0xa', 'out');
     const other = transfer('0xb', 'in');
     expect(activityType({ item: sent, items: [sent, other] })).toBe('send');
+  });
+});
+
+describe('activity logos by address', () => {
+  const REAL_USDC = '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359';
+  const SPOOF_USDC = '0x00000000000000000000000000000000000000ee';
+  const items = [
+    { ...transfer('0x1', 'in'), address: REAL_USDC },
+    { ...transfer('0x2', 'in'), address: SPOOF_USDC },
+    { ...transfer('0x3', 'out'), address: REAL_USDC },
+    { ...transfer('0x4', 'out'), address: '' }
+  ];
+
+  it('gives a spoof with a well-known symbol no logo, and the real address its own', () => {
+    const logos = logosByAddress({
+      [REAL_USDC]: { name: 'USD Coin', logo: 'https://img.test/usdc.png' },
+      [SPOOF_USDC]: { name: 'Fake' }
+    });
+    expect(logos[REAL_USDC]).toBe('https://img.test/usdc.png');
+    expect(logos[SPOOF_USDC]).toBeUndefined();
+  });
+
+  it('looks up each distinct address once, skips empty ones and honours the cap', () => {
+    expect(logoAddresses({ items, limit: 10 })).toEqual([REAL_USDC, SPOOF_USDC]);
+    expect(logoAddresses({ items, limit: 1 })).toEqual([REAL_USDC]);
   });
 });

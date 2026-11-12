@@ -1,4 +1,5 @@
 import type { ActivityItem, Holding } from '../indexer';
+import type { TokenLook } from './tokens.js';
 
 export type ActivityKind = 'send' | 'receive' | 'swap';
 
@@ -31,4 +32,24 @@ export function activityType({ item, items }: ActivityTypeParams): ActivityKind 
   const opposite = items.some((o) => o.txnHash === item.txnHash && o.direction !== item.direction);
   if (opposite) return 'swap';
   return item.direction === 'in' ? 'receive' : 'send';
+}
+
+/** Distinct token addresses of the rows, in order, capped so a busy wallet can't fan out into dozens of lookups. */
+export function logoAddresses({
+  items,
+  limit
+}: {
+  items: ActivityItem[];
+  limit: number;
+}): string[] {
+  return [...new Set(items.map((i) => i.address).filter(Boolean))].slice(0, limit);
+}
+
+/** Only addresses the token list itself returned a logo for; a symbol can be spoofed, an address cannot. */
+export function logosByAddress(looks: Record<string, TokenLook>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [address, look] of Object.entries(looks)) {
+    if (look.logo) out[address] = look.logo;
+  }
+  return out;
 }
