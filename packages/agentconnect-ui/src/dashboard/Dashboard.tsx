@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import {
   Button,
@@ -7,7 +7,6 @@ import {
   TabsContent,
   TabsList,
   TabsTrigger,
-  useMediaQuery,
   useToast
 } from '@polygonlabs/design-system';
 
@@ -47,16 +46,6 @@ type OverviewSection = 'tokens' | 'history' | 'agents';
 function isOverviewSection(v: unknown): v is OverviewSection {
   return v === 'tokens' || v === 'history' || v === 'agents';
 }
-
-// Tab components still navigate by tab id; this maps each to its page and section.
-const LEGACY_TARGETS: Record<string, { page: Page; section?: OverviewSection }> = {
-  overview: { page: 'overview' },
-  wallet: { page: 'overview', section: 'tokens' },
-  activity: { page: 'overview', section: 'history' },
-  markets: { page: 'markets' },
-  earn: { page: 'yield' },
-  settings: { page: 'settings' }
-};
 
 function useLoad<T>(load: (() => Promise<T>) | null, deps: unknown[]): Loadable<T> {
   const [state, setState] = useState<Loadable<T>>({ data: null, loading: !!load, error: false });
@@ -104,10 +93,6 @@ export function Dashboard({
 }) {
   const [page, setPage] = useState<Page>('overview');
   const [section, setSection] = useState<OverviewSection>('tokens');
-  // The tab row sits below the fold; links that pick a tab would look dead without a scroll.
-  const [revealTabs, setRevealTabs] = useState(false);
-  const tabsRef = useRef<HTMLDivElement>(null);
-  const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
   const [modal, setModal] = useState<ModalState | null>(initialFundOpen ? { kind: 'add' } : null);
   const [promptsOpen, setPromptsOpen] = useState(false);
   const [promptGroup, setPromptGroup] = useState<PromptGroup>('wallet');
@@ -148,22 +133,7 @@ export function Dashboard({
       toast.add({ title: 'Copied. Paste it into your agent.', type: 'success', timeout: 2200 });
   }, [copied]);
 
-  useEffect(() => {
-    if (!revealTabs) return;
-    tabsRef.current?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
-    setRevealTabs(false);
-  }, [revealTabs, reduceMotion]);
-
   const ctx: AgentContext = { copied, copy };
-  const go = (target: string) => {
-    const next = LEGACY_TARGETS[target];
-    if (!next) return;
-    setPage(next.page);
-    if (next.section) {
-      setSection(next.section);
-      setRevealTabs(true);
-    }
-  };
   // Open positions plus pUSD waiting in the trading account.
   const positionsValue = positions.data
     ? positions.data.reduce((s, p) => s + p.value, 0) + (predictionCash.data ?? 0)
@@ -219,13 +189,13 @@ export function Dashboard({
                   positionsValue={positionsValue}
                   vaultsValue={vaultsValue}
                   earningApy={earningApy}
-                  go={go}
+                  go={setPage}
                   onAdd={openAdd}
                   onWithdraw={openWithdraw}
                   onReceive={openReceive}
                   onTryAgent={() => openPrompts('wallet')}
                 />
-                <div ref={tabsRef} className="scroll-mt-4">
+                <div>
                   <Tabs
                     value={section === 'agents' && !owner ? 'tokens' : section}
                     onValueChange={(v) => isOverviewSection(v) && setSection(v)}
@@ -236,7 +206,7 @@ export function Dashboard({
                       {owner && <TabsTrigger value="agents">Connected agents</TabsTrigger>}
                     </TabsList>
                     <TabsContent value="tokens" className="flex flex-col gap-8 pt-6">
-                      <WalletTab holdings={holdings} onOpenPrompts={() => openPrompts('wallet')} />
+                      <WalletTab holdings={holdings} />
                     </TabsContent>
                     <TabsContent value="history" className="pt-6">
                       <ActivityTab activity={activity} />

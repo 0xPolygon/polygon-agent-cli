@@ -1,86 +1,76 @@
-import { ArrowDownLeft, ArrowUpRight } from 'lucide-react';
-
-import { Card, cn, Skeleton } from '@polygonlabs/design-system';
+import {
+  Card,
+  Skeleton,
+  Table,
+  TableBody,
+  TableHead,
+  TableHeader,
+  TableRow
+} from '@polygonlabs/design-system';
 
 import type { ActivityItem } from '../../indexer';
 import type { Loadable } from '../types.js';
+import type { ActivityFilterValue } from './ActivityFilter.js';
 
-import { EmptyNotice } from '../../components/EmptyNotice.js';
-import { qty, shortAddr, signedUsd, when } from '../../utils/format.js';
-import { EXPLORER } from '../explorer.js';
-import { ROW_LIST } from './styles.js';
-
-interface ActivityRowProps {
-  item: ActivityItem;
-}
+import { EmptyState } from '../../components/EmptyState.js';
+import { activityType } from '../derive.js';
+import { ActivityTableRow } from './ActivityTableRow.js';
 
 interface ActivityListProps {
   activity: Loadable<ActivityItem[]>;
-  limit?: number;
+  filter: ActivityFilterValue;
 }
 
-export function ActivityRow({ item }: ActivityRowProps) {
-  const incoming = item.direction === 'in';
-  const Icon = incoming ? ArrowDownLeft : ArrowUpRight;
-  const amount =
-    item.usd > 0
-      ? signedUsd(incoming ? item.usd : -item.usd)
-      : `${incoming ? '+' : '-'}${qty(item.qty)} ${item.symbol}`;
-  return (
-    <a
-      href={`${EXPLORER}/tx/${item.txnHash}`}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="flex items-center gap-3 py-3.5 text-primary hover:text-primary no-underline"
-    >
-      <span className="size-10 rounded-xl bg-background-info flex items-center justify-center flex-shrink-0">
-        <Icon className="size-[18px] text-brand" />
-      </span>
-      <span className="flex-1 min-w-0 flex flex-col gap-1">
-        <span className="text-[15px] font-bold leading-tight">
-          {incoming ? 'Received' : 'Sent'} {qty(item.qty)} {item.symbol}
-        </span>
-        <span className="text-[13px] text-muted truncate">
-          {incoming ? 'From' : 'To'} {shortAddr(item.counterparty)} · {when(item.timestamp)}
-        </span>
-      </span>
-      <span
-        className={cn(
-          'text-[15px] font-bold whitespace-nowrap',
-          incoming ? 'text-success' : 'text-primary'
-        )}
-      >
-        {amount}
-      </span>
-    </a>
-  );
-}
+const COLUMNS = ['Date', 'Type', 'Token and amount', 'USD', 'Counterparty', 'Direction'];
 
-export function ActivityList({ activity, limit }: ActivityListProps) {
+export function ActivityList({ activity, filter }: ActivityListProps) {
   if (activity.loading) {
     return (
-      <Card className={ROW_LIST}>
+      <div className="flex flex-col gap-2.5">
         {[0, 1, 2].map((i) => (
-          <div key={i} className="py-4 flex items-center gap-3">
-            <Skeleton className="w-10 h-10" />
-            <Skeleton className="h-4 flex-1" />
-          </div>
+          <Skeleton key={i} className="h-14 w-full rounded-xl" />
         ))}
-      </Card>
+      </div>
     );
   }
-  const rows = (activity.data ?? []).slice(0, limit);
+  if (activity.error) {
+    return <EmptyState title="Couldn't load activity">Refresh the page to try again.</EmptyState>;
+  }
+  const items = activity.data ?? [];
+  if (items.length === 0) {
+    return (
+      <EmptyState title="Nothing yet">Money your agents send and receive shows up here.</EmptyState>
+    );
+  }
+  // Type comes from every transfer, so a swap still reads as one when its other leg is filtered out.
+  const shown = items.filter((i) => filter === 'all' || i.direction === filter);
+  if (shown.length === 0) {
+    return (
+      <EmptyState title={filter === 'in' ? 'No money in yet' : 'No money out yet'}>
+        Nothing matches this filter. Try All.
+      </EmptyState>
+    );
+  }
   return (
-    <Card className={ROW_LIST}>
-      {activity.error ? (
-        <EmptyNotice title="Couldn't load activity">Refresh the page to try again.</EmptyNotice>
-      ) : rows.length === 0 ? (
-        <EmptyNotice title="Nothing yet">
-          Money your agents send and receive shows up here.
-        </EmptyNotice>
-      ) : (
-        rows.map((it, i) => <ActivityRow key={`${it.txnHash}-${i}`} item={it} />)
-      )}
+    <Card variant="outline" className="rounded-3xl p-3 md:p-6">
+      <Table className="min-w-[700px]">
+        <TableHeader>
+          <TableRow>
+            {COLUMNS.map((c) => (
+              <TableHead key={c}>{c}</TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {shown.map((item, i) => (
+            <ActivityTableRow
+              key={`${item.txnHash}-${i}`}
+              item={item}
+              kind={activityType({ item, items })}
+            />
+          ))}
+        </TableBody>
+      </Table>
     </Card>
   );
 }

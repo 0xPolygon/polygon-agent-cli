@@ -3,6 +3,7 @@ import { ArrowDownLeft, ArrowUpRight, Bot, Plus } from 'lucide-react';
 import { Button, Separator } from '@polygonlabs/design-system';
 
 import type { Holding } from '../../indexer';
+import type { Page } from '../AppSidebar.js';
 import type { Loadable } from '../types.js';
 
 import { Money } from '../../components/Money.js';
@@ -15,7 +16,7 @@ interface OverviewTabProps {
   vaultsValue: number | null;
   // Blended rate on what's earning, percent a year.
   earningApy: number | null;
-  go: (tab: string) => void;
+  go: (page: Page) => void;
   onAdd: () => void;
   onWithdraw: () => void;
   onReceive: () => void;
