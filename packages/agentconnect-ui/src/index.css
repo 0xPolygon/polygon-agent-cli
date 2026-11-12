@@ -17,6 +17,12 @@
   --color-slate-950: #090624;
 
   --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, monospace;
+
+  /* The Tailwind scale has no 32 or 40, which the page heading needs. */
+  --text-page-title-sm: 2rem;
+  --text-page-title-sm--line-height: 1.2;
+  --text-page-title: 2.5rem;
+  --text-page-title--line-height: 1.2;
 }
 
 body {

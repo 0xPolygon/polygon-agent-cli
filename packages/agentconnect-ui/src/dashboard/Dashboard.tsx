@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 
 import {
-  Button,
   SidebarProvider,
   Tabs,
   TabsContent,
@@ -120,8 +119,9 @@ export function Dashboard({
     [polymarketAddress]
   );
   const vaults = useLoad<Vault[]>(fetchVaults, []);
+  const vaultList = vaults.data;
   const vaultBalances = useLoad<Record<string, number>>(
-    vaults.data ? () => fetchVaultBalances(walletAddress, vaults.data!) : null,
+    vaultList ? () => fetchVaultBalances(walletAddress, vaultList) : null,
     [walletAddress, vaults.data]
   );
   const polygonRates = useLoad<Record<string, number>>(fetchPolygonRates, []);
@@ -143,11 +143,12 @@ export function Dashboard({
     : null;
   // What the earning money makes, weighted by how much sits in each place.
   const earningApy = (() => {
-    if (!holdings.data || !polygonRates.data) return null;
+    const rates = polygonRates.data;
+    if (!holdings.data || !rates) return null;
     const parts: [number, number | undefined][] = [
       ...holdings.data
         .filter((h) => h.kind === 'earn')
-        .map((h): [number, number | undefined] => [h.usd, polygonRates.data![h.address]]),
+        .map((h): [number, number | undefined] => [h.usd, rates[h.address]]),
       ...(vaults.data ?? []).map((v): [number, number | undefined] => [
         vaultBalances.data?.[v.address] ?? 0,
         v.apy
@@ -237,17 +238,6 @@ export function Dashboard({
               />
             )}
             {page === 'settings' && <SettingsTab address={walletAddress} ctx={ctx} />}
-            {page === 'settings' && owner && (
-              <Button
-                type="button"
-                variant="secondary"
-                size="lg"
-                onClick={leave}
-                className="self-start"
-              >
-                Sign out
-              </Button>
-            )}
           </div>
         </main>
       </div>
