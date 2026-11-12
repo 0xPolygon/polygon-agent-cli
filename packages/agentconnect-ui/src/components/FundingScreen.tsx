@@ -2,7 +2,8 @@ import { Fund } from '0xtrails/widget';
 import { Check, Copy } from 'lucide-react';
 
 import { trailsApiKey } from '../config';
-import { shortAddr, useCopy } from '../dashboard/ui.js';
+import { useCopy } from '../hooks/useCopy.js';
+import { shortAddr } from '../utils/format.js';
 
 interface FundingScreenProps {
   walletAddress: string;
@@ -77,7 +78,7 @@ export function parseFundAmount(raw: string | null | undefined): string | undefi
 export function FundingScreen({ walletAddress, chainId, amount, onSkip }: FundingScreenProps) {
   const [copied, copy] = useCopy();
   return (
-    <div className="w-full max-w-sm animate-scale-in">
+    <div className="w-full max-w-sm">
       {/* Card */}
       <div
         className="w-full bg-white rounded-3xl border border-[#c8cfe1] overflow-hidden"

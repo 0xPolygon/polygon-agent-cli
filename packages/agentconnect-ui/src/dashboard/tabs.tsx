@@ -1,30 +1,32 @@
 import { ArrowDownLeft, ArrowUpRight, Check, Copy, ExternalLink } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
+import {
+  Badge,
+  Button,
+  Card,
+  cn,
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+  Progress,
+  Skeleton
+} from '@polygonlabs/design-system';
+
 import type { ActivityItem, Holding } from '../indexer';
 import type { Vault } from './earn.js';
 import type { Position } from './markets.js';
 import type { TokenLook } from './tokens.js';
 
+import { AgentPromptBox } from '../components/AgentPromptBox.js';
+import { AmountChips } from '../components/AmountChips.js';
+import { PromptRow } from '../components/PromptRow.js';
 import { dailyFlow } from '../indexer';
+import { shortAddr, signedUsd, usd } from '../utils/format.js';
 import { buildPrompt, SKILL_URL } from './agents.js';
 import { cents } from './markets.js';
 import { fetchTokenLooks } from './tokens.js';
-import {
-  AgentPromptBox,
-  AmountChips,
-  Chip,
-  CommandLine,
-  CopyButton,
-  EmptyState,
-  IconTile,
-  Panel,
-  RowList,
-  SectionTitle,
-  shortAddr,
-  signedUsd,
-  usd
-} from './ui.js';
 
 export type Loadable<T> = { data: T | null; loading: boolean; error: boolean };
 
@@ -36,9 +38,28 @@ export interface AgentContext {
 
 const EXPLORER = 'https://polygonscan.com';
 
-function Skeleton({ className = '' }: { className?: string }) {
+// The classes of a divided list inside a card; each row gets a hairline except the last.
+const ROW_LIST = 'px-5 py-1 divide-y divide-slate-100';
+
+const SECTION_TITLE = 'text-lg font-bold';
+
+// The vault tiers name their badge by the old badge class; this maps it to a Badge variant.
+const TIER_BADGE: Record<string, 'success' | 'warning' | 'error'> = {
+  'oms-badge--success': 'success',
+  'oms-badge--warning': 'warning',
+  'oms-badge--danger': 'error'
+};
+
+function EmptyNotice({ title, children }: { title: string; children?: React.ReactNode }) {
   return (
-    <span className={`inline-block rounded-md bg-[var(--slate-100)] animate-pulse ${className}`} />
+    <Empty className="border-0 bg-transparent p-0 py-8 md:p-0 md:py-8 gap-1.5">
+      <EmptyHeader className="gap-1.5">
+        <EmptyTitle className="text-[15px] md:text-[15px]">{title}</EmptyTitle>
+        {children && (
+          <EmptyDescription className="text-[13px] md:text-[13px]">{children}</EmptyDescription>
+        )}
+      </EmptyHeader>
+    </Empty>
   );
 }
 
@@ -57,7 +78,7 @@ function Money({
   failed?: boolean;
   className?: string;
 }) {
-  if (value === null && failed) return <span className="text-[var(--slate-400)]">–</span>;
+  if (value === null && failed) return <span className="text-slate-400">–</span>;
   return value === null ? (
     <Skeleton className="h-[1em] w-32" />
   ) : (
@@ -84,6 +105,7 @@ function qty(n: number): string {
 
 export function ActivityRow({ item }: { item: ActivityItem }) {
   const incoming = item.direction === 'in';
+  const Icon = incoming ? ArrowDownLeft : ArrowUpRight;
   const amount =
     item.usd > 0
       ? signedUsd(incoming ? item.usd : -item.usd)
@@ -93,20 +115,24 @@ export function ActivityRow({ item }: { item: ActivityItem }) {
       href={`${EXPLORER}/tx/${item.txnHash}`}
       target="_blank"
       rel="noopener noreferrer"
-      className="flex items-center gap-3 py-3.5 text-[var(--slate-900)] hover:text-[var(--slate-900)] no-underline"
+      className="flex items-center gap-3 py-3.5 text-primary hover:text-primary no-underline"
     >
-      <IconTile icon={incoming ? ArrowDownLeft : ArrowUpRight} />
+      <span className="size-10 rounded-xl bg-background-info flex items-center justify-center flex-shrink-0">
+        <Icon className="size-[18px] text-brand" />
+      </span>
       <span className="flex-1 min-w-0 flex flex-col gap-1">
         <span className="text-[15px] font-bold leading-tight">
           {incoming ? 'Received' : 'Sent'} {qty(item.qty)} {item.symbol}
         </span>
-        <span className="text-[13px] text-[var(--slate-500)] truncate">
+        <span className="text-[13px] text-muted truncate">
           {incoming ? 'From' : 'To'} {shortAddr(item.counterparty)} · {when(item.timestamp)}
         </span>
       </span>
       <span
-        className="text-[15px] font-bold whitespace-nowrap"
-        style={{ color: incoming ? 'var(--emerald-700)' : 'var(--slate-900)' }}
+        className={cn(
+          'text-[15px] font-bold whitespace-nowrap',
+          incoming ? 'text-success' : 'text-primary'
+        )}
       >
         {amount}
       </span>
@@ -117,29 +143,29 @@ export function ActivityRow({ item }: { item: ActivityItem }) {
 function ActivityList({ activity, limit }: { activity: Loadable<ActivityItem[]>; limit?: number }) {
   if (activity.loading) {
     return (
-      <RowList>
+      <Card className={ROW_LIST}>
         {[0, 1, 2].map((i) => (
           <div key={i} className="py-4 flex items-center gap-3">
             <Skeleton className="w-10 h-10" />
             <Skeleton className="h-4 flex-1" />
           </div>
         ))}
-      </RowList>
+      </Card>
     );
   }
   const rows = (activity.data ?? []).slice(0, limit);
   return (
-    <RowList>
+    <Card className={ROW_LIST}>
       {activity.error ? (
-        <EmptyState title="Couldn't load activity">Refresh the page to try again.</EmptyState>
+        <EmptyNotice title="Couldn't load activity">Refresh the page to try again.</EmptyNotice>
       ) : rows.length === 0 ? (
-        <EmptyState title="Nothing yet">
+        <EmptyNotice title="Nothing yet">
           Money your agents send and receive shows up here.
-        </EmptyState>
+        </EmptyNotice>
       ) : (
         rows.map((it, i) => <ActivityRow key={`${it.txnHash}-${i}`} item={it} />)
       )}
-    </RowList>
+    </Card>
   );
 }
 
@@ -153,20 +179,20 @@ function FlowChart({ activity }: { activity: ActivityItem[] }) {
   const label = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   const bar = (v: number) => (v ? Math.max(4, (v / max) * 100) : 0) + '%';
   return (
-    <Panel className="flex flex-col gap-5">
+    <Card className="flex flex-col gap-5">
       <div className="flex justify-between items-start flex-wrap gap-3">
         <div className="flex flex-col gap-1.5">
           <span className="text-lg font-bold">Money in and out</span>
-          <span className="text-sm text-[var(--slate-500)]">Last 14 days</span>
+          <span className="text-sm text-muted">Last 14 days</span>
         </div>
         <div className="flex gap-5 text-sm">
           {[
-            ['In', totalIn, 'var(--purple-500)'],
-            ['Out', totalOut, 'var(--slate-300)']
+            ['In', totalIn, 'bg-brand'],
+            ['Out', totalOut, 'bg-slate-300']
           ].map(([name, v, color]) => (
             <span key={name as string} className="flex flex-col gap-1">
-              <span className="flex items-center gap-1.5 text-[var(--slate-500)]">
-                <span className="w-2 h-2 rounded-sm" style={{ background: color as string }} />
+              <span className="flex items-center gap-1.5 text-muted">
+                <span className={cn('w-2 h-2 rounded-sm', color as string)} />
                 {name}
               </span>
               <span className="font-bold text-base">{usd(v as number)}</span>
@@ -175,12 +201,10 @@ function FlowChart({ activity }: { activity: ActivityItem[] }) {
         </div>
       </div>
       {totalIn + totalOut === 0 && (
-        <span className="text-sm text-[var(--slate-500)] -mb-2">
-          No money moved in the last 14 days.
-        </span>
+        <span className="text-sm text-muted -mb-2">No money moved in the last 14 days.</span>
       )}
       <div
-        className="grid gap-1.5 items-end h-[140px] border-b border-[var(--slate-100)]"
+        className="grid gap-1.5 items-end h-[140px] border-b border-slate-100"
         style={{ gridTemplateColumns: 'repeat(14, minmax(0, 1fr))' }}
         role="img"
         aria-label={`Last 14 days: ${usd(totalIn)} in, ${usd(totalOut)} out`}
@@ -188,24 +212,24 @@ function FlowChart({ activity }: { activity: ActivityItem[] }) {
         {days.map((d) => (
           <div key={d.date.toISOString()} className="flex gap-0.5 items-end justify-center h-full">
             <div
-              className="w-[45%] max-w-3 rounded-t-[3px] bg-[var(--purple-500)]"
+              className="w-[45%] max-w-3 rounded-t-[3px] bg-brand"
               style={{ height: bar(d.in) }}
               title={`${label(d.date)}: ${usd(d.in)} in`}
             />
             <div
-              className="w-[45%] max-w-3 rounded-t-[3px] bg-[var(--slate-300)]"
+              className="w-[45%] max-w-3 rounded-t-[3px] bg-slate-300"
               style={{ height: bar(d.out) }}
               title={`${label(d.date)}: ${usd(d.out)} out`}
             />
           </div>
         ))}
       </div>
-      <div className="flex justify-between text-xs text-[var(--slate-400)]">
+      <div className="flex justify-between text-xs text-slate-400">
         <span>{label(days[0].date)}</span>
         <span>{label(days[7].date)}</span>
         <span>Today</span>
       </div>
-    </Panel>
+    </Card>
   );
 }
 
@@ -239,21 +263,21 @@ export function OverviewTab({
       label: 'Available to spend',
       value: sum(holdings.data, 'spend'),
       failed: holdings.error,
-      color: 'var(--purple-500)',
+      color: 'bg-brand',
       tab: 'wallet'
     },
     {
       label: 'In predictions',
       value: positionsValue,
       failed: false,
-      color: 'var(--purple-300)',
+      color: 'bg-purple-300',
       tab: 'markets'
     },
     {
       label: 'Earning',
       value: earning === null ? null : earning + (vaultsValue ?? 0),
       failed: holdings.error,
-      color: 'var(--emerald-500)',
+      color: 'bg-emerald-500',
       tab: 'earn',
       note: earningApy === null ? null : `${earningApy.toFixed(2)}% APY`
     }
@@ -262,12 +286,12 @@ export function OverviewTab({
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-5">
         <div className="flex flex-col gap-2">
-          <span className="text-[15px] text-[var(--slate-500)]">Total balance</span>
+          <span className="text-[15px] text-muted">Total balance</span>
           <span className="text-5xl md:text-[64px] font-bold tracking-[-0.03em] leading-none">
             <Money value={totalWithPositions} />
           </span>
           {holdings.error && (
-            <span className="text-[15px] text-[var(--red-700)] font-medium">
+            <span className="text-[15px] text-destructive font-medium">
               Couldn't load your balance. Refresh to try again.
             </span>
           )}
@@ -281,32 +305,38 @@ export function OverviewTab({
               key={b.label}
               type="button"
               onClick={() => go(b.tab)}
-              className="flex flex-col gap-2.5 p-4 rounded-2xl border border-[var(--slate-200)] bg-white text-left cursor-pointer hover:border-[var(--slate-400)] transition-colors"
+              className="flex flex-col gap-2.5 p-4 rounded-2xl border border-slate-200 bg-white text-left cursor-pointer hover:border-border-hover transition-colors"
             >
-              <span className="flex items-center gap-2 text-sm text-[var(--slate-500)]">
-                <span className="w-2 h-2 rounded-full" style={{ background: b.color }} />
+              <span className="flex items-center gap-2 text-sm text-muted">
+                <span className={cn('w-2 h-2 rounded-full', b.color)} />
                 {b.label}
               </span>
               <span className="text-[22px] font-bold">
                 {b.value === null && b.tab === 'markets' && !holdings.loading ? (
-                  <span className="text-[var(--slate-400)]">See Markets</span>
+                  <span className="text-slate-400">See Markets</span>
                 ) : (
                   <Money value={b.value} failed={b.failed} />
                 )}
               </span>
               {'note' in b && b.note && (
-                <span className="text-sm font-bold text-[var(--emerald-700)] -mt-1">{b.note}</span>
+                <span className="text-sm font-bold text-success -mt-1">{b.note}</span>
               )}
             </button>
           ))}
         </div>
         <div className="grid grid-cols-2 gap-2.5 md:hidden">
-          <button type="button" onClick={onAdd} className="btn btn-primary btn-lg h-12">
+          <Button type="button" size="lg" onClick={onAdd} className="justify-center">
             Add money
-          </button>
-          <button type="button" onClick={onWithdraw} className="btn btn-secondary btn-lg h-12">
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="lg"
+            onClick={onWithdraw}
+            className="justify-center"
+          >
             Withdraw
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -314,10 +344,10 @@ export function OverviewTab({
 
       <div className="flex flex-col gap-3">
         <div className="flex justify-between items-center">
-          <SectionTitle>Recent activity</SectionTitle>
-          <button type="button" onClick={() => go('activity')} className="btn btn-ghost btn-md">
+          <span className={SECTION_TITLE}>Recent activity</span>
+          <Button type="button" variant="ghost" onClick={() => go('activity')}>
             See all
-          </button>
+          </Button>
         </div>
         <ActivityList activity={activity} limit={4} />
       </div>
@@ -339,16 +369,20 @@ export function HoldingsList({ holdings }: { holdings: Loadable<Holding[]> }) {
     };
   }, [holdings.data]);
   return (
-    <RowList>
+    <Card className={ROW_LIST}>
       {holdings.loading ? (
         <div className="py-4 flex items-center gap-3">
           <Skeleton className="w-10 h-10" />
           <Skeleton className="h-4 flex-1" />
         </div>
       ) : holdings.error ? (
-        <EmptyState title="Couldn't load your balances">Refresh the page to try again.</EmptyState>
+        <EmptyNotice title="Couldn't load your balances">
+          Refresh the page to try again.
+        </EmptyNotice>
       ) : rows.length === 0 ? (
-        <EmptyState title="Your wallet is empty">Add money to get your agents started.</EmptyState>
+        <EmptyNotice title="Your wallet is empty">
+          Add money to get your agents started.
+        </EmptyNotice>
       ) : (
         rows.map((h) => {
           const look = looks[h.address];
@@ -358,10 +392,10 @@ export function HoldingsList({ holdings }: { holdings: Loadable<Holding[]> }) {
                 <img
                   src={look.logo}
                   alt=""
-                  className="w-10 h-10 rounded-full flex-shrink-0 bg-[var(--slate-100)] object-cover"
+                  className="w-10 h-10 rounded-full flex-shrink-0 bg-slate-100 object-cover"
                 />
               ) : (
-                <span className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-[15px] flex-shrink-0 bg-[var(--slate-100)] text-[var(--slate-700)]">
+                <span className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-[15px] flex-shrink-0 bg-slate-100 text-slate-700">
                   {(look?.name ?? h.name).charAt(0).toUpperCase()}
                 </span>
               )}
@@ -373,31 +407,31 @@ export function HoldingsList({ holdings }: { holdings: Loadable<Holding[]> }) {
           );
         })
       )}
-    </RowList>
+    </Card>
   );
 }
 
 export function ReceivePanel({ address }: { address: string }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="bg-[var(--purple-50)] border border-[var(--purple-200)] rounded-2xl px-5 py-4 flex flex-wrap gap-3 items-center justify-between">
+    <div className="bg-background-info border border-purple-200 rounded-2xl px-5 py-4 flex flex-wrap gap-3 items-center justify-between">
       <span className="flex flex-col gap-1 min-w-0">
         <span className="text-sm font-bold">Receive from another wallet or exchange</span>
-        <span className="oms-mono text-[13px] text-[var(--slate-600)] break-all">{address}</span>
-        <span className="text-xs text-[var(--slate-500)]">Send only on the Polygon network.</span>
+        <span className="oms-mono text-[13px] text-slate-600 break-all">{address}</span>
+        <span className="text-xs text-muted">Send only on the Polygon network.</span>
       </span>
-      <button
+      <Button
         type="button"
-        className="btn btn-secondary btn-md"
+        variant="secondary"
         onClick={() => {
           void navigator.clipboard?.writeText(address).catch(() => {});
           setCopied(true);
           setTimeout(() => setCopied(false), 1600);
         }}
       >
-        {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+        {copied ? <Check /> : <Copy />}
         {copied ? 'Copied' : 'Copy address'}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -417,24 +451,25 @@ export function WalletTab({
   return (
     <div className="flex flex-col gap-8">
       <div className="flex gap-2 flex-wrap">
-        <button type="button" onClick={onAdd} className="btn btn-secondary btn-lg">
+        <Button type="button" variant="secondary" size="lg" onClick={onAdd}>
           Add money
-        </button>
-        <button type="button" onClick={onWithdraw} className="btn btn-secondary btn-lg">
+        </Button>
+        <Button type="button" variant="secondary" size="lg" onClick={onWithdraw}>
           Withdraw
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          variant="secondary"
+          size="lg"
           onClick={() => setShowReceive((v) => !v)}
-          className={`btn btn-secondary btn-lg ${showReceive ? 'is-active' : ''}`}
           aria-expanded={showReceive}
         >
           Receive
-        </button>
+        </Button>
       </div>
       {showReceive && <ReceivePanel address={address} />}
       <div className="flex flex-col gap-3">
-        <SectionTitle>What you hold</SectionTitle>
+        <span className={SECTION_TITLE}>What you hold</span>
         <HoldingsList holdings={holdings} />
       </div>
     </div>
@@ -460,23 +495,17 @@ export function AskAgent({
 }) {
   return (
     <div className="flex flex-col gap-3">
-      <SectionTitle>{title}</SectionTitle>
-      <RowList>
+      <span className={SECTION_TITLE}>{title}</span>
+      <Card className={ROW_LIST}>
         {prompts.map((t, i) => (
-          <div key={t} className="flex items-center gap-3.5 py-3.5">
-            <span className="flex-1 min-w-0">
-              <CommandLine text={t} />
-            </span>
-            <CopyButton
-              size="md"
-              label="Copy"
-              copied={ctx.copied === `${id}${i}`}
-              onClick={() => ctx.copy(`${id}${i}`, buildPrompt(t, SKILL_URL))}
-              className="flex-shrink-0"
-            />
-          </div>
+          <PromptRow
+            key={t}
+            text={t}
+            copied={ctx.copied === `${id}${i}`}
+            onCopy={() => ctx.copy(`${id}${i}`, buildPrompt(t, SKILL_URL))}
+          />
         ))}
-      </RowList>
+      </Card>
     </div>
   );
 }
@@ -534,48 +563,49 @@ export function MarketsTab({
             [
               'Gain',
               positions.data ? signedUsd(gain) : null,
-              gain >= 0 ? 'var(--emerald-700)' : 'var(--red-700)'
+              gain >= 0 ? 'text-success' : 'text-destructive'
             ]
           ].map(([label, v, color]) => (
-            <Panel key={label} pad="p-[18px]" className="flex flex-col gap-2 rounded-[20px]">
-              <span className="text-sm text-[var(--slate-500)]">{label}</span>
-              <span className="text-[28px] font-bold" style={{ color: color ?? undefined }}>
+            <Card key={label} className="p-[18px] flex flex-col gap-2 rounded-[20px]">
+              <span className="text-sm text-muted">{label}</span>
+              <span className={cn('text-[28px] font-bold', color)}>
                 {v ?? <Skeleton className="h-7 w-24" />}
               </span>
-            </Panel>
+            </Card>
           ))}
         </div>
       )}
 
       <div className="flex flex-col gap-3">
-        <SectionTitle
-          aside={<span className="oms-badge oms-badge--neutral oms-badge--sm">Polymarket</span>}
-        >
-          Your predictions
-        </SectionTitle>
+        <div className="flex items-center gap-2">
+          <span className={SECTION_TITLE}>Your predictions</span>
+          <Badge variant="neutral" size="sm">
+            Polymarket
+          </Badge>
+        </div>
         {!hasAccount ? (
-          <RowList>
-            <EmptyState title="No predictions on this page yet">
+          <Card className={ROW_LIST}>
+            <EmptyNotice title="No predictions on this page yet">
               Ask your agent to make a prediction. Open this page from your agent's latest link to
               see your positions here.
-            </EmptyState>
-          </RowList>
+            </EmptyNotice>
+          </Card>
         ) : positions.error ? (
-          <RowList>
-            <EmptyState title="Couldn't load your predictions">
+          <Card className={ROW_LIST}>
+            <EmptyNotice title="Couldn't load your predictions">
               Refresh the page to try again.
-            </EmptyState>
-          </RowList>
+            </EmptyNotice>
+          </Card>
         ) : positions.loading ? (
-          <Panel>
+          <Card>
             <Skeleton className="h-5 w-2/3" />
-          </Panel>
+          </Card>
         ) : rows.length === 0 ? (
-          <RowList>
-            <EmptyState title="No open predictions">
+          <Card className={ROW_LIST}>
+            <EmptyNotice title="No open predictions">
               Ask your agent to find a market for you.
-            </EmptyState>
-          </RowList>
+            </EmptyNotice>
+          </Card>
         ) : (
           <div className="flex flex-col gap-2.5">
             {rows.map((p) => {
@@ -586,26 +616,26 @@ export function MarketsTab({
                   href={p.slug ? `https://polymarket.com/event/${p.slug}` : undefined}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="bg-white border border-[var(--slate-200)] rounded-[20px] px-5 py-[18px] flex flex-col gap-3.5 text-[var(--slate-900)] hover:text-[var(--slate-900)] hover:border-[var(--slate-400)] transition-colors"
+                  className="bg-white border border-slate-200 rounded-[20px] px-5 py-[18px] flex flex-col gap-3.5 text-primary hover:text-primary hover:border-border-hover transition-colors"
                 >
                   <div className="flex justify-between gap-4 items-start">
                     <span className="text-base font-bold leading-snug">{p.title}</span>
                     <span className="flex flex-col gap-1 items-end flex-shrink-0">
                       <span className="text-base font-bold">{usd(p.value)}</span>
                       <span
-                        className="text-[13px] font-bold"
-                        style={{ color: p.pnl >= 0 ? 'var(--emerald-700)' : 'var(--red-700)' }}
+                        className={cn(
+                          'text-[13px] font-bold',
+                          p.pnl >= 0 ? 'text-success' : 'text-destructive'
+                        )}
                       >
                         {signedUsd(p.pnl)}
                       </span>
                     </span>
                   </div>
-                  <div className="flex items-center gap-3 flex-wrap text-[13px] text-[var(--slate-500)]">
-                    <span
-                      className={`oms-badge oms-badge--sm ${yes ? 'oms-badge--success' : 'oms-badge--danger'}`}
-                    >
+                  <div className="flex items-center gap-3 flex-wrap text-[13px] text-muted">
+                    <Badge variant={yes ? 'success' : 'error'} size="sm">
                       {p.outcome}
-                    </span>
+                    </Badge>
                     <span>
                       Bought at {cents(p.avgPrice)} · Now {cents(p.curPrice)}
                     </span>
@@ -620,14 +650,12 @@ export function MarketsTab({
                       </span>
                     )}
                   </div>
-                  <div className="h-1.5 rounded-full bg-[var(--slate-100)] overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-[var(--purple-500)]"
-                      style={{
-                        width: `${Math.round(Math.min(1, Math.max(0, p.curPrice)) * 100)}%`
-                      }}
-                    />
-                  </div>
+                  <Progress
+                    value={Math.round(Math.min(1, Math.max(0, p.curPrice)) * 100)}
+                    size="sm"
+                    trackClassName="h-1.5 bg-slate-100"
+                    aria-label={`${p.outcome} price`}
+                  />
                 </a>
               );
             })}
@@ -668,41 +696,39 @@ export function EarnTab({
   const prime = vaults.data?.[0];
   return (
     <div className="flex flex-col gap-8">
-      <Panel className="flex flex-wrap gap-6 justify-between items-end">
+      <Card className="flex flex-wrap gap-6 justify-between items-end">
         <div className="flex flex-col gap-2">
-          <span className="text-[15px] text-[var(--slate-500)]">Earning</span>
+          <span className="text-[15px] text-muted">Earning</span>
           <span className="text-[44px] font-bold tracking-[-0.02em] leading-none">
             <Money value={earningTotal} failed={failed} />
           </span>
           {failed && (
-            <span className="text-sm text-[var(--red-700)] font-medium">
+            <span className="text-sm text-destructive font-medium">
               Couldn't load your balance. Refresh to try again.
             </span>
           )}
-          {earningTotal === 0 && (
-            <span className="text-sm text-[var(--slate-500)]">Nothing deposited yet.</span>
-          )}
+          {earningTotal === 0 && <span className="text-sm text-muted">Nothing deposited yet.</span>}
         </div>
         {prime && earningTotal !== null && earningTotal > 0 && (
           <div className="flex flex-col gap-1 items-end">
-            <span className="text-sm text-[var(--slate-500)]">At the Prime rate</span>
+            <span className="text-sm text-muted">At the Prime rate</span>
             <span className="text-lg font-bold">
               ≈ {usd((earningTotal * prime.apy) / 100)} a year
             </span>
           </div>
         )}
-      </Panel>
+      </Card>
 
       <div className="flex flex-col gap-3">
-        <SectionTitle>Ways to earn</SectionTitle>
+        <span className={SECTION_TITLE}>Ways to earn</span>
         {vaults.error ? (
-          <RowList>
-            <EmptyState title="Couldn't load rates">Refresh the page to try again.</EmptyState>
-          </RowList>
+          <Card className={ROW_LIST}>
+            <EmptyNotice title="Couldn't load rates">Refresh the page to try again.</EmptyNotice>
+          </Card>
         ) : vaults.data?.length === 0 ? (
-          <RowList>
-            <EmptyState title="No vaults open right now">Check back soon.</EmptyState>
-          </RowList>
+          <Card className={ROW_LIST}>
+            <EmptyNotice title="No vaults open right now">Check back soon.</EmptyNotice>
+          </Card>
         ) : (
           <div
             className="grid gap-3"
@@ -711,45 +737,45 @@ export function EarnTab({
             {(vaults.data ?? [null, null, null]).map((v, i) => {
               if (!v) {
                 return (
-                  <Panel key={i} pad="p-5">
+                  <Card key={i} className="p-5">
                     <Skeleton className="h-24 w-full" />
-                  </Panel>
+                  </Card>
                 );
               }
               const mine = vaultBalances.data?.[v.address] ?? null;
               return (
-                <Panel
+                <Card
                   key={v.address}
-                  pad="p-5"
-                  className={`flex flex-col gap-4 ${i === 0 ? '!border-[var(--purple-200)]' : ''}`}
+                  className={cn('p-5 flex flex-col gap-4', i === 0 && 'border-purple-200')}
                 >
                   <div className="flex justify-between items-center gap-2">
                     <span className="text-[17px] font-bold">{v.tier.name}</span>
-                    <span className={`oms-badge oms-badge--sm ${v.tier.badge}`}>{v.tier.risk}</span>
+                    <Badge variant={TIER_BADGE[v.tier.badge] ?? 'neutral'} size="sm">
+                      {v.tier.risk}
+                    </Badge>
                   </div>
                   <span className="flex items-baseline gap-1.5">
-                    <span className="text-[32px] font-bold text-[var(--purple-500)]">
-                      {v.apy.toFixed(2)}%
-                    </span>
-                    <span className="text-sm text-[var(--slate-500)]">a year</span>
+                    <span className="text-[32px] font-bold text-brand">{v.apy.toFixed(2)}%</span>
+                    <span className="text-sm text-muted">a year</span>
                   </span>
-                  <span className="text-sm leading-snug text-[var(--slate-600)]">
+                  <span className="text-sm leading-snug text-slate-600">
                     {v.tier.blurb} Earn on {v.symbol} and withdraw anytime.
                   </span>
-                  <div className="flex justify-between text-[13px] text-[var(--slate-500)] pt-3 border-t border-[var(--slate-100)]">
+                  <div className="flex justify-between text-[13px] text-muted pt-3 border-t border-slate-100">
                     <span>{usd(v.tvl)} in the vault</span>
-                    <span className="font-bold text-[var(--slate-900)]">
+                    <span className="font-bold text-primary">
                       {mine === null ? '' : mine > 0 ? `${usd(mine)} deposited` : 'Not deposited'}
                     </span>
                   </div>
-                  <button
+                  <Button
                     type="button"
+                    size="lg"
                     onClick={() => onDeposit(v)}
-                    className="btn btn-primary btn-lg"
+                    className="justify-center"
                   >
                     Deposit
-                  </button>
-                </Panel>
+                  </Button>
+                </Card>
               );
             })}
           </div>
@@ -758,7 +784,7 @@ export function EarnTab({
 
       {!!onPolygon && (
         <div className="flex flex-col gap-3">
-          <SectionTitle>Also earning on Polygon</SectionTitle>
+          <span className={SECTION_TITLE}>Also earning on Polygon</span>
           <HoldingsList
             holdings={{ ...holdings, data: holdings.data!.filter((h) => h.kind === 'earn') }}
           />
@@ -766,15 +792,15 @@ export function EarnTab({
       )}
 
       <div className="flex flex-col gap-3">
-        <SectionTitle>Or let your agent manage it</SectionTitle>
-        <Panel pad="p-5">
+        <span className={SECTION_TITLE}>Or let your agent manage it</span>
+        <Card className="p-5">
           <AgentPromptBox
             {...ctx}
             id="earn"
             skill={SKILL_URL}
             text="keep $300 available to spend and move anything above that into the Prime earn vault on Katana. Check every Monday."
           />
-        </Panel>
+        </Card>
       </div>
     </div>
   );
@@ -795,9 +821,16 @@ export function ActivityTab({ activity }: { activity: Loadable<ActivityItem[]> }
             ['out', 'Money out']
           ] as const
         ).map(([id, label]) => (
-          <Chip key={id} active={filter === id} onClick={() => setFilter(id)}>
+          <Button
+            key={id}
+            type="button"
+            variant={filter === id ? 'default' : 'secondary'}
+            aria-pressed={filter === id}
+            onClick={() => setFilter(id)}
+            className="h-9 rounded-full px-4"
+          >
             {label}
-          </Chip>
+          </Button>
         ))}
       </div>
       <ActivityList activity={{ ...activity, data }} />
@@ -835,36 +868,36 @@ export function SettingsTab({ address, ctx }: { address: string; ctx: AgentConte
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-3">
-        <SectionTitle>Spending limit</SectionTitle>
-        <Panel pad="p-5" className="flex flex-col gap-5">
-          <span className="text-sm text-[var(--slate-500)] leading-snug">
+        <span className={SECTION_TITLE}>Spending limit</span>
+        <Card className="p-5 flex flex-col gap-5">
+          <span className="text-sm text-muted leading-snug">
             Your agents can only spend up to this amount. You approve every change from your email
             or browser.
           </span>
           <AmountChips values={[50, 100, 200, 500]} value={limit} onPick={setLimit} />
           <AgentPromptBox {...ctx} id="limit" skill={SKILL_URL} text={limitText} />
-        </Panel>
+        </Card>
       </div>
 
       <div className="flex flex-col gap-3">
-        <SectionTitle>Account</SectionTitle>
-        <RowList>
+        <span className={SECTION_TITLE}>Account</span>
+        <Card className={ROW_LIST}>
           {links.map((l) => (
             <a
               key={l.label}
               href={l.href}
               target="_blank"
               rel="noopener noreferrer"
-              className="w-full flex items-center gap-4 py-4 text-[var(--slate-900)] hover:text-[var(--slate-900)]"
+              className="w-full flex items-center gap-4 py-4 text-primary hover:text-primary"
             >
               <span className="flex-1 flex flex-col gap-1 min-w-0">
                 <span className="text-[15px] font-bold">{l.label}</span>
-                <span className="text-[13px] text-[var(--slate-500)] truncate">{l.desc}</span>
+                <span className="text-[13px] text-muted truncate">{l.desc}</span>
               </span>
-              <ExternalLink className="w-4 h-4 text-[var(--slate-400)] flex-shrink-0" />
+              <ExternalLink className="w-4 h-4 text-slate-400 flex-shrink-0" />
             </a>
           ))}
-        </RowList>
+        </Card>
       </div>
     </div>
   );
