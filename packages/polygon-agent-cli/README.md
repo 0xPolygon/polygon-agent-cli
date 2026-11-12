@@ -46,7 +46,7 @@ Polygon Agent CLI gives AI agents everything they need to operate onchain:
 
 Give your assistant this link and ask it to set up your wallet:
 
-```
+```text
 https://agents.polygon.technology/skill.md
 ```
 
