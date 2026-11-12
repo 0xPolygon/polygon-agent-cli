@@ -38,12 +38,11 @@ export interface AgentContext {
 
 const EXPLORER = 'https://polygonscan.com';
 
-// The classes of a divided list inside a card; each row gets a hairline except the last.
 const ROW_LIST = 'px-5 py-1 divide-y divide-slate-100';
 
 const SECTION_TITLE = 'text-lg font-bold';
 
-// The vault tiers name their badge by the old badge class; this maps it to a Badge variant.
+// earn.ts names a tier's badge by class; Badge takes a variant.
 const TIER_BADGE: Record<string, 'success' | 'warning' | 'error'> = {
   'oms-badge--success': 'success',
   'oms-badge--warning': 'warning',

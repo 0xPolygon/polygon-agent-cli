@@ -9,7 +9,6 @@ interface AmountChipsProps {
 
 const dollars = (v: number) => '$' + v.toLocaleString('en-US');
 
-/** Option chips for amounts (top-up, limits). */
 export function AmountChips({ values, value, onPick, format = dollars }: AmountChipsProps) {
   return (
     <div className="grid grid-cols-4 gap-2">

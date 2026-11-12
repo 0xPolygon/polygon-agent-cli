@@ -9,8 +9,7 @@ import { Toaster } from './components/Toaster.tsx';
 import './index.css';
 import { trailsApiKey } from './config.ts';
 
-// Where the brand's values differ from the preset's: warning text, the secondary button's
-// outline and the info badge's stroke.
+// Brand values that differ from the preset's.
 const THEME_OVERRIDES = {
   light: { warning: '#d97706', borderButton: '#64708f', borderInfo: '#eae4f5' }
 };

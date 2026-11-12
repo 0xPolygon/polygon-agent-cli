@@ -10,7 +10,6 @@ interface AgentPromptBoxProps {
   copy: (id: string, text: string) => void;
 }
 
-/** A self-contained "ask your agent" block: the prompt and a copy button. */
 export function AgentPromptBox({ text, skill, id, copied, copy }: AgentPromptBoxProps) {
   return (
     <div className="flex flex-col gap-4">

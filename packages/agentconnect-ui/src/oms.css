@@ -1,5 +1,5 @@
-/* Names and classes the sign-in, connect and approve pages still use. The dashboard takes its
-   styling from the design system and does not read this file. */
+/* Tokens and classes for the sign-in, connect and approve pages; the dashboard does not read
+   this file. */
 
 :root {
   --purple-50: var(--color-purple-50);

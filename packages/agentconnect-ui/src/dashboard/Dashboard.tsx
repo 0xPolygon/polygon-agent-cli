@@ -59,7 +59,7 @@ function isOverviewSection(v: unknown): v is OverviewSection {
   return v === 'tokens' || v === 'history' || v === 'agents';
 }
 
-// Tab components navigate with these ids.
+// Tab components still navigate by tab id; this maps each to its page and section.
 const LEGACY_TARGETS: Record<string, { page: Page; section?: OverviewSection }> = {
   overview: { page: 'overview' },
   wallet: { page: 'overview', section: 'tokens' },

@@ -18,7 +18,6 @@ function ToastList() {
   );
 }
 
-/** The design system's toast provider with a viewport placed for this app's layouts. */
 export function Toaster({ children }: ToasterProps) {
   return (
     <ToastPrimitive.Provider>

@@ -7,7 +7,6 @@ interface PromptRowProps {
   onCopy: () => void;
 }
 
-/** One suggested prompt with its copy button, for a divided list. */
 export function PromptRow({ text, copied, onCopy }: PromptRowProps) {
   return (
     <div className="flex items-center gap-3.5 py-3.5">
