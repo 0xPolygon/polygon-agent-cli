@@ -17,3 +17,7 @@ export const MARKET_PROMPTS = [
   'sell any Polymarket position that has dropped more than 20% since I bought it.',
   'summarize how my predictions did this month.'
 ];
+
+export const YIELD_PROMPTS = [
+  'keep $300 available to spend and move anything above that into the Prime earn vault on Katana. Check every Monday.'
+];

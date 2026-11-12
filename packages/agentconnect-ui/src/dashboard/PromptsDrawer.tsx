@@ -16,13 +16,14 @@ import type { AgentContext } from './types.js';
 
 import { PromptRow } from '../components/PromptRow.js';
 import { buildPrompt, SKILL_URL } from './agents.js';
-import { MARKET_PROMPTS, OVERVIEW_PROMPTS, WALLET_PROMPTS } from './prompts.js';
+import { MARKET_PROMPTS, OVERVIEW_PROMPTS, WALLET_PROMPTS, YIELD_PROMPTS } from './prompts.js';
 
-export type PromptGroup = 'wallet' | 'markets';
+export type PromptGroup = 'wallet' | 'markets' | 'yield';
 
 const GROUPS: { id: PromptGroup; title: string; prompts: string[] }[] = [
   { id: 'wallet', title: 'Wallet prompts', prompts: [...OVERVIEW_PROMPTS, ...WALLET_PROMPTS] },
-  { id: 'markets', title: 'Prediction markets prompts', prompts: MARKET_PROMPTS }
+  { id: 'markets', title: 'Prediction markets prompts', prompts: MARKET_PROMPTS },
+  { id: 'yield', title: 'Yield prompts', prompts: YIELD_PROMPTS }
 ];
 
 interface PromptsDrawerProps {

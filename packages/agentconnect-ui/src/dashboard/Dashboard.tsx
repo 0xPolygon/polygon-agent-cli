@@ -21,6 +21,7 @@ import type { AgentContext, Loadable } from './types.js';
 import { useCopy } from '../hooks/useCopy.js';
 import { fetchActivity, fetchHoldings } from '../indexer';
 import { usd } from '../utils/format.js';
+import { vaultAssets } from '../utils/yieldTotals.js';
 import { rememberedEmail } from './account.js';
 import { AppSidebar } from './AppSidebar.js';
 import { ConnectedAgents } from './ConnectedAgents.js';
@@ -34,11 +35,11 @@ import { ProfileMenu } from './ProfileMenu.js';
 import { PromptsDrawer } from './PromptsDrawer.js';
 import { signOut } from './signin.js';
 import { ActivityTab } from './tabs/ActivityTab.js';
-import { EarnTab } from './tabs/EarnTab.js';
 import { MarketsTab } from './tabs/MarketsTab.js';
 import { OverviewTab } from './tabs/OverviewTab.js';
 import { SettingsTab } from './tabs/SettingsTab.js';
 import { WalletTab } from './tabs/WalletTab.js';
+import { YieldTab } from './tabs/YieldTab.js';
 import { TopBar } from './TopBar.js';
 
 type OverviewSection = 'tokens' | 'history' | 'agents';
@@ -124,9 +125,7 @@ export function Dashboard({
     [walletAddress, vaults.data]
   );
   const polygonRates = useLoad<Record<string, number>>(fetchPolygonRates, []);
-  const vaultsValue = vaultBalances.data
-    ? Object.values(vaultBalances.data).reduce((s, v) => s + v, 0)
-    : null;
+  const vaultsValue = vaultAssets(vaultBalances.data)?.total ?? null;
 
   useEffect(() => {
     if (copied)
@@ -229,12 +228,12 @@ export function Dashboard({
               />
             )}
             {page === 'yield' && (
-              <EarnTab
+              <YieldTab
                 holdings={holdings}
                 vaults={vaults}
                 vaultBalances={vaultBalances}
-                ctx={ctx}
                 onDeposit={(vault) => setModal({ kind: 'deposit', vault })}
+                onOpenPrompts={() => openPrompts('yield')}
               />
             )}
             {page === 'settings' && <SettingsTab address={walletAddress} ctx={ctx} />}

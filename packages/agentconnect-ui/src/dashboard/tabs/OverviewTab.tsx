@@ -8,6 +8,7 @@ import type { Loadable } from '../types.js';
 
 import { Money } from '../../components/Money.js';
 import { sum } from '../../utils/holdings.js';
+import { earningTotal } from '../../utils/yieldTotals.js';
 
 interface OverviewTabProps {
   holdings: Loadable<Holding[]>;
@@ -48,7 +49,7 @@ export function OverviewTab({
     { label: 'In predictions', value: positionsValue, failed: false, note: null },
     {
       label: 'Earning',
-      value: earning === null ? null : earning + (vaultsValue ?? 0),
+      value: earningTotal({ polygon: earning, vaults: vaultsValue, vaultsSettled: true }),
       failed: holdings.error,
       note: earningApy === null ? null : `${earningApy.toFixed(2)}% APY`
     }
