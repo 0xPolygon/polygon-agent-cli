@@ -1,6 +1,3 @@
-import './oms.css';
-import './App.css';
-
 import { useEffect, useMemo, useState } from 'react';
 
 import type { Session } from './dashboard/signin.js';

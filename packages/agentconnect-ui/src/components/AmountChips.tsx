@@ -1,4 +1,4 @@
-import { Button, cn } from '@polygonlabs/design-system';
+import { Button } from '@polygonlabs/design-system';
 
 interface AmountChipsProps {
   values: number[];
@@ -16,14 +16,11 @@ export function AmountChips({ values, value, onPick, format = dollars }: AmountC
         <Button
           key={v}
           type="button"
-          variant="secondary"
+          variant={v === value ? 'default' : 'secondary'}
           size="lg"
           aria-pressed={v === value}
           onClick={() => onPick(v)}
-          className={cn(
-            'h-11 justify-center rounded-xl text-[15px]',
-            v === value && 'border-primary bg-background-info hover:bg-background-info'
-          )}
+          className="h-11 justify-center rounded-xl text-[15px]"
         >
           {format(v)}
         </Button>
