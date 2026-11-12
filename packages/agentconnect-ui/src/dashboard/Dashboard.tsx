@@ -2,14 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 
 import {
   Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogOverlay,
-  DialogPortal,
-  DialogPrimitive,
-  DialogTitle,
   SidebarProvider,
   Tabs,
   TabsContent,
@@ -23,26 +15,26 @@ import type { ActivityItem, Holding } from '../indexer';
 import type { Page } from './AppSidebar.js';
 import type { Vault } from './earn.js';
 import type { Position } from './markets.js';
+import type { PromptGroup } from './PromptsDrawer.js';
 import type { Session } from './signin.js';
 import type { AgentContext, Loadable } from './types.js';
 
-import { AgentPromptBox } from '../components/AgentPromptBox.js';
-import { AmountChips } from '../components/AmountChips.js';
-import { FundingScreen } from '../components/FundingScreen.js';
 import { useCopy } from '../hooks/useCopy.js';
 import { fetchActivity, fetchHoldings } from '../indexer';
 import { usd } from '../utils/format.js';
 import { rememberedEmail } from './account.js';
-import { SKILL_URL } from './agents.js';
 import { AppSidebar } from './AppSidebar.js';
 import { ConnectedAgents } from './ConnectedAgents.js';
 import { fetchPolygonRates, fetchVaultBalances, fetchVaults } from './earn.js';
 import { fetchPositions, fetchPredictionCash } from './markets.js';
+import { AddMoneyModal } from './modals/AddMoneyModal.js';
+import { DepositModal } from './modals/DepositModal.js';
+import { ReceiveModal } from './modals/ReceiveModal.js';
+import { WithdrawModal } from './modals/WithdrawModal.js';
 import { ProfileMenu } from './ProfileMenu.js';
-import { OVERVIEW_PROMPTS, WALLET_PROMPTS } from './prompts.js';
+import { PromptsDrawer } from './PromptsDrawer.js';
 import { signOut } from './signin.js';
 import { ActivityTab } from './tabs/ActivityTab.js';
-import { AskAgent } from './tabs/AskAgent.js';
 import { EarnTab } from './tabs/EarnTab.js';
 import { MarketsTab } from './tabs/MarketsTab.js';
 import { OverviewTab } from './tabs/OverviewTab.js';
@@ -88,7 +80,11 @@ function useLoad<T>(load: (() => Promise<T>) | null, deps: unknown[]): Loadable<
   return state;
 }
 
-type ModalState = { kind: 'add' } | { kind: 'withdraw' } | { kind: 'deposit'; vault: Vault };
+type ModalState =
+  | { kind: 'add' }
+  | { kind: 'withdraw' }
+  | { kind: 'receive' }
+  | { kind: 'deposit'; vault: Vault };
 
 export function Dashboard({
   walletAddress,
@@ -113,6 +109,8 @@ export function Dashboard({
   const tabsRef = useRef<HTMLDivElement>(null);
   const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
   const [modal, setModal] = useState<ModalState | null>(initialFundOpen ? { kind: 'add' } : null);
+  const [promptsOpen, setPromptsOpen] = useState(false);
+  const [promptGroup, setPromptGroup] = useState<PromptGroup>('wallet');
   const [copied, copy] = useCopy();
   const toast = useToast();
   const owner = session?.wallet === walletAddress.toLowerCase() ? session : null;
@@ -192,6 +190,11 @@ export function Dashboard({
   })();
   const openAdd = () => setModal({ kind: 'add' });
   const openWithdraw = () => setModal({ kind: 'withdraw' });
+  const openReceive = () => setModal({ kind: 'receive' });
+  const openPrompts = (group: PromptGroup) => {
+    setPromptGroup(group);
+    setPromptsOpen(true);
+  };
 
   return (
     <SidebarProvider className="[--sidebar-width:15rem]! h-[100dvh] flex-col overflow-hidden bg-background-primary text-primary">
@@ -208,20 +211,20 @@ export function Dashboard({
       <div className="flex min-h-0 flex-1">
         <AppSidebar page={page} onNavigate={setPage} />
         <main className="min-w-0 flex-1 overflow-y-auto">
-          <div className="mx-auto flex w-full max-w-[800px] flex-col gap-8 px-4 pb-12 pt-6 md:px-0 md:pt-12">
+          <div className="mx-auto flex w-full max-w-[800px] flex-col gap-8 px-4 pb-12 pt-6 md:pt-12 xl:px-0">
             {page === 'overview' && (
-              <>
+              <div className="flex flex-col gap-10">
                 <OverviewTab
                   holdings={holdings}
-                  activity={activity}
                   positionsValue={positionsValue}
                   vaultsValue={vaultsValue}
                   earningApy={earningApy}
                   go={go}
                   onAdd={openAdd}
                   onWithdraw={openWithdraw}
+                  onReceive={openReceive}
+                  onTryAgent={() => openPrompts('wallet')}
                 />
-                <AskAgent ctx={ctx} id="o" prompts={OVERVIEW_PROMPTS} title="Try with your agent" />
                 <div ref={tabsRef} className="scroll-mt-4">
                   <Tabs
                     value={section === 'agents' && !owner ? 'tokens' : section}
@@ -233,13 +236,7 @@ export function Dashboard({
                       {owner && <TabsTrigger value="agents">Connected agents</TabsTrigger>}
                     </TabsList>
                     <TabsContent value="tokens" className="flex flex-col gap-8 pt-6">
-                      <WalletTab
-                        address={walletAddress}
-                        holdings={holdings}
-                        onAdd={openAdd}
-                        onWithdraw={openWithdraw}
-                      />
-                      <AskAgent ctx={ctx} id="w" prompts={WALLET_PROMPTS} />
+                      <WalletTab holdings={holdings} onOpenPrompts={() => openPrompts('wallet')} />
                     </TabsContent>
                     <TabsContent value="history" className="pt-6">
                       <ActivityTab activity={activity} />
@@ -251,14 +248,14 @@ export function Dashboard({
                     )}
                   </Tabs>
                 </div>
-              </>
+              </div>
             )}
             {page === 'markets' && (
               <MarketsTab
                 positions={positions}
                 cash={predictionCash}
                 hasAccount={!!polymarketAddress}
-                ctx={ctx}
+                onOpenPrompts={() => openPrompts('markets')}
               />
             )}
             {page === 'yield' && (
@@ -287,24 +284,17 @@ export function Dashboard({
       </div>
 
       {modal?.kind === 'add' && (
-        <Dialog open onOpenChange={(open) => !open && setModal(null)}>
-          <DialogPortal>
-            <DialogOverlay />
-            {/* No transform or overflow on the popup: the funding widget draws full-screen
-                layers that a transformed or clipping ancestor would confine to this box. */}
-            <DialogPrimitive.Popup className="fixed inset-0 m-auto h-fit w-full max-w-[calc(100%-2rem)] sm:max-w-sm outline-none">
-              <DialogTitle className="sr-only">Fund your agent wallet</DialogTitle>
-              <FundingScreen
-                walletAddress={walletAddress}
-                chainId={chainId}
-                amount={fundAmount}
-                onSkip={() => setModal(null)}
-              />
-            </DialogPrimitive.Popup>
-          </DialogPortal>
-        </Dialog>
+        <AddMoneyModal
+          walletAddress={walletAddress}
+          chainId={chainId}
+          amount={fundAmount}
+          onClose={() => setModal(null)}
+        />
       )}
       {modal?.kind === 'withdraw' && <WithdrawModal ctx={ctx} onClose={() => setModal(null)} />}
+      {modal?.kind === 'receive' && (
+        <ReceiveModal address={walletAddress} onClose={() => setModal(null)} />
+      )}
       {modal?.kind === 'deposit' && (
         <DepositModal
           vault={modal.vault}
@@ -317,86 +307,12 @@ export function Dashboard({
           onClose={() => setModal(null)}
         />
       )}
+      <PromptsDrawer
+        open={promptsOpen}
+        onClose={() => setPromptsOpen(false)}
+        initialGroup={promptGroup}
+        ctx={ctx}
+      />
     </SidebarProvider>
-  );
-}
-
-// Money only moves through the agent (the wallet's key lives with the CLI), so
-// these modals hand the user a ready prompt rather than signing in the browser.
-
-function WithdrawModal({ ctx, onClose }: { ctx: AgentContext; onClose: () => void }) {
-  const [amount, setAmount] = useState(50);
-  return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent responsive className="sm:max-w-[420px] gap-5">
-        <DialogHeader className="pr-8 text-left">
-          <DialogTitle className="text-[22px]">Withdraw</DialogTitle>
-          <DialogDescription>
-            Ask your agent to send money back to you. You confirm the request from your email or
-            browser.
-          </DialogDescription>
-        </DialogHeader>
-        <AmountChips values={[25, 50, 100, 250]} value={amount} onPick={setAmount} />
-        <AgentPromptBox
-          {...ctx}
-          id="withdraw"
-          skill={SKILL_URL}
-          text={`withdraw ${amount} USDC from my agent wallet to my own wallet. Ask me which address to send it to.`}
-        />
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function DepositModal({
-  vault,
-  available,
-  ctx,
-  onClose
-}: {
-  vault: Vault;
-  available: number | null;
-  ctx: AgentContext;
-  onClose: () => void;
-}) {
-  const [amount, setAmount] = useState(100);
-  return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent responsive className="sm:max-w-[420px] gap-5">
-        <DialogHeader className="pr-8 text-left">
-          <DialogTitle className="text-[22px]">{`Deposit into ${vault.tier.name}`}</DialogTitle>
-          <DialogDescription>
-            {available === null
-              ? `Your agent moves ${vault.symbol} from your balance into the ${vault.tier.name} vault.`
-              : `From your available ${vault.symbol} balance of ${usd(available)}.`}
-          </DialogDescription>
-        </DialogHeader>
-        <AmountChips values={[25, 50, 100, 250]} value={amount} onPick={setAmount} />
-        <div className="bg-background-muted rounded-xl px-4 py-3.5 flex flex-col gap-2 text-sm">
-          <span className="flex justify-between">
-            <span className="text-slate-600">Rate</span>
-            <span className="font-bold">{vault.apy.toFixed(2)}% a year</span>
-          </span>
-          <span className="flex justify-between">
-            <span className="text-slate-600">Estimated in 1 year</span>
-            <span className="font-bold text-success">+{usd((amount * vault.apy) / 100)}</span>
-          </span>
-          <span className="flex justify-between">
-            <span className="text-slate-600">Risk</span>
-            <span className="font-bold">{vault.tier.risk}</span>
-          </span>
-          <span className="flex justify-between">
-            <span className="text-slate-600">Withdraw</span>
-            <span className="font-bold">Anytime</span>
-          </span>
-        </div>
-        <AgentPromptBox
-          {...ctx}
-          id="deposit"
-          skill={SKILL_URL}
-          text={`deposit ${amount} ${vault.symbol} into the ${vault.tier.name} earn vault on Katana (vault ${vault.address}). Bridge the ${vault.symbol} from Polygon to Katana first if needed, then report the rate.`}
-        />
-      </DialogContent>
-    </Dialog>
   );
 }

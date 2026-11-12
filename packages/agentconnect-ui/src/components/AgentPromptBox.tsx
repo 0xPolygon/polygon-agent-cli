@@ -8,15 +8,17 @@ interface AgentPromptBoxProps {
   id: string;
   copied: string | null;
   copy: (id: string, text: string) => void;
+  variant?: 'default' | 'secondary';
 }
 
-export function AgentPromptBox({ text, skill, id, copied, copy }: AgentPromptBoxProps) {
+export function AgentPromptBox({ text, skill, id, copied, copy, variant }: AgentPromptBoxProps) {
   return (
     <div className="flex flex-col gap-4">
       <CommandLine text={text} />
       <CopyButton
         copied={copied === id}
         onClick={() => copy(id, buildPrompt(text, skill))}
+        variant={variant}
         className="w-full"
       />
     </div>

@@ -1,23 +1,22 @@
 import { Badge, Card, cn, Progress, Skeleton } from '@polygonlabs/design-system';
 
 import type { Position } from '../markets.js';
-import type { AgentContext, Loadable } from '../types.js';
+import type { Loadable } from '../types.js';
 
 import { EmptyNotice } from '../../components/EmptyNotice.js';
+import { PromptsButton } from '../../components/PromptsButton.js';
 import { signedUsd, usd } from '../../utils/format.js';
 import { cents } from '../markets.js';
-import { MARKET_PROMPTS } from '../prompts.js';
-import { AskAgent } from './AskAgent.js';
 import { ROW_LIST, SECTION_TITLE } from './styles.js';
 
 interface MarketsTabProps {
   positions: Loadable<Position[]>;
   cash: Loadable<number>;
   hasAccount: boolean;
-  ctx: AgentContext;
+  onOpenPrompts: () => void;
 }
 
-export function MarketsTab({ positions, cash, hasAccount, ctx }: MarketsTabProps) {
+export function MarketsTab({ positions, cash, hasAccount, onOpenPrompts }: MarketsTabProps) {
   const rows = positions.data ?? [];
   const value = rows.reduce((s, p) => s + p.value, 0);
   const cost = rows.reduce((s, p) => s + p.cost, 0);
@@ -59,6 +58,9 @@ export function MarketsTab({ positions, cash, hasAccount, ctx }: MarketsTabProps
           <Badge variant="neutral" size="sm">
             Polymarket
           </Badge>
+          <span className="ml-auto">
+            <PromptsButton onClick={onOpenPrompts} />
+          </span>
         </div>
         {!hasAccount ? (
           <Card className={ROW_LIST}>
@@ -139,8 +141,6 @@ export function MarketsTab({ positions, cash, hasAccount, ctx }: MarketsTabProps
           </div>
         )}
       </div>
-
-      <AskAgent ctx={ctx} id="m" prompts={MARKET_PROMPTS} />
     </div>
   );
 }

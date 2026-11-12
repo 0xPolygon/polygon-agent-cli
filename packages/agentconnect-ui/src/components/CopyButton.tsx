@@ -7,6 +7,7 @@ interface CopyButtonProps {
   onClick: () => void;
   label?: string;
   size?: 'lg' | 'default';
+  variant?: 'default' | 'secondary';
   className?: string;
 }
 
@@ -15,12 +16,13 @@ export function CopyButton({
   onClick,
   label = 'Copy',
   size = 'lg',
+  variant = 'secondary',
   className
 }: CopyButtonProps) {
   return (
     <Button
       type="button"
-      variant="secondary"
+      variant={variant}
       size={size}
       onClick={onClick}
       className={cn('justify-center', className)}

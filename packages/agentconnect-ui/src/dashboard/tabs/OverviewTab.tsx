@@ -1,17 +1,15 @@
-import { Button, cn } from '@polygonlabs/design-system';
+import { ArrowDownLeft, ArrowUpRight, Bot, Plus } from 'lucide-react';
 
-import type { ActivityItem, Holding } from '../../indexer';
+import { Button, Separator } from '@polygonlabs/design-system';
+
+import type { Holding } from '../../indexer';
 import type { Loadable } from '../types.js';
 
 import { Money } from '../../components/Money.js';
 import { sum } from '../../utils/holdings.js';
-import { ActivityList } from './ActivityList.js';
-import { FlowChart } from './FlowChart.js';
-import { SECTION_TITLE } from './styles.js';
 
 interface OverviewTabProps {
   holdings: Loadable<Holding[]>;
-  activity: Loadable<ActivityItem[]>;
   positionsValue: number | null;
   // Money in the Katana earn vaults (not in `holdings`, which is Polygon only).
   vaultsValue: number | null;
@@ -20,17 +18,20 @@ interface OverviewTabProps {
   go: (tab: string) => void;
   onAdd: () => void;
   onWithdraw: () => void;
+  onReceive: () => void;
+  onTryAgent: () => void;
 }
 
 export function OverviewTab({
   holdings,
-  activity,
   positionsValue,
   vaultsValue,
   earningApy,
   go,
   onAdd,
-  onWithdraw
+  onWithdraw,
+  onReceive,
+  onTryAgent
 }: OverviewTabProps) {
   const total = holdings.error ? 0 : sum(holdings.data);
   const totalWithPositions =
@@ -41,93 +42,81 @@ export function OverviewTab({
       label: 'Available to spend',
       value: sum(holdings.data, 'spend'),
       failed: holdings.error,
-      color: 'bg-brand',
-      tab: 'wallet'
+      note: null
     },
-    {
-      label: 'In predictions',
-      value: positionsValue,
-      failed: false,
-      color: 'bg-purple-300',
-      tab: 'markets'
-    },
+    { label: 'In predictions', value: positionsValue, failed: false, note: null },
     {
       label: 'Earning',
       value: earning === null ? null : earning + (vaultsValue ?? 0),
       failed: holdings.error,
-      color: 'bg-emerald-500',
-      tab: 'earn',
       note: earningApy === null ? null : `${earningApy.toFixed(2)}% APY`
     }
   ];
+  const actions = [
+    { label: 'Add money', icon: Plus, onClick: onAdd },
+    { label: 'Withdraw money', icon: ArrowUpRight, onClick: onWithdraw },
+    { label: 'Receive money', icon: ArrowDownLeft, onClick: onReceive },
+    { label: 'Try with your agent', icon: Bot, onClick: onTryAgent }
+  ];
   return (
-    <div className="flex flex-col gap-8">
-      <div className="flex flex-col gap-5">
-        <div className="flex flex-col gap-2">
-          <span className="text-[15px] text-muted">Total balance</span>
-          <span className="text-5xl md:text-[64px] font-bold tracking-[-0.03em] leading-none">
-            <Money value={totalWithPositions} />
-          </span>
-          {holdings.error && (
-            <span className="text-[15px] text-destructive font-medium">
-              Couldn't load your balance. Refresh to try again.
+    <div className="flex flex-col gap-10">
+      <div className="flex flex-col gap-10">
+        <div className="grid grid-cols-[minmax(0,1fr)] items-center gap-6 md:grid-cols-[auto_1px_1fr] md:gap-10">
+          <div className="flex flex-col items-center gap-2 md:items-start">
+            <span className="text-sm font-medium text-muted">Balance</span>
+            <span className="text-6xl leading-[1.1] font-bold break-all">
+              <Money value={totalWithPositions} />
             </span>
-          )}
+            {holdings.error && (
+              <span className="text-sm text-destructive font-medium">
+                Couldn't load your balance. Refresh to try again.
+              </span>
+            )}
+          </div>
+          <Separator orientation="vertical" className="hidden h-full md:block" />
+          <dl className="m-0 flex flex-col gap-3">
+            {buckets.map((b) => (
+              <div key={b.label} className="flex items-baseline gap-1">
+                <dt className="text-sm font-medium">
+                  {b.label}
+                  {b.note && <span className="ml-2 text-xs font-medium text-muted">{b.note}</span>}
+                </dt>
+                <span
+                  aria-hidden="true"
+                  className="mb-1 min-w-4 flex-1 border-b-2 border-dotted border-slate-300"
+                />
+                <dd className="m-0 text-xl font-bold">
+                  {b.value === null && b.label === 'In predictions' && !holdings.loading ? (
+                    <Button
+                      type="button"
+                      variant="link"
+                      onClick={() => go('markets')}
+                      className="h-auto min-w-0 p-0 text-sm"
+                    >
+                      See Markets
+                    </Button>
+                  ) : (
+                    <Money value={b.value} failed={b.failed} />
+                  )}
+                </dd>
+              </div>
+            ))}
+          </dl>
         </div>
-        <div
-          className="grid gap-3"
-          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}
-        >
-          {buckets.map((b) => (
-            <button
-              key={b.label}
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {actions.map(({ label, icon: Icon, onClick }) => (
+            <Button
+              key={label}
               type="button"
-              onClick={() => go(b.tab)}
-              className="flex flex-col gap-2.5 p-4 rounded-2xl border border-slate-200 bg-white text-left cursor-pointer hover:border-border-hover transition-colors"
+              variant="secondary"
+              onClick={onClick}
+              className="justify-center"
             >
-              <span className="flex items-center gap-2 text-sm text-muted">
-                <span className={cn('w-2 h-2 rounded-full', b.color)} />
-                {b.label}
-              </span>
-              <span className="text-[22px] font-bold">
-                {b.value === null && b.tab === 'markets' && !holdings.loading ? (
-                  <span className="text-slate-400">See Markets</span>
-                ) : (
-                  <Money value={b.value} failed={b.failed} />
-                )}
-              </span>
-              {'note' in b && b.note && (
-                <span className="text-sm font-bold text-success -mt-1">{b.note}</span>
-              )}
-            </button>
+              <Icon />
+              {label}
+            </Button>
           ))}
         </div>
-        <div className="grid grid-cols-2 gap-2.5 md:max-w-[400px]">
-          <Button type="button" size="lg" onClick={onAdd} className="justify-center">
-            Add money
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            size="lg"
-            onClick={onWithdraw}
-            className="justify-center"
-          >
-            Withdraw
-          </Button>
-        </div>
-      </div>
-
-      {activity.data && <FlowChart activity={activity.data} />}
-
-      <div className="flex flex-col gap-3">
-        <div className="flex justify-between items-center">
-          <span className={SECTION_TITLE}>Recent activity</span>
-          <Button type="button" variant="ghost" onClick={() => go('activity')}>
-            See all
-          </Button>
-        </div>
-        <ActivityList activity={activity} limit={4} />
       </div>
     </div>
   );
