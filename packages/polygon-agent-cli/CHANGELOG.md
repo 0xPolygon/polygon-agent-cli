@@ -1,5 +1,13 @@
 # Change Log
 
+## 0.17.4
+
+### Patch Changes
+
+- [#266](https://github.com/0xPolygon/polygon-agent-cli/pull/266) [`e9c7f04`](https://github.com/0xPolygon/polygon-agent-cli/commit/e9c7f04110d46278e884c79077e60e2d1b67af88) Thanks [@shan8851](https://github.com/shan8851)! - Remove the unused `dotenv` dependency, so installing the CLI pulls in one package fewer. The CLI never loaded it; nothing about how it reads its environment changes.
+
+- [#262](https://github.com/0xPolygon/polygon-agent-cli/pull/262) [`ef7dd31`](https://github.com/0xPolygon/polygon-agent-cli/commit/ef7dd31fc4cd782fc9f496c48a55815ab0381e5a) Thanks [@shan8851](https://github.com/shan8851)! - The published package now includes its changelog and a migration guide (`MIGRATION.md`) listing the changes that need action when upgrading.
+
 ## 0.17.3
 
 ### Patch Changes
