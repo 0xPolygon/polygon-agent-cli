@@ -18,12 +18,20 @@ const TIER_BADGE: Record<string, 'success' | 'warning' | 'error'> = {
 interface VaultCardProps {
   vault: Vault;
   assets: number | null;
+  dust: string | null;
   failed: boolean;
   onDeposit: (vault: Vault) => void;
   onTryAgent: () => void;
 }
 
-export function VaultCard({ vault: v, assets, failed, onDeposit, onTryAgent }: VaultCardProps) {
+export function VaultCard({
+  vault: v,
+  assets,
+  dust,
+  failed,
+  onDeposit,
+  onTryAgent
+}: VaultCardProps) {
   const deposited = assets !== null && assets > 0;
   return (
     <Card variant="outline" className="flex flex-col gap-6 p-6">
@@ -62,7 +70,7 @@ export function VaultCard({ vault: v, assets, failed, onDeposit, onTryAgent }: V
       <div className="flex flex-col gap-1">
         <span className="text-xs font-medium text-muted">Your assets in vault</span>
         <span className="text-3xl leading-tight font-bold">
-          <Money value={assets} failed={failed} />
+          {dust ?? <Money value={assets} failed={failed} />}
         </span>
         <span className={cn('text-sm font-medium', deposited ? 'text-success' : 'text-muted')}>
           {deposited ? 'Earning' : 'Pays'} {v.apy.toFixed(2)}% a year

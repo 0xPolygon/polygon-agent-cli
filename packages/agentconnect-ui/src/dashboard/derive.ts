@@ -6,7 +6,7 @@ export type ActivityKind = 'send' | 'receive' | 'swap';
 interface FilterHoldingsParams {
   holdings: Holding[];
   query: string;
-  /** Names the user sees, keyed by token address; matched alongside the indexer's name. */
+  /** Names the user sees, keyed by token address; the indexer's name is searched only when none is known. */
   displayNames?: Record<string, string | undefined>;
 }
 
@@ -23,7 +23,7 @@ export function filterHoldings({
   const needle = query.trim().toLowerCase();
   if (!needle) return holdings;
   return holdings.filter((h) =>
-    [h.symbol, h.name, displayNames[h.address] ?? ''].some((t) => t.toLowerCase().includes(needle))
+    [h.symbol, displayNames[h.address] ?? h.name].some((t) => t.toLowerCase().includes(needle))
   );
 }
 

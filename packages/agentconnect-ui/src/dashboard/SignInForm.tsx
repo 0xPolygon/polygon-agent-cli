@@ -62,6 +62,7 @@ export function SignInForm({ finishing, onSignedIn }: SignInFormProps) {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@example.com"
+            className="text-base sm:text-sm"
           />
           <Button type="submit" size="lg" disabled={busy} className="w-full justify-center">
             {busy ? 'Sending code…' : 'Continue with email'}
@@ -86,7 +87,7 @@ export function SignInForm({ finishing, onSignedIn }: SignInFormProps) {
             value={code}
             onChange={(e) => setCode(e.target.value)}
             placeholder="123456"
-            className="tracking-[0.2em]"
+            className="text-base tracking-[0.2em] sm:text-sm"
           />
           <Button type="submit" size="lg" disabled={busy} className="w-full justify-center">
             {busy ? 'Signing in…' : 'Sign in'}

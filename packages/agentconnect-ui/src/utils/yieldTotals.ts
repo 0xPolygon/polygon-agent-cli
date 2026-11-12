@@ -14,6 +14,9 @@ export function vaultAssets(balances: Record<string, number> | null): VaultAsset
   return { total: roundCents(Object.values(byVault).reduce((s, v) => s + v, 0)), byVault };
 }
 
+// A balance that is above zero but rounds to $0.00 would read as empty.
+export const dustLabel = (raw: number) => (raw > 0 && roundCents(raw) === 0 ? '<$0.01' : null);
+
 interface EarningTotalInput {
   polygon: number | null;
   vaults: number | null;

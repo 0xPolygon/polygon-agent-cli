@@ -180,7 +180,7 @@ export function Dashboard({
       <div className="flex min-h-0 flex-1">
         <AppSidebar page={page} onNavigate={setPage} />
         <main className="min-w-0 flex-1 overflow-y-auto">
-          <div className="mx-auto flex w-full max-w-[800px] flex-col gap-8 px-4 pb-12 pt-6 md:pt-12 xl:px-0">
+          <div className="mx-auto flex w-full max-w-200 flex-col gap-8 px-4 pb-12 pt-6 md:pt-12 xl:px-0">
             {page === 'overview' && (
               <div className="flex flex-col gap-10">
                 <OverviewTab

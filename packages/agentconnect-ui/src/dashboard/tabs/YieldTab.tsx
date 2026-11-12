@@ -6,7 +6,7 @@ import { EmptyState } from '../../components/EmptyState.js';
 import { Money } from '../../components/Money.js';
 import { PromptsButton } from '../../components/PromptsButton.js';
 import { sum } from '../../utils/holdings.js';
-import { earningTotal, vaultAssets, yearlyAt } from '../../utils/yieldTotals.js';
+import { dustLabel, earningTotal, vaultAssets, yearlyAt } from '../../utils/yieldTotals.js';
 import { HoldingsList } from './HoldingsList.js';
 import { SECTION_TITLE } from './styles.js';
 import { VaultCard } from './VaultCard.js';
@@ -37,6 +37,8 @@ export function YieldTab({
     vaults: assets?.total ?? null,
     vaultsSettled: vaultsFailed
   });
+  const rawBalances = vaultBalances.data ?? {};
+  const anyDust = Object.values(rawBalances).some((b) => dustLabel(b) !== null);
   const prime = vaults.data?.[0];
   const atPrimeRate =
     prime && !holdings.error && !vaultsFailed && everything !== null && everything > 0
@@ -62,7 +64,7 @@ export function YieldTab({
             At the Prime rate that's ≈ <Money value={atPrimeRate.yearly} /> a year.
           </p>
         )}
-        {everything === 0 && !holdings.error && !vaultsFailed && (
+        {everything === 0 && !anyDust && !holdings.error && !vaultsFailed && (
           <p className="m-0 text-sm text-muted">Nothing deposited yet.</p>
         )}
       </div>
@@ -79,6 +81,7 @@ export function YieldTab({
                   key={v.address}
                   vault={v}
                   assets={assets?.byVault[v.address] ?? null}
+                  dust={dustLabel(rawBalances[v.address] ?? 0)}
                   failed={vaultsFailed}
                   onDeposit={onDeposit}
                   onTryAgent={onOpenPrompts}

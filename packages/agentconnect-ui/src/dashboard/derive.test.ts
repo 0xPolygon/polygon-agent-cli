@@ -43,7 +43,17 @@ describe('filterHoldings', () => {
   it('matches the name the user sees when it differs from the indexer name', () => {
     const displayNames = { [holdings[0].address]: 'Dollar Token' };
     expect(filterHoldings({ holdings, query: 'dollar', displayNames })).toEqual([holdings[0]]);
-    expect(filterHoldings({ holdings, query: 'usd coin', displayNames })).toEqual([holdings[0]]);
+  });
+
+  it('does not match a raw indexer name the row no longer shows', () => {
+    const displayNames = { [holdings[0].address]: 'Dollar Token' };
+    expect(filterHoldings({ holdings, query: 'usd coin', displayNames })).toEqual([]);
+  });
+
+  it('matches the indexer name when no display name is known', () => {
+    expect(filterHoldings({ holdings, query: 'usd coin', displayNames: {} })).toEqual([
+      holdings[0]
+    ]);
   });
 
   it('returns an empty list when nothing matches', () => {

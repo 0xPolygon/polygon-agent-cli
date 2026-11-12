@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Holding } from '../indexer';
 
 import { sum } from './holdings.js';
-import { earningTotal, vaultAssets, yearlyAt } from './yieldTotals.js';
+import { dustLabel, earningTotal, vaultAssets, yearlyAt } from './yieldTotals.js';
 
 describe('vaultAssets', () => {
   it('is null until the balances load', () => {
@@ -72,5 +72,20 @@ describe('earning on Overview and Yield', () => {
     const yieldPage = earningTotal({ polygon, vaults, vaultsSettled: false });
     expect(overview).toBe(yieldPage);
     expect(overview).toBe(25.82);
+  });
+});
+
+describe('dustLabel', () => {
+  it('is null for zero, so the empty wording stays', () => {
+    expect(dustLabel(0)).toBeNull();
+  });
+
+  it('labels a balance above zero that rounds to $0.00', () => {
+    expect(dustLabel(0.003)).toBe('<$0.01');
+  });
+
+  it('is null from a cent up, where the amount itself is shown', () => {
+    expect(dustLabel(0.005)).toBeNull();
+    expect(dustLabel(12.5)).toBeNull();
   });
 });
