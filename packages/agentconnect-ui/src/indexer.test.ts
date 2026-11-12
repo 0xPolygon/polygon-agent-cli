@@ -97,9 +97,13 @@ describe('fetchActivity token address', () => {
   const USDC = '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359';
   const ZERO = '0x0000000000000000000000000000000000000000';
 
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
 
   const activityWith = async (transfers: object[]) => {
+    vi.stubEnv('VITE_INDEXER_ACCESS_KEY', 'test-key');
     vi.stubGlobal(
       'fetch',
       vi.fn(
