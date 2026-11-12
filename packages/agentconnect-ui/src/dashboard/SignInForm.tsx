@@ -76,7 +76,7 @@ export function SignInForm({ finishing, onSignedIn }: SignInFormProps) {
             void run(async () => onSignedIn(await finishEmail(code.trim())));
           }}
         >
-          <Label htmlFor="code" className="text-sm font-medium text-muted">
+          <Label htmlFor="code" className="block text-sm font-medium break-words text-muted">
             Enter the code we sent to {email}
           </Label>
           <Input
@@ -109,7 +109,7 @@ export function SignInForm({ finishing, onSignedIn }: SignInFormProps) {
 
       {!sent && !(finishing && busy) && (
         <>
-          <div className="-my-2 flex items-center gap-4 text-xs font-medium text-slate-400">
+          <div className="-my-3 flex items-center gap-4 text-xs font-medium text-slate-400">
             <Separator className="flex-1 bg-slate-400" />
             or
             <Separator className="flex-1 bg-slate-400" />
@@ -120,7 +120,7 @@ export function SignInForm({ finishing, onSignedIn }: SignInFormProps) {
             size="lg"
             disabled={busy}
             onClick={() => void run(startGoogle)}
-            className="-mt-2 w-full justify-center border-slate-500"
+            className="w-full justify-center border-slate-500"
           >
             <GoogleIcon />
             Sign in with Google
@@ -128,7 +128,11 @@ export function SignInForm({ finishing, onSignedIn }: SignInFormProps) {
         </>
       )}
 
-      {error && <span className="text-center text-sm font-medium text-destructive">{error}</span>}
+      {error && (
+        <span role="alert" className="text-center text-sm font-medium text-destructive">
+          {error}
+        </span>
+      )}
     </div>
   );
 }
