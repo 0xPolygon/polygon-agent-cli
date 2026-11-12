@@ -32,7 +32,7 @@ export function TokenIcon({
       src={failed ? undefined : logo}
       symbol={symbol}
       withNetwork={withChain ? CHAIN_BADGE : undefined}
-      className={cn('size-6', className)}
+      className={cn('isolate size-6', className)}
       onError={() => setFailedLogo(logo)}
     />
   );

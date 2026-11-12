@@ -20,6 +20,7 @@ import type { AgentContext, Loadable } from './types.js';
 import { useCopy } from '../hooks/useCopy.js';
 import { fetchActivity, fetchHoldings } from '../indexer';
 import { usd } from '../utils/format.js';
+import { predictionsTotal } from '../utils/groupPositions.js';
 import { vaultAssets } from '../utils/yieldTotals.js';
 import { rememberedEmail } from './account.js';
 import { AppSidebar } from './AppSidebar.js';
@@ -134,7 +135,7 @@ export function Dashboard({
 
   const ctx: AgentContext = { copied, copy };
   const positionsValue = positions.data
-    ? positions.data.reduce((s, p) => s + p.value, 0) + (predictionCash.data ?? 0)
+    ? predictionsTotal({ positions: positions.data, cash: predictionCash.data })
     : null;
   // Everything the wallet holds, as on Overview: Polygon, predictions, Katana vaults.
   const totalBalance = holdings.data
@@ -171,7 +172,7 @@ export function Dashboard({
         profile={
           <ProfileMenu
             label={email ?? 'Your wallet'}
-            balance={totalBalance === null ? '…' : usd(totalBalance)}
+            balance={holdings.error ? '–' : totalBalance === null ? '…' : usd(totalBalance)}
             onSettings={() => setPage('settings')}
             onSignOut={owner ? leave : undefined}
           />

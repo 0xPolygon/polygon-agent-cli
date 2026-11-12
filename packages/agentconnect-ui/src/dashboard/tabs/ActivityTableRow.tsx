@@ -45,7 +45,7 @@ export function ActivityTableRow({ item, kind, logo }: ActivityTableRowProps) {
             {qty(item.qty)}
           </span>
           <TokenIcon symbol={item.symbol} logo={logo} plainFallback className="size-4 shrink-0" />
-          <span className="max-w-24 truncate" title={item.symbol}>
+          <span className="max-w-20 truncate" title={item.symbol}>
             {item.symbol}
           </span>
         </span>

@@ -22,7 +22,7 @@ export function ProfileMenu({ label, balance, onSettings, onSignOut }: ProfileMe
     <Popover>
       <PopoverTrigger
         aria-label="Account"
-        className="flex cursor-pointer items-center gap-2 rounded-lg border-0 bg-transparent p-0 text-left"
+        className="flex cursor-pointer items-center gap-2 rounded-lg border-0 bg-transparent p-0 text-left outline-offset-2 outline-border-focus focus-visible:outline-2"
       >
         <CircleUserRound className="size-6 shrink-0 stroke-[1.5] md:size-7 md:stroke-[0.86]" />
         <span className="hidden max-w-[180px] flex-col gap-2 md:flex">
@@ -37,7 +37,7 @@ export function ProfileMenu({ label, balance, onSettings, onSignOut }: ProfileMe
       >
         <PopoverClose
           aria-label="Close"
-          className="absolute right-5 top-5 cursor-pointer border-0 bg-transparent p-0 text-primary"
+          className="absolute right-5 top-5 cursor-pointer rounded-sm border-0 bg-transparent p-0 text-primary outline-offset-2 outline-border-focus focus-visible:outline-2"
         >
           <X className="size-4" />
         </PopoverClose>

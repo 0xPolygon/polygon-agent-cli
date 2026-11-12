@@ -14,6 +14,17 @@ export interface MarketGroup {
 
 export const roundCents = (n: number) => Math.round(n * 100) / 100;
 
+interface PredictionsTotalInput {
+  positions: Position[];
+  cash: number | null;
+}
+
+// The header total is the sum of its displayed lines: rounded worth plus rounded cash.
+export function predictionsTotal({ positions, cash }: PredictionsTotalInput): number {
+  const worth = roundCents(positions.reduce((s, p) => s + p.value, 0));
+  return roundCents(worth + roundCents(cash ?? 0));
+}
+
 interface MarketGainInput {
   cost: number;
   value: number;

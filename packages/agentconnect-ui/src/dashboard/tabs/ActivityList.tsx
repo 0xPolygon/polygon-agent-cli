@@ -54,8 +54,8 @@ export function ActivityList({ activity, filter }: ActivityListProps) {
     );
   }
   return (
-    <Card variant="outline" className="rounded-3xl p-3 md:p-6">
-      <Table className="min-w-[700px]">
+    <Card variant="outline" className="rounded-3xl p-3">
+      <Table className="min-w-[700px] [&_td]:px-2 [&_th]:px-2">
         <TableHeader>
           <TableRow>
             {COLUMNS.map((c) => (

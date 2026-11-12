@@ -5,7 +5,7 @@ import type { Loadable } from '../types.js';
 
 import { EmptyState } from '../../components/EmptyState.js';
 import { PromptsButton } from '../../components/PromptsButton.js';
-import { groupPositions, roundCents } from '../../utils/groupPositions.js';
+import { groupPositions, predictionsTotal, roundCents } from '../../utils/groupPositions.js';
 import { MarketCard } from './MarketCard.js';
 import { MarketsHeader } from './MarketsHeader.js';
 
@@ -32,7 +32,7 @@ export function MarketsTab({ positions, cash, hasAccount, onOpenPrompts }: Marke
   const value = roundCents(rawValue);
   const cost = roundCents(rows.reduce((s, p) => s + p.cost, 0));
   const loaded = positions.data !== null;
-  const total = loaded ? rawValue + (cash.data ?? 0) : null;
+  const total = loaded ? predictionsTotal({ positions: rows, cash: cash.data }) : null;
 
   return (
     <div className="flex flex-col gap-8">

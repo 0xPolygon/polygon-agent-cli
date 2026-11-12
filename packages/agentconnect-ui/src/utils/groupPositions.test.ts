@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Position } from '../dashboard/markets.js';
 
-import { groupPositions, marketGain } from './groupPositions.js';
+import { groupPositions, marketGain, predictionsTotal } from './groupPositions.js';
 
 const position = (overrides: Partial<Position>): Position => ({
   title: 'Market',
@@ -77,5 +77,18 @@ describe('groupPositions', () => {
       position({ title: 'B', slug: 'b', pnl: 7 })
     ]);
     expect(groups.map((g) => g.unrealizedPnl)).toEqual([40.25, 7]);
+  });
+});
+
+describe('predictionsTotal', () => {
+  it('adds the rounded worth to the rounded cash, as the header lines do', () => {
+    const positions = [position({ value: 44956.104 })];
+    const total = predictionsTotal({ positions, cash: 1246.9249 });
+    expect(total).toBe(46203.02);
+    expect(Math.round((44956.104 + 1246.9249) * 100) / 100).toBe(46203.03);
+  });
+
+  it('counts missing cash as zero', () => {
+    expect(predictionsTotal({ positions: [position({ value: 10.005 })], cash: null })).toBe(10.01);
   });
 });
