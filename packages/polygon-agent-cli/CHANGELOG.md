@@ -1,5 +1,15 @@
 # Change Log
 
+## 0.17.5
+
+### Patch Changes
+
+- [#280](https://github.com/0xPolygon/polygon-agent-cli/pull/280) [`d2b9476`](https://github.com/0xPolygon/polygon-agent-cli/commit/d2b94769d51384691071057d9cafd0a9cd7b45c9) Thanks [@shan8851](https://github.com/shan8851)! - Read-only chain calls work again without a project access key on Polygon, Amoy and Ethereum.
+
+  The public RPC hosts the CLI fell back to for those chains had stopped answering, so balance checks and transaction confirmations could fail before an access key was set up. All seven fallback chains (Polygon, Amoy, Ethereum, Base, Base Sepolia, Arbitrum, Optimism) now use PublicNode.
+
+  A chain with no fallback now fails with an error naming the chain and `SEQUENCE_PROJECT_ACCESS_KEY`, instead of quietly reading Polygon mainnet.
+
 ## 0.17.4
 
 ### Patch Changes
