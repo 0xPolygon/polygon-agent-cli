@@ -122,27 +122,33 @@ export function getRpcUrl(network: NetworkMetadata): string {
   return `https://nodes.sequence.app/${network.name}/${accessKey}`;
 }
 
-// Public RPC fallbacks per chain — used for read-only calls (e.g. tx receipt
-// polling) when no OMS project access key is available (the OMS path uses
-// publishableKey/projectId, not a nodes.sequence.app access key).
+// Public RPC fallbacks per chain, for read-only calls (e.g. tx receipt polling) made before this
+// install has a project access key. One provider, so there is one place to check when a host dies.
 const PUBLIC_RPC_BY_CHAIN_ID: Record<number, string> = {
-  137: 'https://polygon-rpc.com',
-  80002: 'https://rpc-amoy.polygon.technology',
-  8453: 'https://mainnet.base.org',
-  84532: 'https://sepolia.base.org',
-  1: 'https://eth.llamarpc.com',
-  42161: 'https://arb1.arbitrum.io/rpc',
-  10: 'https://mainnet.optimism.io'
+  137: 'https://polygon-bor-rpc.publicnode.com',
+  80002: 'https://polygon-amoy-bor-rpc.publicnode.com',
+  8453: 'https://base-rpc.publicnode.com',
+  84532: 'https://base-sepolia-rpc.publicnode.com',
+  1: 'https://ethereum-rpc.publicnode.com',
+  42161: 'https://arbitrum-one-rpc.publicnode.com',
+  10: 'https://optimism-rpc.publicnode.com'
 };
 
 /**
  * Read-only RPC URL. Prefers the OMS nodes endpoint when a project access
  * key is configured; otherwise falls back to a public RPC for the chain.
+ * Throws for a chain with no fallback rather than reading a different chain.
  */
 export function getReadRpcUrl(network: NetworkMetadata): string {
   const accessKey = process.env.SEQUENCE_PROJECT_ACCESS_KEY;
   if (accessKey) return `https://nodes.sequence.app/${network.name}/${accessKey}`;
-  return PUBLIC_RPC_BY_CHAIN_ID[network.chainId] || `https://polygon-rpc.com`;
+  const fallback = PUBLIC_RPC_BY_CHAIN_ID[network.chainId];
+  if (!fallback) {
+    throw new Error(
+      `No public RPC for chain ${network.chainId} (${network.name}). Set SEQUENCE_PROJECT_ACCESS_KEY to read it.`
+    );
+  }
+  return fallback;
 }
 
 /** Explorer URL for transaction */
