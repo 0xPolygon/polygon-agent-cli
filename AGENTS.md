@@ -137,6 +137,10 @@ them for this repo. A standard not listed here applies as written.
   runtime has neither Node streams nor an Express request cycle.
 - **Error type (CLI)** → the CLI keeps its own `CliError` with stable `code` values at the user
   boundary. *Why:* callers branch on the code; a cause chain is not part of the contract.
+- **Error type (Workers)** → no error-wrapping library. The agentconnect Worker's money paths
+  throw `MoneyError` (`worker/money/errors.ts`): a stable `code`, with the original failure as the
+  native `cause`. Stored action records keep a failure as its message string. *Why:* the MCP
+  caller branches on the code, as CLI callers do.
 - **Environment validation (Workers)** → no env-validation library; the typed bindings interface
   (`Env`) is the schema, and new code checks the bindings it needs once rather than at each use.
   *Why:* Worker config arrives as bindings per request, not `process.env`.
@@ -153,10 +157,18 @@ them for this repo. A standard not listed here applies as written.
 - **Named exports only** → the Workers' module entry (`export default { fetch }`) is
   framework-imposed.
 - **Test tiers** → defined in `TESTING.md`, which owns them.
-- **RPC client lifetime rules** → not applicable to the short-lived CLI process. They do apply to
-  the Worker's request paths.
-- **tsconfig layout for `agentconnect-ui`** → the SPA and the Worker need different `lib`/`types`
-  sets, so each has its own config under the package's hub `tsconfig.json`.
+- **RPC client lifetime rules** → not applied. The CLI is a short-lived process, and the Worker
+  builds a viem client per call over `fetch`, with no polling or subscriptions. *Why:* the rule
+  stops a long-running process leaking sockets and timers; a Workers isolate is short-lived and
+  holds neither.
+- **tsconfig layout** → the bundlers own `dist/`, so `tsc` only typechecks and writes to
+  `out-tsc/`, and a package's top-level `tsconfig.json` may carry options its bundler reads
+  (esbuild for the CLI, wrangler for the relay). In `agentconnect-ui` the SPA and the Worker need
+  different `lib`/`types` sets, so each has its own config under the package's hub
+  `tsconfig.json`. The relay and Worker configs set `erasableSyntaxOnly: false` because that code
+  uses constructor parameter properties.
+- **Markdown lint** → skips `skills/` and `plugins/`, which ship as published content, and allows
+  the four HTML elements the README headers use.
 - **Test assertion style** → the team's Chai-chain style rule is not applied here; tests use
   Vitest's standard matchers.
 - **Dependency-update automation** → none is configured.

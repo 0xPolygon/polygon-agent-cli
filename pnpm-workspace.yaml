@@ -12,8 +12,8 @@ minimumReleaseAgeExclude:
   - '0xtrails'
 trustPolicy: no-downgrade
 trustPolicyExclude:
-  - 'semver@5.7.2 || 6.3.1'
-  - 'vite'
+  - 'semver@6.3.1'
+  - 'vite@5.4.21'
 
 overrides:
   '@noble/curves': 1.9.7
