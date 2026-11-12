@@ -1,20 +1,7 @@
-import type { ElementType } from 'react';
-
-import {
-  Activity,
-  LayoutGrid,
-  Menu,
-  PiggyBank,
-  Plus,
-  Settings,
-  TrendingUp,
-  Wallet
-} from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   Button,
-  cn,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -23,16 +10,22 @@ import {
   DialogPortal,
   DialogPrimitive,
   DialogTitle,
+  SidebarProvider,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  useMediaQuery,
   useToast
 } from '@polygonlabs/design-system';
 
 import type { ActivityItem, Holding } from '../indexer';
+import type { Page } from './AppSidebar.js';
 import type { Vault } from './earn.js';
 import type { Position } from './markets.js';
 import type { Session } from './signin.js';
 import type { AgentContext, Loadable } from './tabs.js';
 
-import { LogoBadge } from '../App.js';
 import { AgentPromptBox } from '../components/AgentPromptBox.js';
 import { AmountChips } from '../components/AmountChips.js';
 import { FundingScreen } from '../components/FundingScreen.js';
@@ -41,9 +34,11 @@ import { fetchActivity, fetchHoldings } from '../indexer';
 import { usd } from '../utils/format.js';
 import { rememberedEmail } from './account.js';
 import { SKILL_URL } from './agents.js';
+import { AppSidebar } from './AppSidebar.js';
 import { ConnectedAgents } from './ConnectedAgents.js';
 import { fetchPolygonRates, fetchVaultBalances, fetchVaults } from './earn.js';
 import { fetchPositions, fetchPredictionCash } from './markets.js';
+import { ProfileMenu } from './ProfileMenu.js';
 import { signOut } from './signin.js';
 import {
   ActivityTab,
@@ -56,19 +51,23 @@ import {
   WALLET_PROMPTS,
   WalletTab
 } from './tabs.js';
+import { TopBar } from './TopBar.js';
 
-type Tab = 'overview' | 'wallet' | 'markets' | 'earn' | 'activity' | 'settings';
+type OverviewSection = 'tokens' | 'history' | 'agents';
 
-const NAV: { id: Tab; label: string; icon: ElementType }[] = [
-  { id: 'overview', label: 'Overview', icon: LayoutGrid },
-  { id: 'wallet', label: 'Wallet', icon: Wallet },
-  { id: 'markets', label: 'Markets', icon: TrendingUp },
-  { id: 'earn', label: 'Earn', icon: PiggyBank },
-  { id: 'activity', label: 'Activity', icon: Activity },
-  { id: 'settings', label: 'Settings', icon: Settings }
-];
-// Phones show the first four in the tab bar and the rest under More.
-const MOBILE_PRIMARY = 4;
+function isOverviewSection(v: unknown): v is OverviewSection {
+  return v === 'tokens' || v === 'history' || v === 'agents';
+}
+
+// Tab components navigate with these ids.
+const LEGACY_TARGETS: Record<string, { page: Page; section?: OverviewSection }> = {
+  overview: { page: 'overview' },
+  wallet: { page: 'overview', section: 'tokens' },
+  activity: { page: 'overview', section: 'history' },
+  markets: { page: 'markets' },
+  earn: { page: 'yield' },
+  settings: { page: 'settings' }
+};
 
 function useLoad<T>(load: (() => Promise<T>) | null, deps: unknown[]): Loadable<T> {
   const [state, setState] = useState<Loadable<T>>({ data: null, loading: !!load, error: false });
@@ -110,8 +109,12 @@ export function Dashboard({
   // The owner signed in on this site, if anyone.
   session: Session | null;
 }) {
-  const [tab, setTab] = useState<Tab>('overview');
-  const [moreOpen, setMoreOpen] = useState(false);
+  const [page, setPage] = useState<Page>('overview');
+  const [section, setSection] = useState<OverviewSection>('tokens');
+  // The tab row sits below the fold; links that pick a tab would look dead without a scroll.
+  const [revealTabs, setRevealTabs] = useState(false);
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
   const [modal, setModal] = useState<ModalState | null>(initialFundOpen ? { kind: 'add' } : null);
   const [copied, copy] = useCopy();
   const toast = useToast();
@@ -150,12 +153,22 @@ export function Dashboard({
       toast.add({ title: 'Copied. Paste it into your agent.', type: 'success', timeout: 2200 });
   }, [copied]);
 
+  useEffect(() => {
+    if (!revealTabs) return;
+    tabsRef.current?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+    setRevealTabs(false);
+  }, [revealTabs, reduceMotion]);
+
   const ctx: AgentContext = { copied, copy };
-  const go = (t: string) => {
-    setTab(t as Tab);
-    setMoreOpen(false);
+  const go = (target: string) => {
+    const next = LEGACY_TARGETS[target];
+    if (!next) return;
+    setPage(next.page);
+    if (next.section) {
+      setSection(next.section);
+      setRevealTabs(true);
+    }
   };
-  const title = NAV.find((n) => n.id === tab)!.label;
   // Open positions plus pUSD waiting in the trading account.
   const positionsValue = positions.data
     ? positions.data.reduce((s, p) => s + p.value, 0) + (predictionCash.data ?? 0)
@@ -184,94 +197,66 @@ export function Dashboard({
   const openWithdraw = () => setModal({ kind: 'withdraw' });
 
   return (
-    <div className="h-[100dvh] flex bg-background-muted text-primary overflow-hidden">
-      {/* Sidebar (tablet and up) */}
-      <aside className="hidden md:flex w-60 flex-shrink-0 bg-white border-r border-slate-200 flex-col px-3 py-5">
-        <div className="px-2 pb-6">
-          <LogoBadge />
-        </div>
-        <nav className="flex flex-col gap-0.5" aria-label="Main">
-          {NAV.map((n) => {
-            const on = n.id === tab;
-            const Icon = n.icon;
-            return (
-              <button
-                key={n.id}
-                type="button"
-                onClick={() => go(n.id)}
-                aria-current={on ? 'page' : undefined}
-                className={cn(
-                  'flex items-center gap-3 h-10 px-3 rounded-[10px] border-0 text-[15px] text-left cursor-pointer transition-colors',
-                  on
-                    ? 'bg-background-info text-info font-bold'
-                    : 'bg-transparent text-slate-600 font-medium hover:bg-background-muted'
-                )}
-              >
-                <Icon className="w-[18px] h-[18px]" />
-                {n.label}
-              </button>
-            );
-          })}
-        </nav>
-        <div className="flex-1" />
-        <div className="flex items-center gap-2.5 p-3 border-t border-slate-100">
-          <span className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-purple-300 flex-shrink-0" />
-          <span className="flex flex-col gap-0.5 min-w-0">
-            <span className="text-sm font-bold truncate max-w-[140px]">
-              {email ?? 'Your wallet'}
-            </span>
-            <span className="text-xs text-muted">
-              {totalBalance === null ? '…' : usd(totalBalance)}
-            </span>
-          </span>
-        </div>
-      </aside>
-
-      <div className="flex-1 min-w-0 flex flex-col">
-        {/* Phone top bar */}
-        <div className="md:hidden h-14 flex-shrink-0 flex items-center justify-between px-4 bg-white border-b border-slate-200">
-          <div className="flex items-center gap-2">
-            <img src="/logo-mark.svg" alt="" className="w-6 h-6" />
-            <span className="font-bold text-[17px]">{title}</span>
-          </div>
-          {email && <span className="text-xs text-muted truncate max-w-[50%]">{email}</span>}
-        </div>
-
-        <main className="flex-1 overflow-y-auto">
-          <div className="max-w-[1000px] mx-auto px-4 pt-5 pb-8 md:px-10 md:pt-9 md:pb-12 flex flex-col gap-8">
-            <div className="hidden md:flex justify-between items-center gap-4">
-              <h1 className="m-0 text-[28px] font-bold">{title}</h1>
-              <Button type="button" size="lg" onClick={openAdd}>
-                <Plus />
-                Add money
-              </Button>
-            </div>
-
-            {tab === 'overview' && (
-              <OverviewTab
-                holdings={holdings}
-                activity={activity}
-                positionsValue={positionsValue}
-                vaultsValue={vaultsValue}
-                earningApy={earningApy}
-                go={go}
-                onAdd={openAdd}
-                onWithdraw={openWithdraw}
-              />
+    <SidebarProvider className="[--sidebar-width:15rem]! h-[100dvh] flex-col overflow-hidden bg-background-primary text-primary">
+      <TopBar
+        profile={
+          <ProfileMenu
+            label={email ?? 'Your wallet'}
+            balance={totalBalance === null ? '…' : usd(totalBalance)}
+            onSettings={() => setPage('settings')}
+            onSignOut={owner ? leave : undefined}
+          />
+        }
+      />
+      <div className="flex min-h-0 flex-1">
+        <AppSidebar page={page} onNavigate={setPage} />
+        <main className="min-w-0 flex-1 overflow-y-auto">
+          <div className="mx-auto flex w-full max-w-[800px] flex-col gap-8 px-4 pb-12 pt-6 md:px-0 md:pt-12">
+            {page === 'overview' && (
+              <>
+                <OverviewTab
+                  holdings={holdings}
+                  activity={activity}
+                  positionsValue={positionsValue}
+                  vaultsValue={vaultsValue}
+                  earningApy={earningApy}
+                  go={go}
+                  onAdd={openAdd}
+                  onWithdraw={openWithdraw}
+                />
+                <AskAgent ctx={ctx} id="o" prompts={OVERVIEW_PROMPTS} title="Try with your agent" />
+                <div ref={tabsRef} className="scroll-mt-4">
+                  <Tabs
+                    value={section === 'agents' && !owner ? 'tokens' : section}
+                    onValueChange={(v) => isOverviewSection(v) && setSection(v)}
+                  >
+                    <TabsList>
+                      <TabsTrigger value="tokens">Tokens</TabsTrigger>
+                      <TabsTrigger value="history">Activity</TabsTrigger>
+                      {owner && <TabsTrigger value="agents">Connected agents</TabsTrigger>}
+                    </TabsList>
+                    <TabsContent value="tokens" className="flex flex-col gap-8 pt-6">
+                      <WalletTab
+                        address={walletAddress}
+                        holdings={holdings}
+                        onAdd={openAdd}
+                        onWithdraw={openWithdraw}
+                      />
+                      <AskAgent ctx={ctx} id="w" prompts={WALLET_PROMPTS} />
+                    </TabsContent>
+                    <TabsContent value="history" className="pt-6">
+                      <ActivityTab activity={activity} />
+                    </TabsContent>
+                    {owner && (
+                      <TabsContent value="agents" className="pt-6">
+                        <ConnectedAgents />
+                      </TabsContent>
+                    )}
+                  </Tabs>
+                </div>
+              </>
             )}
-            {tab === 'overview' && (
-              <AskAgent ctx={ctx} id="o" prompts={OVERVIEW_PROMPTS} title="Try with your agent" />
-            )}
-            {tab === 'wallet' && (
-              <WalletTab
-                address={walletAddress}
-                holdings={holdings}
-                onAdd={openAdd}
-                onWithdraw={openWithdraw}
-              />
-            )}
-            {tab === 'wallet' && <AskAgent ctx={ctx} id="w" prompts={WALLET_PROMPTS} />}
-            {tab === 'markets' && (
+            {page === 'markets' && (
               <MarketsTab
                 positions={positions}
                 cash={predictionCash}
@@ -279,7 +264,7 @@ export function Dashboard({
                 ctx={ctx}
               />
             )}
-            {tab === 'earn' && (
+            {page === 'yield' && (
               <EarnTab
                 holdings={holdings}
                 vaults={vaults}
@@ -288,10 +273,8 @@ export function Dashboard({
                 onDeposit={(vault) => setModal({ kind: 'deposit', vault })}
               />
             )}
-            {tab === 'activity' && <ActivityTab activity={activity} />}
-            {tab === 'settings' && owner && <ConnectedAgents />}
-            {tab === 'settings' && <SettingsTab address={walletAddress} ctx={ctx} />}
-            {tab === 'settings' && owner && (
+            {page === 'settings' && <SettingsTab address={walletAddress} ctx={ctx} />}
+            {page === 'settings' && owner && (
               <Button
                 type="button"
                 variant="secondary"
@@ -302,71 +285,9 @@ export function Dashboard({
                 Sign out
               </Button>
             )}
-
-            <div className="text-center text-[13px] text-slate-400 pt-2">Powered by Polygon</div>
           </div>
         </main>
-
-        {/* Phone tab bar */}
-        <nav
-          className="md:hidden flex-shrink-0 grid grid-cols-5 bg-white border-t border-slate-200 px-1 pt-1.5 pb-3.5"
-          aria-label="Main"
-        >
-          {[
-            ...NAV.slice(0, MOBILE_PRIMARY),
-            { id: 'more' as const, label: 'More', icon: Menu }
-          ].map((n) => {
-            const on =
-              n.id === 'more' ? NAV.slice(MOBILE_PRIMARY).some((m) => m.id === tab) : n.id === tab;
-            const Icon = n.icon;
-            return (
-              <button
-                key={n.id}
-                type="button"
-                onClick={() => (n.id === 'more' ? setMoreOpen(true) : go(n.id))}
-                className={cn(
-                  'flex flex-col items-center justify-center gap-1 h-[52px] border-0 bg-transparent text-[11px] font-bold cursor-pointer',
-                  on ? 'text-brand' : 'text-muted'
-                )}
-              >
-                <Icon className="w-[22px] h-[22px]" />
-                {n.id === 'overview' ? 'Home' : n.label}
-              </button>
-            );
-          })}
-        </nav>
       </div>
-
-      {moreOpen && (
-        <div
-          onClick={() => setMoreOpen(false)}
-          className="md:hidden fixed inset-0 z-40 bg-background-overlay flex items-end"
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="w-full bg-white rounded-t-3xl px-4 pt-3 pb-7 flex flex-col gap-1"
-          >
-            <div className="w-10 h-1 rounded bg-slate-200 mx-auto mb-3" />
-            {NAV.slice(MOBILE_PRIMARY).map((n) => {
-              const Icon = n.icon;
-              return (
-                <button
-                  key={n.id}
-                  type="button"
-                  onClick={() => go(n.id)}
-                  className={cn(
-                    'flex items-center gap-3.5 h-[52px] px-3 rounded-xl border-0 text-base font-bold text-left cursor-pointer text-primary',
-                    tab === n.id ? 'bg-background-info' : 'bg-transparent'
-                  )}
-                >
-                  <Icon className="w-5 h-5 text-brand" />
-                  {n.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {modal?.kind === 'add' && (
         <Dialog open onOpenChange={(open) => !open && setModal(null)}>
@@ -399,7 +320,7 @@ export function Dashboard({
           onClose={() => setModal(null)}
         />
       )}
-    </div>
+    </SidebarProvider>
   );
 }
 

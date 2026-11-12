@@ -19,10 +19,10 @@ const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 // Shared logo header used on every screen.
 export function LogoBadge() {
   return (
-    <div className="flex items-center gap-2 flex-shrink-0">
-      <img src="/logo-mark.svg" alt="" className="w-[26px] h-[26px]" />
-      <span className="font-bold text-[19px] text-[var(--slate-900)]">polygon</span>
-      <span className="oms-mono text-[11px] bg-[var(--slate-900)] text-white px-[7px] py-[3px] rounded-md whitespace-nowrap">
+    <div className="flex shrink-0 items-end gap-[9px]">
+      <img src="/logo-mark.svg" alt="" className="h-5 w-auto" />
+      <span className="text-[19px] font-bold leading-none text-primary">polygon</span>
+      <span className="flex h-5 items-center rounded bg-slate-900 px-3 text-xs font-medium leading-none whitespace-nowrap text-white">
         &gt;_ agent
       </span>
     </div>
@@ -87,7 +87,7 @@ function Home({
 }) {
   const session = useSession();
   if (session === undefined) {
-    return <div className="min-h-[100dvh] bg-[var(--slate-50)]" />;
+    return <div className="min-h-[100dvh] bg-background-primary" />;
   }
 
   const wallet = walletAddress || session?.wallet;

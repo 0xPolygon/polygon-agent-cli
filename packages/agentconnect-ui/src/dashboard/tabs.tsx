@@ -324,7 +324,7 @@ export function OverviewTab({
             </button>
           ))}
         </div>
-        <div className="grid grid-cols-2 gap-2.5 md:hidden">
+        <div className="grid grid-cols-2 gap-2.5 md:max-w-[400px]">
           <Button type="button" size="lg" onClick={onAdd} className="justify-center">
             Add money
           </Button>
