@@ -6,7 +6,7 @@ interface TokenIconProps {
   symbol: string;
   logo?: string;
   withChain?: boolean;
-  /** Show a plain circle instead of letters when there is no logo or it fails to load; letters are unreadable when small. */
+  /** Letters are unreadable at small sizes, so a missing or failed logo gets a plain circle. */
   plainFallback?: boolean;
   className?: string;
 }

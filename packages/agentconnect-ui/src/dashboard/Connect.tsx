@@ -62,11 +62,7 @@ function spendingPermissions(allowanceUsd: number, days: number) {
   ];
 }
 
-/**
- * An agent (an MCP client) asked for access to the agent wallet. The owner
- * signs in here (or already is), reviews what the agent may do, and allows or
- * denies; either way the page goes back to the agent.
- */
+/** An MCP client asked for access to the agent wallet; allow or deny, the page goes back to the agent. */
 export function Connect({ finishing = false }: { finishing?: boolean }) {
   const [id] = useState(() => {
     if (!finishing) return new URLSearchParams(window.location.search).get('c') ?? '';

@@ -15,7 +15,6 @@ interface OverviewTabProps {
   positionsValue: number | null;
   // Money in the Katana earn vaults (not in `holdings`, which is Polygon only).
   vaultsValue: number | null;
-  // Blended rate on what's earning, percent a year.
   earningApy: number | null;
   go: (page: Page) => void;
   onAdd: () => void;

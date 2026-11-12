@@ -116,12 +116,7 @@ export interface Action {
   error?: { error: string };
 }
 
-/**
- * An agent's request to spend, from an app that has the owner approve each one
- * (ChatGPT). The owner, signed in on this site, sees what it does and approves
- * or declines it. Approving answers at once: it runs in the background, and the
- * agent, waiting on it, carries on with the result. The page follows along.
- */
+/** Approving answers at once and the action runs in the background; the page follows it to a result. */
 export function Approve({ finishing = false }: { finishing?: boolean }) {
   const [returning] = useState(() => {
     if (!finishing) return null;

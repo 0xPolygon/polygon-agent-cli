@@ -5,7 +5,6 @@ interface OnboardingProps {
   finishing?: boolean;
 }
 
-/** Shown when the page is opened without a wallet; `finishing` is set on the Google return to `/login`. */
 export function Onboarding({ finishing = false }: OnboardingProps) {
   return (
     <div className="relative flex min-h-[100dvh] flex-col overflow-hidden bg-gradient-to-r from-purple-100 to-purple-50 text-primary md:grid md:grid-cols-2 md:overflow-visible md:bg-none md:bg-white">

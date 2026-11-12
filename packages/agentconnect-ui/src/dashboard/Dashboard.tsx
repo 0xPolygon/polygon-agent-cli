@@ -133,7 +133,6 @@ export function Dashboard({
   }, [copied]);
 
   const ctx: AgentContext = { copied, copy };
-  // Open positions plus pUSD waiting in the trading account.
   const positionsValue = positions.data
     ? positions.data.reduce((s, p) => s + p.value, 0) + (predictionCash.data ?? 0)
     : null;
