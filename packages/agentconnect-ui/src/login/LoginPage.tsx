@@ -2,10 +2,19 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { LoginAction, MachineEvent, MachineState, RelayStatus } from './machine.js';
 
-import { LogoBadge } from '../App.js';
 import { oidcRelayUrl } from '../config';
+import { AuthPending } from './AuthPending.js';
+import { EmailForm } from './EmailForm.js';
+import { LinkExpired } from './LinkExpired.js';
+import { LoginShell } from './LoginShell.js';
 import { LOGIN_LINE, initialState, reduce } from './machine.js';
+import { MethodChoice } from './MethodChoice.js';
+import { NoSession } from './NoSession.js';
+import { OtpForm } from './OtpForm.js';
 import { getSessionId, isRelayReturn } from './returnUrl.js';
+import { SignedIn } from './SignedIn.js';
+import { SignInFailed } from './SignInFailed.js';
+import { Waiting } from './Waiting.js';
 
 // Poll fast while waiting on the CLI (returning from the provider, checking a
 // code) so the transition to the dashboard feels immediate; poll slower while
@@ -170,34 +179,13 @@ export function LoginPage() {
 
   if (!session) {
     return (
-      <Shell>
-        <h1 className="text-xl font-semibold text-[#141635]">No login session</h1>
-        <p className="mt-2 text-sm text-[#64708f]">
-          Open this page from the polygon-agent CLI: run
-          <code className="mx-1 rounded bg-[#eef0f8] px-1.5 py-0.5 text-xs">
-            agent wallet login
-          </code>
-          in your terminal.
-        </p>
-      </Shell>
+      <LoginShell>
+        <NoSession />
+      </LoginShell>
     );
   }
 
-  return <Shell>{renderState(state, session, dispatch)}</Shell>;
-}
-
-function Shell({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="min-h-screen bg-[#f5f6fb] flex flex-col items-center justify-center px-4 py-6">
-      {/* In the page flow on phones so it never covers the card; pinned on larger screens. */}
-      <div className="mb-6 sm:mb-0 sm:fixed sm:top-6 sm:left-1/2 sm:-translate-x-1/2 z-[99999]">
-        <LogoBadge />
-      </div>
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 sm:p-8 shadow-[0_2px_8px_rgba(20,22,53,0.06)] border border-[#e3e7f2]">
-        {children}
-      </div>
-    </div>
-  );
+  return <LoginShell>{renderState(state, session, dispatch)}</LoginShell>;
 }
 
 function renderState(state: MachineState, session: string, dispatch: (e: MachineEvent) => void) {
@@ -217,20 +205,7 @@ function renderState(state: MachineState, session: string, dispatch: (e: Machine
     case 'google-wait':
       return <Waiting text="Sending you to Google sign in" />;
     case 'auth-pending':
-      return (
-        <div className="text-center">
-          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-[#c8cfe1] border-t-[#141635]" />
-          <p className="mt-4 text-sm text-[#64708f]">Finishing sign in</p>
-          {state.url && (
-            <a
-              href={state.url}
-              className="mt-3 inline-block py-3 text-sm text-[#64708f] hover:text-[#141635] underline"
-            >
-              Not redirected? Continue with Google
-            </a>
-          )}
-        </div>
-      );
+      return <AuthPending url={state.url} />;
     case 'email-entry':
       return (
         <EmailForm
@@ -260,204 +235,15 @@ function renderState(state: MachineState, session: string, dispatch: (e: Machine
       return <Waiting text="Checking your code" />;
     case 'success':
       return (
-        <div className="text-center">
-          <h1 className="text-xl font-semibold text-[#141635]">You're signed in</h1>
-          <p className="mt-2 text-sm text-[#64708f] break-all">Wallet {state.walletAddress}</p>
-          <p className="mt-2 text-sm text-[#64708f]">
-            {state.funding
-              ? 'Your terminal session is ready. Your agent wallet is empty.'
-              : 'Your terminal session is ready. Taking you to your dashboard.'}
-          </p>
-          {state.funding && (
-            <a
-              href={state.funding.url}
-              className="mt-6 inline-block rounded-xl bg-[#141635] px-5 py-3 text-sm font-medium text-white hover:bg-[#1e2155]"
-            >
-              Add funds
-            </a>
-          )}
-          <br />
-          <a
-            href={dashboardUrl(state.walletAddress)}
-            className="mt-3 inline-block py-3 text-sm text-[#64708f] hover:text-[#141635] underline"
-          >
-            {state.funding ? 'Open your dashboard' : 'Not redirected? Open your dashboard'}
-          </a>
-        </div>
+        <SignedIn
+          walletAddress={state.walletAddress}
+          dashboardHref={dashboardUrl(state.walletAddress)}
+          fundingUrl={state.funding?.url}
+        />
       );
     case 'expired':
-      return (
-        <div className="text-center">
-          <h1 className="text-xl font-semibold text-[#141635]">This link has expired</h1>
-          <p className="mt-2 text-sm text-[#64708f]">
-            Run{' '}
-            <code className="rounded bg-[#eef0f8] px-1.5 py-0.5 text-xs">agent wallet login</code>{' '}
-            again to get a fresh link.
-          </p>
-        </div>
-      );
+      return <LinkExpired />;
     case 'failed':
-      return (
-        <div className="text-center">
-          <h1 className="text-xl font-semibold text-[#141635]">Sign in failed</h1>
-          <p className="mt-2 text-sm text-[#64708f]">{state.message}</p>
-          <p className="mt-2 text-sm text-[#64708f]">
-            Check your terminal for details and re-run the login.
-          </p>
-        </div>
-      );
+      return <SignInFailed message={state.message} />;
   }
-}
-
-function GoogleLogo() {
-  return (
-    <svg viewBox="0 0 48 48" className="h-4 w-4" aria-hidden="true">
-      <path
-        fill="#EA4335"
-        d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
-      />
-      <path
-        fill="#4285F4"
-        d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
-      />
-      <path
-        fill="#FBBC05"
-        d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
-      />
-      <path
-        fill="#34A853"
-        d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
-      />
-    </svg>
-  );
-}
-
-function MethodChoice({
-  line,
-  onGoogle,
-  onEmail
-}: {
-  line: string;
-  onGoogle: () => void;
-  onEmail: () => void;
-}) {
-  return (
-    <div>
-      <h1 className="text-xl font-semibold text-[#141635] text-center">
-        Sign in to your agent wallet
-      </h1>
-      <p className="mt-2 text-sm text-[#64708f] text-center">{line}</p>
-      <button
-        onClick={onGoogle}
-        className="mt-6 w-full rounded-xl bg-[#141635] px-5 py-3 text-sm font-medium text-white hover:bg-[#1e2155] flex items-center justify-center gap-2.5"
-      >
-        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white">
-          <GoogleLogo />
-        </span>
-        Continue with Google
-      </button>
-      <button
-        onClick={onEmail}
-        className="mt-3 w-full rounded-xl border border-[#c8cfe1] px-5 py-3 text-sm font-medium text-[#141635] hover:bg-[#f5f6fb]"
-      >
-        Continue with email
-      </button>
-    </div>
-  );
-}
-
-function EmailForm({
-  onSubmit,
-  onBack
-}: {
-  onSubmit: (email: string) => void;
-  onBack: () => void;
-}) {
-  const [email, setEmail] = useState('');
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (email.includes('@')) onSubmit(email.trim());
-      }}
-    >
-      <h1 className="text-xl font-semibold text-[#141635] text-center">Sign in with email</h1>
-      <input
-        type="email"
-        required
-        autoFocus
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        placeholder="you@example.com"
-        className="mt-6 w-full rounded-xl border border-[#c8cfe1] px-4 py-3 text-base sm:text-sm text-[#141635] outline-none focus:border-[#141635]"
-      />
-      <button
-        type="submit"
-        className="mt-4 w-full rounded-xl bg-[#141635] px-5 py-3 text-sm font-medium text-white hover:bg-[#1e2155]"
-      >
-        Send code
-      </button>
-      <button
-        type="button"
-        onClick={onBack}
-        className="mt-3 w-full min-h-11 text-sm text-[#64708f] hover:text-[#141635]"
-      >
-        Back
-      </button>
-    </form>
-  );
-}
-
-function OtpForm({
-  invalid,
-  attemptsLeft,
-  onSubmit
-}: {
-  invalid?: boolean;
-  attemptsLeft?: number;
-  onSubmit: (code: string) => void;
-}) {
-  const [code, setCode] = useState('');
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (code.trim().length >= 4) onSubmit(code.trim());
-      }}
-    >
-      <h1 className="text-xl font-semibold text-[#141635] text-center">Enter your code</h1>
-      <p className="mt-2 text-sm text-[#64708f] text-center">
-        We sent a one-time code to your email.
-      </p>
-      {invalid && (
-        <p className="mt-2 text-sm text-[#d92d20] text-center">
-          That code didn't work
-          {typeof attemptsLeft === 'number' ? ` (${attemptsLeft} attempts left)` : ''}. Try again.
-        </p>
-      )}
-      <input
-        inputMode="numeric"
-        autoFocus
-        value={code}
-        onChange={(e) => setCode(e.target.value)}
-        placeholder="123456"
-        className="mt-6 w-full rounded-xl border border-[#c8cfe1] px-4 py-3 text-center text-lg tracking-[0.3em] text-[#141635] outline-none focus:border-[#141635]"
-      />
-      <button
-        type="submit"
-        className="mt-4 w-full rounded-xl bg-[#141635] px-5 py-3 text-sm font-medium text-white hover:bg-[#1e2155]"
-      >
-        Verify
-      </button>
-    </form>
-  );
-}
-
-function Waiting({ text }: { text: string }) {
-  return (
-    <div className="text-center">
-      <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-[#c8cfe1] border-t-[#141635]" />
-      <p className="mt-4 text-sm text-[#64708f]">{text}</p>
-    </div>
-  );
 }
