@@ -6,7 +6,7 @@ import { EmptyState } from '../../components/EmptyState.js';
 import { Money } from '../../components/Money.js';
 import { PromptsButton } from '../../components/PromptsButton.js';
 import { sum } from '../../utils/holdings.js';
-import { dustLabel, earningTotal, vaultAssets, yearlyAt } from '../../utils/yieldTotals.js';
+import { dustLabel, earningTotal, vaultAssets, yearlyFromVaults } from '../../utils/yieldTotals.js';
 import { HoldingsList } from './HoldingsList.js';
 import { VaultCard } from './VaultCard.js';
 import { VaultCardSkeleton } from './VaultCardSkeleton.js';
@@ -38,11 +38,20 @@ export function YieldTab({
   });
   const rawBalances = vaultBalances.data ?? {};
   const anyDust = Object.values(rawBalances).some((b) => dustLabel(b) !== null);
-  const prime = vaults.data?.[0];
-  const atPrimeRate =
-    prime && !holdings.error && !vaultsFailed && everything !== null && everything > 0
-      ? { total: everything, yearly: yearlyAt(everything, prime.apy) }
-      : null;
+  const ratedVaults = (vaults.data ?? []).map((v) => ({
+    usd: assets?.byVault[v.address] ?? 0,
+    apy: v.apy
+  }));
+  const yearly = yearlyFromVaults(ratedVaults);
+  // Lending positions and vaults missing from the rate list carry no rate here.
+  const ratedUsd = ratedVaults.reduce((s, v) => s + v.usd, 0);
+  const showTotal =
+    !!vaults.data?.length &&
+    !holdings.error &&
+    !vaultsFailed &&
+    everything !== null &&
+    everything > 0;
+  const partial = everything !== null && everything - ratedUsd >= 0.005;
 
   return (
     <div className="flex flex-col gap-8">
@@ -57,10 +66,21 @@ export function YieldTab({
             Couldn't load your balance. Refresh to try again.
           </span>
         )}
-        {atPrimeRate && (
+        {showTotal && (
           <p className="m-0 text-sm text-muted">
-            <Money value={atPrimeRate.total} className="font-bold text-primary" /> earning in total.
-            At the Prime rate that's ≈ <Money value={atPrimeRate.yearly} /> a year.
+            <Money value={everything} className="font-bold text-primary" /> earning in total.
+            {yearly > 0 &&
+              (partial ? (
+                <>
+                  {' '}
+                  Your vault deposits earn ≈ <Money value={yearly} /> a year at today's rates.
+                </>
+              ) : (
+                <>
+                  {' '}
+                  At today's rates that's ≈ <Money value={yearly} /> a year.
+                </>
+              ))}
           </p>
         )}
         {everything === 0 && !anyDust && !holdings.error && !vaultsFailed && (

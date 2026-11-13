@@ -29,6 +29,16 @@ export function earningTotal({ polygon, vaults, vaultsSettled }: EarningTotalInp
   return roundCents(roundCents(polygon) + (vaults ?? 0));
 }
 
-// The rate is rounded to the two decimals the card shows, so the yearly figure can be reproduced from the screen.
-export const yearlyAt = (total: number, apy: number) =>
-  roundCents((total * (Math.round(apy * 100) / 100)) / 100);
+export interface RatedBalance {
+  usd: number;
+  apy: number | null;
+}
+
+// Each vault's yearly amount uses its own rate as displayed (two decimals) and is rounded to cents
+// before summing, so the figure can be reproduced from the cards. A vault with no rate adds nothing.
+export function yearlyFromVaults(vaults: RatedBalance[]): number {
+  const cents = vaults.map(({ usd, apy }) =>
+    apy === null ? 0 : roundCents((usd * (Math.round(apy * 100) / 100)) / 100)
+  );
+  return roundCents(cents.reduce((s, v) => s + v, 0));
+}

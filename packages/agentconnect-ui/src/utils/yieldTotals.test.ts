@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Holding } from '../indexer';
 
 import { sum } from './holdings.js';
-import { dustLabel, earningTotal, vaultAssets, yearlyAt } from './yieldTotals.js';
+import { dustLabel, earningTotal, vaultAssets, yearlyFromVaults } from './yieldTotals.js';
 
 describe('vaultAssets', () => {
   it('is null until the balances load', () => {
@@ -41,14 +41,55 @@ describe('earningTotal', () => {
   });
 });
 
-describe('yearlyAt', () => {
+describe('yearlyFromVaults', () => {
   it('applies a percent rate and rounds to cents', () => {
-    expect(yearlyAt(1000, 1.76)).toBe(17.6);
-    expect(yearlyAt(333.33, 3)).toBe(10);
+    expect(yearlyFromVaults([{ usd: 1000, apy: 1.76 }])).toBe(17.6);
+    expect(yearlyFromVaults([{ usd: 333.33, apy: 3 }])).toBe(10);
   });
 
   it('uses the rate as displayed, to two decimals', () => {
-    expect(yearlyAt(1000, 2.1838)).toBe(21.8);
+    expect(yearlyFromVaults([{ usd: 1000, apy: 2.1838 }])).toBe(21.8);
+  });
+
+  it('applies each vault its own rate', () => {
+    expect(
+      yearlyFromVaults([
+        { usd: 1000, apy: 2 },
+        { usd: 500, apy: 9 }
+      ])
+    ).toBe(65);
+  });
+
+  it('rounds each vault to cents before summing', () => {
+    expect(
+      yearlyFromVaults([
+        { usd: 0.5, apy: 1 },
+        { usd: 0.5, apy: 1 }
+      ])
+    ).toBe(0.02);
+  });
+
+  it('leaves out a vault with no rate', () => {
+    expect(
+      yearlyFromVaults([
+        { usd: 1000, apy: null },
+        { usd: 100, apy: 5 }
+      ])
+    ).toBe(5);
+  });
+
+  it('is zero when empty or nothing is deposited', () => {
+    expect(yearlyFromVaults([])).toBe(0);
+    expect(yearlyFromVaults([{ usd: 0, apy: 9.3 }])).toBe(0);
+  });
+
+  it('does not project a balance held only in a high-rate vault at a lower rate', () => {
+    expect(
+      yearlyFromVaults([
+        { usd: 0, apy: 2.03 },
+        { usd: 100006.27, apy: 9.3 }
+      ])
+    ).toBe(9300.58);
   });
 });
 
