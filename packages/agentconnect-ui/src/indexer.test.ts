@@ -31,7 +31,8 @@ describe('dailyFlow', () => {
     qty: usd,
     usd,
     counterparty: '0x',
-    address: '0x'
+    address: '0x',
+    scaleKnown: true
   });
 
   it('buckets by local day, oldest first, ending today', () => {

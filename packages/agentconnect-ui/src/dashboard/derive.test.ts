@@ -22,7 +22,8 @@ const transfer = (txnHash: string, direction: ActivityItem['direction']): Activi
   qty: 5,
   usd: 5,
   counterparty: '0x0000000000000000000000000000000000000001',
-  address: '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359'
+  address: '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359',
+  scaleKnown: true
 });
 
 describe('filterHoldings', () => {

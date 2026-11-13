@@ -256,6 +256,7 @@ export interface ActivityItem {
   usd: number;
   counterparty: string;
   address: string;
+  scaleKnown: boolean;
 }
 
 interface RawTransfer {
@@ -309,7 +310,8 @@ export async function fetchActivity(
         qty,
         usd,
         counterparty: (direction === 'in' ? t.from : t.to) ?? '',
-        address: t.contractAddress?.toLowerCase() ?? ''
+        address: t.contractAddress?.toLowerCase() ?? '',
+        scaleKnown: t.contractType === 'NATIVE' || typeof t.contractInfo?.decimals === 'number'
       });
     }
   }

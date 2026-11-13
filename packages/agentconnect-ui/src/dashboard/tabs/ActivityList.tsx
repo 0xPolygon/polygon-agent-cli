@@ -14,6 +14,7 @@ import type { ActivityFilterValue } from './ActivityFilter.js';
 
 import { EmptyState } from '../../components/EmptyState.js';
 import { useActivityLogos } from '../../hooks/useActivityLogos.js';
+import { visibleActivity } from '../../utils/visibleActivity.js';
 import { activityType } from '../derive.js';
 import { ActivityTableRow } from './ActivityTableRow.js';
 
@@ -27,7 +28,8 @@ const COLUMNS = ['Date', 'Type', 'Token and amount', 'USD', 'Counterparty', 'Dir
 export function ActivityList({ activity, filter }: ActivityListProps) {
   const items = activity.data ?? [];
   // Type comes from every transfer, so a swap still reads as one when its other leg is filtered out.
-  const shown = items.filter((i) => filter === 'all' || i.direction === filter);
+  const visible = visibleActivity(items);
+  const shown = visible.filter((i) => filter === 'all' || i.direction === filter);
   const logos = useActivityLogos(shown);
   if (activity.loading) {
     return (
@@ -41,7 +43,7 @@ export function ActivityList({ activity, filter }: ActivityListProps) {
   if (activity.error) {
     return <EmptyState title="Couldn't load activity">Refresh the page to try again.</EmptyState>;
   }
-  if (items.length === 0) {
+  if (visible.length === 0) {
     return (
       <EmptyState title="Nothing yet">Money your agents send and receive shows up here.</EmptyState>
     );
