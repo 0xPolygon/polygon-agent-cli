@@ -53,6 +53,7 @@ describe('yearlyAt', () => {
 });
 
 const holding = (kind: Holding['kind'], usd: number): Holding => ({
+  chainId: 137,
   address: '0x1111111111111111111111111111111111111111',
   symbol: 'TKN',
   name: 'Token',

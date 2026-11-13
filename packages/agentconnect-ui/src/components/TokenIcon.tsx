@@ -5,19 +5,23 @@ import { cn, TokenImage } from '@polygonlabs/design-system';
 interface TokenIconProps {
   symbol: string;
   logo?: string;
-  withChain?: boolean;
+  chainId?: number;
   /** Letters are unreadable at small sizes, so a missing or failed logo gets a plain circle. */
   plainFallback?: boolean;
   className?: string;
 }
 
-// The badge is served from this app so no image host is added.
-const CHAIN_BADGE = { src: '/chain-polygon.svg' };
+const POLYGON_CHAIN_ID = 137;
+
+// Served from this app so no image host is added; a chain without an entry gets no badge.
+const CHAIN_BADGES: Record<number, { src: string }> = {
+  [POLYGON_CHAIN_ID]: { src: '/chain-polygon.svg' }
+};
 
 export function TokenIcon({
   symbol,
   logo,
-  withChain = false,
+  chainId,
   plainFallback = false,
   className
 }: TokenIconProps) {
@@ -31,7 +35,7 @@ export function TokenIcon({
     <TokenImage
       src={failed ? undefined : logo}
       symbol={symbol}
-      withNetwork={withChain ? CHAIN_BADGE : undefined}
+      withNetwork={chainId === undefined ? undefined : CHAIN_BADGES[chainId]}
       className={cn('isolate size-6', className)}
       onError={() => setFailedLogo(logo)}
     />

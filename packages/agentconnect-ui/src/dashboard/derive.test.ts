@@ -5,6 +5,7 @@ import type { ActivityItem, Holding } from '../indexer';
 import { activityType, filterHoldings, logoAddresses, logosByAddress } from './derive.js';
 
 const holding = (symbol: string, name: string): Holding => ({
+  chainId: 137,
   address: `0x${symbol.toLowerCase()}`,
   symbol,
   name,
