@@ -80,7 +80,7 @@ export function parseFundAmount(raw: string | null | undefined): string | undefi
 export function FundingScreen({ walletAddress, chainId, amount, onSkip }: FundingScreenProps) {
   const [copied, copy] = useCopy();
   return (
-    <div className="relative w-full max-w-[400px] rounded-3xl border border-border-normal bg-background-primary shadow-lg">
+    <div className="relative w-full max-w-[400px] rounded-3xl border border-border-normal bg-background-primary shadow-lg max-sm:max-w-full max-sm:rounded-b-none max-sm:border-b-0">
       <Button
         type="button"
         variant="ghost"

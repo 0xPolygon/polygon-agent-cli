@@ -20,9 +20,9 @@ export function AddMoneyModal({ walletAddress, chainId, amount, onClose }: AddMo
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogPortal>
         <DialogOverlay />
-        {/* No transform or overflow on the popup: the funding widget draws full-screen
-            layers that a transformed or clipping ancestor would confine to this box. */}
-        <DialogPrimitive.Popup className="fixed inset-0 m-auto h-fit max-h-[calc(100dvh-2rem)] w-full overflow-y-auto max-w-[calc(100%-2rem)] outline-none sm:max-w-[400px]">
+        {/* No transform on the popup: the funding widget draws full-screen layers that a
+            transformed ancestor would confine to this box. Scrolls instead of clipping. */}
+        <DialogPrimitive.Popup className="fixed inset-0 m-auto h-fit max-h-[calc(100dvh-2rem)] w-full overflow-y-auto max-w-[calc(100%-2rem)] outline-none max-sm:mb-0 max-sm:mt-auto max-sm:max-w-full sm:max-w-[400px]">
           <DialogTitle className="sr-only">Fund your agent wallet</DialogTitle>
           <FundingScreen
             walletAddress={walletAddress}
