@@ -1,4 +1,4 @@
-import { Input, Label } from '@polygonlabs/design-system';
+import { Input, Label, Select } from '@polygonlabs/design-system';
 
 import { AmountChips } from '../../components/AmountChips.js';
 import { usd } from './usd.js';
@@ -25,6 +25,10 @@ export function SpendingLimit({
   setAllowanceUsd,
   setDays
 }: SpendingLimitProps) {
+  const periodOptions = PERIODS.filter((d) => d <= spending.maxDays).map((d) => ({
+    value: String(d),
+    label: `over ${d} days`
+  }));
   return (
     <div className="flex flex-col gap-3">
       <span className="text-sm font-medium text-muted">Spending limit</span>
@@ -46,19 +50,17 @@ export function SpendingLimit({
         <Label htmlFor="days" className="sr-only">
           Period
         </Label>
-        <select
+        <Select.Helper
           id="days"
-          value={days}
           disabled={busy}
-          onChange={(e) => setDays(Number(e.target.value))}
-          className="h-10 rounded-xl border border-border-normal bg-background-input px-3 text-base font-medium text-primary outline-offset-2 outline-border-focus hover:not-disabled:border-border-hover focus-visible:outline-2 disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm"
-        >
-          {PERIODS.filter((d) => d <= spending.maxDays).map((d) => (
-            <option key={d} value={d}>
-              over {d} days
-            </option>
-          ))}
-        </select>
+          options={periodOptions}
+          value={String(days)}
+          onValueChange={(v) => {
+            const period = PERIODS.find((d) => String(d) === v);
+            if (period !== undefined) setDays(period);
+          }}
+          className="shrink-0 text-base sm:text-sm"
+        />
       </div>
       {!amountValid && (
         <span className="text-sm text-destructive">
