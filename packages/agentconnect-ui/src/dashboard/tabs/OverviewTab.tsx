@@ -8,6 +8,7 @@ import type { Loadable } from '../types.js';
 
 import { Money } from '../../components/Money.js';
 import { TotalAssetsHeader } from '../../components/TotalAssetsHeader.js';
+import { roundCents } from '../../utils/groupPositions.js';
 import { sum } from '../../utils/holdings.js';
 import { earningTotal } from '../../utils/yieldTotals.js';
 
@@ -38,10 +39,11 @@ export function OverviewTab({
   onTryAgent
 }: OverviewTabProps) {
   const earning = sum(holdings.data, 'earn');
+  const spend = sum(holdings.data, 'spend');
   const buckets = [
     {
       label: 'Available to spend',
-      value: sum(holdings.data, 'spend'),
+      value: spend === null ? null : roundCents(spend),
       failed: holdings.error,
       note: null
     },

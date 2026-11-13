@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { usd } from './format.js';
+import { roundCents } from './groupPositions.js';
 import { totalBalance } from './totalBalance.js';
 
 const settled = {
@@ -15,6 +17,10 @@ describe('totalBalance', () => {
   it('equals the sum of the displayed parts where unrounded addition differs by a cent', () => {
     // Shown as 10.00 + 10.00; adding the raw 10.004s first would give 20.01.
     expect(totalBalance({ ...settled, spend: 10.004, earn: 10.004 })).toBe(20);
+  });
+
+  it.each([1.005, 0.145])('prints the spend line the same as the headline for %s', (spend) => {
+    expect(usd(roundCents(spend))).toBe(usd(totalBalance({ ...settled, spend }) ?? NaN));
   });
 
   it('is unknown while any part is still loading', () => {
