@@ -8,7 +8,6 @@ import { PromptsButton } from '../../components/PromptsButton.js';
 import { sum } from '../../utils/holdings.js';
 import { dustLabel, earningTotal, vaultAssets, yearlyAt } from '../../utils/yieldTotals.js';
 import { HoldingsList } from './HoldingsList.js';
-import { SECTION_TITLE } from './styles.js';
 import { VaultCard } from './VaultCard.js';
 import { VaultCardSkeleton } from './VaultCardSkeleton.js';
 import { YieldHeader } from './YieldHeader.js';
@@ -93,7 +92,7 @@ export function YieldTab({
 
       {onPolygon !== null && onPolygon > 0 && (
         <div className="flex flex-col gap-3">
-          <span className={SECTION_TITLE}>Also earning on Polygon</span>
+          <span className="text-lg font-bold">Also earning on Polygon</span>
           <HoldingsList holdings={{ ...holdings, data: polygonEarn }} />
         </div>
       )}
