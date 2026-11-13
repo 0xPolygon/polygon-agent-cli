@@ -149,6 +149,17 @@ describe('fetchActivity token address', () => {
     expect(item?.symbol).toBe('POL');
   });
 
+  it('marks the amount scale as known only when decimals are present or the transfer is native', async () => {
+    const [withDecimals] = await activityWith([receive]);
+    const [noDecimals] = await activityWith([{ ...receive, contractInfo: { symbol: 'NFT' } }]);
+    const [native] = await activityWith([
+      { ...receive, contractType: 'NATIVE', contractAddress: ZERO, contractInfo: undefined }
+    ]);
+    expect(withDecimals?.scaleKnown).toBe(true);
+    expect(noDecimals?.scaleKnown).toBe(false);
+    expect(native?.scaleKnown).toBe(true);
+  });
+
   it('uses an empty address when the record has none', async () => {
     const [item] = await activityWith([receive]);
     expect(item?.address).toBe('');

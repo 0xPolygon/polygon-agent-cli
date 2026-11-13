@@ -8,5 +8,5 @@ Alongside the new design:
 
 - The yearly estimate on the Yield page uses each vault's own rate instead of applying one vault's rate to everything.
 - The balance at the top of Overview always equals the sum of the three figures under it, and waits for all of them before showing a total.
-- Activity no longer lists transfers of tokens that have no known decimals and no dollar value, such as airdropped spam tokens that read "+0".
+- Activity no longer lists incoming transfers of tokens that have no known decimals and no dollar value, such as airdropped spam tokens that read "+0". Anything leaving the wallet is always listed.
 - Add money opens as a bottom sheet on phones, like withdraw and receive.

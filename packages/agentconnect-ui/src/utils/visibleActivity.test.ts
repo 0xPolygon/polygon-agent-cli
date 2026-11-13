@@ -27,6 +27,11 @@ describe('visibleActivity', () => {
     expect(visibleActivity([row({ symbol: 'Visit example.test to claim' })])).toEqual([]);
   });
 
+  it('keeps an outbound row with no known scale and no value, while its inbound twin stays hidden', () => {
+    const sent = row({ direction: 'out' });
+    expect(visibleActivity([sent, row({ direction: 'in' })])).toEqual([sent]);
+  });
+
   it('keeps a row whose decimals are known even when it has no USD value', () => {
     const dust = row({ scaleKnown: true });
     expect(visibleActivity([dust])).toEqual([dust]);
