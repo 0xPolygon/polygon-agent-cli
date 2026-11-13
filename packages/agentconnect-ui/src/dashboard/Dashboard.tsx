@@ -15,9 +15,10 @@ import type { Vault } from './earn.js';
 import type { Position } from './markets.js';
 import type { PromptGroup } from './PromptsDrawer.js';
 import type { Session } from './signin.js';
-import type { AgentContext, Loadable } from './types.js';
+import type { AgentContext } from './types.js';
 
 import { useCopy } from '../hooks/useCopy.js';
+import { useLoad } from '../hooks/useLoad.js';
 import { fetchActivity, fetchHoldings } from '../indexer';
 import { usd } from '../utils/format.js';
 import { predictionsTotal } from '../utils/groupPositions.js';
@@ -48,28 +49,6 @@ type OverviewSection = 'tokens' | 'history' | 'agents';
 
 function isOverviewSection(v: unknown): v is OverviewSection {
   return v === 'tokens' || v === 'history' || v === 'agents';
-}
-
-function useLoad<T>(load: (() => Promise<T>) | null, deps: unknown[]): Loadable<T> {
-  const [state, setState] = useState<Loadable<T>>({ data: null, loading: !!load, error: false });
-  useEffect(() => {
-    if (!load) {
-      setState({ data: null, loading: false, error: false });
-      return;
-    }
-    let active = true;
-    setState({ data: null, loading: true, error: false });
-    load()
-      .then((data) => active && setState({ data, loading: false, error: false }))
-      .catch((err) => {
-        console.warn(err);
-        if (active) setState({ data: null, loading: false, error: true });
-      });
-    return () => {
-      active = false;
-    };
-  }, deps);
-  return state;
 }
 
 type ModalState =
