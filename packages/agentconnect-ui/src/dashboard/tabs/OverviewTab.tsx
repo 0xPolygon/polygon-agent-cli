@@ -13,6 +13,7 @@ import { earningTotal } from '../../utils/yieldTotals.js';
 
 interface OverviewTabProps {
   holdings: Loadable<Holding[]>;
+  totalBalance: number | null;
   positionsValue: number | null;
   // Money in the Katana earn vaults (not in `holdings`, which is Polygon only).
   vaultsValue: number | null;
@@ -26,6 +27,7 @@ interface OverviewTabProps {
 
 export function OverviewTab({
   holdings,
+  totalBalance,
   positionsValue,
   vaultsValue,
   earningApy,
@@ -35,9 +37,6 @@ export function OverviewTab({
   onReceive,
   onTryAgent
 }: OverviewTabProps) {
-  const total = holdings.error ? null : sum(holdings.data);
-  const totalWithPositions =
-    total === null ? null : total + (positionsValue ?? 0) + (vaultsValue ?? 0);
   const earning = sum(holdings.data, 'earn');
   const buckets = [
     {
@@ -65,7 +64,7 @@ export function OverviewTab({
       <div className="flex flex-col gap-10">
         <TotalAssetsHeader
           label="Balance"
-          total={totalWithPositions}
+          total={totalBalance}
           failed={holdings.error}
           listClassName="gap-3"
           figureClassName="leading-[1.1]"

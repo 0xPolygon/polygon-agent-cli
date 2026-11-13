@@ -21,6 +21,8 @@ import { useCopy } from '../hooks/useCopy.js';
 import { fetchActivity, fetchHoldings } from '../indexer';
 import { usd } from '../utils/format.js';
 import { predictionsTotal } from '../utils/groupPositions.js';
+import { sum } from '../utils/holdings.js';
+import { totalBalance as sumBalance } from '../utils/totalBalance.js';
 import { vaultAssets } from '../utils/yieldTotals.js';
 import { rememberedEmail } from './account.js';
 import { AppSidebar } from './AppSidebar.js';
@@ -138,9 +140,14 @@ export function Dashboard({
     ? predictionsTotal({ positions: positions.data, cash: predictionCash.data })
     : null;
   // Everything the wallet holds, as on Overview: Polygon, predictions, Katana vaults.
-  const totalBalance = holdings.data
-    ? holdings.data.reduce((t, h) => t + h.usd, 0) + (positionsValue ?? 0) + (vaultsValue ?? 0)
-    : null;
+  const totalBalance = sumBalance({
+    spend: sum(holdings.data, 'spend'),
+    earn: sum(holdings.data, 'earn'),
+    predictions: positionsValue,
+    predictionsSettled: !positions.loading && !predictionCash.loading,
+    vaults: vaultsValue,
+    vaultsSettled: !!(vaults.error || vaultBalances.error || vaultBalances.data)
+  });
   // What the earning money makes, weighted by how much sits in each place.
   const earningApy = (() => {
     const rates = polygonRates.data;
@@ -186,6 +193,7 @@ export function Dashboard({
               <div className="flex flex-col gap-10">
                 <OverviewTab
                   holdings={holdings}
+                  totalBalance={totalBalance}
                   positionsValue={positionsValue}
                   vaultsValue={vaultsValue}
                   earningApy={earningApy}
