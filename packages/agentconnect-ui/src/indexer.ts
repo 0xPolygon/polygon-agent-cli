@@ -71,6 +71,7 @@ function units(raw: string | undefined, decimals: number): number {
 export type HoldingKind = 'spend' | 'earn';
 
 export interface Holding {
+  chainId: number;
   // Token contract; the zero address for POL.
   address: string;
   symbol: string;
@@ -214,6 +215,7 @@ export async function fetchHoldings(walletAddress: string, chainId = 137): Promi
     const receipt = receipts.get(b.contractAddress?.toLowerCase() ?? '');
     const kind = classifyToken(symbol, name);
     out.push({
+      chainId,
       address: b.contractAddress?.toLowerCase() ?? '',
       symbol,
       name,
@@ -225,6 +227,7 @@ export async function fetchHoldings(walletAddress: string, chainId = 137): Promi
   const nativeQty = units(native.balance?.balance, 18);
   if (nativeQty > 0) {
     out.push({
+      chainId,
       address: '0x0000000000000000000000000000000000000000',
       symbol: 'POL',
       name: 'Polygon',
@@ -252,6 +255,8 @@ export interface ActivityItem {
   qty: number;
   usd: number;
   counterparty: string;
+  address: string;
+  scaleKnown: boolean;
 }
 
 interface RawTransfer {
@@ -261,6 +266,7 @@ interface RawTransfer {
   amounts?: string[];
   amountsUSD?: string[];
   contractType?: string;
+  contractAddress?: string;
   contractInfo?: { symbol?: string; decimals?: number };
 }
 
@@ -303,7 +309,9 @@ export async function fetchActivity(
         symbol,
         qty,
         usd,
-        counterparty: (direction === 'in' ? t.from : t.to) ?? ''
+        counterparty: (direction === 'in' ? t.from : t.to) ?? '',
+        address: t.contractAddress?.toLowerCase() ?? '',
+        scaleKnown: t.contractType === 'NATIVE' || typeof t.contractInfo?.decimals === 'number'
       });
     }
   }
