@@ -1,7 +1,12 @@
 import { ArrowLeftRight, Ban, Eye, Send } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import { LogoBadge } from '../App.js';
+import { LoginShell } from '../login/LoginShell.js';
+import { ConnectConsent } from './connect/ConnectConsent.js';
+import { ConnectLoading } from './connect/ConnectLoading.js';
+import { ConnectSignIn } from './connect/ConnectSignIn.js';
+import { ErrorNote } from './connect/ErrorNote.js';
+import { usd } from './connect/usd.js';
 
 // Set while a Google sign-in for connecting an agent is out at the relay. The
 // relay returns to the static `/login`; this tells that page whose return it is.
@@ -26,9 +31,6 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return data;
 }
 
-const inputClass =
-  'h-12 border border-[var(--slate-300)] rounded-xl px-3.5 text-base bg-white outline-none focus:border-[var(--purple-500)]';
-
 interface Spending {
   defaultUsd: number;
   defaultDays: number;
@@ -51,8 +53,6 @@ const READ_ONLY = [
   { icon: Ban, text: "It can't send or withdraw your money" }
 ];
 
-const usd = (n: number) => `$${n.toLocaleString('en-US')}`;
-
 function spendingPermissions(allowanceUsd: number, days: number) {
   const period = days === 1 ? 'a day' : `${days} days`;
   return [
@@ -62,14 +62,7 @@ function spendingPermissions(allowanceUsd: number, days: number) {
   ];
 }
 
-const AMOUNTS = [100, 500, 1000, 5000];
-const PERIODS = [7, 30];
-
-/**
- * An agent (an MCP client) asked for access to the agent wallet. The owner
- * signs in here (or already is), reviews what the agent may do, and allows or
- * denies; either way the page goes back to the agent.
- */
+/** An MCP client asked for access to the agent wallet; allow or deny, the page goes back to the agent. */
 export function Connect({ finishing = false }: { finishing?: boolean }) {
   const [id] = useState(() => {
     if (!finishing) return new URLSearchParams(window.location.search).get('c') ?? '';
@@ -177,6 +170,7 @@ export function Connect({ finishing = false }: { finishing?: boolean }) {
   };
 
   const name = client ?? 'Your agent';
+  const midName = name === 'Your agent' ? 'your agent' : name;
   const spending = consent?.spending;
   const permissions = spending ? spendingPermissions(allowanceUsd, days) : READ_ONLY;
   const amountValid =
@@ -193,237 +187,65 @@ export function Connect({ finishing = false }: { finishing?: boolean }) {
   }, [spending?.defaultUsd, spending?.defaultDays]);
 
   return (
-    <div className="min-h-[100dvh] flex flex-col bg-[var(--slate-50)] text-[var(--slate-900)]">
-      <div className="h-16 flex items-center px-6 bg-white border-b border-[var(--slate-200)]">
-        <LogoBadge />
-      </div>
-      <div className="flex-1 flex items-center justify-center px-5 py-10">
-        <div className="w-full max-w-[420px] flex flex-col gap-6">
-          {consent ? (
-            <>
-              <div className="flex flex-col gap-3">
-                <h1 className="m-0 text-[30px] leading-[1.15] font-bold tracking-[-0.02em]">
-                  Allow {name} to use your wallet?
-                </h1>
-                {consent.email && (
-                  <p className="m-0 text-base text-[var(--slate-600)]">
-                    Signed in as {consent.email}
-                  </p>
-                )}
-              </div>
-              <div className="bg-white border border-[var(--slate-200)] rounded-2xl px-4 py-1">
-                {permissions.map((p) => (
-                  <div
-                    key={p.text}
-                    className="flex items-center gap-3 py-3.5 text-[15px] border-b last:border-b-0 border-[var(--slate-100)]"
-                  >
-                    <p.icon className="w-[18px] h-[18px] flex-shrink-0 text-[var(--slate-500)]" />
-                    <span>{p.text}</span>
-                  </div>
-                ))}
-              </div>
-              {spending && (
-                <div className="flex flex-col gap-3">
-                  <span className="text-sm font-medium text-[var(--slate-600)]">
-                    Spending limit
-                  </span>
-                  <div className="grid grid-cols-4 gap-2">
-                    {AMOUNTS.map((a) => (
-                      <button
-                        key={a}
-                        type="button"
-                        disabled={busy}
-                        onClick={() => setAllowanceUsd(a)}
-                        aria-pressed={allowanceUsd === a}
-                        className={`h-10 rounded-xl border text-sm font-medium ${
-                          allowanceUsd === a
-                            ? 'border-[var(--purple-500)] bg-[var(--purple-50)] text-[var(--purple-700)]'
-                            : 'border-[var(--slate-300)] bg-white'
-                        }`}
-                      >
-                        {usd(a)}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-2.5">
-                    <label htmlFor="allowance" className="sr-only">
-                      Other amount in US dollars
-                    </label>
-                    <input
-                      id="allowance"
-                      inputMode="numeric"
-                      value={String(allowanceUsd)}
-                      onChange={(e) =>
-                        setAllowanceUsd(Number(e.target.value.replace(/[^0-9]/g, '')))
-                      }
-                      className={`${inputClass} h-10 flex-1`}
-                    />
-                    <label htmlFor="days" className="sr-only">
-                      Period
-                    </label>
-                    <select
-                      id="days"
-                      value={days}
-                      disabled={busy}
-                      onChange={(e) => setDays(Number(e.target.value))}
-                      className={`${inputClass} h-10`}
-                    >
-                      {PERIODS.filter((d) => d <= spending.maxDays).map((d) => (
-                        <option key={d} value={d}>
-                          over {d} days
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  {!amountValid && (
-                    <span className="text-sm text-[var(--red-700)]">
-                      Choose between {usd(spending.minUsd)} and {usd(spending.maxUsd)}.
-                    </span>
-                  )}
-                </div>
-              )}
-              <span className="text-[13px] text-[var(--slate-500)] leading-snug">
-                {spending
-                  ? `${name} spends from your agent wallet, never past this limit. Disconnect it anytime in Settings to stop it.`
-                  : `Disconnect ${name} anytime in Settings.`}
-              </span>
-              <div className="grid grid-cols-2 gap-2.5">
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void decide(false)}
-                  className="btn btn-secondary btn-lg h-12 bg-white"
-                >
-                  Don&apos;t allow
-                </button>
-                <button
-                  type="button"
-                  disabled={busy || !amountValid}
-                  onClick={() => void decide(true)}
-                  className="btn btn-primary btn-lg h-12"
-                >
-                  {busy ? (spending ? 'Approving…' : 'Connecting…') : 'Allow'}
-                </button>
-              </div>
-            </>
-          ) : (busy && finishing) || !loaded ? (
-            <span className="text-base text-[var(--slate-600)]">
-              {finishing ? 'Signing you in…' : 'Loading…'}
-            </span>
-          ) : (
-            <>
-              <div className="flex flex-col gap-3">
-                <h1 className="m-0 text-[30px] leading-[1.15] font-bold tracking-[-0.02em]">
-                  Connect {name} to your wallet
-                </h1>
-                <p className="m-0 text-base leading-snug text-[var(--slate-600)]">
-                  {asksToSpend
-                    ? 'Sign in, then choose how much it can spend.'
-                    : 'Sign in, then choose what it can do.'}
-                </p>
-              </div>
+    <LoginShell>
+      {consent ? (
+        <ConnectConsent
+          name={name}
+          midName={midName}
+          email={consent.email}
+          permissions={permissions}
+          spending={spending}
+          allowanceUsd={allowanceUsd}
+          days={days}
+          busy={busy}
+          amountValid={amountValid}
+          setAllowanceUsd={setAllowanceUsd}
+          setDays={setDays}
+          onDecide={(allow) => void decide(allow)}
+        />
+      ) : (busy && finishing) || !loaded ? (
+        <ConnectLoading finishing={finishing} />
+      ) : (
+        <ConnectSignIn
+          midName={midName}
+          asksToSpend={asksToSpend}
+          sent={sent}
+          email={email}
+          code={code}
+          busy={busy}
+          setEmail={setEmail}
+          setCode={setCode}
+          onEmailSubmit={(e) => {
+            e.preventDefault();
+            void run(async () => {
+              await post('/api/connect/email/start', { c: id, email: email.trim() });
+              setSent(true);
+            });
+          }}
+          onCodeSubmit={(e) => {
+            e.preventDefault();
+            void run(async () =>
+              setConsent(
+                await post<Consent>('/api/connect/email/finish', {
+                  c: id,
+                  code: code.trim()
+                })
+              )
+            );
+          }}
+          onGoogle={() =>
+            void run(async () => {
+              const { url } = await post<{ url: string }>('/api/connect/google/start', {
+                c: id
+              });
+              sessionStorage.setItem(CONNECT_KEY, id);
+              window.location.assign(url);
+            })
+          }
+        />
+      )}
 
-              {!sent ? (
-                <form
-                  className="flex flex-col gap-2.5"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    void run(async () => {
-                      await post('/api/connect/email/start', { c: id, email: email.trim() });
-                      setSent(true);
-                    });
-                  }}
-                >
-                  <label htmlFor="email" className="text-sm font-medium text-[var(--slate-600)]">
-                    Email
-                  </label>
-                  <input
-                    id="email"
-                    type="email"
-                    required
-                    autoComplete="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@example.com"
-                    className={inputClass}
-                  />
-                  <button
-                    type="submit"
-                    disabled={busy}
-                    className="btn btn-primary btn-lg w-full h-12"
-                  >
-                    {busy ? 'Sending code…' : 'Continue with email'}
-                  </button>
-                </form>
-              ) : (
-                <form
-                  className="flex flex-col gap-2.5"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    void run(async () =>
-                      setConsent(
-                        await post<Consent>('/api/connect/email/finish', {
-                          c: id,
-                          code: code.trim()
-                        })
-                      )
-                    );
-                  }}
-                >
-                  <label htmlFor="code" className="text-sm font-medium text-[var(--slate-600)]">
-                    Enter the code we sent to {email}
-                  </label>
-                  <input
-                    id="code"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    required
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                    placeholder="123456"
-                    className={`${inputClass} tracking-[0.2em]`}
-                  />
-                  <button
-                    type="submit"
-                    disabled={busy}
-                    className="btn btn-primary btn-lg w-full h-12"
-                  >
-                    {busy ? 'Signing in…' : 'Continue'}
-                  </button>
-                </form>
-              )}
-
-              {!sent && (
-                <>
-                  <div className="flex items-center gap-3 text-[13px] text-[var(--slate-400)]">
-                    <div className="flex-1 h-px bg-[var(--slate-200)]" />
-                    or
-                    <div className="flex-1 h-px bg-[var(--slate-200)]" />
-                  </div>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() =>
-                      void run(async () => {
-                        const { url } = await post<{ url: string }>('/api/connect/google/start', {
-                          c: id
-                        });
-                        sessionStorage.setItem(CONNECT_KEY, id);
-                        window.location.assign(url);
-                      })
-                    }
-                    className="btn btn-secondary btn-lg w-full h-12 bg-white"
-                  >
-                    Continue with Google
-                  </button>
-                </>
-              )}
-            </>
-          )}
-
-          {error && <span className="text-sm text-[var(--red-700)] font-medium">{error}</span>}
-        </div>
-      </div>
-    </div>
+      {error && <ErrorNote>{error}</ErrorNote>}
+    </LoginShell>
   );
 }

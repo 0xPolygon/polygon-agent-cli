@@ -1,8 +1,11 @@
 import { Fund } from '0xtrails/widget';
-import { Check, Copy } from 'lucide-react';
+import { Check, Copy, Plus, X } from 'lucide-react';
+
+import { Button } from '@polygonlabs/design-system';
 
 import { trailsApiKey } from '../config';
-import { shortAddr, useCopy } from '../dashboard/ui.js';
+import { useCopy } from '../hooks/useCopy.js';
+import { shortAddr } from '../utils/format.js';
 
 interface FundingScreenProps {
   walletAddress: string;
@@ -77,78 +80,79 @@ export function parseFundAmount(raw: string | null | undefined): string | undefi
 export function FundingScreen({ walletAddress, chainId, amount, onSkip }: FundingScreenProps) {
   const [copied, copy] = useCopy();
   return (
-    <div className="w-full max-w-sm animate-scale-in">
-      {/* Card */}
-      <div
-        className="w-full bg-white rounded-3xl border border-[#c8cfe1] overflow-hidden"
-        style={{ boxShadow: '0 2px 8px rgba(20,22,53,0.06), 0 16px 48px rgba(20,22,53,0.08)' }}
-      >
-        <div className="px-4 pt-6 pb-5 sm:px-6 sm:pt-7 sm:pb-6 flex flex-col gap-5 min-w-0">
-          {/* Headline + subtext */}
-          <div>
-            <h2 className="text-[#141635] font-bold text-lg leading-snug mb-1">
-              Fund your agent wallet
-            </h2>
-            <p className="text-[#64708f] text-sm font-medium leading-relaxed">
-              Deposit funds with a wallet, credit card, or exchange to access paid services.
-            </p>
-          </div>
-
-          {/* Keep the Trails widget inside the card width on narrow screens. */}
-          <div className="w-full min-w-0 max-w-full [&>*]:max-w-full">
-            <Fund
-              apiKey={trailsApiKey}
-              theme="light"
-              customCss={trailsTheme}
-              to={{
-                recipient: walletAddress,
-                token: USDC_POLYGON,
-                chain: chainId
-              }}
-              // The widget's destination amount (toAmount) is not in the Fund prop types, but
-              // Fund passes unknown props through to it.
-              {...(amount ? { toAmount: amount } : {})}
-              buttonText="Add Funds to Agent"
-              hideSwap={true}
-              onramp={{
-                mesh: {
-                  environment: 'production'
-                }
-              }}
-              onDestinationConfirmation={({ txHash, chainId: confirmChainId, sessionId }) => {
-                console.log('onDestinationConfirmation:', {
-                  txHash,
-                  chainId: confirmChainId,
-                  sessionId
-                });
-                setTimeout(onSkip, 3000);
-              }}
-            />
-          </div>
-
-          {/* Or send straight to the address from another wallet or exchange. */}
-          <div className="flex items-center justify-between gap-3 text-sm">
-            <span className="text-[#64708f] font-medium">Or send on Polygon to</span>
-            <button
-              type="button"
-              onClick={() => copy('address', walletAddress)}
-              aria-label={copied ? 'Address copied' : 'Copy wallet address'}
-              title={walletAddress}
-              className="inline-flex items-center gap-1.5 font-mono text-[13px] text-[#141635] hover:text-[#7c3aed] transition-colors cursor-pointer border-0 bg-transparent p-0"
-            >
-              {shortAddr(walletAddress)}
-              {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <button
+    <div className="relative w-full max-w-[400px] rounded-3xl border border-border-normal bg-background-primary shadow-lg max-sm:max-w-full max-sm:rounded-b-none max-sm:border-b-0">
+      <Button
+        type="button"
+        variant="ghost"
+        size="xs"
+        iconOnly
+        aria-label="Close"
         onClick={onSkip}
-        className="mt-2 sm:mt-4 w-full min-h-11 text-sm text-[#929eba] hover:text-[#64708f] font-medium transition-colors cursor-pointer border-0 bg-transparent py-1"
+        className="absolute right-4 top-4"
       >
-        Skip for now
-      </button>
+        <X className="size-4" />
+      </Button>
+      <div className="flex min-w-0 flex-col gap-5 px-4 pb-4 pt-6 sm:px-6 sm:pb-6">
+        <div className="flex flex-col items-center gap-1 pt-1 text-center">
+          <Plus aria-hidden="true" className="size-8 stroke-1 text-link" />
+          <h2 className="text-[28px] font-bold leading-[1.2] text-primary">
+            Fund your agent wallet
+          </h2>
+          <p className="text-base font-bold leading-snug text-muted">
+            Deposit funds with a wallet, credit card, or exchange to access paid services.
+          </p>
+        </div>
+
+        {/* Keep the Trails widget inside the card width on narrow screens. */}
+        <div className="w-full min-w-0 max-w-full [&>*]:max-w-full">
+          <Fund
+            apiKey={trailsApiKey}
+            theme="light"
+            customCss={trailsTheme}
+            to={{
+              recipient: walletAddress,
+              token: USDC_POLYGON,
+              chain: chainId
+            }}
+            // The widget's destination amount (toAmount) is not in the Fund prop types, but
+            // Fund passes unknown props through to it.
+            {...(amount ? { toAmount: amount } : {})}
+            buttonText="Add Funds to Agent"
+            hideSwap={true}
+            onramp={{
+              mesh: {
+                environment: 'production'
+              }
+            }}
+            onDestinationConfirmation={({ txHash, chainId: confirmChainId, sessionId }) => {
+              console.log('onDestinationConfirmation:', {
+                txHash,
+                chainId: confirmChainId,
+                sessionId
+              });
+              setTimeout(onSkip, 3000);
+            }}
+          />
+        </div>
+
+        <div className="flex items-center justify-between gap-3 text-sm">
+          <span className="font-medium text-muted">Or send on Polygon to</span>
+          <button
+            type="button"
+            onClick={() => copy('address', walletAddress)}
+            aria-label={copied ? 'Address copied' : 'Copy wallet address'}
+            title={walletAddress}
+            className="inline-flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 font-mono text-[13px] text-primary transition-colors hover:text-link"
+          >
+            {shortAddr(walletAddress)}
+            {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+          </button>
+        </div>
+
+        <Button type="button" variant="ghost" onClick={onSkip} className="w-full justify-center">
+          Skip for now
+        </Button>
+      </div>
     </div>
   );
 }

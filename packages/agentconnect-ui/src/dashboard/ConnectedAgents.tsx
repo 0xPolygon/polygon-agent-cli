@@ -1,7 +1,10 @@
-import { Bot } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import { Panel, SectionTitle } from './ui.js';
+import { Skeleton } from '@polygonlabs/design-system';
+
+import { EmptyState } from '../components/EmptyState.js';
+import { StatusBanner } from '../components/StatusBanner.js';
+import { AgentRow } from './AgentRow.js';
 
 interface Agent {
   id: string;
@@ -46,42 +49,28 @@ export function ConnectedAgents() {
   };
 
   return (
-    <div className="flex flex-col gap-3">
-      <SectionTitle>Connected agents</SectionTitle>
-      <Panel pad="px-5 py-2" className="flex flex-col">
-        {agents === null && !error ? (
-          <div className="h-14 my-2 rounded-xl bg-[var(--slate-50)] animate-pulse" />
-        ) : agents && agents.length === 0 ? (
-          <span className="py-4 text-sm text-[var(--slate-500)]">
-            No agents connected yet. When an agent asks to use your wallet, you&apos;ll approve it
-            here.
-          </span>
-        ) : (
-          agents?.map((a) => (
-            <div
-              key={a.id}
-              className="flex items-center gap-3 py-3.5 border-b last:border-b-0 border-[var(--slate-100)]"
-            >
-              <Bot className="w-5 h-5 flex-shrink-0 text-[var(--slate-500)]" />
-              <span className="flex-1 min-w-0 flex flex-col gap-0.5">
-                <span className="text-[15px] font-bold truncate">{a.name}</span>
-                <span className="text-[13px] text-[var(--slate-500)]">
-                  Connected {since(a.connectedAt)}
-                </span>
-              </span>
-              <button
-                type="button"
-                disabled={removing === a.id}
-                onClick={() => void disconnect(a)}
-                className="btn btn-secondary btn-md bg-white"
-              >
-                {removing === a.id ? 'Disconnecting…' : 'Disconnect'}
-              </button>
-            </div>
-          ))
-        )}
-        {error && <span className="py-3 text-sm text-[var(--red-700)]">{error}</span>}
-      </Panel>
+    <div className="flex flex-col gap-2">
+      <div className="mb-3">
+        <StatusBanner>These are the agents that can interact with your wallet</StatusBanner>
+      </div>
+      {agents === null && !error ? (
+        <Skeleton className="h-10 w-full rounded-xl" />
+      ) : agents && agents.length === 0 ? (
+        <EmptyState title="No agents connected yet">
+          When an agent asks to use your wallet, you&apos;ll approve it here.
+        </EmptyState>
+      ) : agents ? (
+        agents.map((a) => (
+          <AgentRow
+            key={a.id}
+            name={a.name}
+            connectedOn={since(a.connectedAt)}
+            removing={removing === a.id}
+            onDisconnect={() => void disconnect(a)}
+          />
+        ))
+      ) : null}
+      {error && <span className="text-sm text-destructive">{error}</span>}
     </div>
   );
 }

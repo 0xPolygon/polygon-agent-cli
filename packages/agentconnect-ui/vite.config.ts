@@ -72,6 +72,8 @@ function serveSkills(): Plugin {
 export default defineConfig({
   plugins: [react(), tailwindcss(), serveSkills()],
   server: {
-    port: 4444
+    port: 4444,
+    // The worker serves these routes; run `pnpm dev:worker` alongside.
+    proxy: { '^/(api|mcp|authorize|oauth|\\.well-known)': 'http://localhost:8787' }
   }
 });
