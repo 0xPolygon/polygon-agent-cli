@@ -17,5 +17,8 @@
     "typescript": "^5.9.3",
     "vitest": "^3.0.0",
     "wrangler": "^4.154.0"
+  },
+  "dependencies": {
+    "zod": "^4.6.5"
   }
 }
