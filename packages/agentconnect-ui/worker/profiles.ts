@@ -10,6 +10,8 @@
 // URI (it registers a new client per install); others are mapped by client id
 // in MCP_CLIENT_PROFILES.
 
+import { logError } from './log.ts';
+
 export type Profile = 'standard' | 'openai' | 'muse';
 
 export interface ProfilePolicy {
@@ -89,7 +91,7 @@ export function profileForClient(
       const profile = Object.hasOwn(map, clientId) ? map[clientId] : undefined;
       if (isProfile(profile)) return profile;
     } catch {
-      console.error('[profiles] MCP_CLIENT_PROFILES is not valid JSON');
+      logError('MCP_CLIENT_PROFILES is not valid JSON', { clientId });
     }
   }
   if (redirectUris.some(isOpenAiRedirect)) return 'openai';

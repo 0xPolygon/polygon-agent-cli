@@ -8,6 +8,7 @@ import { AuthorizationError, OAuthProvider } from '@cloudflare/workers-oauth-pro
 import type { McpProps } from './mcp.ts';
 
 import { AuthError } from './agent-auth.ts';
+import { logError } from './log.ts';
 import { handleMcp } from './mcp.ts';
 import { agentKey } from './money/agent-key.ts';
 import { setUpAllowance } from './money/connect.ts';
@@ -312,10 +313,10 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
     if (err instanceof AuthError) return fail(401, err.code, err.message);
     if (err instanceof ValidationError) return fail(400, 'invalid_request', err.message);
     if (err instanceof MoneyError) {
-      if (err.code !== 'invalid_input') console.error('[connect]', err);
+      if (err.code !== 'invalid_input') logError('Connecting a client failed', { err });
       return fail(err.code === 'invalid_input' ? 400 : 502, err.code, err.message);
     }
-    console.error('[connect]', err);
+    logError('Connecting a client failed', { err });
     const message = err instanceof Error ? err.message : '';
     // OMS refusals (a wrong code, an expired one) are the owner's to fix.
     if (/code|otp|expired|invalid/i.test(message)) {
@@ -375,7 +376,7 @@ export async function handleAgentsApi(req: Request, env: Env, path: string): Pro
           env.AGENT_KEYS,
           keyId
         )({ op: 'revoke', wallet: owner.wallet }).catch((err) =>
-          console.error('[agents] revoking key', err)
+          logError('Revoking the connection key failed', { err, grantId, keyId })
         );
       }
       await env.OAUTH_PROVIDER.revokeGrant(grantId, owner.wallet);
@@ -384,7 +385,7 @@ export async function handleAgentsApi(req: Request, env: Env, path: string): Pro
     return fail(404, 'not_found', 'No such endpoint');
   } catch (err) {
     if (err instanceof AuthError) return fail(401, err.code, err.message);
-    console.error('[agents]', err);
+    logError('Agents endpoint failed', { err });
     return fail(500, 'internal_error', 'Something went wrong');
   }
 }
@@ -505,7 +506,7 @@ export async function handleActionsApi(req: Request, env: Env, path: string): Pr
           const result = await runAsOwner({ oms, wallet: owner.wallet, ...txs });
           return key({ op: 'owner_end', wallet: owner.wallet, id: actionId, result });
         } catch (err) {
-          console.error('[actions] owner run', err);
+          logError('Running an approved action as the owner failed', { err, actionId });
           const e =
             err instanceof MoneyError
               ? err.toJSON()
@@ -520,7 +521,7 @@ export async function handleActionsApi(req: Request, env: Env, path: string): Pr
   } catch (err) {
     if (err instanceof AuthError) return fail(401, err.code, err.message);
     if (err instanceof ValidationError) return fail(400, 'invalid_request', err.message);
-    console.error('[actions]', err);
+    logError('Actions endpoint failed', { err });
     const message = err instanceof Error ? err.message : '';
     if (/code|otp|expired|invalid/i.test(message)) {
       return fail(
@@ -598,7 +599,7 @@ export async function handleSessionApi(req: Request, env: Env, path: string): Pr
   } catch (err) {
     if (err instanceof AuthError) return fail(401, err.code, err.message);
     if (err instanceof ValidationError) return fail(400, 'invalid_request', err.message);
-    console.error('[session]', err);
+    logError('Session endpoint failed', { err });
     const message = err instanceof Error ? err.message : '';
     if (/code|otp|expired|invalid/i.test(message)) {
       return fail(

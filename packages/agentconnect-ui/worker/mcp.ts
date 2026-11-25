@@ -21,6 +21,7 @@ import type { Env } from './index.ts';
 import type { KeyRequest, SpendRequest } from './money/agent-key.ts';
 import type { Profile, ProfilePolicy } from './profiles.ts';
 
+import { logError } from './log.ts';
 import { agentKey, SPEND_OPS } from './money/agent-key.ts';
 import { chainLabel, supportedChainIds } from './money/tokens.ts';
 import { publishableKey } from './oms-config.ts';
@@ -427,7 +428,7 @@ async function walletHoldings(env: Env, wallet: string) {
   try {
     res = await oms.indexer.getBalances({ walletAddress: wallet, networks, includeMetadata: true });
   } catch (err) {
-    console.error('[mcp] balances', err);
+    logError('Reading balances from the indexer failed', { err });
     return null;
   }
   const rows = [...res.nativeBalances, ...res.balances]
@@ -679,7 +680,7 @@ async function handleMessage(env: Env, props: McpProps, msg: Rpc, origin: string
         const { value, isError } = await callTool(env, props, p.name, p.arguments ?? {}, origin);
         return rpcResult(msg.id, toolText(value, isError));
       } catch (err) {
-        console.error('[mcp]', err);
+        logError('MCP tool call failed', { err, tool: p.name });
         return rpcResult(msg.id, toolText('Something went wrong. Try again.', true));
       }
     }
