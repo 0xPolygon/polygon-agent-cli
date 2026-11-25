@@ -29,6 +29,7 @@ import type { PlanJson } from './plan.ts';
 import type { QuoteParams, TradeDeps, TradeRecord } from './trade.ts';
 import type { PayParams, PendingAuthorization, X402Deps } from './x402.ts';
 
+import { logError } from '../log.ts';
 import { publishableKey } from '../oms-config.ts';
 import { deriveKey, openSealed, seal } from '../store.ts';
 import {
@@ -380,7 +381,7 @@ export class AgentKey {
       return { ok: true, value: await this.dispatch(req as KeyRequest) };
     } catch (error) {
       if (error instanceof MoneyError) return { ok: false, error: error.toJSON() };
-      console.error('[agent-key]', error);
+      logError('Agent key request failed', { err: error });
       return {
         ok: false,
         error: new MoneyError({
