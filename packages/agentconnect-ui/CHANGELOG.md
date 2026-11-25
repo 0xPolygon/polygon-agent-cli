@@ -1,5 +1,15 @@
 # @polygonlabs/agentconnect-ui
 
+## 0.2.3
+
+### Patch Changes
+
+- [#290](https://github.com/0xPolygon/polygon-agent-cli/pull/290) [`e8eaca6`](https://github.com/0xPolygon/polygon-agent-cli/commit/e8eaca624690783b63487bcb0811625c5a01748b) Thanks [@shan8851](https://github.com/shan8851)! - Update the Workers runtime compatibility date to 2026-03-10 so both Workers pick up current runtime behaviour.
+
+- [#289](https://github.com/0xPolygon/polygon-agent-cli/pull/289) [`7378645`](https://github.com/0xPolygon/polygon-agent-cli/commit/7378645581064363dea957b3b51fd2fad358dd21) Thanks [@shan8851](https://github.com/shan8851)! - Validate the site's build-time settings once at startup, so a malformed indexer or relay URL now fails with a clear error instead of being used as-is.
+
+- [#288](https://github.com/0xPolygon/polygon-agent-cli/pull/288) [`c24105f`](https://github.com/0xPolygon/polygon-agent-cli/commit/c24105f90f4f3d17c0ea9213eee3fca12e931d04) Thanks [@shan8851](https://github.com/shan8851)! - Worker errors are logged as structured JSON with the error code and cause chain
+
 ## 0.2.2
 
 ### Patch Changes

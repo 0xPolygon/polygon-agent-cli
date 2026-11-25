@@ -1,5 +1,11 @@
 # @polygonlabs/oidc-relay
 
+## 0.0.2
+
+### Patch Changes
+
+- [#290](https://github.com/0xPolygon/polygon-agent-cli/pull/290) [`e8eaca6`](https://github.com/0xPolygon/polygon-agent-cli/commit/e8eaca624690783b63487bcb0811625c5a01748b) Thanks [@shan8851](https://github.com/shan8851)! - Update the Workers runtime compatibility date to 2026-03-10 so both Workers pick up current runtime behaviour.
+
 ## 0.0.1
 
 ### Patch Changes
