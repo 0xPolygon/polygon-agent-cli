@@ -621,7 +621,27 @@ describe('malformed request bodies', () => {
     const path = '/api/connect/decide';
     await refused(
       await handleConnectApi(post(path, JSON.stringify({ allow: 'yes' })), e(), path),
-      'Invalid input: expected boolean, received string'
+      'allow must be a boolean'
+    );
+  });
+
+  it('connect: an allowance that is not a number is named', async () => {
+    const path = '/api/connect/decide';
+    await refused(
+      await handleConnectApi(
+        post(path, JSON.stringify({ allow: true, allowanceUsd: '50' })),
+        e(),
+        path
+      ),
+      'allowanceUsd must be a number'
+    );
+  });
+
+  it('connect: a null id is treated as missing, so the sign-in is reported expired', async () => {
+    const path = '/api/connect/google/start';
+    await refused(
+      await handleConnectApi(post(path, JSON.stringify({ c: null })), e(), path),
+      'This sign-in expired. Start again.'
     );
   });
 
@@ -674,7 +694,7 @@ describe('malformed request bodies', () => {
         withKeys(),
         path
       );
-      await refused(res, 'Invalid input: expected boolean, received string');
+      await refused(res, 'approve must be a boolean');
     });
   });
 });

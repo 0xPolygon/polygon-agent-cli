@@ -6,6 +6,8 @@
 
 import { z } from 'zod/v4';
 
+import type { TokenKind } from '@polygonlabs/agent-shared';
+
 import type { KeyRequest, WalletStoreRequest } from './money/agent-key.ts';
 import type { MoneyCode } from './money/errors.ts';
 
@@ -14,7 +16,11 @@ const requiredString = (name: string) =>
 
 // The connect page may post without an id (a stale link): the handler then
 // answers "This sign-in expired", so a missing id defaults rather than fails.
-const optionalId = z.string('c must be a string').default('');
+// null counts as missing.
+const optionalId = z
+  .string('c must be a string')
+  .nullish()
+  .transform((c) => c ?? '');
 
 const jsonObject = <T extends z.ZodRawShape>(shape: T) =>
   z.object(shape, 'Request body must be a JSON object');
@@ -38,14 +44,14 @@ export const ConnectGoogleFinishBody = jsonObject({
 // by the allowance setup, which answers invalid_input, so a missing one stays NaN for it.
 export const ConnectDecideBody = jsonObject({
   c: optionalId,
-  allow: z.boolean().optional(),
-  allowanceUsd: z.number().optional(),
-  days: z.number().optional()
+  allow: z.boolean('allow must be a boolean').optional(),
+  allowanceUsd: z.number('allowanceUsd must be a number').optional(),
+  days: z.number('days must be a number').optional()
 });
 
 export const ActionDecideBody = jsonObject({
-  approve: z.boolean().optional(),
-  c: z.string().optional()
+  approve: z.boolean('approve must be a boolean').optional(),
+  c: z.string('c must be a string').optional()
 });
 
 // JSON-RPC: the envelope is checked here and each method's params where it is read.
@@ -66,16 +72,27 @@ export const ToolCallParams = z.object({
 // fields passed on whole (swap and payment parameters) survive parsing.
 const wallet = z.string();
 const optString = z.string().optional();
-const ownerRegion = z.object({ country: z.string().nullable(), region: z.string().nullable() });
+// A missing half is an unknown location, which can only close Polymarket positions.
+const ownerRegion = z.object({
+  country: z.string().nullable().default(null),
+  region: z.string().nullable().default(null)
+});
 const pmRegion = { ownerRegion: ownerRegion.optional() };
 
 const hex = z.templateLiteral(['0x', z.string()]);
+
+// Every TokenKind, so a plan the Worker built always parses back; adding a kind fails to compile here.
+const TOKEN_KINDS = ['usd', 'eth', 'btc', 'pol'] as const;
+const allTokenKindsListed: Exclude<TokenKind, (typeof TOKEN_KINDS)[number]> extends never
+  ? true
+  : never = true;
+void allTokenKindsListed;
 
 const planGrant = z.looseObject({
   symbol: z.string(),
   token: hex,
   decimals: z.number(),
-  kind: z.enum(['usd', 'eth', 'btc', 'pol']),
+  kind: z.enum(TOKEN_KINDS),
   limit: z.string(),
   priceUsd: z.number()
 });
