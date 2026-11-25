@@ -1,15 +1,18 @@
 import { Network } from '@0xsequence/wallet-primitives';
 
+import { getEnv } from './env';
+
 // Chain-specific Sequence Indexer base URL pattern.
 // The polygon indexer is at polygon-indexer.sequence.app; other chains follow <chain>-indexer.sequence.app
 const DEFAULT_INDEXER_BASE = 'https://{chain}-indexer.sequence.app/rpc/Indexer';
 
 function getIndexerAccessKey(): string | undefined {
+  const env = getEnv();
   return (
-    (import.meta.env.VITE_INDEXER_ACCESS_KEY as string | undefined) ||
-    (import.meta.env.VITE_POLYGON_INDEXER_ACCESS_KEY as string | undefined) ||
+    env.VITE_INDEXER_ACCESS_KEY ||
+    env.VITE_POLYGON_INDEXER_ACCESS_KEY ||
     // Fall back to project access key — they're often the same value
-    (import.meta.env.VITE_PROJECT_ACCESS_KEY as string | undefined) ||
+    env.VITE_PROJECT_ACCESS_KEY ||
     undefined
   );
 }
@@ -28,7 +31,7 @@ function chainSlug(chainId: number): string {
 
 /** Build the indexer base URL for a given chain. Respects VITE_INDEXER_URL override. */
 function indexerBase(chainId: number): string {
-  const override = import.meta.env.VITE_INDEXER_URL as string | undefined;
+  const override = getEnv().VITE_INDEXER_URL;
   if (override) return override.replace(/\/+$/, '');
   const slug = chainSlug(chainId);
   return DEFAULT_INDEXER_BASE.replace('{chain}', slug);
