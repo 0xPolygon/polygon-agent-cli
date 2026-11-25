@@ -13,6 +13,8 @@ wallet, plus the hosted pieces that wallet sign-in and the remote connector need
   (`scripts/build.mjs`). ABI JSON in `contracts/` ships with it via `files` in its `package.json`.
 - `packages/agentconnect-ui/` — the agentconnect site (a React SPA) and its Cloudflare Worker
   (`worker/`), which also serves the remote MCP connector. Private, deployed.
+- `packages/agent-shared/` — private, source-only constants (token tables, shared addresses) that
+  the CLI bundle and the Worker both compile in, so the two can't drift. Never published.
 - `packages/oidc-relay/` — a small Cloudflare Worker that pairs the CLI with the browser login
   page during sign-in. It carries pairing state only and authenticates no one. Private, deployed.
 
@@ -91,8 +93,8 @@ Read `packages/agentconnect-ui/worker/index.ts` first; it routes everything.
 - **Why a money-moving connection gets its own key in its own Durable Object**
   (`worker/money/agent-key.ts`): the blast radius of any one connection is its own allowance, and
   the object serialises requests so a nonce or transfer record can't race. Allowance planning
-  (`plan.ts`) deliberately mirrors the CLI's session mode and `tokens.test.ts` guards that the
-  token tables match. The transfer engine (`engine.ts`) records before it sends and never resends,
+  (`plan.ts`) deliberately mirrors the CLI's session mode, and both read the token tables
+  from `packages/agent-shared`. The transfer engine (`engine.ts`) records before it sends and never resends,
   so a retry cannot double-spend.
 - **Connecting keeps only what it can verify** (`worker/money/connect.ts`): after the owner approves
   an allowance for the connection's key on each chain, the Worker reads the approval back through

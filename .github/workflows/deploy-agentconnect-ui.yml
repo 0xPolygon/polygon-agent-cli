@@ -12,6 +12,8 @@ on:
       - staging
     paths:
       - 'packages/agentconnect-ui/**'
+      # The Worker and site bundle the shared token table.
+      - 'packages/agent-shared/**'
       # The site serves the skill, at /skill.md among others, and its index.
       - 'skills/**'
       - '.github/workflows/deploy-agentconnect-ui.yml'

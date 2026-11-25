@@ -1,10 +1,11 @@
 // Polymarket's bridge: per-wallet addresses that credit pUSD on deposit, and
 // destination-bound addresses that pay out pUSD as another token on withdraw.
 
+import { USDC_POLYGON } from '@polygonlabs/agent-shared';
+
 import { CliError } from '../errors.ts';
 
 const BRIDGE_URL = process.env.POLYMARKET_BRIDGE_URL || 'https://bridge.polymarket.com';
-const POLYGON_USDC = '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359';
 export const BRIDGE_MIN_DEPOSIT_UNITS = 2_000_000n;
 // The bridge's minimum checkout applies to withdrawals too: pUSD sent to a withdraw address
 // below it is never paid out, and sits at that address.
@@ -69,7 +70,7 @@ export async function withdrawAddress(params: {
     await call('POST', '/withdraw', {
       address: params.wallet,
       toChainId: String(params.toChainId ?? 137),
-      toTokenAddress: params.toToken ?? POLYGON_USDC,
+      toTokenAddress: params.toToken ?? USDC_POLYGON,
       recipientAddr: params.recipient
     }),
     'withdraw'

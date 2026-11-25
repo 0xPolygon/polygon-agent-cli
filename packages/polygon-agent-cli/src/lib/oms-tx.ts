@@ -7,6 +7,7 @@
 
 import type { FeeOptionSelection, FeeOptionWithBalance } from '@polygonlabs/oms-wallet';
 
+import { USDC_POLYGON } from '@polygonlabs/agent-shared';
 import { findNetworkById, isOMSWalletError, TransactionMode } from '@polygonlabs/oms-wallet';
 
 import { CliError } from './errors.ts';
@@ -38,8 +39,6 @@ export interface OmsTxResult {
   feeOptionUsed?: unknown;
 }
 
-const USDC_POLYGON = '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359';
-
 // Build a selectFeeOption callback mirroring the legacy fee logic:
 // prefer native gas if requested, else prefer USDC, always gated on affordability.
 // Sponsored transactions call it with an empty list (oms-wallet >= 0.3); returning
@@ -62,7 +61,9 @@ export function makeFeeSelector(
     if (preferNativeFee) pick = usable.find(isNative);
     if (!pick) {
       pick =
-        usable.find((o) => o.feeOption.token.contractAddress?.toLowerCase() === USDC_POLYGON) ??
+        usable.find(
+          (o) => o.feeOption.token.contractAddress?.toLowerCase() === USDC_POLYGON.toLowerCase()
+        ) ??
         usable.find((o) => o.feeOption.token.symbol?.toUpperCase().includes('USDC')) ??
         (preferNativeFee ? undefined : usable.find(isNative)) ??
         usable[0];

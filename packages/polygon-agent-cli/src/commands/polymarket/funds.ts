@@ -8,6 +8,8 @@ import path from 'node:path';
 
 import { encodeFunctionData, erc20Abi } from 'viem';
 
+import { USDC_POLYGON } from '@polygonlabs/agent-shared';
+
 import type { PendingDeposit } from '../../lib/polymarket/deposits.ts';
 
 import { CliError, NOTHING_SENT_CODES } from '../../lib/errors.ts';
@@ -31,7 +33,6 @@ import { loadOmsWalletPointer, STORAGE_ROOT } from '../../lib/storage.ts';
 import { runTx } from '../../lib/tx-dispatch.ts';
 import { fail, ok, omsAddress, walletOption } from './shared.ts';
 
-const USDC = '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359';
 const POLL_MS = 5_000;
 const WAIT_MS = 5 * 60_000;
 
@@ -132,7 +133,7 @@ async function handleDeposit(argv: DepositArgs): Promise<void> {
       const held = await tokenBalance({
         wallet: argv.wallet,
         chainId: 137,
-        token: USDC,
+        token: USDC_POLYGON,
         walletAddress: from
       });
       if (held < units) {
@@ -167,7 +168,7 @@ async function handleDeposit(argv: DepositArgs): Promise<void> {
             walletName: argv.wallet,
             walletAddress: from,
             chainId: 137,
-            token: USDC,
+            token: USDC_POLYGON,
             amount: units
           });
           summary.allowance = {
@@ -204,7 +205,7 @@ async function handleDeposit(argv: DepositArgs): Promise<void> {
         res = await runTx({
           walletName: argv.wallet,
           chainId: 137,
-          transactions: [{ to: USDC, value: 0n, data }],
+          transactions: [{ to: USDC_POLYGON, value: 0n, data }],
           broadcast,
           purpose: 'trade',
           ref: 'polymarket-deposit'

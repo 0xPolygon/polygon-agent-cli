@@ -19,6 +19,8 @@ import path from 'node:path';
 import { encodeFunctionData, erc20Abi, getAddress, isAddress, isHex, parseEventLogs } from 'viem';
 import { z } from 'zod';
 
+import { USDC_POLYGON } from '@polygonlabs/agent-shared';
+
 import { readConfig } from './config.ts';
 import { CliError, NOTHING_SENT_CODES } from './errors.ts';
 import { appendJsonLine } from './jsonl.ts';
@@ -488,8 +490,6 @@ const SETTLE_SLACK_MS = 4_000;
 // from the server: it's parsed strictly, and the transfer is encoded (never
 // spliced) so the amount valued is exactly the amount sent.
 
-const POLYGON_USDC = '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359';
-
 const address = z.string().refine((value) => isAddress(value), 'not an address');
 const positive = z.number().finite().positive();
 
@@ -569,7 +569,7 @@ export function parseBazaarPayment(params: { body: unknown; chainId?: number }):
     }
     chain = option === polygon ? 'polygon' : option.chain;
     chainId = option === polygon ? 137 : option.chainId;
-    const contract = data.usdc_contracts[chain] ?? (chainId === 137 ? POLYGON_USDC : undefined);
+    const contract = data.usdc_contracts[chain] ?? (chainId === 137 ? USDC_POLYGON : undefined);
     if (!contract) throw invalidPayment(`no USDC contract for ${chain}`);
     asset = contract;
     recipient = data.payment_address;
@@ -588,7 +588,7 @@ export function parseBazaarPayment(params: { body: unknown; chainId?: number }):
     chain = 'polygon';
     chainId = 137;
     recipient = to;
-    asset = polygon.usdc_contract ?? POLYGON_USDC;
+    asset = polygon.usdc_contract ?? USDC_POLYGON;
     amountUsd = details.amount;
   }
 
