@@ -16,11 +16,11 @@
 //   POST /api/login/status  { session, status }               (CLI: publish state)
 //   GET  /api/login/status?session=  -> LoginStatus           (browser: poll state, repeat-readable)
 
-import type { LoginAction } from './login-session.ts';
-
 import { LoginSession, parseLoginStatus } from './login-session.ts';
+import { ActionBody, RegisterBody, SESSION_ID, StatusBody } from './schemas.ts';
 
 export { LoginSession };
+export { validCallbackUrl } from './schemas.ts';
 
 interface Env {
   LOGIN_SESSION: DurableObjectNamespace;
@@ -38,55 +38,7 @@ function json(data: unknown, status = 200): Response {
 }
 
 function validSession(s: string | null): s is string {
-  return typeof s === 'string' && /^[A-Za-z0-9_-]{16,64}$/.test(s);
-}
-
-// Host allowlist for the oidc-callback URL. The callbackUrl is always our own
-// agentconnect /login page (the omsRelayReturnUri) that the OMS relay returned
-// the browser to, so only those hosts (plus localhost for dev) are accepted.
-const ALLOWED_RETURN_HOSTS = new Set([
-  'agentconnect.polygon.technology',
-  'agentconnect.staging.polygon.technology',
-  'localhost',
-  '127.0.0.1'
-]);
-
-// Bound the callback URL the browser hands back after the OMS relay finishes the
-// Google OAuth leg. It must be an https URL, or an http localhost/127.0.0.1 URL
-// for local dev, on one of the allowlisted hosts, so a junk or spoofed value
-// can't be smuggled through as an action.
-export function validCallbackUrl(u: unknown): u is string {
-  if (typeof u !== 'string' || u.length === 0 || u.length > 2048) return false;
-  let url: URL;
-  try {
-    url = new URL(u);
-  } catch {
-    return false;
-  }
-  const isLocal = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
-  if (url.protocol !== 'https:' && !(isLocal && url.protocol === 'http:')) return false;
-  return ALLOWED_RETURN_HOSTS.has(url.hostname);
-}
-
-// Shape-check browser-submitted actions before they reach the DO.
-export function validAction(a: unknown): a is LoginAction {
-  if (typeof a !== 'object' || a === null) return false;
-  const t = (a as { type?: unknown }).type;
-  if (t === 'google' || t === 'cancel') return true;
-  if (t === 'email') {
-    const email = (a as { email?: unknown }).email;
-    return (
-      typeof email === 'string' && email.length >= 3 && email.length <= 320 && email.includes('@')
-    );
-  }
-  if (t === 'otp') {
-    const code = (a as { code?: unknown }).code;
-    return typeof code === 'string' && code.length >= 4 && code.length <= 16;
-  }
-  if (t === 'oidc-callback') {
-    return validCallbackUrl((a as { callbackUrl?: unknown }).callbackUrl);
-  }
-  return false;
+  return typeof s === 'string' && SESSION_ID.test(s);
 }
 
 // --- Worker entry / router ---
@@ -110,18 +62,18 @@ export default {
     // POST /api/login/register { session, context? } -> arm a pairing session (CLI).
     // An invalid context is dropped by the session, never a 400.
     if (request.method === 'POST' && url.pathname === '/api/login/register') {
-      let body: { session?: unknown; context?: unknown };
+      let raw: unknown;
       try {
-        body = (await request.json()) as { session?: unknown; context?: unknown };
+        raw = await request.json();
       } catch {
         return json({ error: 'invalid json' }, 400);
       }
-      const session = typeof body.session === 'string' ? body.session : null;
-      if (!validSession(session)) return json({ error: 'invalid session' }, 400);
-      await loginStub(session).fetch(
+      const body = RegisterBody.safeParse(raw);
+      if (!body.success) return json({ error: 'invalid session' }, 400);
+      await loginStub(body.data.session).fetch(
         new Request('https://do/register', {
           method: 'POST',
-          body: JSON.stringify(body.context ?? null)
+          body: JSON.stringify(body.data.context ?? null)
         })
       );
       return cors(new Response(null, { status: 204 }));
@@ -129,20 +81,18 @@ export default {
 
     // POST /api/login/action { session, action } -> browser submits user input.
     if (request.method === 'POST' && url.pathname === '/api/login/action') {
-      let body: { session?: unknown; action?: unknown };
+      let raw: unknown;
       try {
-        body = (await request.json()) as { session?: unknown; action?: unknown };
+        raw = await request.json();
       } catch {
         return json({ error: 'invalid json' }, 400);
       }
-      const session = typeof body.session === 'string' ? body.session : null;
-      if (!validSession(session) || !validAction(body.action)) {
-        return json({ error: 'invalid request' }, 400);
-      }
-      const res = await loginStub(session).fetch(
+      const body = ActionBody.safeParse(raw);
+      if (!body.success) return json({ error: 'invalid request' }, 400);
+      const res = await loginStub(body.data.session).fetch(
         new Request('https://do/action', {
           method: 'POST',
-          body: JSON.stringify(body.action)
+          body: JSON.stringify(body.data.action)
         })
       );
       return cors(res);
@@ -157,18 +107,18 @@ export default {
 
     // POST /api/login/status { session, ...LoginStatus } -> CLI publishes state.
     if (request.method === 'POST' && url.pathname === '/api/login/status') {
-      let body: { session?: unknown; status?: unknown };
+      let raw: unknown;
       try {
-        body = (await request.json()) as { session?: unknown; status?: unknown };
+        raw = await request.json();
       } catch {
         return json({ error: 'invalid json' }, 400);
       }
-      const session = typeof body.session === 'string' ? body.session : null;
-      const parsed = parseLoginStatus(body.status);
-      if (!validSession(session) || parsed === null) {
+      const body = StatusBody.safeParse(raw);
+      const parsed = body.success ? parseLoginStatus(body.data.status) : null;
+      if (!body.success || parsed === null) {
         return json({ error: 'invalid request' }, 400);
       }
-      const res = await loginStub(session).fetch(
+      const res = await loginStub(body.data.session).fetch(
         new Request('https://do/set-status', {
           method: 'POST',
           body: JSON.stringify(parsed)

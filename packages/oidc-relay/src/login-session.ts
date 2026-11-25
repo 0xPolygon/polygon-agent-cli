@@ -8,6 +8,8 @@
 // flight; a second submit (double click, cancel during OTP) should replace,
 // not queue. Actions are one-time reads so an OTP can never be replayed.
 
+import { LoginActionSchema } from './schemas.ts';
+
 export type LoginAction =
   | { type: 'google' }
   | { type: 'email'; email: string }
@@ -211,8 +213,9 @@ export class LoginSession {
       return new Response(null, { status: 204 });
     }
     if (op === '/action') {
-      const action = (await request.json()) as LoginAction;
-      const result = await this.core.submitAction(action);
+      const action = LoginActionSchema.safeParse(await request.json());
+      if (!action.success) return Response.json({ error: 'invalid request' }, { status: 400 });
+      const result = await this.core.submitAction(action.data);
       if (!result.ok) return Response.json({ error: result.error }, { status: 410 });
       return new Response(null, { status: 204 });
     }
@@ -220,7 +223,9 @@ export class LoginSession {
       return Response.json(await this.core.nextAction());
     }
     if (op === '/set-status') {
-      const result = await this.core.setStatus(await request.json());
+      const status = parseLoginStatus(await request.json());
+      if (status === null) return Response.json({ error: 'invalid request' }, { status: 400 });
+      const result = await this.core.setStatus(status);
       if (!result.ok) return Response.json({ error: 'expired' }, { status: 410 });
       return new Response(null, { status: 204 });
     }

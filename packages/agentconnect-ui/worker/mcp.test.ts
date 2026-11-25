@@ -340,3 +340,41 @@ describe('MCP money tools', () => {
     expect(await instructions(OPENAI)).toMatch(/can't move funds/);
   });
 });
+
+describe('MCP malformed messages', () => {
+  it('answers an envelope without a method with Invalid Request, under its id', async () => {
+    const { status, body } = await rpc(env(), { jsonrpc: '2.0', id: 7 });
+    expect(status).toBe(400);
+    expect(body).toMatchObject({ id: 7, error: { code: -32600 } });
+  });
+
+  it('answers a body that is not an object with Invalid Request and a null id', async () => {
+    const { status, body } = await rpc(env(), null);
+    expect(status).toBe(400);
+    expect(body).toMatchObject({ id: null, error: { code: -32600 } });
+  });
+
+  it('answers only the bad entry of a batch with an error', async () => {
+    const { status, body } = await rpc(env(), [
+      { jsonrpc: '2.0', id: 1, method: 'ping' },
+      { jsonrpc: '2.0', id: 2, method: 5 }
+    ]);
+    expect(status).toBe(200);
+    expect(body).toMatchObject([
+      { id: 1, result: {} },
+      { id: 2, error: { code: -32600 } }
+    ]);
+  });
+
+  it('refuses tools/call params that are not a tool name and arguments', async () => {
+    const { body } = await rpc(env(), {
+      jsonrpc: '2.0',
+      id: 4,
+      method: 'tools/call',
+      params: { name: 5 }
+    });
+    expect(body).toMatchObject({ id: 4, error: { code: -32602 } });
+    const noName = await rpc(env(), { jsonrpc: '2.0', id: 5, method: 'tools/call' });
+    expect(noName.body).toMatchObject({ id: 5, error: { code: -32602 } });
+  });
+});

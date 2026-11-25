@@ -4,6 +4,7 @@ import type { Env } from './index.ts';
 
 import worker, {
   agentName,
+  handleActionsApi,
   handleAgentsApi,
   handleConnectApi,
   isLocalAgent,
@@ -589,5 +590,111 @@ describe('isLocalAgent', () => {
     expect(isLocalAgent('https://claude.ai/api/mcp/auth_callback')).toBe(false);
     expect(isLocalAgent('http://localhost.evil.com/cb')).toBe(false);
     expect(isLocalAgent('not a url')).toBe(false);
+  });
+});
+
+describe('malformed request bodies', () => {
+  const ORIGIN = 'https://agentconnect.test';
+  const post = (path: string, body: string, cookie?: string) =>
+    new Request(`${ORIGIN}${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: ORIGIN,
+        ...(cookie ? { Cookie: cookie } : {})
+      },
+      body
+    });
+  const e = () =>
+    env({ OAUTH_KV: fakeKv().kv, OAUTH_PROVIDER: {} as unknown as Env['OAUTH_PROVIDER'] });
+  const refused = async (res: Response, message: string) => {
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_request', message });
+  };
+
+  it('connect: a missing field is named, as before', async () => {
+    const path = '/api/connect/email/start';
+    await refused(await handleConnectApi(post(path, '{}'), e(), path), 'email is required');
+  });
+
+  it('connect: a decision that is not a boolean is refused, not read as a denial', async () => {
+    const path = '/api/connect/decide';
+    await refused(
+      await handleConnectApi(post(path, JSON.stringify({ allow: 'yes' })), e(), path),
+      'allow must be a boolean'
+    );
+  });
+
+  it('connect: an allowance that is not a number is named', async () => {
+    const path = '/api/connect/decide';
+    await refused(
+      await handleConnectApi(
+        post(path, JSON.stringify({ allow: true, allowanceUsd: '50' })),
+        e(),
+        path
+      ),
+      'allowanceUsd must be a number'
+    );
+  });
+
+  it('connect: a null id is treated as missing, so the sign-in is reported expired', async () => {
+    const path = '/api/connect/google/start';
+    await refused(
+      await handleConnectApi(post(path, JSON.stringify({ c: null })), e(), path),
+      'This sign-in expired. Start again.'
+    );
+  });
+
+  it('connect: a body that is not an object is a 400, not a crash', async () => {
+    const path = '/api/connect/google/finish';
+    await refused(
+      await handleConnectApi(post(path, 'null'), e(), path),
+      'Request body must be a JSON object'
+    );
+  });
+
+  it('session: a missing code is named', async () => {
+    const path = '/api/session/email/finish';
+    await refused(
+      await handleSessionApi(post(path, JSON.stringify({ c: 'x' })), e(), path),
+      'code is required'
+    );
+  });
+
+  it('session: an array body is refused', async () => {
+    const path = '/api/session/email/start';
+    await refused(
+      await handleSessionApi(post(path, '[]'), e(), path),
+      'Request body must be a JSON object'
+    );
+  });
+
+  describe('approval page', () => {
+    const KEY = 'a'.repeat(32);
+    const ACTION = 'b'.repeat(24);
+    const keys = {
+      idFromName: (n: string) => n,
+      get: () => ({ fetch: async () => Response.json({ ok: true, value: {} }) })
+    } as unknown as DurableObjectNamespace;
+    const withKeys = () => env({ OAUTH_KV: fakeKv().kv, AGENT_KEYS: keys });
+
+    it('sign-in start: a missing email is named', async () => {
+      const path = `/api/actions/${KEY}/${ACTION}/signin/email/start`;
+      await refused(
+        await handleActionsApi(post(path, '{}'), withKeys(), path),
+        'email is required'
+      );
+    });
+
+    it('answering: an approval that is not a boolean is refused', async () => {
+      const path = `/api/actions/${KEY}/${ACTION}`;
+      const cookie = `${SESSION_COOKIE}=${await issueSession({ wallet: WALLET, email: null }, SECRET)}`;
+      const res = await handleActionsApi(
+        post(path, JSON.stringify({ approve: 'yes' }), cookie),
+        withKeys(),
+        path
+      );
+      await refused(res, 'approve must be a boolean');
+    });
   });
 });

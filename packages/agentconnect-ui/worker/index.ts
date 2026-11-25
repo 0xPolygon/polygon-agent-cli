@@ -2,6 +2,7 @@
 // site, and connecting agents over MCP.
 
 import type { OAuthHelpers } from '@cloudflare/workers-oauth-provider';
+import type { z } from 'zod/v4';
 
 import { AuthorizationError, OAuthProvider } from '@cloudflare/workers-oauth-provider';
 
@@ -32,6 +33,17 @@ import {
 } from './owner-session.ts';
 import { OwnerSignIn, ValidationError } from './owner-signin.ts';
 import { policyOf, profileForClient } from './profiles.ts';
+import {
+  ActionDecideBody,
+  ConnectDecideBody,
+  ConnectEmailFinishBody,
+  ConnectEmailStartBody,
+  ConnectGoogleFinishBody,
+  ConnectGoogleStartBody,
+  EmailFinishBody,
+  EmailStartBody,
+  GoogleFinishBody
+} from './schemas.ts';
 import { SealedKv } from './store.ts';
 
 // Each connection that moves money has its own key in a Durable Object.
@@ -124,6 +136,14 @@ function fail(status: number, error: string, message: string): Response {
   return json({ error, message }, status);
 }
 
+function parse<T>(schema: z.ZodType<T>, body: unknown): T {
+  const result = schema.safeParse(body);
+  if (!result.success) {
+    throw new ValidationError(result.error.issues[0]?.message ?? 'Request body is invalid');
+  }
+  return result.data;
+}
+
 async function readBody(req: Request): Promise<unknown> {
   try {
     return await req.json();
@@ -195,15 +215,9 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
       return json({ ...base, signedIn: false });
     }
     if (req.method !== 'POST') return fail(405, 'method_not_allowed', 'Use POST');
-    const body = (await readBody(req)) as Record<string, unknown>;
-    const id = typeof body.c === 'string' ? body.c : '';
-    const str = (k: string) => {
-      const v = body[k];
-      if (typeof v !== 'string' || !v.trim()) throw new ValidationError(`${k} is required`);
-      return v.trim();
-    };
+    const body = await readBody(req);
     // Signed in: remember who, keep them signed in on the site, show consent.
-    const signedIn = async (who: { wallet: string; email: string | null }) => {
+    const signedIn = async (id: string, who: { wallet: string; email: string | null }) => {
       await signIn.markSignedIn(id, who);
       const request = (await signIn.load(id)).authRequest;
       return new Response(JSON.stringify(consent(who, request)), {
@@ -215,22 +229,27 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
       });
     };
     if (path === '/api/connect/email/start') {
-      await signIn.startEmail(id, str('email'));
+      const { c, email } = parse(ConnectEmailStartBody, body);
+      await signIn.startEmail(c, email);
       return json({ sent: true });
     }
     // An agent that moves money keeps the owner signed in until they decide.
-    const keep = async () => movesMoney((await signIn.load(id)).authRequest);
+    const keep = async (id: string) => movesMoney((await signIn.load(id)).authRequest);
     if (path === '/api/connect/email/finish') {
-      return signedIn(await signIn.finishEmail(id, str('code'), await keep()));
+      const { c, code } = parse(ConnectEmailFinishBody, body);
+      return signedIn(c, await signIn.finishEmail(c, code, await keep(c)));
     }
     if (path === '/api/connect/google/start') {
-      const url = await signIn.startGoogle(id, `${new URL(req.url).origin}/login`);
+      const { c } = parse(ConnectGoogleStartBody, body);
+      const url = await signIn.startGoogle(c, `${new URL(req.url).origin}/login`);
       return json({ url });
     }
     if (path === '/api/connect/google/finish') {
-      return signedIn(await signIn.finishGoogle(id, str('callbackUrl'), await keep()));
+      const { c, callbackUrl } = parse(ConnectGoogleFinishBody, body);
+      return signedIn(c, await signIn.finishGoogle(c, callbackUrl, await keep(c)));
     }
     if (path === '/api/connect/decide') {
+      const { c: id, allow, allowanceUsd, days } = parse(ConnectDecideBody, body);
       const pending = await signIn.load(id);
       if (!pending.authRequest)
         throw new ValidationError('This link is not for connecting an agent.');
@@ -242,7 +261,7 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
       if (!owner || owner.wallet !== who.wallet) {
         throw new AuthError('unauthorized', 'Sign in on this page to decide.');
       }
-      if (body.allow !== true) {
+      if (allow !== true) {
         // Signs out first if the owner was kept signed in.
         if (pending.ownerSession) await signIn.withOwner(id, async () => {});
         else await signIn.forget(id);
@@ -260,16 +279,14 @@ export async function handleConnectApi(req: Request, env: Env, path: string): Pr
       let keyId: string | undefined;
       let allowance: Awaited<ReturnType<typeof setUpAllowance>> | undefined;
       if (movesMoney(authRequest)) {
-        const allowanceUsd = Number(body.allowanceUsd);
-        const days = Number(body.days);
         const id_ = hexId();
         const key = agentKey(env.AGENT_KEYS!, id_);
         allowance = await signIn.withOwner(id, (oms) =>
           setUpAllowance({
             wallet: who.wallet,
             appName: pending.clientName ?? 'An agent',
-            allowanceUsd,
-            days,
+            allowanceUsd: allowanceUsd ?? Number.NaN,
+            days: days ?? Number.NaN,
             deps: {
               owner: oms.wallet,
               indexer: oms.indexer,
@@ -434,25 +451,24 @@ export async function handleActionsApi(req: Request, env: Env, path: string): Pr
     // session cookie, as on the connect page.
     if (method) {
       if (req.method !== 'POST') return fail(405, 'method_not_allowed', 'Use POST');
-      const body = (await readBody(req)) as Record<string, unknown>;
-      const str = (k: string) => {
-        const v = body[k];
-        if (typeof v !== 'string' || !v.trim()) throw new ValidationError(`${k} is required`);
-        return v.trim();
-      };
+      const body = await readBody(req);
       if (step === 'start') {
+        // Validated before the sign-in is created, as the field check was.
+        const email = method === 'email' ? parse(EmailStartBody, body).email : '';
         const c = await signIn.create({});
         if (method === 'email') {
-          await signIn.startEmail(c, str('email'));
+          await signIn.startEmail(c, email);
           return json({ c });
         }
         return json({ c, url: await signIn.startGoogle(c, `${new URL(req.url).origin}/login`) });
       }
-      const c = str('c');
+      const finished =
+        method === 'email' ? parse(EmailFinishBody, body) : parse(GoogleFinishBody, body);
+      const c = finished.c;
       const who =
-        method === 'email'
-          ? await signIn.finishEmail(c, str('code'), true)
-          : await signIn.finishGoogle(c, str('callbackUrl'), true);
+        'code' in finished
+          ? await signIn.finishEmail(c, finished.code, true)
+          : await signIn.finishGoogle(c, finished.callbackUrl, true);
       return new Response(JSON.stringify({ c, signedIn: true }), {
         headers: {
           'Content-Type': 'application/json',
@@ -471,7 +487,7 @@ export async function handleActionsApi(req: Request, env: Env, path: string): Pr
     if (req.method === 'GET')
       return answer(await key({ op: 'action', wallet: owner.wallet, id: actionId }));
     if (req.method !== 'POST') return fail(405, 'method_not_allowed', 'Use GET or POST');
-    const body = (await readBody(req)) as { approve?: unknown; c?: unknown };
+    const body = parse(ActionDecideBody, await readBody(req));
     const view = await key({ op: 'action', wallet: owner.wallet, id: actionId });
     if (!view.ok) return answer(view);
     const ownerAction = (view.value as { ownerSignIn?: boolean }).ownerSignIn === true;
@@ -562,12 +578,7 @@ export async function handleSessionApi(req: Request, env: Env, path: string): Pr
       return fail(405, 'method_not_allowed', 'Use GET or DELETE');
     }
     if (req.method !== 'POST') return fail(405, 'method_not_allowed', 'Use POST');
-    const body = (await readBody(req)) as Record<string, unknown>;
-    const str = (k: string) => {
-      const v = body[k];
-      if (typeof v !== 'string' || !v.trim()) throw new ValidationError(`${k} is required`);
-      return v.trim();
-    };
+    const body = await readBody(req);
     const finish = async (id: string, who: { wallet: string; email: string | null }) => {
       await signIn.forget(id);
       return new Response(JSON.stringify(who), {
@@ -579,21 +590,22 @@ export async function handleSessionApi(req: Request, env: Env, path: string): Pr
       });
     };
     if (path === '/api/session/email/start') {
+      const { email } = parse(EmailStartBody, body);
       const c = await signIn.create({});
-      await signIn.startEmail(c, str('email'));
+      await signIn.startEmail(c, email);
       return json({ c });
     }
     if (path === '/api/session/email/finish') {
-      const c = str('c');
-      return finish(c, await signIn.finishEmail(c, str('code')));
+      const { c, code } = parse(EmailFinishBody, body);
+      return finish(c, await signIn.finishEmail(c, code));
     }
     if (path === '/api/session/google/start') {
       const c = await signIn.create({});
       return json({ c, url: await signIn.startGoogle(c, `${new URL(req.url).origin}/login`) });
     }
     if (path === '/api/session/google/finish') {
-      const c = str('c');
-      return finish(c, await signIn.finishGoogle(c, str('callbackUrl')));
+      const { c, callbackUrl } = parse(GoogleFinishBody, body);
+      return finish(c, await signIn.finishGoogle(c, callbackUrl));
     }
     return fail(404, 'not_found', 'No such endpoint');
   } catch (err) {

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { RemoteAccessClient } from '@polygonlabs/oms-wallet';
 
-import type { KeyRecord, KeyRequest, KeyResponse, KeyStorage } from './agent-key.ts';
+import type { KeyRecord, KeyResponse, KeyStorage } from './agent-key.ts';
 
 import { AgentKey } from './agent-key.ts';
 import { buildPlan, planToJson } from './plan.ts';
@@ -40,7 +40,7 @@ function setup(client: Partial<RemoteAccessClient> = {}) {
       listSessions: async () => [],
       ...client
     }) as unknown as RemoteAccessClient;
-  const ask = async (req: KeyRequest) =>
+  const ask = async (req: unknown) =>
     (await (
       await key.fetch(
         new Request('https://agent-key/', { method: 'POST', body: JSON.stringify(req) })
@@ -224,5 +224,38 @@ describe('AgentKey', () => {
       await s.ask({ op: 'register', wallet: WALLET, days: 30, appName: 'Claude' });
       expect(await raw(s, { op: 'wstore_get', name: 'pm-key' })).toMatchObject({ ok: false });
     });
+  });
+});
+
+describe('AgentKey request validation', () => {
+  const refused = (res: KeyResponse) => {
+    expect(res).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+  };
+
+  it('refuses an unknown op', async () => {
+    refused(await setup().ask({ op: 'mint', wallet: WALLET }));
+  });
+
+  it('refuses a request missing a required field', async () => {
+    refused(await setup().ask({ op: 'register', wallet: WALLET, appName: 'Claude' }));
+  });
+
+  it('refuses a wallet-store write without a value', async () => {
+    refused(await setup().ask({ op: 'wstore_put', name: 'account' }));
+  });
+
+  it('refuses a proposal whose request is not a spend', async () => {
+    refused(
+      await setup().ask({
+        op: 'propose',
+        wallet: WALLET,
+        appName: 'Claude',
+        request: { op: 'revoke' }
+      })
+    );
+  });
+
+  it('refuses a body that is not an object', async () => {
+    refused(await setup().ask(null));
   });
 });
