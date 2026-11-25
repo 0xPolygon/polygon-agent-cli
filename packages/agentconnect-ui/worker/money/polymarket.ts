@@ -335,22 +335,37 @@ const doFetch = (deps: PolymarketDeps): typeof fetch => deps.fetch ?? fetch;
 // Upstream replies are parsed with loose schemas naming only the fields read
 // here: a changed shape fails the parse, an added field doesn't.
 const GeoblockBody = z.looseObject({
-  blocked: z.boolean().optional(),
+  blocked: z.boolean().nullish(),
   country: z.string().nullish()
 });
 // Market and position rows are read key by key (and shown as data), so a row
-// only has to be an object.
+// only has to be an object; one that isn't is skipped, as the old filters did.
 const GammaRow = z.record(z.string(), z.unknown());
+const gammaRows = (list: unknown[] | null | undefined) =>
+  (list ?? []).flatMap((r) => {
+    const row = GammaRow.safeParse(r);
+    return row.success ? [row.data] : [];
+  });
+const Rows = z.array(z.unknown()).nullish().transform(gammaRows);
 const SearchBody = z.looseObject({
-  events: z.array(z.looseObject({ markets: z.array(GammaRow).optional() })).optional()
+  events: z
+    .array(z.unknown())
+    .nullish()
+    .transform((events) =>
+      (events ?? []).flatMap((e) => {
+        const event = z.looseObject({ markets: Rows }).safeParse(e);
+        return event.success ? [event.data] : [];
+      })
+    )
 });
-const MarketsBody = z.looseObject({ markets: z.array(GammaRow).optional() });
-const PositionsBody = z.looseObject({ data: z.array(GammaRow).optional() });
+const MarketsBody = z.looseObject({ markets: Rows });
+const PositionsBody = z.looseObject({ data: Rows });
 const BridgeAddressBody = z.looseObject({
-  address: z.looseObject({ evm: z.string().optional() }).optional()
+  address: z.looseObject({ evm: z.string().nullish() }).nullish()
 });
+// Rows are counted as well as read, so a row without a status still has to count.
 const BridgeStatusBody = z.looseObject({
-  transactions: z.array(z.looseObject({ status: z.string() })).optional()
+  transactions: z.array(z.looseObject({ status: z.string().nullish() })).nullish()
 });
 
 function malformed(what: string, cause: unknown): MoneyError {
@@ -828,7 +843,7 @@ async function bridgeCall<S extends z.ZodType>(
   return parsed.data;
 }
 
-function evmOf(res: { address?: { evm?: string } }, what: string): `0x${string}` {
+function evmOf(res: { address?: { evm?: string | null } | null }, what: string): `0x${string}` {
   const evm = res.address?.evm;
   if (!evm || !/^0x[0-9a-fA-F]{40}$/.test(evm)) {
     throw new MoneyError({

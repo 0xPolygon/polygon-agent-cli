@@ -28,17 +28,20 @@ const MAX_BODY_CHARS = 50_000;
 const CHAINS = [polygon, base, mainnet, arbitrum, optimism];
 
 // What a service asks for, parsed from its 402 reply. A loose object naming only
-// the fields read here, so extra fields don't matter.
+// the fields read here, coerced the way the checks below always read them, so
+// validating never changes which offer is chosen: only an offer those checks
+// would reject anyway fails to parse.
 const RequirementSchema = z.looseObject({
   scheme: z.string(),
   network: z.string(),
-  amount: z.string(),
+  amount: z.union([z.string(), z.number()]).transform(String),
   asset: z.string(),
   payTo: z.string(),
-  maxTimeoutSeconds: z.number(),
+  maxTimeoutSeconds: z.coerce.number().optional().catch(undefined),
   extra: z
-    .looseObject({ name: z.string().optional(), assetTransferMethod: z.string().optional() })
-    .optional()
+    .looseObject({ name: z.unknown().optional(), assetTransferMethod: z.string().optional() })
+    .nullish()
+    .catch(undefined)
 });
 export type Requirement = z.infer<typeof RequirementSchema>;
 
@@ -198,8 +201,8 @@ export async function payAndFetch(
       .json()
       .catch(() => ({}))
   );
-  // An offer that doesn't parse (another scheme's shape, say) is one this wallet
-  // can't make; if none parse, the "no payment this wallet can make" error follows.
+  // An offer that doesn't parse is one the checks below would have rejected too;
+  // if none parse, the "no payment this wallet can make" error follows.
   const offers = required.accepts.flatMap((a) => {
     const parsed = RequirementSchema.safeParse(a);
     return parsed.success ? [parsed.data] : [];
@@ -212,7 +215,7 @@ export async function payAndFetch(
         'The service offers no payment this wallet can make (a plain stablecoin transfer on an EVM chain). Nothing was paid.'
     });
   }
-  if (req.maxTimeoutSeconds > MAX_AUTHORIZATION_SECONDS) {
+  if (req.maxTimeoutSeconds !== undefined && req.maxTimeoutSeconds > MAX_AUTHORIZATION_SECONDS) {
     throw new MoneyError({
       code: 'invalid_input',
       message: `The service wants a payment valid for ${req.maxTimeoutSeconds} s, more than ${MAX_AUTHORIZATION_SECONDS / 60} minutes. Nothing was paid.`

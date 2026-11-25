@@ -127,7 +127,7 @@ export function Connect({ finishing = false }: { finishing?: boolean }) {
     void fetch(`/api/connect?c=${encodeURIComponent(id)}`)
       .then(async (r) => {
         const raw: unknown = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(errorMessage(raw) ?? 'This connect link expired.');
+        if (!r.ok) throw new Error(errorMessage(raw) ?? 'Something went wrong. Try again.');
         const d = parseBody(ConnectInfoSchema, raw, 'This connect link expired.');
         setClient(d.clientName ?? 'Your agent');
         if (d.spending) setAsksToSpend(true);

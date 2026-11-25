@@ -52,30 +52,37 @@ async function postAction(session: string, action: LoginAction): Promise<boolean
 }
 
 // Loose objects: the relay may add fields. A context this page doesn't recognise
-// is dropped, so a newer CLI falls back to the generic copy instead of stalling
-// the login.
+// is dropped (see parseRelayStatus), so a newer CLI falls back to the generic
+// copy instead of stalling the login.
 const LoginContextSchema = z.looseObject({
   purpose: z.enum(['connect', 'allowance', 'renew', 'withdraw', 'access', 'owner']),
   allowanceUsd: z.number().optional(),
   days: z.number().optional(),
   polymarket: z.boolean().optional()
 });
-const RelayStatusSchema: z.ZodType<RelayStatus> = z.intersection(
-  z.discriminatedUnion('status', [
-    z.looseObject({ status: z.literal('awaiting-method') }),
-    z.looseObject({ status: z.literal('auth-url'), url: z.string() }),
-    z.looseObject({ status: z.literal('otp-sent') }),
-    z.looseObject({ status: z.literal('otp-invalid'), attemptsLeft: z.number().optional() }),
-    z.looseObject({
-      status: z.literal('done'),
-      walletAddress: z.string(),
-      funding: z.looseObject({ url: z.string() }).optional()
-    }),
-    z.looseObject({ status: z.literal('error'), message: z.string() }),
-    z.looseObject({ status: z.literal('expired') })
-  ]),
-  z.looseObject({ context: LoginContextSchema.optional().catch(undefined) })
-);
+const RelayStatusSchema = z.discriminatedUnion('status', [
+  z.looseObject({ status: z.literal('awaiting-method') }),
+  z.looseObject({ status: z.literal('auth-url'), url: z.string() }),
+  z.looseObject({ status: z.literal('otp-sent') }),
+  z.looseObject({ status: z.literal('otp-invalid'), attemptsLeft: z.number().optional() }),
+  z.looseObject({
+    status: z.literal('done'),
+    walletAddress: z.string(),
+    funding: z.looseObject({ url: z.string() }).optional()
+  }),
+  z.looseObject({ status: z.literal('error'), message: z.string() }),
+  z.looseObject({ status: z.literal('expired') })
+]);
+
+/** A relay reply as a RelayStatus, or null when the status itself isn't one this page knows. */
+export function parseRelayStatus(raw: unknown): RelayStatus | null {
+  const status = RelayStatusSchema.safeParse(raw);
+  if (!status.success) return null;
+  // Parsed apart from the status: a context that is null or unrecognised must
+  // only drop the context, never the status the login is waiting on.
+  const context = LoginContextSchema.safeParse(status.data.context);
+  return context.success ? { ...status.data, context: context.data } : status.data;
+}
 
 // A transient relay failure (network error or a 5xx) must not terminate the
 // session, so it returns null and the polling effect just skips that tick.
@@ -87,7 +94,7 @@ async function fetchStatus(session: string): Promise<RelayStatus | null> {
       `${oidcRelayUrl}/api/login/status?session=${encodeURIComponent(session)}`
     );
     // A reply this page can't read is skipped like a transient failure.
-    if (res.ok) return RelayStatusSchema.safeParse(await res.json()).data ?? null;
+    if (res.ok) return parseRelayStatus(await res.json());
     if (res.status === 400) return { status: 'expired' };
     return null;
   } catch {

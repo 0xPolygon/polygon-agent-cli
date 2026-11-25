@@ -66,7 +66,7 @@ function num(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function units(raw: string | undefined, decimals: number): number {
+function units(raw: string | null | undefined, decimals: number): number {
   if (!raw) return 0;
   try {
     const big = BigInt(raw);
@@ -107,25 +107,37 @@ export function classifyToken(
   return { kind: 'spend' };
 }
 
-// Loose objects naming only what is read below: a changed shape fails the parse,
-// an added field doesn't.
+// Loose objects naming only what is read below: a changed envelope fails the
+// parse, an added field doesn't. The indexer sends null for absent values, so
+// leaves are nullish, and a row that doesn't parse is skipped rather than
+// failing the list.
+const rowsOf = <S extends z.ZodType>(row: S) =>
+  z
+    .array(z.unknown())
+    .nullish()
+    .transform((list): z.output<S>[] =>
+      (list ?? []).flatMap((r) => {
+        const parsed = row.safeParse(r);
+        return parsed.success ? [parsed.data] : [];
+      })
+    );
 const RawTokenBalance = z.looseObject({
-  contractAddress: z.string().optional(),
-  balance: z.string().optional(),
-  balanceUSD: z.string().optional(),
+  contractAddress: z.string().nullish(),
+  balance: z.string().nullish(),
+  balanceUSD: z.string().nullish(),
   contractInfo: z
     .looseObject({
-      symbol: z.string().optional(),
-      name: z.string().optional(),
-      decimals: z.number().optional()
+      symbol: z.string().nullish(),
+      name: z.string().nullish(),
+      decimals: z.number().nullish()
     })
-    .optional()
+    .nullish()
 });
-const TokenBalances = z.looseObject({ balances: z.array(RawTokenBalance).optional() });
+const TokenBalances = z.looseObject({ balances: rowsOf(RawTokenBalance) });
 const NativeBalance = z.looseObject({
   balance: z
-    .looseObject({ balance: z.string().optional(), balanceUSD: z.string().optional() })
-    .optional()
+    .looseObject({ balance: z.string().nullish(), balanceUSD: z.string().nullish() })
+    .nullish()
 });
 
 // Polygon stablecoins an earn receipt can be backed by, priced at $1, with
@@ -141,7 +153,15 @@ const word = (hex: string) => hex.replace(/^0x/, '').toLowerCase().padStart(64, 
 const addressOf = (result?: string) =>
   result && result.length >= 66 ? `0x${result.slice(-40)}`.toLowerCase() : undefined;
 
-const RpcReplies = z.array(z.looseObject({ id: z.number(), result: z.string().optional() }));
+const RpcReplies = z.array(
+  z.looseObject({
+    id: z.number(),
+    result: z
+      .string()
+      .nullish()
+      .transform((r) => r ?? undefined)
+  })
+);
 
 export async function rpcCalls(
   chainId: number,
@@ -291,27 +311,25 @@ export interface ActivityItem {
 
 const RawTransfer = z.looseObject({
   // SEND, RECEIVE or UNKNOWN; left a plain string so a new value can't fail the page.
-  transferType: z.string().optional(),
-  from: z.string().optional(),
-  to: z.string().optional(),
-  amounts: z.array(z.string()).optional(),
-  amountsUSD: z.array(z.string()).optional(),
-  contractType: z.string().optional(),
-  contractAddress: z.string().optional(),
+  transferType: z.string().nullish(),
+  from: z.string().nullish(),
+  to: z.string().nullish(),
+  amounts: z.array(z.string()).nullish(),
+  amountsUSD: z.array(z.string()).nullish(),
+  contractType: z.string().nullish(),
+  contractAddress: z.string().nullish(),
   contractInfo: z
-    .looseObject({ symbol: z.string().optional(), decimals: z.number().optional() })
-    .optional()
+    .looseObject({ symbol: z.string().nullish(), decimals: z.number().nullish() })
+    .nullish()
 });
 const TransactionHistory = z.looseObject({
-  transactions: z
-    .array(
-      z.looseObject({
-        txnHash: z.string(),
-        timestamp: z.string(),
-        transfers: z.array(RawTransfer).optional()
-      })
-    )
-    .optional()
+  transactions: rowsOf(
+    z.looseObject({
+      txnHash: z.string(),
+      timestamp: z.string(),
+      transfers: rowsOf(RawTransfer)
+    })
+  )
 });
 
 /** Token movements in and out of the wallet, newest first. One row per transfer. */

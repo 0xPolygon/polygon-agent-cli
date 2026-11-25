@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { pickVaults } from './earn.js';
+import { fetchVaults, pickVaults } from './earn.js';
 
 const market = (
   id: string,
@@ -71,5 +71,29 @@ describe('pickVaults', () => {
   it('needs a clear step up in rate, not a rounding difference', () => {
     const vaults = pickVaults([market('a', 1_000_000, 0.03), market('b', 500_000, 0.032)]);
     expect(vaults.map((v) => v.marketId)).toEqual(['a']);
+  });
+});
+
+describe('fetchVaults', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('skips rows with null fields instead of failing the list', async () => {
+    const items = [
+      market('b', 3_100_000, 0.021),
+      { ...market('c', 500_000, 0.05), statistics: { tvlUsd: null } },
+      {
+        ...market('d', 500_000, 0.05),
+        inputTokens: [{ symbol: 'ETH', decimals: 18, address: null }]
+      },
+      { ...market('e', 500_000, 0.05), statistics: { tvlUsd: 5 } }
+    ];
+    vi.stubGlobal('fetch', async () => Response.json({ items }));
+    const vaults = await fetchVaults();
+    expect(vaults.map((v) => v.marketId)).toEqual(['b']);
+  });
+
+  it('fails when the envelope is wrong', async () => {
+    vi.stubGlobal('fetch', async () => Response.json({ items: 'nope' }));
+    await expect(fetchVaults()).rejects.toThrow();
   });
 });

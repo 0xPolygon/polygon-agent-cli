@@ -23,32 +23,31 @@ export interface Position {
   slug: string;
 }
 
-// A loose object naming only what is read below: a changed shape fails the
-// parse, an added field doesn't.
-const PositionsBody = z.looseObject({
-  data: z
-    .array(
-      z.looseObject({
-        title: z.string().optional(),
-        outcome: z.string().optional(),
-        avg_price: z.number().optional(),
-        current_price: z.number().optional(),
-        current_value: z.number().optional(),
-        total_cost_usdc: z.number().optional(),
-        unrealized_pnl: z.number().optional(),
-        end_date: z.string().optional(),
-        event_slug: z.string().optional()
-      })
-    )
-    .optional()
+// Loose objects naming only what is read below: a changed envelope fails the
+// parse, an added field doesn't. A row that doesn't parse is skipped.
+const Row = z.looseObject({
+  title: z.string().nullish(),
+  outcome: z.string().nullish(),
+  avg_price: z.number().nullish(),
+  current_price: z.number().nullish(),
+  current_value: z.number().nullish(),
+  total_cost_usdc: z.number().nullish(),
+  unrealized_pnl: z.number().nullish(),
+  end_date: z.string().nullish(),
+  event_slug: z.string().nullish()
 });
+const PositionsBody = z.looseObject({ data: z.array(z.unknown()).nullish() });
 
 export async function fetchPositions(address: string): Promise<Position[]> {
   const params = new URLSearchParams({ user: address, limit: '50', status: 'OPEN' });
   const res = await fetch(`${DATA_URL}/v2/positions?${params}`);
   if (!res.ok) throw new Error(`Polymarket positions failed: ${res.status}`);
   const body = PositionsBody.parse(await res.json());
-  return (body.data ?? []).map((p) => ({
+  const rows = (body.data ?? []).flatMap((r) => {
+    const row = Row.safeParse(r);
+    return row.success ? [row.data] : [];
+  });
+  return rows.map((p) => ({
     title: p.title ?? 'Untitled market',
     outcome: p.outcome ?? '',
     avgPrice: p.avg_price ?? 0,

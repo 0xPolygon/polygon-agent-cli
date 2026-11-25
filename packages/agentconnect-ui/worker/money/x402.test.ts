@@ -105,6 +105,30 @@ describe('payAndFetch', () => {
     ).rejects.toMatchObject({ code: 'invalid_input', details: { priceUsd: 2 } });
   });
 
+  it('validating offers does not change which one is chosen', async () => {
+    const response = new Response('{}', {
+      status: 402,
+      headers: {
+        'PAYMENT-REQUIRED': encodePaymentRequiredHeader({
+          x402Version: 2,
+          resource: { url: 'https://api.example.com/search' },
+          accepts: [
+            { ...req({ amount: '5000' }), maxTimeoutSeconds: '3600', extra: null },
+            req({ network: 'eip155:8453', asset: USDC_BASE, amount: '1000' })
+          ]
+        } as never)
+      }
+    });
+    // The Polygon offer is first and preferred, and it asks for more than the
+    // allowed validity: the call is refused for that, not moved to the Base offer.
+    await expect(
+      payAndFetch({ url: 'https://api.example.com/search', maxUsd: 1 }, deps([response]), [])
+    ).rejects.toMatchObject({
+      code: 'invalid_input',
+      message: expect.stringContaining('valid for 3600 s')
+    });
+  });
+
   it('needs a max_usd', async () => {
     await expect(
       payAndFetch({ url: 'https://api.example.com/search', maxUsd: NaN }, deps([]), [])

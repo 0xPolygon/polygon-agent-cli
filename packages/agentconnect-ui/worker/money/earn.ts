@@ -43,27 +43,43 @@ export interface Vault {
 }
 
 // Loose objects naming only what listVaults reads: a changed shape fails the
-// parse, an added field doesn't.
+// parse, an added field doesn't. Trails sends null for absent values (a vault
+// with no TVL, a native-token input with no address), so leaves are nullish.
+const InputToken = z.looseObject({
+  symbol: z.string(),
+  decimals: z.number(),
+  address: z.string().nullish()
+});
 const RawMarket = z.looseObject({
   id: z.string(),
   metadata: z
     .looseObject({
-      name: z.string().optional(),
-      deprecated: z.boolean().optional(),
-      underMaintenance: z.boolean().optional()
+      name: z.string().nullish(),
+      deprecated: z.boolean().nullish(),
+      underMaintenance: z.boolean().nullish()
     })
-    .optional(),
+    .nullish(),
+  // Only the first input token is read; one that doesn't parse leaves the list
+  // empty, which filters the vault out as before.
   inputTokens: z
-    .array(
-      z.looseObject({ symbol: z.string(), decimals: z.number(), address: z.string().optional() })
-    )
-    .optional(),
-  outputToken: z.looseObject({ address: z.string().optional() }).optional(),
-  rewardRate: z.looseObject({ total: z.number() }).optional(),
-  statistics: z.looseObject({ tvlUsd: z.string().optional() }).optional(),
-  status: z.looseObject({ enter: z.boolean() }).optional()
+    .array(z.unknown())
+    .nullish()
+    .transform((list) => {
+      const first = InputToken.safeParse(list?.[0]);
+      return first.success ? [first.data] : [];
+    }),
+  outputToken: z.looseObject({ address: z.string().nullish() }).nullish(),
+  rewardRate: z.looseObject({ total: z.number() }).nullish(),
+  statistics: z.looseObject({ tvlUsd: z.string().nullish() }).nullish(),
+  status: z.looseObject({ enter: z.boolean() }).nullish()
 });
-const MarketsResponse = z.looseObject({ items: z.array(RawMarket).optional() });
+// The envelope must match; a row that doesn't is skipped, as the old filter did.
+const MarketsResponse = z.looseObject({ items: z.array(z.unknown()).nullish() });
+const parseMarkets = (items: unknown[]) =>
+  items.flatMap((item) => {
+    const row = RawMarket.safeParse(item);
+    return row.success ? [row.data] : [];
+  });
 
 export interface EarnDeps {
   trailsKey: string;
@@ -131,7 +147,7 @@ export async function listVaults(chain: string | undefined, deps: EarnDeps): Pro
           cause: parsed.error
         });
       }
-      const items = parsed.data.items ?? [];
+      const items = parseMarkets(parsed.data.items ?? []);
       return items.flatMap((m): Vault[] => {
         const input = m.inputTokens?.[0];
         const out = m.outputToken?.address;

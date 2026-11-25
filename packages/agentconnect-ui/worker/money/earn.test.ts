@@ -114,12 +114,41 @@ describe('earn', () => {
     ).rejects.toMatchObject({ code: 'not_covered' });
   });
 
-  it('tolerates added fields but reports a changed shape as an upstream error', async () => {
-    const extra = await listVaults('katana', deps([market({ brandNew: { field: 1 } })]));
-    expect(extra).toHaveLength(1);
-    await expect(
-      listVaults('katana', deps([market({ statistics: { tvlUsd: 2500000 } })]))
-    ).rejects.toMatchObject({ code: 'upstream_error' });
+  it('tolerates added fields and skips rows it cannot use, as before', async () => {
+    const vaults = await listVaults(
+      'katana',
+      deps([
+        market({ brandNew: { field: 1 } }),
+        market({ id: 'no-tvl', statistics: { tvlUsd: null } }),
+        market({
+          id: 'native-alt',
+          inputTokens: [{ symbol: 'ETH', decimals: 18, address: null }]
+        }),
+        market({ id: 'odd-row', statistics: { tvlUsd: 2500000 } })
+      ])
+    );
+    expect(vaults).toHaveLength(1);
+  });
+
+  it('keeps a vault whose later input token has a null address', async () => {
+    const vaults = await listVaults(
+      'katana',
+      deps([
+        market({
+          inputTokens: [
+            { symbol: 'vbUSDC', decimals: 6, address: USDC_KATANA },
+            { symbol: 'ETH', decimals: 18, address: null }
+          ]
+        })
+      ])
+    );
+    expect(vaults).toHaveLength(1);
+  });
+
+  it('reports a wrong envelope as an upstream error', async () => {
+    await expect(listVaults('katana', deps('nope' as never))).rejects.toMatchObject({
+      code: 'upstream_error'
+    });
   });
 
   it('lists only vaults that take deposits now', async () => {
