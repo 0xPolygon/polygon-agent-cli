@@ -312,9 +312,10 @@ describe('omsSigner', () => {
     const sig = await signer.signTypedData(typed);
     expect(sig).toMatch(/^0x[0-9a-f]{130}$/);
     expect(f.signed).toHaveLength(1);
-    expect(f.signed[0]!.active).toBe('imp-x');
-    const td = (f.signed[0]!.payload as { typedData: { types: Record<string, unknown> } })
-      .typedData;
+    const [first] = f.signed;
+    if (!first) throw new Error('no signature recorded');
+    expect(first.active).toBe('imp-x');
+    const td = (first.payload as { typedData: { types: Record<string, unknown> } }).typedData;
     expect(td.types.EIP712Domain).toEqual([
       { name: 'name', type: 'string' },
       { name: 'version', type: 'string' },
@@ -328,7 +329,9 @@ describe('omsSigner', () => {
     const f = fakeOms([MAIN, IMPORTED], 'main');
     const signer = omsSigner(f.w, { walletId: 'imp-x', address: IMPORTED.address });
     expect(await signer.signMessage('0x1234' as never)).toMatch(/^0x/);
-    expect(f.signed[0]!.active).toBe('imp-x');
+    const [first] = f.signed;
+    if (!first) throw new Error('no signature recorded');
+    expect(first.active).toBe('imp-x');
     expect(f.getActive()).toBe('main');
   });
 
