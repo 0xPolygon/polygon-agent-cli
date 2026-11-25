@@ -1,6 +1,7 @@
 import { Fund } from '0xtrails/widget';
 import { Check, Copy, Plus, X } from 'lucide-react';
 
+import { USDC_POLYGON } from '@polygonlabs/agent-shared';
 import { Button } from '@polygonlabs/design-system';
 
 import { trailsApiKey } from '../config';
@@ -14,8 +15,6 @@ interface FundingScreenProps {
   amount?: string;
   onSkip: () => void;
 }
-
-const USDC_POLYGON = '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359';
 
 const trailsTheme: Record<string, string> = {
   '--trails-font-family': "'Fustat', 'Inter', ui-sans-serif, system-ui, sans-serif",

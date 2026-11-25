@@ -4,13 +4,14 @@ import { getAddress } from 'viem';
 
 import type { RemoteAccessSession, TransactionStatus } from '@polygonlabs/oms-wallet';
 
+import { USDC_POLYGON } from '@polygonlabs/agent-shared';
 import { OMSWalletRequestError } from '@polygonlabs/oms-wallet';
 
 import type { ApprovedPlan, EngineDeps, RacClient, TransferRecord } from './engine.ts';
 
 import { buildPlan } from './plan.ts';
 
-export const USDC = getAddress('0x3c499c542cef5e3811e1192ce70d8cc03d5c3359');
+export const USDC = getAddress(USDC_POLYGON);
 export const WETH = getAddress('0x7ceb23fd6bc0add59e62ac25578270cff1b9f619');
 export const WALLET = getAddress('0xd384ea24ca0B3a5e4BB35935C611E3dCB68Fd08e');
 export const TO = getAddress('0x1D17C0F90A0b3dFb5124C2FF56B33a0D2E202e1d');

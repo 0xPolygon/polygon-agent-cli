@@ -1,0 +1,24 @@
+{
+  "name": "@polygonlabs/agent-shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Token tables and constants shared by the CLI and the agentconnect Worker/SPA",
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "@polygonlabs/source": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "test": "vitest run",
+    "typecheck": "tsc -b",
+    "clean": "rm -rf out-tsc node_modules *.tsbuildinfo"
+  },
+  "devDependencies": {
+    "viem": "^2.57.3",
+    "vitest": "^3.0.0"
+  }
+}

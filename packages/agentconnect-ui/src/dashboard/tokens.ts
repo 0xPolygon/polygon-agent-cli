@@ -1,10 +1,10 @@
 // Token names and logos from the Trails token list, for the holdings list.
 
-const TRAILS = 'https://trails-api.sequence.app/rpc/Trails';
+import { TRAILS_API_URL, USDC_POLYGON } from '@polygonlabs/agent-shared';
 
 // Earn receipts (vault shares, aTokens) have no logo of their own; they show
 // the stablecoin they hold.
-const USDC = '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359';
+const USDC = USDC_POLYGON.toLowerCase();
 const USDT = '0xc2132d05d31c914a87c6611c10748aeb04b58e8f';
 
 export interface TokenLook {
@@ -18,7 +18,7 @@ function lookup(chainId: number, address: string): Promise<TokenLook | null> {
   const key = `${chainId}:${address}`;
   let hit = cache.get(key);
   if (!hit) {
-    hit = fetch(`${TRAILS}/GetTokenList`, {
+    hit = fetch(`${TRAILS_API_URL}/GetTokenList`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chainIds: [chainId], tokenAddress: address, includeAllListed: true })

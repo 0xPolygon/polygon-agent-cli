@@ -4,11 +4,12 @@
 // largest smaller vault that pays clearly more than the tier before it, so
 // taking on more risk always earns more; a vault that doesn't is never offered.
 
+import { TRAILS_API_URL } from '@polygonlabs/agent-shared';
+
 import { trailsApiKey } from '../config';
 
 export const KATANA_CHAIN_ID = 747474;
 const KATANA_RPC = 'https://rpc.katana.network';
-const TRAILS = 'https://trails-api.sequence.app/rpc/Trails';
 
 // A vault needs this much in it, and a real rate (not one that rounds to 0.00%),
 // to be offered.
@@ -118,7 +119,7 @@ export function pickVaults(markets: RawMarket[]): Vault[] {
 }
 
 export async function fetchVaults(): Promise<Vault[]> {
-  const res = await fetch(`${TRAILS}/YieldGetMarkets`, {
+  const res = await fetch(`${TRAILS_API_URL}/YieldGetMarkets`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -185,7 +186,7 @@ export async function fetchVaultBalances(
 export async function fetchPolygonRates(): Promise<Record<string, number>> {
   const lists = await Promise.all(
     ['morpho', 'aave'].map(async (provider) => {
-      const res = await fetch(`${TRAILS}/YieldGetMarkets`, {
+      const res = await fetch(`${TRAILS_API_URL}/YieldGetMarkets`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
