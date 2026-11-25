@@ -161,7 +161,7 @@ describe('a connection key in a real Durable Object', { timeout: 30_000 }, () =>
       op: 'propose',
       wallet: WALLET,
       appName: 'tests',
-      request: { op: 'pay_service', url: 'https://service.x402.test/data', maxUsd: '1' }
+      request: { op: 'pay_service', url: 'https://service.x402.test/data', maxUsd: 1 }
     });
     const { actionId } = proposed.value as { actionId: string };
     expect(proposed.value).property('status', 'pending');

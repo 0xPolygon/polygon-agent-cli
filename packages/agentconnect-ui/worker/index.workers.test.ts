@@ -51,7 +51,7 @@ describe('worker routes in the Workers runtime', { timeout: 30_000 }, () => {
       op: 'propose',
       wallet: WALLET,
       appName: 'tests',
-      request: { op: 'pay_service', url: 'https://service.x402.test/data', maxUsd: '1' }
+      request: { op: 'pay_service', url: 'https://service.x402.test/data', maxUsd: 1 }
     });
     const url = `${SITE}/api/actions/${KEY_ID}/${proposed.value?.actionId}`;
     const pending = async () =>

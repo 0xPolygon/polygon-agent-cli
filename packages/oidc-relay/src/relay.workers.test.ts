@@ -35,6 +35,34 @@ describe('relay in the Workers runtime', { timeout: 10_000 }, () => {
     expect(await res.text()).equal('not found');
   });
 
+  it('answers a body that is not an object with the same 400 as other bad input', async () => {
+    for (const body of [null, [], 'text', 7]) {
+      const register = await post('/api/login/register', body);
+      expect(register.status).equal(400);
+      expect(await register.json()).deep.equal({ error: 'invalid session' });
+      for (const path of ['/api/login/action', '/api/login/status']) {
+        const res = await post(path, body);
+        expect(res.status).equal(400);
+        expect(await res.json()).deep.equal({ error: 'invalid request' });
+      }
+    }
+  });
+
+  it('refuses an action or status whose fields are the wrong type', async () => {
+    const session = newSession();
+    await register(session);
+    const badAction = await post('/api/login/action', {
+      session,
+      action: { type: 'otp', code: 1234 }
+    });
+    expect(badAction.status).equal(400);
+    expect(await badAction.json()).deep.equal({ error: 'invalid request' });
+    const badStatus = await post('/api/login/status', { session, status: { status: 'done' } });
+    expect(badStatus.status).equal(400);
+    expect(await badStatus.json()).deep.equal({ error: 'invalid request' });
+    expect((await post('/api/login/register', { session: 12345678901234567 })).status).equal(400);
+  });
+
   it('rejects bad input at the HTTP edge with CORS on the error', async () => {
     const session = newSession();
     const badJson = await SELF.fetch(`${base}/api/login/register`, {

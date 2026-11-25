@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { validAction, validCallbackUrl } from './relay.ts';
+import { validCallbackUrl } from './relay.ts';
+import { LoginActionSchema } from './schemas.ts';
+
+const validAction = (a: unknown) => LoginActionSchema.safeParse(a).success;
 
 describe('validCallbackUrl', () => {
   it('accepts the production and staging agentconnect login pages over https', () => {

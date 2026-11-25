@@ -10,6 +10,7 @@
 // What a connection sees depends on its profile (profiles.ts): which tools.
 
 import { formatUnits } from 'viem';
+import { z } from 'zod/v4';
 
 import {
   EthereumPrivateKeyCredentialSigner,
@@ -20,12 +21,14 @@ import {
 import type { Env } from './index.ts';
 import type { KeyRequest, SpendRequest } from './money/agent-key.ts';
 import type { Profile, ProfilePolicy } from './profiles.ts';
+import type { Rpc } from './schemas.ts';
 
 import { logError } from './log.ts';
 import { agentKey, SPEND_OPS } from './money/agent-key.ts';
 import { chainLabel, supportedChainIds } from './money/tokens.ts';
 import { publishableKey } from './oms-config.ts';
 import { policyOf } from './profiles.ts';
+import { RpcMessage, ToolCallParams } from './schemas.ts';
 
 export interface McpProps {
   wallet: string;
@@ -394,8 +397,6 @@ function toolsFor(allowed: string[]) {
   return TOOLS.filter((t) => allowed.includes(t.name));
 }
 
-type Rpc = { jsonrpc: '2.0'; id?: string | number | null; method: string; params?: unknown };
-
 const rpcResult = (id: Rpc['id'], result: unknown) => ({ jsonrpc: '2.0', id, result });
 const rpcError = (id: Rpc['id'], code: number, message: string) => ({
   jsonrpc: '2.0',
@@ -671,9 +672,13 @@ async function handleMessage(env: Env, props: McpProps, msg: Rpc, origin: string
     case 'tools/list':
       return rpcResult(msg.id, { tools: toolsFor(allowed) });
     case 'tools/call': {
-      const p = (msg.params ?? {}) as { name?: string; arguments?: Record<string, unknown> };
+      const parsed = ToolCallParams.safeParse(msg.params ?? {});
+      if (!parsed.success) {
+        return rpcError(msg.id, -32602, `Invalid params: ${parsed.error.issues[0]?.message}`);
+      }
+      const p = parsed.data;
       // Checked here too, not only in the list: a hidden tool can't be called by name.
-      if (!p.name || !allowed.includes(p.name)) {
+      if (!allowed.includes(p.name)) {
         return rpcError(msg.id, -32602, `Unknown tool: ${p.name}`);
       }
       try {
@@ -704,10 +709,25 @@ export async function handleMcp(req: Request, env: Env, props: McpProps): Promis
     return Response.json(rpcError(null, -32700, 'Parse error'), { status: 400 });
   }
   const origin = new URL(req.url).origin;
-  const messages = (Array.isArray(body) ? body : [body]) as Rpc[];
+  let invalid = false;
+  const messages: unknown[] = Array.isArray(body) ? body : [body];
   const replies = (
-    await Promise.all(messages.map((m) => handleMessage(env, props, m, origin)))
+    await Promise.all(
+      messages.map((raw) => {
+        const msg = RpcMessage.safeParse(raw);
+        if (msg.success) return handleMessage(env, props, msg.data, origin);
+        // Answer under the caller's id when it sent a usable one.
+        invalid = true;
+        const claimed = z.object({ id: RpcMessage.shape.id }).safeParse(raw);
+        return rpcError(
+          claimed.success ? (claimed.data.id ?? null) : null,
+          -32600,
+          'Invalid Request'
+        );
+      })
+    )
   ).filter(Boolean);
   if (replies.length === 0) return new Response(null, { status: 202 });
-  return Response.json(Array.isArray(body) ? replies : replies[0]);
+  if (Array.isArray(body)) return Response.json(replies);
+  return Response.json(replies[0], invalid ? { status: 400 } : undefined);
 }

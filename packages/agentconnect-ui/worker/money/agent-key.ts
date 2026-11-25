@@ -16,6 +16,7 @@ import type { Address } from 'viem';
 
 import { getAddress, isAddress } from 'viem';
 
+import { USDC_POLYGON } from '@polygonlabs/agent-shared';
 import {
   EthereumPrivateKeyCredentialSigner,
   findNetworkById,
@@ -31,6 +32,7 @@ import type { PayParams, PendingAuthorization, X402Deps } from './x402.ts';
 
 import { logError } from '../log.ts';
 import { publishableKey } from '../oms-config.ts';
+import { AgentKeyRequest } from '../schemas.ts';
 import { deriveKey, openSealed, seal } from '../store.ts';
 import {
   beginOwnerAction,
@@ -366,15 +368,26 @@ export class AgentKey {
 
   async fetch(request: Request): Promise<Response> {
     if (request.method !== 'POST') return new Response(null, { status: 405 });
-    const body = (await request.json()) as KeyRequest | WalletStoreRequest;
+    const body: unknown = await request.json();
     // Reading an action needs no turn: it may wait while one runs.
-    if (body.op === 'action') return Response.json(await this.handle(body));
+    if (typeof body === 'object' && body !== null && 'op' in body && body.op === 'action') {
+      return Response.json(await this.handle(body));
+    }
     // One request at a time, start to finish.
     return Response.json(await this.enqueue(() => this.handle(body)));
   }
 
-  private async handle(req: KeyRequest | WalletStoreRequest): Promise<KeyResponse> {
+  private async handle(raw: unknown): Promise<KeyResponse> {
     try {
+      const parsed = AgentKeyRequest.safeParse(raw);
+      if (!parsed.success) {
+        const issue = parsed.error.issues[0];
+        throw new MoneyError({
+          code: 'invalid_input',
+          message: `Invalid request${issue ? `: ${issue.path.join('.') || 'body'} ${issue.message}` : '.'}`
+        });
+      }
+      const req = parsed.data;
       if (req.op.startsWith('wstore_')) {
         return { ok: true, value: await this.walletStoreOp(req as WalletStoreRequest) };
       }
@@ -1074,7 +1087,7 @@ export class AgentKey {
     const sealer = await this.sealer();
     const wallet = record.wallet;
     const deps = await this.deps(record);
-    const USDC = getAddress('0x3c499c542cef5e3811e1192ce70d8cc03d5c3359');
+    const USDC = USDC_POLYGON;
     return {
       store: {
         get: async (name: string) => {
