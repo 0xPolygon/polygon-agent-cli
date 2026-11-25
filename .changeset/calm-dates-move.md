@@ -3,4 +3,4 @@
 '@polygonlabs/oidc-relay': patch
 ---
 
-Update the Workers runtime compatibility date to 2026-11-01 so both Workers pick up current runtime behaviour.
+Update the Workers runtime compatibility date to 2026-03-10 so both Workers pick up current runtime behaviour.
