@@ -38,7 +38,7 @@ export default defineConfig({
               // The outbound fake's log is process-wide, so test files must not overlap.
               singleWorker: true,
               miniflare: {
-                compatibilityDate: '2024-07-04',
+                compatibilityDate: '2026-03-10',
                 durableObjects: { AGENT_KEYS: { className: 'AgentKey', useSQLite: true } },
                 kvNamespaces: ['OAUTH_KV'],
                 ratelimits: { REGISTER_LIMITER: { simple: { limit: 10, period: 60 } } },
