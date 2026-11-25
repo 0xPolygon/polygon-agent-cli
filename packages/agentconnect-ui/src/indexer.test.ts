@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ActivityItem } from './indexer';
 
+import { resetEnv } from './env';
 import { classifyToken, dailyFlow, fetchActivity, priceReceipts } from './indexer';
 
 describe('classifyToken', () => {
@@ -101,10 +102,12 @@ describe('fetchActivity token address', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
+    resetEnv();
   });
 
   const activityWith = async (transfers: object[]) => {
     vi.stubEnv('VITE_INDEXER_ACCESS_KEY', 'test-key');
+    resetEnv();
     vi.stubGlobal(
       'fetch',
       vi.fn(
