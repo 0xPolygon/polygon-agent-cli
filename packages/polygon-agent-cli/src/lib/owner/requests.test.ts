@@ -179,6 +179,26 @@ describe('startOwnerRequest (browser)', () => {
     expect(world.calls.some((c) => c.startsWith('startEmail'))).toBe(false);
   });
 
+  it("registers on the run's --relay-url instead of the default relay", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) => {
+        urls.push(String(input instanceof Request ? input.url : input));
+        return new Response(null, { status: 204 });
+      })
+    );
+    await startOwnerRequest({
+      wallet,
+      method: 'browser',
+      context: { purpose: 'access' },
+      action: { kind: 'access' },
+      now: NOW,
+      relayUrl: 'https://relay.example'
+    });
+    expect(urls).toEqual(['https://relay.example/api/login/register']);
+  });
+
   it('gives the login page url for the session', () => {
     expect(loginPageUrl('abc')).toMatch(/\/login#abc$/);
   });

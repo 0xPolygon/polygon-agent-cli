@@ -80,7 +80,7 @@ export function currentSignInMethod(): { method: SignInMethod; reason: string } 
   const root = getEnv().POLYGON_AGENT_ROOT;
   const platform = root ? readInstallRecord(stateDir(root))?.platform : undefined;
   return pickSignInMethod({
-    env: process.env,
+    env: { ...process.env, POLYGON_AGENT_SIGNIN: getEnv().POLYGON_AGENT_SIGNIN },
     platform,
     os: process.platform,
     container: inContainer({

@@ -355,7 +355,7 @@ export function loadOmsConfig(): OmsConfig {
     try {
       const data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
       const publishableKey = data.publishableKey;
-      if (publishableKey) return { publishableKey, omsProjectId: data.omsProjectId };
+      if (publishableKey) return { publishableKey, omsProjectId: envProj ?? data.omsProjectId };
     } catch {
       // ignore malformed config
     }

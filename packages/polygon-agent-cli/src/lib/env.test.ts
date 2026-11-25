@@ -61,12 +61,51 @@ describe('getEnv', () => {
     ['true', true],
     ['yes', true],
     ['TRUE', true],
+    ['Yes', true],
     ['0', false],
     ['false', false],
-    ['no', false]
+    ['no', false],
+    ['on', false],
+    ['y', false],
+    ['enabled', false],
+    ['2', false],
+    ['garbage', false]
   ])('reads SEQ_ECO_NATIVE_DIRECT=%s as %s', (value, expected) => {
     vi.stubEnv('SEQ_ECO_NATIVE_DIRECT', value);
     expect(getEnv().SEQ_ECO_NATIVE_DIRECT).toBe(expected);
+  });
+
+  it('keeps SEQ_ECO_NATIVE_DIRECT false when unset', () => {
+    vi.stubEnv('SEQ_ECO_NATIVE_DIRECT', '');
+    expect(getEnv().SEQ_ECO_NATIVE_DIRECT).toBe(false);
+  });
+
+  it('ignores an unknown POLYGON_AGENT_SIGNIN instead of failing', () => {
+    vi.stubEnv('POLYGON_AGENT_SIGNIN', 'nope');
+    expect(getEnv().POLYGON_AGENT_SIGNIN).toBeUndefined();
+    resetEnv();
+    vi.stubEnv('POLYGON_AGENT_SIGNIN', 'email');
+    expect(getEnv().POLYGON_AGENT_SIGNIN).toBe('email');
+  });
+
+  it('leaves an empty variable in process.env', () => {
+    vi.stubEnv('TRAILS_API_KEY', '');
+    expect(getEnv().TRAILS_API_KEY).toBeUndefined();
+    expect(process.env.TRAILS_API_KEY).toBe('');
+    expect('TRAILS_API_KEY' in process.env).toBe(true);
+  });
+
+  it.each(['localhost:8787', 'mailto:a@example.com', 'file:///etc/passwd', 'ftp://example.com'])(
+    'rejects %s as a URL variable',
+    (value) => {
+      vi.stubEnv('POLYGON_AGENT_OIDC_RELAY', value);
+      expect(() => getEnv()).toThrow(CliError);
+    }
+  );
+
+  it('accepts http and https URLs', () => {
+    vi.stubEnv('POLYGON_AGENT_OIDC_RELAY', 'http://localhost:8787');
+    expect(getEnv().POLYGON_AGENT_OIDC_RELAY).toBe('http://localhost:8787');
   });
 
   it('fails with a clear message on an invalid value', () => {
