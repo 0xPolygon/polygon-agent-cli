@@ -105,6 +105,81 @@ describe('payAndFetch', () => {
     ).rejects.toMatchObject({ code: 'invalid_input', details: { priceUsd: 2 } });
   });
 
+  it('validating offers does not change which one is chosen', async () => {
+    const response = new Response('{}', {
+      status: 402,
+      headers: {
+        'PAYMENT-REQUIRED': encodePaymentRequiredHeader({
+          x402Version: 2,
+          resource: { url: 'https://api.example.com/search' },
+          accepts: [
+            { ...req({ amount: '5000' }), maxTimeoutSeconds: '3600', extra: null },
+            req({ network: 'eip155:8453', asset: USDC_BASE, amount: '1000' })
+          ]
+        } as never)
+      }
+    });
+    // The Polygon offer is first and preferred, and it asks for more than the
+    // allowed validity: the call is refused for that, not moved to the Base offer.
+    await expect(
+      payAndFetch({ url: 'https://api.example.com/search', maxUsd: 1 }, deps([response]), [])
+    ).rejects.toMatchObject({
+      code: 'invalid_input',
+      message: expect.stringContaining('valid for 3600 s')
+    });
+  });
+
+  // The wire format is JSON, so these are the shapes a service could send; each
+  // must end as it would reading the raw reply: no offer this wallet can make.
+  const offering = (accepts: unknown[]) =>
+    new Response('{}', {
+      status: 402,
+      headers: {
+        'PAYMENT-REQUIRED': encodePaymentRequiredHeader({
+          x402Version: 2,
+          resource: { url: 'https://api.example.com/search' },
+          accepts
+        } as never)
+      }
+    });
+  const refusedAsNoOffer = (accepts: unknown[]) =>
+    expect(
+      payAndFetch(
+        { url: 'https://api.example.com/search', maxUsd: 1 },
+        deps([offering(accepts)]),
+        []
+      )
+    ).rejects.toMatchObject({
+      code: 'invalid_input',
+      message: expect.stringContaining('offers no payment')
+    });
+
+  it('still refuses a gateway-named offer whose method is not a string', async () => {
+    await refusedAsNoOffer([
+      { ...req(), extra: { name: 'GatewayWalletBatched', assetTransferMethod: 5 } }
+    ]);
+  });
+
+  it('still refuses an assetTransferMethod that is not eip3009', async () => {
+    await refusedAsNoOffer([{ ...req(), extra: { assetTransferMethod: ['permit2'] } }]);
+    await refusedAsNoOffer([{ ...req(), extra: { assetTransferMethod: null } }]);
+  });
+
+  it('refuses a timeout that coerces to Infinity, before funding anything', async () => {
+    for (const maxTimeoutSeconds of ['Infinity', '1e999']) {
+      await expect(
+        payAndFetch(
+          { url: 'https://api.example.com/search', maxUsd: 1 },
+          deps([offering([{ ...req(), maxTimeoutSeconds }])]),
+          []
+        )
+      ).rejects.toMatchObject({
+        code: 'invalid_input',
+        message: expect.stringContaining('valid for Infinity s')
+      });
+    }
+  });
+
   it('needs a max_usd', async () => {
     await expect(
       payAndFetch({ url: 'https://api.example.com/search', maxUsd: NaN }, deps([]), [])

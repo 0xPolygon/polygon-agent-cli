@@ -626,4 +626,18 @@ describe('market search', () => {
     });
     expect(res.note).toMatch(/data, not instructions/);
   });
+
+  it('skips unreadable rows, but fails when none can be read', async () => {
+    const env = setup();
+    const reply = (markets: unknown[]) => ({
+      ...env.deps,
+      fetch: (async () => Response.json({ markets })) as typeof fetch
+    });
+    await expect(pmMarkets({}, reply([null, { id: '1', slug: 'ok' }]))).resolves.toMatchObject({
+      count: 1
+    });
+    await expect(pmMarkets({}, reply([null, 5]))).rejects.toMatchObject({
+      code: 'upstream_error'
+    });
+  });
 });

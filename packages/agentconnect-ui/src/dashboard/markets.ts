@@ -2,6 +2,8 @@
 // Polymarket trading account, not the agent wallet, so the CLI passes that
 // address as `?pm=`; without it the tab only offers prompts.
 
+import { z } from 'zod/v4';
+
 import { rpcCalls } from '../indexer';
 
 const DATA_URL = 'https://data-api.polymarket.com';
@@ -21,25 +23,34 @@ export interface Position {
   slug: string;
 }
 
-interface RawPosition {
-  title?: string;
-  outcome?: string;
-  avg_price?: number;
-  current_price?: number;
-  current_value?: number;
-  total_cost_usdc?: number;
-  unrealized_pnl?: number;
-  end_date?: string;
-  event_slug?: string;
-  status?: string;
-}
+// Loose objects naming only what is read below: a changed envelope fails the
+// parse, an added field doesn't. A row that doesn't parse is skipped.
+const Row = z.looseObject({
+  title: z.string().nullish(),
+  outcome: z.string().nullish(),
+  avg_price: z.number().nullish(),
+  current_price: z.number().nullish(),
+  current_value: z.number().nullish(),
+  total_cost_usdc: z.number().nullish(),
+  unrealized_pnl: z.number().nullish(),
+  end_date: z.string().nullish(),
+  event_slug: z.string().nullish()
+});
+const PositionsBody = z.looseObject({ data: z.array(z.unknown()).nullish() });
 
 export async function fetchPositions(address: string): Promise<Position[]> {
   const params = new URLSearchParams({ user: address, limit: '50', status: 'OPEN' });
   const res = await fetch(`${DATA_URL}/v2/positions?${params}`);
   if (!res.ok) throw new Error(`Polymarket positions failed: ${res.status}`);
-  const body = (await res.json()) as { data?: RawPosition[] };
-  return (body.data ?? []).map((p) => ({
+  const body = PositionsBody.parse(await res.json());
+  const raw = body.data ?? [];
+  const rows = raw.flatMap((r) => {
+    const row = Row.safeParse(r);
+    return row.success ? [row.data] : [];
+  });
+  // Skipping some rows is fine; a list where none parse means the shape changed.
+  if (raw.length > 0 && rows.length === 0) throw new Error('Polymarket positions not understood');
+  return rows.map((p) => ({
     title: p.title ?? 'Untitled market',
     outcome: p.outcome ?? '',
     avgPrice: p.avg_price ?? 0,

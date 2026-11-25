@@ -1,5 +1,7 @@
 // Token names and logos from the Trails token list, for the holdings list.
 
+import { z } from 'zod/v4';
+
 import { TRAILS_API_URL, USDC_POLYGON } from '@polygonlabs/agent-shared';
 
 // Earn receipts (vault shares, aTokens) have no logo of their own; they show
@@ -12,6 +14,11 @@ export interface TokenLook {
   logo?: string;
 }
 
+// A loose object naming only what is read below.
+const TokenListBody = z.looseObject({
+  tokens: z.array(z.looseObject({ name: z.string(), logoUri: z.string().optional() })).optional()
+});
+
 const cache = new Map<string, Promise<TokenLook | null>>();
 
 function lookup(chainId: number, address: string): Promise<TokenLook | null> {
@@ -23,14 +30,10 @@ function lookup(chainId: number, address: string): Promise<TokenLook | null> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chainIds: [chainId], tokenAddress: address, includeAllListed: true })
     })
-      .then(
-        (r) =>
-          (r.ok ? r.json() : null) as Promise<{
-            tokens?: { name: string; logoUri?: string }[];
-          } | null>
-      )
+      .then((r) => (r.ok ? r.json() : null))
+      // A reply that doesn't parse throws into the catch below: no look for this token.
       .then((body) => {
-        const t = body?.tokens?.[0];
+        const t = TokenListBody.nullable().parse(body)?.tokens?.[0];
         return t ? { name: t.name, logo: t.logoUri || undefined } : null;
       })
       .catch(() => null);

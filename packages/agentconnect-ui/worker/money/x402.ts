@@ -10,6 +10,7 @@ import type { Address } from 'viem';
 import { createPublicClient, erc20Abi, formatUnits, getAddress, http } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { arbitrum, base, mainnet, optimism, polygon } from 'viem/chains';
+import { z } from 'zod/v4';
 
 import type { EngineDeps } from './engine.ts';
 
@@ -26,15 +27,49 @@ const SETTLE_SLACK_MS = 4_000;
 const MAX_BODY_CHARS = 50_000;
 const CHAINS = [polygon, base, mainnet, arbitrum, optimism];
 
+// What a service asks for. selectRequirement and the checks after it read these
+// fields as plain JS values, so parsing is only a type-normaliser: the values
+// those checks look at (extra.name, extra.assetTransferMethod) stay raw, and the
+// rest are coerced the way those checks coerce them. It can never make an offer
+// more acceptable than reading the raw reply would.
 export interface Requirement {
   scheme: string;
   network: string;
   amount: string;
   asset: string;
   payTo: string;
+  // Number(...) of the raw value, as the `>` comparison coerces it.
   maxTimeoutSeconds: number;
-  extra?: { name?: string; assetTransferMethod?: string };
+  extra?: { name?: unknown; assetTransferMethod?: unknown };
 }
+
+const RawExtra = z.record(z.string(), z.unknown());
+const RequirementSchema = z
+  .looseObject({
+    // A non-string scheme or network is never selected, so the offer isn't kept.
+    scheme: z.string(),
+    network: z.string(),
+    amount: z.unknown(),
+    asset: z.unknown(),
+    payTo: z.unknown(),
+    maxTimeoutSeconds: z.unknown(),
+    extra: z.unknown()
+  })
+  .transform((o): Requirement => {
+    // A non-object extra has no name or method to read, same as no extra.
+    const extra = RawExtra.safeParse(o.extra).data;
+    return {
+      scheme: o.scheme,
+      network: o.network,
+      amount: String(o.amount),
+      asset: String(o.asset),
+      payTo: String(o.payTo),
+      maxTimeoutSeconds: Number(o.maxTimeoutSeconds),
+      ...(extra
+        ? { extra: { name: extra.name, assetTransferMethod: extra.assetTransferMethod } }
+        : {})
+    };
+  });
 
 // Signed and possibly sent, not yet confirmed: the signer's funds it covers
 // aren't free until it expires.
@@ -192,7 +227,13 @@ export async function payAndFetch(
       .json()
       .catch(() => ({}))
   );
-  const req = selectRequirement(required.accepts as unknown as Requirement[], params.chain ?? 137);
+  // Only offers with a non-string scheme or network fail to parse, and those are
+  // never selected; if none parse, the "no payment this wallet can make" error follows.
+  const offers = required.accepts.flatMap((a) => {
+    const parsed = RequirementSchema.safeParse(a);
+    return parsed.success ? [parsed.data] : [];
+  });
+  const req = selectRequirement(offers, params.chain ?? 137);
   if (!req) {
     throw new MoneyError({
       code: 'invalid_input',

@@ -4,6 +4,8 @@
 // largest smaller vault that pays clearly more than the tier before it, so
 // taking on more risk always earns more; a vault that doesn't is never offered.
 
+import { z } from 'zod/v4';
+
 import { TRAILS_API_URL } from '@polygonlabs/agent-shared';
 
 import { trailsApiKey } from '../config';
@@ -63,15 +65,42 @@ export interface Vault {
   decimals: number;
 }
 
-interface RawMarket {
-  id: string;
-  inputTokens?: { symbol: string; decimals: number }[];
-  outputToken?: { address?: string };
-  rewardRate?: { total: number };
-  statistics?: { tvlUsd?: string };
-  status?: { enter: boolean };
-  metadata?: { deprecated?: boolean; underMaintenance?: boolean };
-}
+// Loose objects naming only what is read here: a changed shape fails the parse,
+// an added field doesn't. Trails sends null for absent values, so leaves are nullish.
+const InputToken = z.looseObject({ symbol: z.string(), decimals: z.number() });
+const RawMarket = z.looseObject({
+  id: z.string(),
+  // Only the first input token is read; one that doesn't parse leaves the list
+  // empty, which filters the vault out as before.
+  inputTokens: z
+    .array(z.unknown())
+    .nullish()
+    .transform((list) => {
+      const first = InputToken.safeParse(list?.[0]);
+      return first.success ? [first.data] : [];
+    }),
+  outputToken: z.looseObject({ address: z.string().nullish() }).nullish(),
+  rewardRate: z.looseObject({ total: z.number() }).nullish(),
+  statistics: z.looseObject({ tvlUsd: z.union([z.string(), z.number()]).nullish() }).nullish(),
+  status: z.looseObject({ enter: z.boolean() }).nullish(),
+  metadata: z
+    .looseObject({ deprecated: z.boolean().nullish(), underMaintenance: z.boolean().nullish() })
+    .nullish()
+});
+type RawMarket = z.infer<typeof RawMarket>;
+// The envelope must match; a row that doesn't is skipped, as the old filter did.
+const MarketsBody = z.looseObject({ items: z.array(z.unknown()).nullish() });
+const parseMarkets = (body: unknown): RawMarket[] => {
+  const items = MarketsBody.parse(body).items ?? [];
+  const rows = items.flatMap((item) => {
+    const row = RawMarket.safeParse(item);
+    return row.success ? [row.data] : [];
+  });
+  // Skipping some rows is fine; a list where none parse means the shape changed.
+  if (items.length > 0 && rows.length === 0) throw new Error('YieldGetMarkets rows not understood');
+  return rows;
+};
+const EthCallReplies = z.array(z.looseObject({ id: z.number(), result: z.string().nullish() }));
 
 const plainSymbol = (s: string) => s.replace(/^vb/i, '').toUpperCase();
 
@@ -128,8 +157,7 @@ export async function fetchVaults(): Promise<Vault[]> {
     body: JSON.stringify({ provider: 'morpho', chainId: String(KATANA_CHAIN_ID), limit: 100 })
   });
   if (!res.ok) throw new Error(`YieldGetMarkets failed: ${res.status}`);
-  const body = (await res.json()) as { items?: RawMarket[] };
-  return pickVaults(body.items ?? []);
+  return pickVaults(parseMarkets(await res.json()));
 }
 
 const word = (hex: string) => hex.replace(/^0x/, '').toLowerCase().padStart(64, '0');
@@ -148,7 +176,7 @@ async function ethCall(calls: { to: string; data: string }[]): Promise<bigint[]>
     )
   });
   if (!res.ok) throw new Error(`Katana RPC failed: ${res.status}`);
-  const out = (await res.json()) as { id: number; result?: string; error?: unknown }[];
+  const out = EthCallReplies.parse(await res.json());
   return calls.map((_, id) => {
     const r = out.find((o) => o.id === id);
     if (!r?.result) throw new Error('Katana RPC returned no result');
@@ -195,7 +223,7 @@ export async function fetchPolygonRates(): Promise<Record<string, number>> {
         body: JSON.stringify({ provider, chainId: '137', limit: 100 })
       });
       if (!res.ok) throw new Error(`YieldGetMarkets failed: ${res.status}`);
-      return ((await res.json()) as { items?: RawMarket[] }).items ?? [];
+      return parseMarkets(await res.json());
     })
   );
   const out: Record<string, number> = {};

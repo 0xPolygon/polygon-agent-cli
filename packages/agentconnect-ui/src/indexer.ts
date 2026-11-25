@@ -1,4 +1,7 @@
+import { z } from 'zod/v4';
+
 import { Network } from '@0xsequence/wallet-primitives';
+import { USDC_POLYGON } from '@polygonlabs/agent-shared';
 
 import { getEnv } from './env';
 
@@ -37,7 +40,12 @@ function indexerBase(chainId: number): string {
   return DEFAULT_INDEXER_BASE.replace('{chain}', slug);
 }
 
-async function indexerCall<T>(chainId: number, method: string, body: unknown): Promise<T> {
+async function indexerCall<S extends z.ZodType>(
+  chainId: number,
+  method: string,
+  body: unknown,
+  schema: S
+): Promise<z.output<S>> {
   const accessKey = getIndexerAccessKey();
   if (!accessKey) {
     throw new Error(
@@ -50,7 +58,7 @@ async function indexerCall<T>(chainId: number, method: string, body: unknown): P
     body: JSON.stringify(body)
   });
   if (!res.ok) throw new Error(`${method} failed: ${res.status}`);
-  return (await res.json()) as T;
+  return schema.parse(await res.json());
 }
 
 function num(v: unknown): number {
@@ -58,7 +66,7 @@ function num(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function units(raw: string | undefined, decimals: number): number {
+function units(raw: string | null | undefined, decimals: number): number {
   if (!raw) return 0;
   try {
     const big = BigInt(raw);
@@ -99,17 +107,48 @@ export function classifyToken(
   return { kind: 'spend' };
 }
 
-interface RawTokenBalance {
-  contractAddress?: string;
-  balance?: string;
-  balanceUSD?: string;
-  contractInfo?: { symbol?: string; name?: string; decimals?: number };
-}
+// Loose objects naming only what is read below: a changed envelope fails the
+// parse, an added field doesn't. The indexer sends null for absent values, so
+// leaves are nullish, and a row that doesn't parse is skipped rather than
+// failing the list.
+const rowsOf = <S extends z.ZodType>(row: S) =>
+  z
+    .array(z.unknown())
+    .nullish()
+    .transform((list, ctx): z.output<S>[] => {
+      const rows = (list ?? []).flatMap((r) => {
+        const parsed = row.safeParse(r);
+        return parsed.success ? [parsed.data] : [];
+      });
+      // Skipping some rows is fine; a list where none parse means the shape changed.
+      if ((list?.length ?? 0) > 0 && rows.length === 0) {
+        ctx.issues.push({ code: 'custom', message: 'no row could be read', input: list });
+      }
+      return rows;
+    });
+const RawTokenBalance = z.looseObject({
+  contractAddress: z.string().nullish(),
+  balance: z.string().nullish(),
+  balanceUSD: z.string().nullish(),
+  contractInfo: z
+    .looseObject({
+      symbol: z.string().nullish(),
+      name: z.string().nullish(),
+      decimals: z.number().nullish()
+    })
+    .nullish()
+});
+const TokenBalances = z.looseObject({ balances: rowsOf(RawTokenBalance) });
+const NativeBalance = z.looseObject({
+  balance: z
+    .looseObject({ balance: z.string().nullish(), balanceUSD: z.string().nullish() })
+    .nullish()
+});
 
 // Polygon stablecoins an earn receipt can be backed by, priced at $1, with
 // their decimals.
 const STABLES: Record<string, number> = {
-  '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359': 6, // USDC
+  [USDC_POLYGON.toLowerCase()]: 6, // USDC
   '0x2791bca1f2de4661ed88a30c99a7a9449aa84174': 6, // USDC.e
   '0xc2132d05d31c914a87c6611c10748aeb04b58e8f': 6, // USDT0
   '0x8f3cf7ad23cd3cadbd9735aff958023239c6a063': 18 // DAI
@@ -118,6 +157,16 @@ const STABLES: Record<string, number> = {
 const word = (hex: string) => hex.replace(/^0x/, '').toLowerCase().padStart(64, '0');
 const addressOf = (result?: string) =>
   result && result.length >= 66 ? `0x${result.slice(-40)}`.toLowerCase() : undefined;
+
+const RpcReplies = z.array(
+  z.looseObject({
+    id: z.number(),
+    result: z
+      .string()
+      .nullish()
+      .transform((r) => r ?? undefined)
+  })
+);
 
 export async function rpcCalls(
   chainId: number,
@@ -139,7 +188,7 @@ export async function rpcCalls(
     }
   );
   if (!res.ok) throw new Error(`RPC failed: ${res.status}`);
-  const out = (await res.json()) as { id: number; result?: string }[];
+  const out = RpcReplies.parse(await res.json());
   return calls.map((_, id) => out.find((o) => o.id === id)?.result);
 }
 
@@ -190,14 +239,17 @@ export async function priceReceipts(
 /** Every token the wallet holds on `chainId`, priced in USD, largest first. */
 export async function fetchHoldings(walletAddress: string, chainId = 137): Promise<Holding[]> {
   const [tokens, native] = await Promise.all([
-    indexerCall<{ balances?: RawTokenBalance[] }>(chainId, 'GetTokenBalances', {
-      accountAddress: walletAddress,
-      includeMetadata: true
-    }),
-    indexerCall<{ balance?: { balance?: string; balanceUSD?: string } }>(
+    indexerCall(
+      chainId,
+      'GetTokenBalances',
+      { accountAddress: walletAddress, includeMetadata: true },
+      TokenBalances
+    ),
+    indexerCall(
       chainId,
       'GetNativeTokenBalance',
-      { accountAddress: walletAddress }
+      { accountAddress: walletAddress },
+      NativeBalance
     ).catch(() => ({ balance: undefined }))
   ]);
 
@@ -262,22 +314,28 @@ export interface ActivityItem {
   scaleKnown: boolean;
 }
 
-interface RawTransfer {
-  transferType?: 'SEND' | 'RECEIVE' | 'UNKNOWN';
-  from?: string;
-  to?: string;
-  amounts?: string[];
-  amountsUSD?: string[];
-  contractType?: string;
-  contractAddress?: string;
-  contractInfo?: { symbol?: string; decimals?: number };
-}
-
-interface RawTransaction {
-  txnHash: string;
-  timestamp: string;
-  transfers?: RawTransfer[];
-}
+const RawTransfer = z.looseObject({
+  // SEND, RECEIVE or UNKNOWN; left a plain string so a new value can't fail the page.
+  transferType: z.string().nullish(),
+  from: z.string().nullish(),
+  to: z.string().nullish(),
+  amounts: z.array(z.string()).nullish(),
+  amountsUSD: z.array(z.string()).nullish(),
+  contractType: z.string().nullish(),
+  contractAddress: z.string().nullish(),
+  contractInfo: z
+    .looseObject({ symbol: z.string().nullish(), decimals: z.number().nullish() })
+    .nullish()
+});
+const TransactionHistory = z.looseObject({
+  transactions: rowsOf(
+    z.looseObject({
+      txnHash: z.string(),
+      timestamp: z.string(),
+      transfers: rowsOf(RawTransfer)
+    })
+  )
+});
 
 /** Token movements in and out of the wallet, newest first. One row per transfer. */
 export async function fetchActivity(
@@ -285,10 +343,11 @@ export async function fetchActivity(
   chainId = 137,
   pageSize = 50
 ): Promise<ActivityItem[]> {
-  const res = await indexerCall<{ transactions?: RawTransaction[] }>(
+  const res = await indexerCall(
     chainId,
     'GetTransactionHistory',
-    { filter: { accountAddress: walletAddress }, includeMetadata: true, page: { pageSize } }
+    { filter: { accountAddress: walletAddress }, includeMetadata: true, page: { pageSize } },
+    TransactionHistory
   );
   const me = walletAddress.toLowerCase();
   const out: ActivityItem[] = [];

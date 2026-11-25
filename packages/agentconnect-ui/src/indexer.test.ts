@@ -122,6 +122,20 @@ describe('fetchActivity token address', () => {
     );
     return fetchActivity(ME);
   };
+  it('skips a transaction it cannot read, but fails when none can be read', async () => {
+    vi.stubEnv('VITE_INDEXER_ACCESS_KEY', 'test-key');
+    resetEnv();
+    const reply = (transactions: unknown[]) =>
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => Response.json({ transactions }))
+      );
+    reply([{ nope: 1 }, { txnHash: '0xabc', timestamp: '2026-11-03T10:00:00Z' }]);
+    await expect(fetchActivity(ME)).resolves.toEqual([]);
+    reply([{ nope: 1 }, 'junk']);
+    await expect(fetchActivity(ME)).rejects.toThrow();
+  });
+
   const receive = {
     transferType: 'RECEIVE',
     from: OTHER,

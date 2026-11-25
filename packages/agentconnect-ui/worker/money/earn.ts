@@ -20,12 +20,14 @@ import {
   isAddress
 } from 'viem';
 import { katana, polygon } from 'viem/chains';
+import { z } from 'zod/v4';
+
+import { TRAILS_API_URL } from '@polygonlabs/agent-shared';
 
 import { MoneyError } from './errors.ts';
 import { chainLabel, findSupportedToken, parseChain } from './tokens.ts';
 import { tokenUnits } from './trade.ts';
 
-const TRAILS = 'https://trails-api.sequence.app/rpc/Trails';
 export const EARN_CHAINS = [747474, 137];
 const CHAINS = { 747474: katana, 137: polygon } as const;
 const MIN_TVL_USD = 10_000;
@@ -40,15 +42,53 @@ export interface Vault {
   tvlUsd: number;
 }
 
-interface RawMarket {
-  id: string;
-  metadata?: { name?: string; deprecated?: boolean; underMaintenance?: boolean };
-  inputTokens?: { symbol: string; decimals: number; address?: string }[];
-  outputToken?: { address?: string };
-  rewardRate?: { total: number };
-  statistics?: { tvlUsd?: string };
-  status?: { enter: boolean };
-}
+// Loose objects naming only what listVaults reads: a changed shape fails the
+// parse, an added field doesn't. Trails sends null for absent values (a vault
+// with no TVL, a native-token input with no address), so leaves are nullish.
+const InputToken = z.looseObject({
+  symbol: z.string(),
+  decimals: z.number(),
+  address: z.string().nullish()
+});
+const RawMarket = z.looseObject({
+  id: z.string(),
+  metadata: z
+    .looseObject({
+      name: z.string().nullish(),
+      deprecated: z.boolean().nullish(),
+      underMaintenance: z.boolean().nullish()
+    })
+    .nullish(),
+  // Only the first input token is read; one that doesn't parse leaves the list
+  // empty, which filters the vault out as before.
+  inputTokens: z
+    .array(z.unknown())
+    .nullish()
+    .transform((list) => {
+      const first = InputToken.safeParse(list?.[0]);
+      return first.success ? [first.data] : [];
+    }),
+  outputToken: z.looseObject({ address: z.string().nullish() }).nullish(),
+  rewardRate: z.looseObject({ total: z.number() }).nullish(),
+  statistics: z.looseObject({ tvlUsd: z.union([z.string(), z.number()]).nullish() }).nullish(),
+  status: z.looseObject({ enter: z.boolean() }).nullish()
+});
+// The envelope must match; a row that doesn't is skipped, as the old filter did.
+const MarketsResponse = z.looseObject({ items: z.array(z.unknown()).nullish() });
+const parseMarkets = (items: unknown[]) => {
+  const rows = items.flatMap((item) => {
+    const row = RawMarket.safeParse(item);
+    return row.success ? [row.data] : [];
+  });
+  // Skipping some rows is fine; a list where none parse means the shape changed.
+  if (items.length > 0 && rows.length === 0) {
+    throw new MoneyError({
+      code: 'upstream_error',
+      message: "Trails listed the vaults in a form this wallet doesn't understand."
+    });
+  }
+  return rows;
+};
 
 export interface EarnDeps {
   trailsKey: string;
@@ -94,7 +134,7 @@ export async function listVaults(chain: string | undefined, deps: EarnDeps): Pro
   const doFetch = deps.fetch ?? fetch;
   const lists = await Promise.all(
     chainArg(chain).map(async (chainId) => {
-      const res = await doFetch(`${TRAILS}/YieldGetMarkets`, {
+      const res = await doFetch(`${TRAILS_API_URL}/YieldGetMarkets`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -108,7 +148,15 @@ export async function listVaults(chain: string | undefined, deps: EarnDeps): Pro
           message: "Trails didn't list the vaults just now. Try again shortly."
         });
       }
-      const items = ((await res.json()) as { items?: RawMarket[] }).items ?? [];
+      const parsed = MarketsResponse.safeParse(await res.json());
+      if (!parsed.success) {
+        throw new MoneyError({
+          code: 'upstream_error',
+          message: "Trails listed the vaults in a form this wallet doesn't understand.",
+          cause: parsed.error
+        });
+      }
+      const items = parseMarkets(parsed.data.items ?? []);
       return items.flatMap((m): Vault[] => {
         const input = m.inputTokens?.[0];
         const out = m.outputToken?.address;

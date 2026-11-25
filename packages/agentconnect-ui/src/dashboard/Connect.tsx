@@ -1,7 +1,9 @@
 import { ArrowLeftRight, Ban, Eye, Send } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { z } from 'zod/v4';
 
 import { LoginShell } from '../login/LoginShell.js';
+import { Ack, errorMessage, parseBody, post } from './api.js';
 import { ConnectConsent } from './connect/ConnectConsent.js';
 import { ConnectLoading } from './connect/ConnectLoading.js';
 import { ConnectSignIn } from './connect/ConnectSignIn.js';
@@ -20,32 +22,37 @@ export function isConnectReturn(): boolean {
   }
 }
 
-async function post<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  const data = (await res.json().catch(() => ({}))) as T & { message?: string };
-  if (!res.ok) throw new Error(data.message ?? 'Something went wrong. Try again.');
-  return data;
-}
+const SpendingSchema = z.looseObject({
+  defaultUsd: z.number(),
+  defaultDays: z.number(),
+  minUsd: z.number(),
+  maxUsd: z.number(),
+  maxDays: z.number()
+});
 
-interface Spending {
-  defaultUsd: number;
-  defaultDays: number;
-  minUsd: number;
-  maxUsd: number;
-  maxDays: number;
-}
+const EmailSchema = z
+  .string()
+  .nullish()
+  .transform((e) => e ?? null);
 
-interface Consent {
-  email: string | null;
+const ConsentSchema = z.looseObject({
+  email: EmailSchema,
   // The agent runs on this machine; once allowed, the dashboard opens in front.
-  localAgent: boolean;
+  localAgent: z.boolean().default(false),
   // Set when the agent may move money: the allowance the owner approves.
-  spending?: Spending;
-}
+  spending: SpendingSchema.optional()
+});
+type Consent = z.infer<typeof ConsentSchema>;
+
+// The connect link's own state. `spending: true` is an older worker's way of
+// saying the agent asks to spend.
+const ConnectInfoSchema = z.looseObject({
+  clientName: z.string().optional(),
+  signedIn: z.boolean().optional(),
+  email: EmailSchema,
+  localAgent: z.boolean().default(false),
+  spending: z.union([SpendingSchema, z.literal(true)]).optional()
+});
 
 // What the agent gets, in the owner's words.
 const READ_ONLY = [
@@ -108,29 +115,26 @@ export function Connect({ finishing = false }: { finishing?: boolean }) {
     if (finishing) {
       void run(async () => {
         forgetReturn();
-        const c = await post<Consent>('/api/connect/google/finish', {
-          c: id,
-          callbackUrl: window.location.href
-        });
+        const c = await post(
+          '/api/connect/google/finish',
+          { c: id, callbackUrl: window.location.href },
+          ConsentSchema
+        );
         window.history.replaceState(null, '', `/connect?c=${id}`);
         setConsent(c);
       });
     }
     void fetch(`/api/connect?c=${encodeURIComponent(id)}`)
       .then(async (r) => {
-        const d = (await r.json()) as Omit<Partial<Consent>, 'spending'> & {
-          clientName?: string;
-          signedIn?: boolean;
-          message?: string;
-          spending?: Spending | true;
-        };
-        if (!r.ok) throw new Error(d.message ?? 'This connect link expired.');
+        const raw: unknown = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(errorMessage(raw) ?? 'Something went wrong. Try again.');
+        const d = parseBody(ConnectInfoSchema, raw, 'This connect link expired.');
         setClient(d.clientName ?? 'Your agent');
         if (d.spending) setAsksToSpend(true);
         if (d.signedIn) {
           setConsent({
-            email: d.email ?? null,
-            localAgent: d.localAgent === true,
+            email: d.email,
+            localAgent: d.localAgent,
             ...(d.spending && d.spending !== true ? { spending: d.spending } : {})
           });
         }
@@ -147,11 +151,11 @@ export function Connect({ finishing = false }: { finishing?: boolean }) {
     const home = local ? window.open('', '_blank') : null;
     return run(async () => {
       try {
-        const { redirectTo } = await post<{ redirectTo: string }>('/api/connect/decide', {
-          c: id,
-          allow,
-          ...(allow && consent?.spending ? { allowanceUsd, days } : {})
-        });
+        const { redirectTo } = await post(
+          '/api/connect/decide',
+          { c: id, allow, ...(allow && consent?.spending ? { allowanceUsd, days } : {}) },
+          z.looseObject({ redirectTo: z.string() })
+        );
         if (!local || redirectTo.startsWith('http')) {
           // This tab hands the agent its sign-in, behind the dashboard.
           home?.location.assign('/');
@@ -218,7 +222,7 @@ export function Connect({ finishing = false }: { finishing?: boolean }) {
           onEmailSubmit={(e) => {
             e.preventDefault();
             void run(async () => {
-              await post('/api/connect/email/start', { c: id, email: email.trim() });
+              await post('/api/connect/email/start', { c: id, email: email.trim() }, Ack);
               setSent(true);
             });
           }}
@@ -226,18 +230,17 @@ export function Connect({ finishing = false }: { finishing?: boolean }) {
             e.preventDefault();
             void run(async () =>
               setConsent(
-                await post<Consent>('/api/connect/email/finish', {
-                  c: id,
-                  code: code.trim()
-                })
+                await post('/api/connect/email/finish', { c: id, code: code.trim() }, ConsentSchema)
               )
             );
           }}
           onGoogle={() =>
             void run(async () => {
-              const { url } = await post<{ url: string }>('/api/connect/google/start', {
-                c: id
-              });
+              const { url } = await post(
+                '/api/connect/google/start',
+                { c: id },
+                z.looseObject({ url: z.string() })
+              );
               sessionStorage.setItem(CONNECT_KEY, id);
               window.location.assign(url);
             })
