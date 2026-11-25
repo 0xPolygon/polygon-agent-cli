@@ -14,7 +14,7 @@ import type { OmsWalletLike } from './oms-key.ts';
 import { CliError } from '../errors.ts';
 import { getOmsClient } from '../oms-client.ts';
 import { readJsonFile, writeJsonFile } from '../session/state.ts';
-import { decrypt, encrypt, loadOmsWalletPointer, STORAGE_ROOT } from '../storage.ts';
+import { decrypt, encrypt, loadOmsWalletPointer, storageRoot } from '../storage.ts';
 import { formatUnits6 } from './amounts.ts';
 import { BRIDGE_MIN_WITHDRAW_UNITS } from './bridge.ts';
 import {
@@ -40,14 +40,14 @@ type Creds = { key: string; secret: string; passphrase: string };
 export type SecureClient = any;
 
 export function accountDir(wallet: string): string {
-  const dir = path.join(STORAGE_ROOT, 'polymarket', wallet);
+  const dir = path.join(storageRoot(), 'polymarket', wallet);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   return dir;
 }
 
 // Read paths join only: they must not create the account directory.
 export function accountFile(wallet: string, name: string): string {
-  return path.join(STORAGE_ROOT, 'polymarket', wallet, name);
+  return path.join(storageRoot(), 'polymarket', wallet, name);
 }
 
 function readSecret(wallet: string, name: string): string | null {
@@ -566,7 +566,7 @@ export async function restoreFromOms(p: {
 // wallet names (account.json, backup.json, key.json). Archived accounts are not included.
 export function localTradingKeyAddresses(): Set<string> {
   const out = new Set<string>();
-  const root = path.join(STORAGE_ROOT, 'polymarket');
+  const root = path.join(storageRoot(), 'polymarket');
   if (!fs.existsSync(root)) return out;
   for (const name of fs.readdirSync(root)) {
     const acct = loadAccount(name);

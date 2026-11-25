@@ -12,7 +12,7 @@ import { getAuthToken, createProject, getDefaultAccessKey } from './builder-api.
 import { CliError } from './errors.ts';
 import { generateEthAuthProof } from './ethauth.ts';
 import { LockHeldError, withLock } from './lock.ts';
-import { loadBuilderConfigRaw, saveBuilderConfig, STORAGE_ROOT } from './storage.ts';
+import { loadBuilderConfigRaw, saveBuilderConfig, storageRoot } from './storage.ts';
 
 /** Normalize any thrown value to a message string, even for non-Error throws. */
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -112,7 +112,7 @@ export async function provisionBuilderOnce(params: {
 }): Promise<ProvisionResult> {
   try {
     return await withLock({
-      dir: path.join(STORAGE_ROOT, 'locks', 'builder.lock'),
+      dir: path.join(storageRoot(), 'locks', 'builder.lock'),
       waitMs: 120_000,
       fn: () =>
         ensureBuilderAccessKey(params.walletAddress, params.deps ?? makeDefaultProvisionDeps())

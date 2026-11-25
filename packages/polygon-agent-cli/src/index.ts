@@ -33,14 +33,20 @@ import { setupCommand } from './commands/setup.ts';
 import { walletCommand } from './commands/wallet.ts';
 import { alertsCommand, watchCommand } from './commands/watch.ts';
 import { skillsCommand, updateCommand, workspaceCommand } from './commands/workspace.ts';
+import { getEnv } from './lib/env.ts';
 import { bigintReplacer, failureJson } from './lib/errors.ts';
-import { bootstrapOmsConfig } from './lib/storage.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8'));
 
-// Auto-load OMS V3 credentials from builder.json if not already in env
-bootstrapOmsConfig();
+// Validate the environment once, up front, so a bad value fails every command
+// the same way (JSON on stderr, exit 1) instead of whichever one reads it first.
+try {
+  getEnv();
+} catch (err) {
+  console.error(JSON.stringify(failureJson(err), bigintReplacer, 2));
+  process.exit(1);
+}
 
 // The CLI ships two bin names ("agent" is the primary, "polygon-agent" the
 // long-form alias); help and usage text follow whichever one was invoked.

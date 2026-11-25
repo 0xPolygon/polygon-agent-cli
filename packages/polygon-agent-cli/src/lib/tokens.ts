@@ -1,11 +1,12 @@
 // Token lookup by symbol for commands that take --symbol / --from / --to:
 // native coins, the TRAILS_TOKEN_MAP_JSON override, then the token directory.
 
+import { getEnv } from './env.ts';
 import { resolveErc20BySymbol } from './token-directory.ts';
 
 // Load optional token map override from env
 function loadTokenMap(): Record<string, Record<string, { address: string; decimals: number }>> {
-  const raw = process.env.TRAILS_TOKEN_MAP_JSON || '';
+  const raw = getEnv().TRAILS_TOKEN_MAP_JSON ?? '';
   if (!raw) return {};
   try {
     return JSON.parse(raw);

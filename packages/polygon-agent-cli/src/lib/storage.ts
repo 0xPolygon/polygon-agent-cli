@@ -5,14 +5,20 @@ import path from 'node:path';
 
 import { z } from 'zod';
 
+import { getEnv } from './env.ts';
 import { CliError } from './errors.ts';
 
 // A workspace install's wrapper sets POLYGON_AGENT_HOME to its own state folder;
-// a global install keeps using ~/.polygon-agent.
-const STORAGE_DIR = process.env.POLYGON_AGENT_HOME
-  ? path.resolve(process.env.POLYGON_AGENT_HOME)
-  : path.join(os.homedir(), '.polygon-agent');
-const ENCRYPTION_KEY_FILE = path.join(STORAGE_DIR, '.encryption-key');
+// a global install keeps using ~/.polygon-agent. A function, not a constant, so
+// importing this module reads no environment.
+export function storageRoot(): string {
+  const home = getEnv().POLYGON_AGENT_HOME;
+  return home ? path.resolve(home) : path.join(os.homedir(), '.polygon-agent');
+}
+
+function encryptionKeyFile(): string {
+  return path.join(storageRoot(), '.encryption-key');
+}
 
 export interface CipherData {
   iv: string;
@@ -83,29 +89,27 @@ export function walletName(name: string): string {
 }
 
 export function ensureStorageDir(): void {
-  if (!fs.existsSync(STORAGE_DIR)) {
-    fs.mkdirSync(STORAGE_DIR, { recursive: true, mode: 0o700 });
+  if (!fs.existsSync(storageRoot())) {
+    fs.mkdirSync(storageRoot(), { recursive: true, mode: 0o700 });
   }
   // Owner-only, even when something else created the folder first (only a
   // folder this user owns; one shared on purpose is left as it is).
-  const stat = fs.statSync(STORAGE_DIR);
+  const stat = fs.statSync(storageRoot());
   if ((stat.mode & 0o777) !== 0o700 && stat.uid === process.getuid?.()) {
     try {
-      fs.chmodSync(STORAGE_DIR, 0o700);
+      fs.chmodSync(storageRoot(), 0o700);
     } catch {
       // a filesystem without permissions
     }
   }
   const subdirs = ['wallets', 'oms'];
   for (const dir of subdirs) {
-    const fullPath = path.join(STORAGE_DIR, dir);
+    const fullPath = path.join(storageRoot(), dir);
     if (!fs.existsSync(fullPath)) {
       fs.mkdirSync(fullPath, { recursive: true, mode: 0o700 });
     }
   }
 }
-
-export const STORAGE_ROOT = STORAGE_DIR;
 
 const errorCode = (error: unknown) =>
   error instanceof Error && 'code' in error ? error.code : undefined;
@@ -114,7 +118,7 @@ const errorCode = (error: unknown) =>
 // checked by path beforehand, so nothing can change between a check and use.
 function readKeyFile(): Buffer | null {
   try {
-    return fs.readFileSync(ENCRYPTION_KEY_FILE);
+    return fs.readFileSync(encryptionKeyFile());
   } catch (error) {
     if (errorCode(error) === 'ENOENT') return null;
     throw error;
@@ -126,16 +130,16 @@ function readKeyFile(): Buffer | null {
 // winner's key, never one each).
 function createKeyFile(): void {
   const key = randomBytes(32);
-  const tmp = `${ENCRYPTION_KEY_FILE}.tmp-${process.pid}`;
+  const tmp = `${encryptionKeyFile()}.tmp-${process.pid}`;
   try {
     fs.writeFileSync(tmp, key, { mode: 0o600 });
     try {
-      fs.linkSync(tmp, ENCRYPTION_KEY_FILE);
+      fs.linkSync(tmp, encryptionKeyFile());
     } catch (error) {
       // No hard links here (FAT, some network or container mounts): an
       // exclusive create instead; a torn one fails the length check.
       if (errorCode(error) === 'EEXIST') throw error;
-      fs.writeFileSync(ENCRYPTION_KEY_FILE, key, { mode: 0o600, flag: 'wx' });
+      fs.writeFileSync(encryptionKeyFile(), key, { mode: 0o600, flag: 'wx' });
     }
   } catch (error) {
     if (errorCode(error) !== 'EEXIST') throw error;
@@ -152,7 +156,7 @@ export function getEncryptionKey(): Buffer {
     key = readKeyFile();
   }
   if (key?.length !== 32) {
-    throw new Error(`The encryption key file ${ENCRYPTION_KEY_FILE} is damaged.`);
+    throw new Error(`The encryption key file ${encryptionKeyFile()} is damaged.`);
   }
   return key;
 }
@@ -191,7 +195,7 @@ export function decrypt(cipherData: CipherData): string {
 export async function saveBuilderConfig(config: BuilderConfig): Promise<void> {
   ensureStorageDir();
 
-  const configPath = path.join(STORAGE_DIR, 'builder.json');
+  const configPath = path.join(storageRoot(), 'builder.json');
   const encryptedKey = encrypt(config.privateKey);
 
   let data: Record<string, unknown> = {};
@@ -212,7 +216,7 @@ export async function saveBuilderConfig(config: BuilderConfig): Promise<void> {
 }
 
 export async function loadBuilderConfig(): Promise<BuilderConfig | null> {
-  const configPath = path.join(STORAGE_DIR, 'builder.json');
+  const configPath = path.join(storageRoot(), 'builder.json');
 
   if (!fs.existsSync(configPath)) {
     return null;
@@ -236,7 +240,7 @@ export async function loadBuilderConfig(): Promise<BuilderConfig | null> {
  * encryption key). This reads only the plaintext accessKey field.
  */
 export function loadBuilderConfigRaw(): { accessKey?: string } | null {
-  const configPath = path.join(STORAGE_DIR, 'builder.json');
+  const configPath = path.join(storageRoot(), 'builder.json');
 
   if (!fs.existsSync(configPath)) {
     return null;
@@ -253,7 +257,7 @@ export function loadBuilderConfigRaw(): { accessKey?: string } | null {
 export async function listWallets(): Promise<string[]> {
   ensureStorageDir();
 
-  const walletsDir = path.join(STORAGE_DIR, 'wallets');
+  const walletsDir = path.join(storageRoot(), 'wallets');
   const files = fs.readdirSync(walletsDir);
 
   // A file whose name isn't a valid wallet name (from before names were
@@ -266,7 +270,7 @@ export async function listWallets(): Promise<string[]> {
 }
 
 export async function deleteWallet(name: string): Promise<boolean> {
-  const walletPath = path.join(STORAGE_DIR, 'wallets', `${walletName(name)}.json`);
+  const walletPath = path.join(storageRoot(), 'wallets', `${walletName(name)}.json`);
 
   if (fs.existsSync(walletPath)) {
     fs.unlinkSync(walletPath);
@@ -278,7 +282,7 @@ export async function deleteWallet(name: string): Promise<boolean> {
 
 export async function savePolymarketKey(privateKey: string): Promise<void> {
   ensureStorageDir();
-  const configPath = path.join(STORAGE_DIR, 'builder.json');
+  const configPath = path.join(storageRoot(), 'builder.json');
   let data: Record<string, unknown> = {};
   try {
     data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
@@ -290,7 +294,7 @@ export async function savePolymarketKey(privateKey: string): Promise<void> {
 }
 
 export async function loadPolymarketKey(): Promise<string> {
-  const configPath = path.join(STORAGE_DIR, 'builder.json');
+  const configPath = path.join(storageRoot(), 'builder.json');
   let data: Record<string, unknown>;
   try {
     data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
@@ -307,7 +311,7 @@ export async function loadPolymarketKey(): Promise<string> {
 /** Directory holding the OMS SDK's per-wallet storage + credential key. */
 export function omsWalletDir(name: string): string {
   ensureStorageDir();
-  const dir = path.join(STORAGE_DIR, 'oms', walletName(name));
+  const dir = path.join(storageRoot(), 'oms', walletName(name));
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   }
@@ -317,7 +321,7 @@ export function omsWalletDir(name: string): string {
 /** Persist OMS publishableKey + projectId into builder.json (merged with existing data). */
 export async function saveOmsConfig(config: OmsConfig): Promise<void> {
   ensureStorageDir();
-  const configPath = path.join(STORAGE_DIR, 'builder.json');
+  const configPath = path.join(storageRoot(), 'builder.json');
   let data: Record<string, unknown> = {};
   try {
     data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
@@ -342,16 +346,16 @@ export const DEFAULT_OMS_PUBLISHABLE_KEY = 'pk_sdbx_01kqfw9zaykks_01kwvkkzs5e2wb
 export function loadOmsConfig(): OmsConfig {
   // SDK 0.1.0-alpha.4: only the publishableKey is required (it identifies the
   // project). omsProjectId is read if present but no longer mandatory.
-  const envPk = process.env.OMS_PUBLISHABLE_KEY;
-  const envProj = process.env.SEQUENCE_OMS_PROJECT_ID;
+  const envPk = getEnv().OMS_PUBLISHABLE_KEY;
+  const envProj = getEnv().SEQUENCE_OMS_PROJECT_ID;
   if (envPk) return { publishableKey: envPk, omsProjectId: envProj };
 
-  const configPath = path.join(STORAGE_DIR, 'builder.json');
+  const configPath = path.join(storageRoot(), 'builder.json');
   if (fs.existsSync(configPath)) {
     try {
       const data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
       const publishableKey = data.publishableKey;
-      if (publishableKey) return { publishableKey, omsProjectId: data.omsProjectId };
+      if (publishableKey) return { publishableKey, omsProjectId: envProj ?? data.omsProjectId };
     } catch {
       // ignore malformed config
     }
@@ -359,37 +363,22 @@ export function loadOmsConfig(): OmsConfig {
   return { publishableKey: DEFAULT_OMS_PUBLISHABLE_KEY, omsProjectId: envProj };
 }
 
-/** Populate OMS env vars from builder.json at startup. */
-export function bootstrapOmsConfig(): void {
-  const cfg = loadOmsConfig();
-  if (!process.env.OMS_PUBLISHABLE_KEY) process.env.OMS_PUBLISHABLE_KEY = cfg.publishableKey;
-  if (!process.env.SEQUENCE_OMS_PROJECT_ID && cfg.omsProjectId)
-    process.env.SEQUENCE_OMS_PROJECT_ID = cfg.omsProjectId;
-
-  // Also bootstrap the OMS project access key (used by Trails swap/bridge
-  // and the indexer) from builder.json into the env, if present — env always
-  // wins. This is separate from the agent wallet credentials above.
-  if (!process.env.SEQUENCE_PROJECT_ACCESS_KEY) {
-    const configPath = path.join(STORAGE_DIR, 'builder.json');
-    if (fs.existsSync(configPath)) {
-      try {
-        const data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-        if (data.accessKey) process.env.SEQUENCE_PROJECT_ACCESS_KEY = data.accessKey as string;
-      } catch {
-        // ignore malformed config
-      }
-    }
-  }
+/**
+ * Project access key (Trails swap/bridge, the indexer, node reads). Priority:
+ * env var → builder.json. Separate from the agent wallet credentials above.
+ */
+export function resolveProjectAccessKey(): string | undefined {
+  return getEnv().SEQUENCE_PROJECT_ACCESS_KEY || loadBuilderConfigRaw()?.accessKey || undefined;
 }
 
 export async function saveOmsWalletPointer(name: string, pointer: OmsWalletPointer): Promise<void> {
   ensureStorageDir();
-  const walletPath = path.join(STORAGE_DIR, 'wallets', `${walletName(name)}.json`);
+  const walletPath = path.join(storageRoot(), 'wallets', `${walletName(name)}.json`);
   fs.writeFileSync(walletPath, JSON.stringify(pointer, null, 2), { mode: 0o600 });
 }
 
 export async function loadOmsWalletPointer(name: string): Promise<OmsWalletPointer | null> {
-  const walletPath = path.join(STORAGE_DIR, 'wallets', `${walletName(name)}.json`);
+  const walletPath = path.join(storageRoot(), 'wallets', `${walletName(name)}.json`);
   if (!fs.existsSync(walletPath)) return null;
   try {
     // loginMethod is display-only; legacy pre-browser sessions still load until
@@ -406,8 +395,8 @@ export async function loadOmsWalletPointer(name: string): Promise<OmsWalletPoint
 
 /** Remove an agent wallet's pointer + the SDK's per-wallet state dir. */
 export async function deleteOmsWallet(name: string): Promise<void> {
-  const walletPath = path.join(STORAGE_DIR, 'wallets', `${walletName(name)}.json`);
+  const walletPath = path.join(storageRoot(), 'wallets', `${walletName(name)}.json`);
   if (fs.existsSync(walletPath)) fs.unlinkSync(walletPath);
-  const dir = path.join(STORAGE_DIR, 'oms', walletName(name));
+  const dir = path.join(storageRoot(), 'oms', walletName(name));
   if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
 }

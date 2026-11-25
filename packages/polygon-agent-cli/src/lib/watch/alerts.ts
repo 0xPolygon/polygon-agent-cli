@@ -10,7 +10,7 @@ import { z } from 'zod';
 
 import { CliError } from '../errors.ts';
 import { appendJsonLine } from '../jsonl.ts';
-import { ensureStorageDir, STORAGE_ROOT } from '../storage.ts';
+import { ensureStorageDir, storageRoot } from '../storage.ts';
 
 const AlertSchema = z.object({
   id: z.string(),
@@ -30,7 +30,7 @@ export type NewAlert = Omit<StoredAlert, 'id' | 'ts'>;
 const AckSchema = z.object({ ts: z.string(), ack: z.string() });
 
 function alertsFile(): string {
-  return path.join(STORAGE_ROOT, 'alerts.jsonl');
+  return path.join(storageRoot(), 'alerts.jsonl');
 }
 
 function append(entry: Record<string, unknown>): void {

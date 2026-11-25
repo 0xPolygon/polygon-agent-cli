@@ -8,8 +8,9 @@ import { z } from 'zod';
 
 import type { Platform } from '../lib/workspace.ts';
 
+import { getEnv } from '../lib/env.ts';
 import { withLock } from '../lib/lock.ts';
-import { STORAGE_ROOT } from '../lib/storage.ts';
+import { storageRoot } from '../lib/storage.ts';
 import { cliVersion, getLatestVersion, isNewerVersion, PACKAGE_NAME } from '../lib/version.ts';
 import {
   ASSISTANT_SKILL,
@@ -39,7 +40,7 @@ function fail(error: unknown): never {
 
 // Set by the wrapper; unset for a global install.
 function workspaceRoot(): string | undefined {
-  return process.env.POLYGON_AGENT_ROOT || undefined;
+  return getEnv().POLYGON_AGENT_ROOT;
 }
 
 // --- workspace init ---
@@ -139,10 +140,10 @@ const installCommand: CommandModule<object, InstallArgs> = {
         wrapper: root ? wrapperPath(root) : undefined
       });
       // Remember where the assistant skill lives, so `update` refreshes it.
-      const record = root ? readInstallRecord(STORAGE_ROOT) : null;
+      const record = root ? readInstallRecord(storageRoot()) : null;
       if (record && path.basename(path.dirname(file)) === ASSISTANT_SKILL) {
         writeInstallRecord({
-          state: STORAGE_ROOT,
+          state: storageRoot(),
           record: {
             ...record,
             skillsDir: path.resolve(argv.dir),

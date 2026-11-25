@@ -12,6 +12,7 @@ import type { TradeRecord } from './state.ts';
 
 import { ensureBuilderAccess } from '../builder-provision.ts';
 import { readConfig } from '../config.ts';
+import { getEnv } from '../env.ts';
 import { CliError } from '../errors.ts';
 import { getUsdPrices, priceKey, trailsClient } from '../prices.ts';
 import { tokenBalance, walletHoldings } from '../session/live.ts';
@@ -26,7 +27,7 @@ import {
   supportedChainIds,
   supportedTokens
 } from '../session/tokens.ts';
-import { loadOmsWalletPointer } from '../storage.ts';
+import { loadOmsWalletPointer, resolveProjectAccessKey } from '../storage.ts';
 import { getTokenConfig } from '../tokens.ts';
 import { formatUnits, parseUnits, resolveNetwork } from '../utils.ts';
 import { previewSwapCommand } from './command.ts';
@@ -816,7 +817,7 @@ export async function quoteSwap(params: QuoteSwapParams): Promise<QuotedSwap> {
     }));
   }
 
-  if (!process.env.TRAILS_API_KEY && !process.env.SEQUENCE_PROJECT_ACCESS_KEY) {
+  if (!getEnv().TRAILS_API_KEY && !resolveProjectAccessKey()) {
     await ensureBuilderAccess(walletAddress);
   }
   const { TradeType } = await import('@0xtrails/api');

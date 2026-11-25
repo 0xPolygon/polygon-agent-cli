@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { resetEnv } from '../env.ts';
+
 const client = vi.hoisted(() => ({
   estimateMarketPrice: vi.fn(),
   placeMarketOrder: vi.fn(),
@@ -61,7 +63,8 @@ const filled = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  delete process.env.POLYMARKET_BUILDER_CODE;
+  vi.stubEnv('POLYMARKET_BUILDER_CODE', '');
+  resetEnv();
   pusd.value = 50_000_000n;
   mk.market = { slug: 'will-x', conditionId: '0xc' };
   region.value = { blocked: false, closeOnly: false, country: 'PT', region: null };
@@ -275,7 +278,8 @@ describe('buy', () => {
   it('adds the builder code only when configured', async () => {
     client.estimateMarketPrice.mockResolvedValue(0.5);
     client.placeMarketOrder.mockResolvedValue(filled);
-    process.env.POLYMARKET_BUILDER_CODE = '0xabc';
+    vi.stubEnv('POLYMARKET_BUILDER_CODE', '0xabc');
+    resetEnv();
     await buy({ wallet: 'main', ref: 'will-x', outcome: 'yes', usd: '5', broadcast: true });
     expect(client.placeMarketOrder).toHaveBeenCalledWith(
       expect.objectContaining({ builderCode: '0xabc' })

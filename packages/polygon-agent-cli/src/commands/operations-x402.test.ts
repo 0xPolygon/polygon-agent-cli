@@ -27,7 +27,7 @@ vi.mock('../lib/storage.ts', async (importOriginal) => {
   fake.home = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-x402-cmd-'));
   return {
     ...(await importOriginal<typeof Storage>()),
-    STORAGE_ROOT: fake.home,
+    storageRoot: () => fake.home,
     loadOmsWalletPointer: vi.fn(async () => ({
       walletAddress: '0xd384ea24ca0B3a5e4BB35935C611E3dCB68Fd08e',
       loginMethod: 'email',

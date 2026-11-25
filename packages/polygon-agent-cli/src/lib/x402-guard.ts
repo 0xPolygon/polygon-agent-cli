@@ -26,7 +26,7 @@ import { CliError, NOTHING_SENT_CODES } from './errors.ts';
 import { appendJsonLine } from './jsonl.ts';
 import { LockHeldError, withLock } from './lock.ts';
 import { findSupportedToken } from './session/tokens.ts';
-import { ensureStorageDir, STORAGE_ROOT } from './storage.ts';
+import { ensureStorageDir, storageRoot } from './storage.ts';
 import { formatUnits, getReadRpcUrl, resolveNetwork } from './utils.ts';
 
 const DEFAULT_MAX_PER_CALL_USD = 1;
@@ -60,7 +60,7 @@ const PendingSchema = z.object({
 const SettledSchema = z.object({ ts: z.string(), id: z.string(), settled: z.literal(true) });
 
 function paymentsFile(): string {
-  return path.join(STORAGE_ROOT, 'x402-payments.jsonl');
+  return path.join(storageRoot(), 'x402-payments.jsonl');
 }
 
 function configUsd(params: { key: string; fallback: number }): number {
@@ -336,7 +336,7 @@ export async function withX402Lock<T>(params: { fn: () => Promise<T> }): Promise
   ensureStorageDir();
   try {
     return await withLock({
-      dir: path.join(STORAGE_ROOT, 'locks', 'x402.lock'),
+      dir: path.join(storageRoot(), 'locks', 'x402.lock'),
       waitMs: 300_000,
       fn: params.fn
     });

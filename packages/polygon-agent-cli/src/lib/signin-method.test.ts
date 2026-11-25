@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { PickInput } from './signin-method.ts';
 
+import { resetEnv } from './env.ts';
 import { currentSignInMethod, inContainer, pickSignInMethod } from './signin-method.ts';
 import { initWorkspace } from './workspace.ts';
 
@@ -174,9 +175,11 @@ describe('currentSignInMethod', () => {
     delete process.env.KUBERNETES_SERVICE_HOST;
     // A desktop-looking host whatever machine runs the tests.
     process.env.DISPLAY = ':0';
+    resetEnv();
   });
   afterEach(() => {
     process.env = { ...saved };
+    resetEnv();
     vi.restoreAllMocks();
     Object.defineProperty(process.stdin, 'isTTY', { value: savedTTY, configurable: true });
   });
@@ -219,6 +222,7 @@ describe('currentSignInMethod', () => {
   it('returns email in a workspace initialised with --platform muse', () => {
     initWorkspace({ root: dir, version: '0.14.0', sourceDir: null, platform: 'muse' });
     process.env.POLYGON_AGENT_ROOT = dir;
+    resetEnv();
     expect(currentSignInMethod()).toEqual({ method: 'email', reason: 'platform muse' });
   });
 });

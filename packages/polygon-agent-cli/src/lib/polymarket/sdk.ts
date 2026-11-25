@@ -7,6 +7,7 @@ import type * as SdkNode from '@polymarket/client/node';
 import type * as SdkViem from '@polymarket/client/viem';
 
 import { CliError } from '../errors.ts';
+import { resolveProjectAccessKey } from '../storage.ts';
 import { getReadRpcUrl, resolveNetwork } from '../utils.ts';
 
 export type Sdk = {
@@ -36,7 +37,7 @@ export async function loadSdk(): Promise<Sdk> {
 // rather than the SDK's public default, when the project has an access key.
 export function environment(root: Sdk['root']): { environment?: SdkRoot.EnvironmentConfig } {
   // Test doubles of the SDK may leave the function out.
-  return typeof root.forkEnvironmentConfig === 'function' && process.env.SEQUENCE_PROJECT_ACCESS_KEY
+  return typeof root.forkEnvironmentConfig === 'function' && resolveProjectAccessKey()
     ? {
         environment: root.forkEnvironmentConfig({
           name: 'production',

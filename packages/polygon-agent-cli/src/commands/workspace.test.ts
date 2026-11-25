@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type * as Version from '../lib/version.ts';
 
+import { resetEnv } from '../lib/env.ts';
 import { initWorkspace, readInstallRecord } from '../lib/workspace.ts';
 import { skillsCommand, updateCommand, workspaceCommand } from './workspace.ts';
 
@@ -74,6 +75,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   root = makeWorkspace();
   vi.stubEnv('POLYGON_AGENT_ROOT', root);
+  resetEnv();
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
   vi.spyOn(process, 'exit').mockImplementation(() => {
@@ -86,11 +88,13 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+  resetEnv();
 });
 
 describe('update', () => {
   it('outside a workspace install, prints the global npm command and installs nothing', async () => {
     vi.stubEnv('POLYGON_AGENT_ROOT', '');
+    resetEnv();
     expect(await update()).toMatchObject({
       ok: true,
       updated: false,
@@ -114,6 +118,7 @@ describe('update', () => {
   it('installs beside the CLI, swaps it in, and re-runs the new CLI’s workspace init', async () => {
     vi.stubEnv('SEQUENCE_PROJECT_ACCESS_KEY', 'secret');
     vi.stubEnv('OMS_PUBLISHABLE_KEY', 'secret');
+    resetEnv();
     const skill = { name: 'open-money-agent', installed: true, path: '/skills/x/SKILL.md' };
     mocks.spawnSync
       .mockImplementationOnce(npmInstalls('new'))

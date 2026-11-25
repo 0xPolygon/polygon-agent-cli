@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { STORAGE_ROOT } from './storage.ts';
+import { storageRoot } from './storage.ts';
 
 const TOKEN_DIR_RAW = 'https://raw.githubusercontent.com/0xsequence/token-directory';
 
@@ -10,7 +10,7 @@ function ensureDir(p: string): void {
 }
 
 function cacheDir(): string {
-  return path.join(STORAGE_ROOT, 'token-directory');
+  return path.join(storageRoot(), 'token-directory');
 }
 
 async function fetchJson(url: string, headers: Record<string, string> = {}): Promise<unknown> {

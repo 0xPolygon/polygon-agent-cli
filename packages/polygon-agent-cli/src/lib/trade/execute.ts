@@ -25,7 +25,7 @@ import { trailsClient } from '../prices.ts';
 import { liveTransferDeps } from '../session/live.ts';
 import { withWalletKeys } from '../session/renewal.ts';
 import { listTransfers, reconcileTransfers } from '../session/transfer.ts';
-import { loadOmsWalletPointer, STORAGE_ROOT } from '../storage.ts';
+import { loadOmsWalletPointer, storageRoot } from '../storage.ts';
 import { runTx } from '../tx-dispatch.ts';
 import { getReadRpcUrl, resolveNetwork } from '../utils.ts';
 import { loadTrade, updateTrade } from './state.ts';
@@ -349,7 +349,7 @@ export async function executeSwap(params: {
 }): Promise<TradeRecord> {
   try {
     return await withLock({
-      dir: path.join(STORAGE_ROOT, 'locks', 'trades', `${params.trade.intentId}.lock`),
+      dir: path.join(storageRoot(), 'locks', 'trades', `${params.trade.intentId}.lock`),
       fn: async () => {
         // Re-read under the lock: another process may have moved it on.
         let trade = loadTrade(params.trade.intentId) ?? params.trade;

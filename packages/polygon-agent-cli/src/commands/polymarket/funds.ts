@@ -29,7 +29,7 @@ import { assertCanTrade, checkRegion } from '../../lib/polymarket/region.ts';
 import { assertWithdrawable, sendWithdraw, withdrawRoute } from '../../lib/polymarket/withdraw.ts';
 import { tokenBalance } from '../../lib/session/live.ts';
 import { checkSessionSpend } from '../../lib/session/run-tx.ts';
-import { loadOmsWalletPointer, STORAGE_ROOT } from '../../lib/storage.ts';
+import { loadOmsWalletPointer, storageRoot } from '../../lib/storage.ts';
 import { runTx } from '../../lib/tx-dispatch.ts';
 import { fail, ok, omsAddress, walletOption } from './shared.ts';
 
@@ -89,7 +89,7 @@ async function settlePending(wallet: string, readOnly: boolean): Promise<void> {
 // Not the session wallet lock: runTx takes that one itself in session mode, so
 // reusing it here would deadlock.
 async function withDepositLock<T>(wallet: string, fn: () => Promise<T>): Promise<T> {
-  const dir = path.join(STORAGE_ROOT, 'locks', 'polymarket', wallet);
+  const dir = path.join(storageRoot(), 'locks', 'polymarket', wallet);
   try {
     return await withLock({ dir, fn });
   } catch (err) {

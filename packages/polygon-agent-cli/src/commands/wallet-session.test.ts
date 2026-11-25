@@ -378,7 +378,7 @@ async function untilWaiterVisible(pid: number, id: string): Promise<void> {
 }
 const { readApprovedPlan } = await import('../lib/session/state.ts');
 const { parkedRacSlots, readRacRecord } = await import('../lib/session/rac.ts');
-const { loadOmsWalletPointer, STORAGE_ROOT } = await import('../lib/storage.ts');
+const { loadOmsWalletPointer, storageRoot } = await import('../lib/storage.ts');
 
 let wallet: string;
 let counter = 0;
@@ -626,7 +626,7 @@ describe('connect', () => {
 describe('status and Polymarket', () => {
   it('shows the Polymarket account of a connected wallet, without secrets', async () => {
     await confirm(await connectStep1());
-    const dir = path.join(STORAGE_ROOT, 'polymarket', wallet);
+    const dir = path.join(storageRoot(), 'polymarket', wallet);
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
       path.join(dir, 'account.json'),

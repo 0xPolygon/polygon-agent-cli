@@ -1,8 +1,10 @@
 // Sequence Builder API helpers (GetAuthToken / CreateProject / GetDefaultAccessKey).
 // Used by `setup` and by the post-login auto-provisioning in lib/builder-provision.ts.
 
+import { getEnv } from './env.ts';
+
 export async function getAuthToken(proofString: string): Promise<string> {
-  const apiUrl = process.env.SEQUENCE_BUILDER_API_URL || 'https://api.sequence.build';
+  const apiUrl = getEnv().SEQUENCE_BUILDER_API_URL;
   const url = `${apiUrl}/rpc/Builder/GetAuthToken`;
 
   const response = await fetch(url, {
@@ -30,7 +32,7 @@ export async function createProject(
   name: string,
   jwtToken: string
 ): Promise<{ id: number; name: string }> {
-  const apiUrl = process.env.SEQUENCE_BUILDER_API_URL || 'https://api.sequence.build';
+  const apiUrl = getEnv().SEQUENCE_BUILDER_API_URL;
   const url = `${apiUrl}/rpc/Builder/CreateProject`;
 
   const response = await fetch(url, {
@@ -58,7 +60,7 @@ export async function createProject(
 }
 
 export async function getDefaultAccessKey(projectId: number, jwtToken: string): Promise<string> {
-  const apiUrl = process.env.SEQUENCE_BUILDER_API_URL || 'https://api.sequence.build';
+  const apiUrl = getEnv().SEQUENCE_BUILDER_API_URL;
   const url = `${apiUrl}/rpc/QuotaControl/GetDefaultAccessKey`;
 
   const response = await fetch(url, {

@@ -304,6 +304,8 @@ async function startRequest(params: {
   shown: Record<string, unknown>;
   // This request with an emailed code, for when the browser sign-in fails.
   emailCommand: string;
+  // --relay-url for this run; the waiter process is handed it too.
+  relayUrl?: string;
 }) {
   const { wallet, method, action } = params;
   if (method.method === 'email') {
@@ -332,11 +334,17 @@ async function startRequest(params: {
     method: 'browser',
     context: loginContext(action),
     action,
-    now: new Date()
+    now: new Date(),
+    relayUrl: params.relayUrl
   });
   if (request.method !== 'browser') throw new Error('unreachable');
   writeEmailFallback(wallet, request.id, params.emailCommand);
-  spawnWaiter({ wallet, id: request.id, emailCommand: params.emailCommand });
+  spawnWaiter({
+    wallet,
+    id: request.id,
+    emailCommand: params.emailCommand,
+    relayUrl: params.relayUrl
+  });
   const url = loginPageUrl(request.relaySession);
   await openPage(url);
   jsonOut({
@@ -399,6 +407,7 @@ export async function handleSessionLogin(argv: {
   allowance?: number;
   days?: number;
   chains?: string;
+  relayUrl?: string;
 }): Promise<void> {
   try {
     const wallet = argv.name;
@@ -503,7 +512,8 @@ export async function handleSessionLogin(argv: {
       method,
       action: { kind: 'connect', plan },
       shown: { plan: planSummary(plan) },
-      emailCommand
+      emailCommand,
+      relayUrl: argv.relayUrl
     });
   } catch (error) {
     jsonFail(error);

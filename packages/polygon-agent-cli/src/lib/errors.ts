@@ -25,6 +25,7 @@ export type CliErrorCode =
   | 'not_sponsored'
   | 'chain_required'
   | 'invalid_input'
+  | 'invalid_env'
   | 'wallet_busy'
   | 'quote_unavailable'
   | 'quote_search_incomplete'

@@ -41,10 +41,11 @@ vi.mock('../lib/storage.ts', async (importOriginal) => {
   const fs = await import('node:fs');
   const os = await import('node:os');
   const path = await import('node:path');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-swap-'));
   return {
     ...(await importOriginal<object>()),
     // Saved trades go to a temp state folder.
-    STORAGE_ROOT: fs.mkdtempSync(path.join(os.tmpdir(), 'pa-swap-')),
+    storageRoot: () => root,
     loadOmsWalletPointer: vi.fn(async () => ({ walletAddress: '0x1234' })),
     loadBuilderConfig: vi.fn(async () => ({ accessKey: 'test' }))
   };

@@ -3,23 +3,23 @@
 
 import { USDC_POLYGON } from '@polygonlabs/agent-shared';
 
+import { getEnv } from '../env.ts';
 import { CliError } from '../errors.ts';
 
-const BRIDGE_URL = process.env.POLYMARKET_BRIDGE_URL || 'https://bridge.polymarket.com';
 export const BRIDGE_MIN_DEPOSIT_UNITS = 2_000_000n;
 // The bridge's minimum checkout applies to withdrawals too: pUSD sent to a withdraw address
 // below it is never paid out, and sits at that address.
 export const BRIDGE_MIN_WITHDRAW_UNITS = 2_000_000n;
 
 export function builderHeaders(): Record<string, string> {
-  const code = process.env.POLYMARKET_BUILDER_CODE;
+  const code = getEnv().POLYMARKET_BUILDER_CODE;
   return code ? { 'X-Builder-Code': code } : {};
 }
 
 async function call<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${BRIDGE_URL}${path}`, {
+    res = await fetch(`${getEnv().POLYMARKET_BRIDGE_URL}${path}`, {
       method,
       headers: { 'Content-Type': 'application/json', ...builderHeaders() },
       ...(body ? { body: JSON.stringify(body) } : {})

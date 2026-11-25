@@ -100,3 +100,87 @@ describe('saveBuilderConfig merging', () => {
     expect(emptyStorage.loadBuilderConfigRaw()).toBeNull();
   });
 });
+
+describe('resolveProjectAccessKey', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  function writeBuilder(home: string, data: Record<string, unknown>) {
+    fs.mkdirSync(path.join(home, '.polygon-agent'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.polygon-agent', 'builder.json'), JSON.stringify(data));
+  }
+
+  it('uses the builder.json key for the node gateway when env has none', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-home-'));
+    writeBuilder(home, { accessKey: 'ak-file' });
+    vi.stubEnv('SEQUENCE_PROJECT_ACCESS_KEY', '');
+    const storage = await freshStorage(home);
+    const utils = await import('./utils.ts');
+    expect(storage.resolveProjectAccessKey()).toBe('ak-file');
+    expect(utils.getRpcUrl(utils.resolveNetwork('polygon'))).toBe(
+      'https://nodes.sequence.app/polygon/ak-file'
+    );
+    expect(utils.getReadRpcUrl(utils.resolveNetwork('polygon'))).toBe(
+      'https://nodes.sequence.app/polygon/ak-file'
+    );
+  });
+
+  it('prefers the env var over builder.json', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-home-'));
+    writeBuilder(home, { accessKey: 'ak-file' });
+    vi.stubEnv('SEQUENCE_PROJECT_ACCESS_KEY', 'ak-env');
+    const storage = await freshStorage(home);
+    const utils = await import('./utils.ts');
+    expect(storage.resolveProjectAccessKey()).toBe('ak-env');
+    expect(utils.getReadRpcUrl(utils.resolveNetwork('polygon'))).toBe(
+      'https://nodes.sequence.app/polygon/ak-env'
+    );
+  });
+
+  it('picks up a key written to builder.json during the run', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-home-'));
+    vi.stubEnv('SEQUENCE_PROJECT_ACCESS_KEY', '');
+    const storage = await freshStorage(home);
+    expect(storage.resolveProjectAccessKey()).toBeUndefined();
+    writeBuilder(home, { accessKey: 'ak-later' });
+    expect(storage.resolveProjectAccessKey()).toBe('ak-later');
+  });
+});
+
+describe('loadOmsConfig project id', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it('prefers the env project id over builder.json, as with the key', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-home-'));
+    fs.mkdirSync(path.join(home, '.polygon-agent'), { recursive: true });
+    fs.writeFileSync(
+      path.join(home, '.polygon-agent', 'builder.json'),
+      JSON.stringify({ publishableKey: 'pk_test_fromfile', omsProjectId: 'proj-file' })
+    );
+    vi.stubEnv('OMS_PUBLISHABLE_KEY', '');
+    vi.stubEnv('SEQUENCE_OMS_PROJECT_ID', 'proj-env');
+    const storage = await freshStorage(home);
+    expect(storage.loadOmsConfig()).toEqual({
+      publishableKey: 'pk_test_fromfile',
+      omsProjectId: 'proj-env'
+    });
+  });
+
+  it('falls back to the builder.json project id when env has none', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-home-'));
+    fs.mkdirSync(path.join(home, '.polygon-agent'), { recursive: true });
+    fs.writeFileSync(
+      path.join(home, '.polygon-agent', 'builder.json'),
+      JSON.stringify({ publishableKey: 'pk_test_fromfile', omsProjectId: 'proj-file' })
+    );
+    vi.stubEnv('OMS_PUBLISHABLE_KEY', '');
+    vi.stubEnv('SEQUENCE_OMS_PROJECT_ID', '');
+    const storage = await freshStorage(home);
+    expect(storage.loadOmsConfig().omsProjectId).toBe('proj-file');
+  });
+});
