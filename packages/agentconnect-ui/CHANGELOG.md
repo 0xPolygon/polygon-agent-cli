@@ -1,5 +1,15 @@
 # @polygonlabs/agentconnect-ui
 
+## 0.2.4
+
+### Patch Changes
+
+- [#295](https://github.com/0xPolygon/polygon-agent-cli/pull/295) [`ca9528f`](https://github.com/0xPolygon/polygon-agent-cli/commit/ca9528f42a30ab704ae77850d9bd79e9c2544ace) Thanks [@shan8851](https://github.com/shan8851)! - Reject malformed requests with a clear 400 error
+
+  The sign-in, approval and connector endpoints now validate the shape of every request body up front, so a body of the wrong type gets a plain error naming the problem instead of failing partway through. Valid requests behave exactly as before.
+
+- [#294](https://github.com/0xPolygon/polygon-agent-cli/pull/294) [`0444d25`](https://github.com/0xPolygon/polygon-agent-cli/commit/0444d2543de6cc980fa80419235b159b9a160b65) Thanks [@shan8851](https://github.com/shan8851)! - Check the replies from Trails, Polymarket, the indexer and the site's own API against their expected shape before using them, so a changed upstream response shows an error instead of wrong data.
+
 ## 0.2.3
 
 ### Patch Changes
