@@ -27,23 +27,49 @@ const SETTLE_SLACK_MS = 4_000;
 const MAX_BODY_CHARS = 50_000;
 const CHAINS = [polygon, base, mainnet, arbitrum, optimism];
 
-// What a service asks for, parsed from its 402 reply. A loose object naming only
-// the fields read here, coerced the way the checks below always read them, so
-// validating never changes which offer is chosen: only an offer those checks
-// would reject anyway fails to parse.
-const RequirementSchema = z.looseObject({
-  scheme: z.string(),
-  network: z.string(),
-  amount: z.union([z.string(), z.number()]).transform(String),
-  asset: z.string(),
-  payTo: z.string(),
-  maxTimeoutSeconds: z.coerce.number().optional().catch(undefined),
-  extra: z
-    .looseObject({ name: z.unknown().optional(), assetTransferMethod: z.string().optional() })
-    .nullish()
-    .catch(undefined)
-});
-export type Requirement = z.infer<typeof RequirementSchema>;
+// What a service asks for. selectRequirement and the checks after it read these
+// fields as plain JS values, so parsing is only a type-normaliser: the values
+// those checks look at (extra.name, extra.assetTransferMethod) stay raw, and the
+// rest are coerced the way those checks coerce them. It can never make an offer
+// more acceptable than reading the raw reply would.
+export interface Requirement {
+  scheme: string;
+  network: string;
+  amount: string;
+  asset: string;
+  payTo: string;
+  // Number(...) of the raw value, as the `>` comparison coerces it.
+  maxTimeoutSeconds: number;
+  extra?: { name?: unknown; assetTransferMethod?: unknown };
+}
+
+const RawExtra = z.record(z.string(), z.unknown());
+const RequirementSchema = z
+  .looseObject({
+    // A non-string scheme or network is never selected, so the offer isn't kept.
+    scheme: z.string(),
+    network: z.string(),
+    amount: z.unknown(),
+    asset: z.unknown(),
+    payTo: z.unknown(),
+    maxTimeoutSeconds: z.unknown(),
+    extra: z.unknown()
+  })
+  .transform((o): Requirement => {
+    // A non-object extra has no name or method to read, same as no extra.
+    const extra = RawExtra.safeParse(o.extra).data;
+    return {
+      scheme: o.scheme,
+      network: o.network,
+      amount: String(o.amount),
+      asset: String(o.asset),
+      payTo: String(o.payTo),
+      maxTimeoutSeconds: Number(o.maxTimeoutSeconds),
+      ...(extra
+        ? { extra: { name: extra.name, assetTransferMethod: extra.assetTransferMethod } }
+        : {})
+    };
+  });
 
 // Signed and possibly sent, not yet confirmed: the signer's funds it covers
 // aren't free until it expires.
@@ -201,8 +227,8 @@ export async function payAndFetch(
       .json()
       .catch(() => ({}))
   );
-  // An offer that doesn't parse is one the checks below would have rejected too;
-  // if none parse, the "no payment this wallet can make" error follows.
+  // Only offers with a non-string scheme or network fail to parse, and those are
+  // never selected; if none parse, the "no payment this wallet can make" error follows.
   const offers = required.accepts.flatMap((a) => {
     const parsed = RequirementSchema.safeParse(a);
     return parsed.success ? [parsed.data] : [];
@@ -215,7 +241,7 @@ export async function payAndFetch(
         'The service offers no payment this wallet can make (a plain stablecoin transfer on an EVM chain). Nothing was paid.'
     });
   }
-  if (req.maxTimeoutSeconds !== undefined && req.maxTimeoutSeconds > MAX_AUTHORIZATION_SECONDS) {
+  if (req.maxTimeoutSeconds > MAX_AUTHORIZATION_SECONDS) {
     throw new MoneyError({
       code: 'invalid_input',
       message: `The service wants a payment valid for ${req.maxTimeoutSeconds} s, more than ${MAX_AUTHORIZATION_SECONDS / 60} minutes. Nothing was paid.`

@@ -341,21 +341,31 @@ const GeoblockBody = z.looseObject({
 // Market and position rows are read key by key (and shown as data), so a row
 // only has to be an object; one that isn't is skipped, as the old filters did.
 const GammaRow = z.record(z.string(), z.unknown());
-const gammaRows = (list: unknown[] | null | undefined) =>
-  (list ?? []).flatMap((r) => {
-    const row = GammaRow.safeParse(r);
-    return row.success ? [row.data] : [];
+// Skipping some rows is fine; a list where none parse means the shape changed.
+const keepReadable = <T>(
+  list: unknown[] | null | undefined,
+  read: (row: unknown) => T | undefined,
+  ctx: z.RefinementCtx
+): T[] => {
+  const rows = (list ?? []).flatMap((r) => {
+    const row = read(r);
+    return row === undefined ? [] : [row];
   });
-const Rows = z.array(z.unknown()).nullish().transform(gammaRows);
+  if ((list?.length ?? 0) > 0 && rows.length === 0) {
+    ctx.issues.push({ code: 'custom', message: 'no row could be read', input: list });
+  }
+  return rows;
+};
+const Rows = z
+  .array(z.unknown())
+  .nullish()
+  .transform((list, ctx) => keepReadable(list, (r) => GammaRow.safeParse(r).data, ctx));
 const SearchBody = z.looseObject({
   events: z
     .array(z.unknown())
     .nullish()
-    .transform((events) =>
-      (events ?? []).flatMap((e) => {
-        const event = z.looseObject({ markets: Rows }).safeParse(e);
-        return event.success ? [event.data] : [];
-      })
+    .transform((events, ctx) =>
+      keepReadable(events, (e) => z.looseObject({ markets: Rows }).safeParse(e).data, ctx)
     )
 });
 const MarketsBody = z.looseObject({ markets: Rows });

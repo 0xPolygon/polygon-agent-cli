@@ -85,11 +85,22 @@ describe('fetchVaults', () => {
         ...market('d', 500_000, 0.05),
         inputTokens: [{ symbol: 'ETH', decimals: 18, address: null }]
       },
-      { ...market('e', 500_000, 0.05), statistics: { tvlUsd: 5 } }
+      { ...market('e', 500_000, 0.05), rewardRate: { total: 'x' } }
     ];
     vi.stubGlobal('fetch', async () => Response.json({ items }));
     const vaults = await fetchVaults();
     expect(vaults.map((v) => v.marketId)).toEqual(['b']);
+  });
+
+  it('accepts a numeric tvlUsd', async () => {
+    const items = [{ ...market('b', 0, 0.021), statistics: { tvlUsd: 3_100_000 } }];
+    vi.stubGlobal('fetch', async () => Response.json({ items }));
+    expect((await fetchVaults()).map((v) => v.marketId)).toEqual(['b']);
+  });
+
+  it('fails when rows are present but none can be read', async () => {
+    vi.stubGlobal('fetch', async () => Response.json({ items: [{ id: 5 }, 'junk'] }));
+    await expect(fetchVaults()).rejects.toThrow();
   });
 
   it('fails when the envelope is wrong', async () => {

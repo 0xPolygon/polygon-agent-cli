@@ -81,7 +81,7 @@ const RawMarket = z.looseObject({
     }),
   outputToken: z.looseObject({ address: z.string().nullish() }).nullish(),
   rewardRate: z.looseObject({ total: z.number() }).nullish(),
-  statistics: z.looseObject({ tvlUsd: z.string().nullish() }).nullish(),
+  statistics: z.looseObject({ tvlUsd: z.union([z.string(), z.number()]).nullish() }).nullish(),
   status: z.looseObject({ enter: z.boolean() }).nullish(),
   metadata: z
     .looseObject({ deprecated: z.boolean().nullish(), underMaintenance: z.boolean().nullish() })
@@ -90,11 +90,16 @@ const RawMarket = z.looseObject({
 type RawMarket = z.infer<typeof RawMarket>;
 // The envelope must match; a row that doesn't is skipped, as the old filter did.
 const MarketsBody = z.looseObject({ items: z.array(z.unknown()).nullish() });
-const parseMarkets = (body: unknown): RawMarket[] =>
-  (MarketsBody.parse(body).items ?? []).flatMap((item) => {
+const parseMarkets = (body: unknown): RawMarket[] => {
+  const items = MarketsBody.parse(body).items ?? [];
+  const rows = items.flatMap((item) => {
     const row = RawMarket.safeParse(item);
     return row.success ? [row.data] : [];
   });
+  // Skipping some rows is fine; a list where none parse means the shape changed.
+  if (items.length > 0 && rows.length === 0) throw new Error('YieldGetMarkets rows not understood');
+  return rows;
+};
 const EthCallReplies = z.array(z.looseObject({ id: z.number(), result: z.string().nullish() }));
 
 const plainSymbol = (s: string) => s.replace(/^vb/i, '').toUpperCase();

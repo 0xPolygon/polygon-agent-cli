@@ -115,12 +115,17 @@ const rowsOf = <S extends z.ZodType>(row: S) =>
   z
     .array(z.unknown())
     .nullish()
-    .transform((list): z.output<S>[] =>
-      (list ?? []).flatMap((r) => {
+    .transform((list, ctx): z.output<S>[] => {
+      const rows = (list ?? []).flatMap((r) => {
         const parsed = row.safeParse(r);
         return parsed.success ? [parsed.data] : [];
-      })
-    );
+      });
+      // Skipping some rows is fine; a list where none parse means the shape changed.
+      if ((list?.length ?? 0) > 0 && rows.length === 0) {
+        ctx.issues.push({ code: 'custom', message: 'no row could be read', input: list });
+      }
+      return rows;
+    });
 const RawTokenBalance = z.looseObject({
   contractAddress: z.string().nullish(),
   balance: z.string().nullish(),

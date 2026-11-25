@@ -81,7 +81,8 @@ export function parseRelayStatus(raw: unknown): RelayStatus | null {
   // Parsed apart from the status: a context that is null or unrecognised must
   // only drop the context, never the status the login is waiting on.
   const context = LoginContextSchema.safeParse(status.data.context);
-  return context.success ? { ...status.data, context: context.data } : status.data;
+  const { context: _raw, ...rest } = status.data;
+  return context.success ? { ...rest, context: context.data } : rest;
 }
 
 // A transient relay failure (network error or a 5xx) must not terminate the

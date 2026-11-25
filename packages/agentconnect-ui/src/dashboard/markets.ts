@@ -43,10 +43,13 @@ export async function fetchPositions(address: string): Promise<Position[]> {
   const res = await fetch(`${DATA_URL}/v2/positions?${params}`);
   if (!res.ok) throw new Error(`Polymarket positions failed: ${res.status}`);
   const body = PositionsBody.parse(await res.json());
-  const rows = (body.data ?? []).flatMap((r) => {
+  const raw = body.data ?? [];
+  const rows = raw.flatMap((r) => {
     const row = Row.safeParse(r);
     return row.success ? [row.data] : [];
   });
+  // Skipping some rows is fine; a list where none parse means the shape changed.
+  if (raw.length > 0 && rows.length === 0) throw new Error('Polymarket positions not understood');
   return rows.map((p) => ({
     title: p.title ?? 'Untitled market',
     outcome: p.outcome ?? '',

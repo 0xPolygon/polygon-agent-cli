@@ -124,10 +124,21 @@ describe('earn', () => {
           id: 'native-alt',
           inputTokens: [{ symbol: 'ETH', decimals: 18, address: null }]
         }),
-        market({ id: 'odd-row', statistics: { tvlUsd: 2500000 } })
+        market({ id: 'odd-row', rewardRate: { total: 'x' } })
       ])
     );
     expect(vaults).toHaveLength(1);
+  });
+
+  it('accepts a numeric tvlUsd', async () => {
+    const vaults = await listVaults('katana', deps([market({ statistics: { tvlUsd: 2500000 } })]));
+    expect(vaults).toHaveLength(1);
+  });
+
+  it('reports an upstream error when no row can be read', async () => {
+    await expect(
+      listVaults('katana', deps([market({ rewardRate: { total: 'x' } }), 'junk']))
+    ).rejects.toMatchObject({ code: 'upstream_error' });
   });
 
   it('keeps a vault whose later input token has a null address', async () => {

@@ -70,16 +70,25 @@ const RawMarket = z.looseObject({
     }),
   outputToken: z.looseObject({ address: z.string().nullish() }).nullish(),
   rewardRate: z.looseObject({ total: z.number() }).nullish(),
-  statistics: z.looseObject({ tvlUsd: z.string().nullish() }).nullish(),
+  statistics: z.looseObject({ tvlUsd: z.union([z.string(), z.number()]).nullish() }).nullish(),
   status: z.looseObject({ enter: z.boolean() }).nullish()
 });
 // The envelope must match; a row that doesn't is skipped, as the old filter did.
 const MarketsResponse = z.looseObject({ items: z.array(z.unknown()).nullish() });
-const parseMarkets = (items: unknown[]) =>
-  items.flatMap((item) => {
+const parseMarkets = (items: unknown[]) => {
+  const rows = items.flatMap((item) => {
     const row = RawMarket.safeParse(item);
     return row.success ? [row.data] : [];
   });
+  // Skipping some rows is fine; a list where none parse means the shape changed.
+  if (items.length > 0 && rows.length === 0) {
+    throw new MoneyError({
+      code: 'upstream_error',
+      message: "Trails listed the vaults in a form this wallet doesn't understand."
+    });
+  }
+  return rows;
+};
 
 export interface EarnDeps {
   trailsKey: string;
