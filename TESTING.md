@@ -11,6 +11,8 @@ Two suffixes mark tests that run differently, so they can be told apart by name:
 
 `*.network.test.ts` files call live services and are skipped unless `RUN_NETWORK_TESTS=1` is set.
 
+Prod-smoke tests (`test/prod-smoke/*.prod-smoke.test.ts` in `agentconnect-ui` and `oidc-relay`) make read-only requests to the deployed production hosts. Run them by hand after a release with `pnpm --filter <package> run test:prod-smoke` (production by default; set `SMOKE_BASE_URL` to point elsewhere). The default config excludes them and CI never runs them.
+
 ## How to run
 
 Use Node 24. The repo pins pnpm through `packageManager`, so run the pinned version (corepack, or `npx -y pnpm@10.30.3`).

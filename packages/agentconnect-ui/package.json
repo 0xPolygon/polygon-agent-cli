@@ -17,6 +17,7 @@
     "typecheck": "tsc -b",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:prod-smoke": "SMOKE_BASE_URL=${SMOKE_BASE_URL:-https://agentconnect.polygon.technology} vitest run --config vitest.prod-smoke.config.ts",
     "deploy:staging": "wrangler deploy --env staging"
   },
   "dependencies": {

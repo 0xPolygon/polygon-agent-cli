@@ -6,7 +6,13 @@
     "rootDir": ".",
     "rewriteRelativeImportExtensions": false
   },
-  "include": ["src/**/*.test.ts", "src/test-env.d.ts", "vitest.config.ts"],
+  "include": [
+    "src/**/*.test.ts",
+    "src/test-env.d.ts",
+    "vitest.config.ts",
+    "vitest.prod-smoke.config.ts",
+    "test/prod-smoke/**/*.ts"
+  ],
   "exclude": [],
   "references": [{ "path": "./tsconfig.lib.json" }]
 }

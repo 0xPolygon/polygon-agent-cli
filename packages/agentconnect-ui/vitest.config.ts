@@ -22,7 +22,7 @@ export default defineConfig({
         test: {
           name: 'node',
           include: ['worker/**/*.test.ts', 'src/**/*.test.ts', 'skills-index.test.ts'],
-          exclude: ['**/*.workers.test.ts', '**/node_modules/**'],
+          exclude: ['**/*.workers.test.ts', '**/node_modules/**', 'test/prod-smoke/**'],
           // Bundle the OAuth provider so the alias reaches its import.
           server: { deps: { inline: ['@cloudflare/workers-oauth-provider'] } }
         }

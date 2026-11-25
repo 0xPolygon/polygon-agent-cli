@@ -29,6 +29,8 @@
     "worker/money/test-fakes.ts",
     "vite.config.ts",
     "vitest.config.ts",
+    "vitest.prod-smoke.config.ts",
+    "test/prod-smoke/**/*.ts",
     "skills-index.ts",
     "skills-index.test.ts"
   ],
