@@ -1,5 +1,13 @@
 # Change Log
 
+## 0.18.0
+
+### Minor Changes
+
+- [#296](https://github.com/0xPolygon/polygon-agent-cli/pull/296) [`d566363`](https://github.com/0xPolygon/polygon-agent-cli/commit/d566363d32ef67eba7384944b8012e0c92060115) Thanks [@shan8851](https://github.com/shan8851)! - Every command now refuses to start, with an `invalid_env` error naming the variable, when one of the URL environment variables (such as `POLYGON_AGENT_OIDC_RELAY` or `POLYMARKET_GAMMA_URL`) holds something that isn't an http(s) URL
+
+  Environment variables set to an empty value now count as unset.
+
 ## 0.17.5
 
 ### Patch Changes

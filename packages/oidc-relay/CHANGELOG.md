@@ -1,5 +1,13 @@
 # @polygonlabs/oidc-relay
 
+## 0.0.3
+
+### Patch Changes
+
+- [#295](https://github.com/0xPolygon/polygon-agent-cli/pull/295) [`ca9528f`](https://github.com/0xPolygon/polygon-agent-cli/commit/ca9528f42a30ab704ae77850d9bd79e9c2544ace) Thanks [@shan8851](https://github.com/shan8851)! - Reject malformed requests with a clear 400 error
+
+  The sign-in, approval and connector endpoints now validate the shape of every request body up front, so a body of the wrong type gets a plain error naming the problem instead of failing partway through. Valid requests behave exactly as before.
+
 ## 0.0.2
 
 ### Patch Changes
