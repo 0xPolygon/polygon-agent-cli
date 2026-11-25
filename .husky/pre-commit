@@ -1,2 +1,3 @@
-pnpm exec lint-staged
+# --no-stash: lint-staged's backup stash lives in refs/stash, shared by every worktree, and is dropped by index, so concurrent commits in different worktrees can drop each other's entry
+pnpm exec lint-staged --no-stash
 pnpm run typecheck

@@ -2,7 +2,7 @@ packages:
   - packages/*
 
 blockExoticSubdeps: true
-minimumReleaseAge: 1440
+minimumReleaseAge: 10080
 minimumReleaseAgeExclude:
   - '@polygonlabs/*'
   - '@maticnetwork/*'
@@ -10,6 +10,8 @@ minimumReleaseAgeExclude:
   - '@0xsequence/*'
   - '@0xtrails/*'
   - '0xtrails'
+onlyBuiltDependencies:
+  - esbuild
 trustPolicy: no-downgrade
 trustPolicyExclude:
   - 'semver@6.3.1'

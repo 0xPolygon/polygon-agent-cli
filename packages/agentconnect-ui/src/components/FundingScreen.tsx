@@ -124,12 +124,7 @@ export function FundingScreen({ walletAddress, chainId, amount, onSkip }: Fundin
                 environment: 'production'
               }
             }}
-            onDestinationConfirmation={({ txHash, chainId: confirmChainId, sessionId }) => {
-              console.log('onDestinationConfirmation:', {
-                txHash,
-                chainId: confirmChainId,
-                sessionId
-              });
+            onDestinationConfirmation={() => {
               setTimeout(onSkip, 3000);
             }}
           />
