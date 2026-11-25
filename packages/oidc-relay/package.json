@@ -9,6 +9,7 @@
     "dev": "wrangler dev",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:prod-smoke": "SMOKE_BASE_URL=${SMOKE_BASE_URL:-https://oidc-relay.polygon.technology} vitest run --config vitest.prod-smoke.config.ts",
     "typecheck": "tsc -b"
   },
   "devDependencies": {
