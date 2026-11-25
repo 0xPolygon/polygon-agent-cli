@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
+import { z } from 'zod/v4';
 
 import { LoginHeading } from '../login/LoginHeading.js';
 import { LoginShell } from '../login/LoginShell.js';
+import { Ack, errorMessage, parseBody, post } from './api.js';
 import { ApproveActions } from './approve/ApproveActions.js';
 import { ApproveCodeForm } from './approve/ApproveCodeForm.js';
 import { ApproveEmailForm } from './approve/ApproveEmailForm.js';
@@ -23,17 +25,6 @@ export function isApproveReturn(): boolean {
   } catch {
     return false;
   }
-}
-
-async function post<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  const data = (await res.json().catch(() => ({}))) as T & { message?: string };
-  if (!res.ok) throw new Error(data.message ?? 'Something went wrong. Try again.');
-  return data;
 }
 
 // Signing in on the approval page: keeps the owner signed in to their wallet
@@ -66,13 +57,23 @@ function ApproveSignIn({ base, onSignedIn }: { base: string; onSignedIn: (c: str
             e.preventDefault();
             void run(async () => {
               setC(
-                (await post<{ c: string }>(`${base}/signin/email/start`, { email: email.trim() })).c
+                (
+                  await post(
+                    `${base}/signin/email/start`,
+                    { email: email.trim() },
+                    z.looseObject({ c: z.string() })
+                  )
+                ).c
               );
             });
           }}
           onGoogle={() =>
             void run(async () => {
-              const r = await post<{ c: string; url: string }>(`${base}/signin/google/start`, {});
+              const r = await post(
+                `${base}/signin/google/start`,
+                {},
+                z.looseObject({ c: z.string(), url: z.string() })
+              );
               sessionStorage.setItem(
                 APPROVE_KEY,
                 JSON.stringify({
@@ -93,7 +94,7 @@ function ApproveSignIn({ base, onSignedIn }: { base: string; onSignedIn: (c: str
           onSubmit={(e) => {
             e.preventDefault();
             void run(async () => {
-              await post(`${base}/signin/email/finish`, { c, code: code.trim() });
+              await post(`${base}/signin/email/finish`, { c, code: code.trim() }, Ack);
               onSignedIn(c);
             });
           }}
@@ -104,17 +105,18 @@ function ApproveSignIn({ base, onSignedIn }: { base: string; onSignedIn: (c: str
   );
 }
 
-export interface Action {
-  actionId: string;
-  status: 'pending' | 'running' | 'done' | 'failed' | 'declined' | 'expired';
-  title: string;
-  details: { label: string; value: string }[];
-  appName: string;
-  expiresAt: string;
+const ActionSchema = z.looseObject({
+  actionId: z.string(),
+  status: z.enum(['pending', 'running', 'done', 'failed', 'declined', 'expired']),
+  title: z.string(),
+  details: z.array(z.looseObject({ label: z.string(), value: z.string() })),
+  appName: z.string(),
+  expiresAt: z.string(),
   // It runs from the owner's wallet: approving needs a sign-in on this page.
-  ownerSignIn?: boolean;
-  error?: { error: string };
-}
+  ownerSignIn: z.boolean().optional(),
+  error: z.looseObject({ error: z.string() }).optional()
+});
+export type Action = z.infer<typeof ActionSchema>;
 
 /** Approving answers at once and the action runs in the background; the page follows it to a result. */
 export function Approve({ finishing = false }: { finishing?: boolean }) {
@@ -144,19 +146,20 @@ export function Approve({ finishing = false }: { finishing?: boolean }) {
 
   const load = async () => {
     const res = await fetch(path);
-    const data = (await res.json().catch(() => ({}))) as Action & { message?: string };
-    if (!res.ok) throw new Error(data.message ?? 'This request was not found.');
-    setAction(data);
+    const data: unknown = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(errorMessage(data) ?? 'This request was not found.');
+    setAction(parseBody(ActionSchema, data, 'This request was not found.'));
   };
 
   useEffect(() => {
     void (async () => {
       if (returning) {
         try {
-          await post(`${path}/signin/google/finish`, {
-            c: returning.c,
-            callbackUrl: window.location.href
-          });
+          await post(
+            `${path}/signin/google/finish`,
+            { c: returning.c, callbackUrl: window.location.href },
+            Ack
+          );
           setC(returning.c);
         } catch (e) {
           setError(e instanceof Error ? e.message : 'That sign-in did not work.');
@@ -192,9 +195,9 @@ export function Approve({ finishing = false }: { finishing?: boolean }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ approve, ...(c ? { c } : {}) })
       });
-      const data = (await res.json().catch(() => ({}))) as Action & { message?: string };
-      if (!res.ok) throw new Error(data.message ?? 'Something went wrong. Try again.');
-      setAction(data);
+      const data: unknown = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(errorMessage(data) ?? 'Something went wrong. Try again.');
+      setAction(parseBody(ActionSchema, data));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong. Try again.');
     } finally {

@@ -10,6 +10,7 @@ import type { Address } from 'viem';
 import { createPublicClient, erc20Abi, formatUnits, getAddress, http } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { arbitrum, base, mainnet, optimism, polygon } from 'viem/chains';
+import { z } from 'zod/v4';
 
 import type { EngineDeps } from './engine.ts';
 
@@ -26,15 +27,20 @@ const SETTLE_SLACK_MS = 4_000;
 const MAX_BODY_CHARS = 50_000;
 const CHAINS = [polygon, base, mainnet, arbitrum, optimism];
 
-export interface Requirement {
-  scheme: string;
-  network: string;
-  amount: string;
-  asset: string;
-  payTo: string;
-  maxTimeoutSeconds: number;
-  extra?: { name?: string; assetTransferMethod?: string };
-}
+// What a service asks for, parsed from its 402 reply. A loose object naming only
+// the fields read here, so extra fields don't matter.
+const RequirementSchema = z.looseObject({
+  scheme: z.string(),
+  network: z.string(),
+  amount: z.string(),
+  asset: z.string(),
+  payTo: z.string(),
+  maxTimeoutSeconds: z.number(),
+  extra: z
+    .looseObject({ name: z.string().optional(), assetTransferMethod: z.string().optional() })
+    .optional()
+});
+export type Requirement = z.infer<typeof RequirementSchema>;
 
 // Signed and possibly sent, not yet confirmed: the signer's funds it covers
 // aren't free until it expires.
@@ -192,7 +198,13 @@ export async function payAndFetch(
       .json()
       .catch(() => ({}))
   );
-  const req = selectRequirement(required.accepts as unknown as Requirement[], params.chain ?? 137);
+  // An offer that doesn't parse (another scheme's shape, say) is one this wallet
+  // can't make; if none parse, the "no payment this wallet can make" error follows.
+  const offers = required.accepts.flatMap((a) => {
+    const parsed = RequirementSchema.safeParse(a);
+    return parsed.success ? [parsed.data] : [];
+  });
+  const req = selectRequirement(offers, params.chain ?? 137);
   if (!req) {
     throw new MoneyError({
       code: 'invalid_input',

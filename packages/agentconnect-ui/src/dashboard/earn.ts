@@ -4,6 +4,8 @@
 // largest smaller vault that pays clearly more than the tier before it, so
 // taking on more risk always earns more; a vault that doesn't is never offered.
 
+import { z } from 'zod/v4';
+
 import { TRAILS_API_URL } from '@polygonlabs/agent-shared';
 
 import { trailsApiKey } from '../config';
@@ -63,15 +65,22 @@ export interface Vault {
   decimals: number;
 }
 
-interface RawMarket {
-  id: string;
-  inputTokens?: { symbol: string; decimals: number }[];
-  outputToken?: { address?: string };
-  rewardRate?: { total: number };
-  statistics?: { tvlUsd?: string };
-  status?: { enter: boolean };
-  metadata?: { deprecated?: boolean; underMaintenance?: boolean };
-}
+// Loose objects naming only what is read here: a changed shape fails the parse,
+// an added field doesn't.
+const RawMarket = z.looseObject({
+  id: z.string(),
+  inputTokens: z.array(z.looseObject({ symbol: z.string(), decimals: z.number() })).optional(),
+  outputToken: z.looseObject({ address: z.string().optional() }).optional(),
+  rewardRate: z.looseObject({ total: z.number() }).optional(),
+  statistics: z.looseObject({ tvlUsd: z.string().optional() }).optional(),
+  status: z.looseObject({ enter: z.boolean() }).optional(),
+  metadata: z
+    .looseObject({ deprecated: z.boolean().optional(), underMaintenance: z.boolean().optional() })
+    .optional()
+});
+type RawMarket = z.infer<typeof RawMarket>;
+const MarketsBody = z.looseObject({ items: z.array(RawMarket).optional() });
+const EthCallReplies = z.array(z.looseObject({ id: z.number(), result: z.string().optional() }));
 
 const plainSymbol = (s: string) => s.replace(/^vb/i, '').toUpperCase();
 
@@ -128,8 +137,7 @@ export async function fetchVaults(): Promise<Vault[]> {
     body: JSON.stringify({ provider: 'morpho', chainId: String(KATANA_CHAIN_ID), limit: 100 })
   });
   if (!res.ok) throw new Error(`YieldGetMarkets failed: ${res.status}`);
-  const body = (await res.json()) as { items?: RawMarket[] };
-  return pickVaults(body.items ?? []);
+  return pickVaults(MarketsBody.parse(await res.json()).items ?? []);
 }
 
 const word = (hex: string) => hex.replace(/^0x/, '').toLowerCase().padStart(64, '0');
@@ -148,7 +156,7 @@ async function ethCall(calls: { to: string; data: string }[]): Promise<bigint[]>
     )
   });
   if (!res.ok) throw new Error(`Katana RPC failed: ${res.status}`);
-  const out = (await res.json()) as { id: number; result?: string; error?: unknown }[];
+  const out = EthCallReplies.parse(await res.json());
   return calls.map((_, id) => {
     const r = out.find((o) => o.id === id);
     if (!r?.result) throw new Error('Katana RPC returned no result');
@@ -195,7 +203,7 @@ export async function fetchPolygonRates(): Promise<Record<string, number>> {
         body: JSON.stringify({ provider, chainId: '137', limit: 100 })
       });
       if (!res.ok) throw new Error(`YieldGetMarkets failed: ${res.status}`);
-      return ((await res.json()) as { items?: RawMarket[] }).items ?? [];
+      return MarketsBody.parse(await res.json()).items ?? [];
     })
   );
   const out: Record<string, number> = {};

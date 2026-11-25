@@ -114,6 +114,14 @@ describe('earn', () => {
     ).rejects.toMatchObject({ code: 'not_covered' });
   });
 
+  it('tolerates added fields but reports a changed shape as an upstream error', async () => {
+    const extra = await listVaults('katana', deps([market({ brandNew: { field: 1 } })]));
+    expect(extra).toHaveLength(1);
+    await expect(
+      listVaults('katana', deps([market({ statistics: { tvlUsd: 2500000 } })]))
+    ).rejects.toMatchObject({ code: 'upstream_error' });
+  });
+
   it('lists only vaults that take deposits now', async () => {
     const vaults = await listVaults('katana', deps([market()]));
     expect(await openVaults(vaults, WALLET, deps([market()]))).toHaveLength(1);

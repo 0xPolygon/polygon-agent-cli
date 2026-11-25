@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { z } from 'zod/v4';
 
 import { Skeleton } from '@polygonlabs/design-system';
 
@@ -6,11 +7,10 @@ import { EmptyState } from '../components/EmptyState.js';
 import { StatusBanner } from '../components/StatusBanner.js';
 import { AgentRow } from './AgentRow.js';
 
-interface Agent {
-  id: string;
-  name: string;
-  connectedAt: number;
-}
+const AgentsSchema = z.looseObject({
+  agents: z.array(z.looseObject({ id: z.string(), name: z.string(), connectedAt: z.number() }))
+});
+type Agent = z.infer<typeof AgentsSchema>['agents'][number];
 
 const since = (unix: number) =>
   new Date(unix * 1000).toLocaleDateString(undefined, {
@@ -29,7 +29,7 @@ export function ConnectedAgents() {
     void fetch('/api/agents')
       .then(async (r) => {
         if (!r.ok) throw new Error();
-        setAgents(((await r.json()) as { agents: Agent[] }).agents);
+        setAgents(AgentsSchema.parse(await r.json()).agents);
       })
       .catch(() => setError("Couldn't load connected agents."));
   }, []);

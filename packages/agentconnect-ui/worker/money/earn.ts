@@ -20,12 +20,14 @@ import {
   isAddress
 } from 'viem';
 import { katana, polygon } from 'viem/chains';
+import { z } from 'zod/v4';
+
+import { TRAILS_API_URL } from '@polygonlabs/agent-shared';
 
 import { MoneyError } from './errors.ts';
 import { chainLabel, findSupportedToken, parseChain } from './tokens.ts';
 import { tokenUnits } from './trade.ts';
 
-const TRAILS = 'https://trails-api.sequence.app/rpc/Trails';
 export const EARN_CHAINS = [747474, 137];
 const CHAINS = { 747474: katana, 137: polygon } as const;
 const MIN_TVL_USD = 10_000;
@@ -40,15 +42,28 @@ export interface Vault {
   tvlUsd: number;
 }
 
-interface RawMarket {
-  id: string;
-  metadata?: { name?: string; deprecated?: boolean; underMaintenance?: boolean };
-  inputTokens?: { symbol: string; decimals: number; address?: string }[];
-  outputToken?: { address?: string };
-  rewardRate?: { total: number };
-  statistics?: { tvlUsd?: string };
-  status?: { enter: boolean };
-}
+// Loose objects naming only what listVaults reads: a changed shape fails the
+// parse, an added field doesn't.
+const RawMarket = z.looseObject({
+  id: z.string(),
+  metadata: z
+    .looseObject({
+      name: z.string().optional(),
+      deprecated: z.boolean().optional(),
+      underMaintenance: z.boolean().optional()
+    })
+    .optional(),
+  inputTokens: z
+    .array(
+      z.looseObject({ symbol: z.string(), decimals: z.number(), address: z.string().optional() })
+    )
+    .optional(),
+  outputToken: z.looseObject({ address: z.string().optional() }).optional(),
+  rewardRate: z.looseObject({ total: z.number() }).optional(),
+  statistics: z.looseObject({ tvlUsd: z.string().optional() }).optional(),
+  status: z.looseObject({ enter: z.boolean() }).optional()
+});
+const MarketsResponse = z.looseObject({ items: z.array(RawMarket).optional() });
 
 export interface EarnDeps {
   trailsKey: string;
@@ -94,7 +109,7 @@ export async function listVaults(chain: string | undefined, deps: EarnDeps): Pro
   const doFetch = deps.fetch ?? fetch;
   const lists = await Promise.all(
     chainArg(chain).map(async (chainId) => {
-      const res = await doFetch(`${TRAILS}/YieldGetMarkets`, {
+      const res = await doFetch(`${TRAILS_API_URL}/YieldGetMarkets`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -108,7 +123,15 @@ export async function listVaults(chain: string | undefined, deps: EarnDeps): Pro
           message: "Trails didn't list the vaults just now. Try again shortly."
         });
       }
-      const items = ((await res.json()) as { items?: RawMarket[] }).items ?? [];
+      const parsed = MarketsResponse.safeParse(await res.json());
+      if (!parsed.success) {
+        throw new MoneyError({
+          code: 'upstream_error',
+          message: "Trails listed the vaults in a form this wallet doesn't understand.",
+          cause: parsed.error
+        });
+      }
+      const items = parsed.data.items ?? [];
       return items.flatMap((m): Vault[] => {
         const input = m.inputTokens?.[0];
         const out = m.outputToken?.address;

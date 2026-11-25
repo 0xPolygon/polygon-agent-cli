@@ -2,6 +2,8 @@
 // Polymarket trading account, not the agent wallet, so the CLI passes that
 // address as `?pm=`; without it the tab only offers prompts.
 
+import { z } from 'zod/v4';
+
 import { rpcCalls } from '../indexer';
 
 const DATA_URL = 'https://data-api.polymarket.com';
@@ -21,24 +23,31 @@ export interface Position {
   slug: string;
 }
 
-interface RawPosition {
-  title?: string;
-  outcome?: string;
-  avg_price?: number;
-  current_price?: number;
-  current_value?: number;
-  total_cost_usdc?: number;
-  unrealized_pnl?: number;
-  end_date?: string;
-  event_slug?: string;
-  status?: string;
-}
+// A loose object naming only what is read below: a changed shape fails the
+// parse, an added field doesn't.
+const PositionsBody = z.looseObject({
+  data: z
+    .array(
+      z.looseObject({
+        title: z.string().optional(),
+        outcome: z.string().optional(),
+        avg_price: z.number().optional(),
+        current_price: z.number().optional(),
+        current_value: z.number().optional(),
+        total_cost_usdc: z.number().optional(),
+        unrealized_pnl: z.number().optional(),
+        end_date: z.string().optional(),
+        event_slug: z.string().optional()
+      })
+    )
+    .optional()
+});
 
 export async function fetchPositions(address: string): Promise<Position[]> {
   const params = new URLSearchParams({ user: address, limit: '50', status: 'OPEN' });
   const res = await fetch(`${DATA_URL}/v2/positions?${params}`);
   if (!res.ok) throw new Error(`Polymarket positions failed: ${res.status}`);
-  const body = (await res.json()) as { data?: RawPosition[] };
+  const body = PositionsBody.parse(await res.json());
   return (body.data ?? []).map((p) => ({
     title: p.title ?? 'Untitled market',
     outcome: p.outcome ?? '',
