@@ -13,7 +13,7 @@ import { z } from 'zod';
 
 import { CliError } from '../errors.ts';
 import { readJsonFile, writeJsonFile } from '../session/state.ts';
-import { STORAGE_ROOT } from '../storage.ts';
+import { storageRoot } from '../storage.ts';
 
 const TokenSide = z.object({
   chainId: z.number(),
@@ -59,7 +59,7 @@ export type TradeRecord = z.infer<typeof TradeRecordSchema>;
 export type TradeState = TradeRecord['state'];
 
 function tradesDir(): string {
-  const dir = path.join(STORAGE_ROOT, 'trades');
+  const dir = path.join(storageRoot(), 'trades');
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   return dir;
 }

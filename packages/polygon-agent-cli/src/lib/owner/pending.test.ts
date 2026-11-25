@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 process.env.POLYGON_AGENT_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-owner-pending-'));
 
 const { loadPending, savePending } = await import('./pending.ts');
-const { encrypt, STORAGE_ROOT } = await import('../storage.ts');
+const { encrypt, storageRoot } = await import('../storage.ts');
 const { writeJsonFile } = await import('../session/state.ts');
 
 const BASE = {
@@ -28,9 +28,9 @@ describe('pending request file', () => {
   it('loads a file written before sign-in methods as an email request', () => {
     const wallet = 'old-file';
     const old = { ...BASE, wallet, email: 'o@example.com', attempt: ATTEMPT };
-    fs.mkdirSync(path.join(STORAGE_ROOT, 'pending'), { recursive: true });
+    fs.mkdirSync(path.join(storageRoot(), 'pending'), { recursive: true });
     writeJsonFile({
-      file: path.join(STORAGE_ROOT, 'pending', `${wallet}.json`),
+      file: path.join(storageRoot(), 'pending', `${wallet}.json`),
       data: encrypt(JSON.stringify(old))
     });
     expect(loadPending(wallet)).toEqual({ ...old, method: 'email' });
@@ -58,9 +58,9 @@ describe('pending request file', () => {
 
   it('rejects a browser request without its relay session', async () => {
     const wallet = 'browser-broken';
-    fs.mkdirSync(path.join(STORAGE_ROOT, 'pending'), { recursive: true });
+    fs.mkdirSync(path.join(storageRoot(), 'pending'), { recursive: true });
     writeJsonFile({
-      file: path.join(STORAGE_ROOT, 'pending', `${wallet}.json`),
+      file: path.join(storageRoot(), 'pending', `${wallet}.json`),
       data: encrypt(JSON.stringify({ ...BASE, wallet, method: 'browser' }))
     });
     expect(loadPending(wallet)).toBeNull();

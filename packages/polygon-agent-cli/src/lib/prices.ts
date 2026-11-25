@@ -1,6 +1,7 @@
 // USD prices from Trails (GetTokenPrices). One call for any number of tokens.
 
-import { loadBuilderConfig } from './storage.ts';
+import { getEnv } from './env.ts';
+import { loadBuilderConfig, resolveProjectAccessKey } from './storage.ts';
 
 export interface PriceQuery {
   chainId: number;
@@ -14,11 +15,11 @@ export function priceKey(token: PriceQuery): string {
 export async function trailsClient() {
   const { TrailsApi } = await import('@0xtrails/api');
   const apiKey =
-    process.env.TRAILS_API_KEY ||
-    process.env.SEQUENCE_PROJECT_ACCESS_KEY ||
+    getEnv().TRAILS_API_KEY ||
+    resolveProjectAccessKey() ||
     (await loadBuilderConfig())?.accessKey ||
     '';
-  return new TrailsApi(apiKey, { hostname: process.env.TRAILS_API_HOSTNAME });
+  return new TrailsApi(apiKey, { hostname: getEnv().TRAILS_API_HOSTNAME });
 }
 
 // Prices by priceKey. Tokens Trails can't price are absent; callers decide

@@ -236,9 +236,9 @@ describe('deposit', () => {
 
   it('fails with wallet_busy, sending nothing, while another deposit holds the lock', async () => {
     const { withLock } = await import('../../lib/lock.ts');
-    const { STORAGE_ROOT } = await import('../../lib/storage.ts');
+    const { storageRoot } = await import('../../lib/storage.ts');
     const out = await withLock({
-      dir: path.join(STORAGE_ROOT, 'locks', 'polymarket', 'main'),
+      dir: path.join(storageRoot(), 'locks', 'polymarket', 'main'),
       fn: () => run(['deposit', '5', '--broadcast', '--no-wait'])
     });
     expect(out).toMatchObject({ ok: false, code: 'wallet_busy' });
@@ -248,9 +248,9 @@ describe('deposit', () => {
 
   it('a dry run does not need the deposit lock', async () => {
     const { withLock } = await import('../../lib/lock.ts');
-    const { STORAGE_ROOT } = await import('../../lib/storage.ts');
+    const { storageRoot } = await import('../../lib/storage.ts');
     const out = await withLock({
-      dir: path.join(STORAGE_ROOT, 'locks', 'polymarket', 'main'),
+      dir: path.join(storageRoot(), 'locks', 'polymarket', 'main'),
       fn: () => run(['deposit', '5', '--dry-run'])
     });
     expect(out).toMatchObject({ ok: true, dryRun: true });

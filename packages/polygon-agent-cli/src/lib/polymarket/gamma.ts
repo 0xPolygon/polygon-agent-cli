@@ -1,5 +1,6 @@
 import type { PolymarketErrorCode } from '../errors.ts';
 
+import { getEnv } from '../env.ts';
 import { CliError } from '../errors.ts';
 
 // Polymarket read helpers: Gamma API (market discovery), Data API v2 (positions), the
@@ -26,9 +27,10 @@ export interface Market {
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-export const GAMMA_URL = process.env.POLYMARKET_GAMMA_URL || 'https://gamma-api.polymarket.com';
-export const CLOB_URL = process.env.POLYMARKET_CLOB_URL || 'https://clob.polymarket.com';
-export const DATA_URL = process.env.POLYMARKET_DATA_URL || 'https://data-api.polymarket.com';
+// Functions, not constants, so importing this module reads no environment.
+export const gammaUrl = () => getEnv().POLYMARKET_GAMMA_URL;
+export const clobUrl = () => getEnv().POLYMARKET_CLOB_URL;
+export const dataUrl = () => getEnv().POLYMARKET_DATA_URL;
 
 // Polygon mainnet (chain 137)
 export const USDC_E = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174'; // USDC.e — 6 decimals
@@ -75,7 +77,7 @@ export interface MarketsPage {
 }
 
 async function gammaGet(path: string, params: URLSearchParams): Promise<unknown> {
-  const res = await fetch(`${GAMMA_URL}${path}?${params}`);
+  const res = await fetch(`${gammaUrl()}${path}?${params}`);
   if (!res.ok) throw new Error(`Gamma API error: ${res.status} ${await res.text()}`);
   return res.json();
 }
@@ -229,7 +231,7 @@ export async function getPositions(
   const params = new URLSearchParams({ user: address, limit: String(limit) });
   if (status) params.set('status', status);
   if (cursor) params.set('cursor', cursor);
-  const res = await fetch(`${DATA_URL}/v2/positions?${params}`);
+  const res = await fetch(`${dataUrl()}/v2/positions?${params}`);
   if (!res.ok) throw new Error(`Data API error: ${res.status} ${await res.text()}`);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const body = (await res.json()) as any;

@@ -10,7 +10,7 @@ import { z } from 'zod';
 import { CliError } from '../errors.ts';
 import { LockHeldError, withLock } from '../lock.ts';
 import { readJsonFile, writeJsonFile } from '../session/state.ts';
-import { ensureStorageDir, STORAGE_ROOT } from '../storage.ts';
+import { ensureStorageDir, storageRoot } from '../storage.ts';
 
 export const MIN_INTERVAL_MS = 5 * 60 * 1000;
 export const MAX_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -77,11 +77,11 @@ const CheckStateSchema = z.object({
 export type CheckState = z.infer<typeof CheckStateSchema>;
 
 function watchesFile(): string {
-  return path.join(STORAGE_ROOT, 'watches.json');
+  return path.join(storageRoot(), 'watches.json');
 }
 
 function stateFile(): string {
-  return path.join(STORAGE_ROOT, 'watch-state.json');
+  return path.join(storageRoot(), 'watch-state.json');
 }
 
 export function loadWatches(): Watch[] {
@@ -114,7 +114,7 @@ export function saveCheckState(state: CheckState): void {
 }
 
 function lockDir(): string {
-  return path.join(STORAGE_ROOT, 'locks', 'watch.lock');
+  return path.join(storageRoot(), 'locks', 'watch.lock');
 }
 
 // Runs fn under the watch lock. A check that finds it held is skipped (the

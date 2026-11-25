@@ -17,7 +17,7 @@ import { z } from 'zod';
 
 import { CliError, bigintReplacer } from '../errors.ts';
 import { readJsonFile, writeJsonFile } from '../session/state.ts';
-import { decrypt, encrypt, STORAGE_ROOT, walletName } from '../storage.ts';
+import { decrypt, encrypt, storageRoot, walletName } from '../storage.ts';
 
 // Request ids become file names, and `--request` is user input.
 const REQUEST_ID = /^[a-z0-9]{1,64}$/;
@@ -33,7 +33,7 @@ function requestId(id: string): string {
 }
 
 function waiterDir(wallet: string): string {
-  return path.join(STORAGE_ROOT, 'pending', walletName(wallet));
+  return path.join(storageRoot(), 'pending', walletName(wallet));
 }
 
 function ensureWaiterDir(wallet: string): void {
@@ -198,7 +198,14 @@ export function clearWaiterFiles(wallet: string): void {
 
 // The pid is written here as well as by the waiter itself, so a `--wait` run
 // right after the start never mistakes a waiter still booting for a dead one.
-export function spawnWaiter(params: { wallet: string; id: string; emailCommand?: string }): void {
+// relayUrl is the run's --relay-url: the waiter is a separate process, so it gets it
+// through the child's environment (the parent's own is left alone).
+export function spawnWaiter(params: {
+  wallet: string;
+  id: string;
+  emailCommand?: string;
+  relayUrl?: string;
+}): void {
   const child = spawn(
     process.execPath,
     [
@@ -213,7 +220,14 @@ export function spawnWaiter(params: { wallet: string; id: string; emailCommand?:
       params.id,
       '--browser-waiter'
     ],
-    { detached: true, stdio: 'ignore', env: process.env, windowsHide: true }
+    {
+      detached: true,
+      stdio: 'ignore',
+      env: params.relayUrl
+        ? { ...process.env, POLYGON_AGENT_OIDC_RELAY: params.relayUrl }
+        : process.env,
+      windowsHide: true
+    }
   );
   child.unref();
   if (child.pid !== undefined) {

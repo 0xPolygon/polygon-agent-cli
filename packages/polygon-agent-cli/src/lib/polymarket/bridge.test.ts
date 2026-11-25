@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { resetEnv } from '../env.ts';
 import { bridgeStatus, depositAddress, withdrawAddress } from './bridge.ts';
 
 const USDC = '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359';
@@ -12,7 +13,8 @@ function mockFetch(body: unknown, status = 200) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  delete process.env.POLYMARKET_BUILDER_CODE;
+  vi.unstubAllEnvs();
+  resetEnv();
 });
 
 describe('depositAddress', () => {
@@ -26,7 +28,8 @@ describe('depositAddress', () => {
   });
 
   it('sends the builder code header when configured', async () => {
-    process.env.POLYMARKET_BUILDER_CODE = `0x${'ab'.repeat(32)}`;
+    vi.stubEnv('POLYMARKET_BUILDER_CODE', `0x${'ab'.repeat(32)}`);
+    resetEnv();
     const fn = mockFetch({ address: { evm: '0xB1' } });
     await depositAddress('0xW');
     expect(fn.mock.calls[0][1].headers['X-Builder-Code']).toBe(`0x${'ab'.repeat(32)}`);

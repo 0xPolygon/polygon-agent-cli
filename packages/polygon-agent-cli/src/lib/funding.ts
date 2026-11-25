@@ -2,13 +2,14 @@
 // (POLYGON_AGENT_CREDENTIALS_URL, else the login page's host), which reads
 // ?wallet&chain&view&amount. POLYGON_AGENT_FUNDING_UI overrides.
 
+import { getEnv } from './env.ts';
 import { credentialsBaseUrl } from './oms-client.ts';
 
 // The Polymarket bridge's minimum, and so the smallest amount worth asking for.
 export const MIN_FUNDING_USD = 2;
 
 export function fundingUiBase(): string {
-  const v = process.env.POLYGON_AGENT_FUNDING_UI;
+  const v = getEnv().POLYGON_AGENT_FUNDING_UI;
   return v ? v.replace(/\/+$/, '') : credentialsBaseUrl();
 }
 

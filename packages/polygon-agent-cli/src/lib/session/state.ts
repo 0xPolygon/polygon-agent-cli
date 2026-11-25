@@ -19,7 +19,7 @@ import type { Plan } from './plan.ts';
 
 import { CliError } from '../errors.ts';
 import { LockHeldError, withLock } from '../lock.ts';
-import { STORAGE_ROOT, walletName } from '../storage.ts';
+import { storageRoot, walletName } from '../storage.ts';
 import { readInstallRecord } from '../workspace.ts';
 import { parsePlan, planToJson } from './plan.ts';
 
@@ -28,17 +28,17 @@ import { parsePlan, planToJson } from './plan.ts';
 const WALLET_LOCK_WAIT_MS = 180_000;
 
 export function sessionDir(wallet: string): string {
-  const dir = path.join(STORAGE_ROOT, 'session', walletName(wallet));
+  const dir = path.join(storageRoot(), 'session', walletName(wallet));
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   return dir;
 }
 
 export function hasSessionState(wallet: string): boolean {
-  return fs.existsSync(path.join(STORAGE_ROOT, 'session', walletName(wallet)));
+  return fs.existsSync(path.join(storageRoot(), 'session', walletName(wallet)));
 }
 
 export function removeSessionState(wallet: string): void {
-  fs.rmSync(path.join(STORAGE_ROOT, 'session', walletName(wallet)), {
+  fs.rmSync(path.join(storageRoot(), 'session', walletName(wallet)), {
     recursive: true,
     force: true
   });
@@ -54,7 +54,7 @@ export async function withWalletLock<T>(params: {
     return await withLock({
       // Never inside session/<wallet>/: deleting a lock's directory would let
       // its generation numbers start over (see lib/lock.ts).
-      dir: path.join(STORAGE_ROOT, 'locks', 'wallets', `${walletName(params.wallet)}.lock`),
+      dir: path.join(storageRoot(), 'locks', 'wallets', `${walletName(params.wallet)}.lock`),
       fn: params.fn,
       waitMs: WALLET_LOCK_WAIT_MS
     });
@@ -125,5 +125,5 @@ export function writeApprovedPlan(params: { wallet: string; approved: ApprovedPl
 // The name the owner sees for this install: the workspace install's name, else
 // the host name.
 export function installName(): string {
-  return readInstallRecord(STORAGE_ROOT)?.name ?? os.hostname();
+  return readInstallRecord(storageRoot())?.name ?? os.hostname();
 }

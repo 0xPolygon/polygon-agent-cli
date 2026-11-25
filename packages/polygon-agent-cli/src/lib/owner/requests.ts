@@ -90,7 +90,7 @@ export function loginPageUrl(relaySession: string): string {
 }
 
 export async function startOwnerRequest(
-  params: { wallet: string; action: OwnerAction; now: Date } & (
+  params: { wallet: string; action: OwnerAction; now: Date; relayUrl?: string } & (
     | { method: 'email'; email: string }
     | { method: 'browser'; context: LoginContext }
   )
@@ -126,7 +126,10 @@ export async function startOwnerRequest(
     // The sign-in itself happens in step 2, which drives this session.
     const relaySession = randomBytes(16).toString('base64url');
     try {
-      await makeLoginRelay(oidcRelayBaseUrl()).registerSession(relaySession, params.context);
+      await makeLoginRelay(params.relayUrl || oidcRelayBaseUrl()).registerSession(
+        relaySession,
+        params.context
+      );
     } catch (error) {
       throw new CliError({
         code: 'upstream_unavailable',

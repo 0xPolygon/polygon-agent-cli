@@ -2,6 +2,7 @@ import fs from 'node:fs';
 
 import type { Platform } from './workspace.ts';
 
+import { getEnv } from './env.ts';
 import { PLATFORMS, readInstallRecord, stateDir } from './workspace.ts';
 
 export type SignInMethod = 'browser' | 'email';
@@ -76,7 +77,7 @@ export function inContainer(params: {
 // Reads the real environment. Inside a workspace install the wrapper sets
 // POLYGON_AGENT_ROOT, and that install's record holds the platform.
 export function currentSignInMethod(): { method: SignInMethod; reason: string } {
-  const root = process.env.POLYGON_AGENT_ROOT;
+  const root = getEnv().POLYGON_AGENT_ROOT;
   const platform = root ? readInstallRecord(stateDir(root))?.platform : undefined;
   return pickSignInMethod({
     env: process.env,

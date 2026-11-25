@@ -12,6 +12,7 @@ import { findNetworkById } from '@polygonlabs/oms-wallet';
 import type { TradeRecord } from '../lib/trade/state.ts';
 
 import { ensureBuilderAccess } from '../lib/builder-provision.ts';
+import { getEnv } from '../lib/env.ts';
 import { bigintReplacer, CliError, failureJson } from '../lib/errors.ts';
 import { fundingUrl } from '../lib/funding.ts';
 import { isWalletFunded } from '../lib/indexer.ts';
@@ -21,7 +22,11 @@ import { checkSessionSpend } from '../lib/session/run-tx.ts';
 import { tokenLabel } from '../lib/session/status.ts';
 import { findSupportedToken } from '../lib/session/tokens.ts';
 import { listTransfers } from '../lib/session/transfer.ts';
-import { loadOmsWalletPointer, loadBuilderConfig } from '../lib/storage.ts';
+import {
+  loadOmsWalletPointer,
+  loadBuilderConfig,
+  resolveProjectAccessKey
+} from '../lib/storage.ts';
 import { resolveErc20BySymbol } from '../lib/token-directory.ts';
 import { getTokenConfig } from '../lib/tokens.ts';
 import { DEFAULT_TRADE_TIMEOUT_MS, executeSwap } from '../lib/trade/execute.ts';
@@ -459,9 +464,7 @@ async function handleSendNative(argv: {
     const decimals = network.nativeToken?.decimals ?? 18;
     const value = parseUnits(amount, decimals);
 
-    const useDirectNative =
-      (argv.direct as boolean) ||
-      ['1', 'true', 'yes'].includes(String(process.env.SEQ_ECO_NATIVE_DIRECT || '').toLowerCase());
+    const useDirectNative = (argv.direct as boolean) || getEnv().SEQ_ECO_NATIVE_DIRECT;
 
     const VALUE_FORWARDER = '0xABAAd93EeE2a569cF0632f39B10A9f5D734777ca';
     const selector = '0x98f850f1';
@@ -495,11 +498,7 @@ async function handleSendNative(argv: {
       const decimals = network.nativeToken?.decimals ?? 18;
       const value = parseUnits(amount, decimals);
 
-      const useDirectNative =
-        (argv.direct as boolean) ||
-        ['1', 'true', 'yes'].includes(
-          String(process.env.SEQ_ECO_NATIVE_DIRECT || '').toLowerCase()
-        );
+      const useDirectNative = (argv.direct as boolean) || getEnv().SEQ_ECO_NATIVE_DIRECT;
 
       const VALUE_FORWARDER = '0xABAAd93EeE2a569cF0632f39B10A9f5D734777ca';
       const selector = '0x98f850f1';
@@ -1131,12 +1130,12 @@ export const depositCommand: CommandModule = {
 
       const { TrailsApi } = await import('@0xtrails/api');
       const trailsApiKey =
-        process.env.TRAILS_API_KEY ||
-        process.env.SEQUENCE_PROJECT_ACCESS_KEY ||
+        getEnv().TRAILS_API_KEY ||
+        resolveProjectAccessKey() ||
         (await loadBuilderConfig())?.accessKey ||
         '';
       const trails = new TrailsApi(trailsApiKey, {
-        hostname: process.env.TRAILS_API_HOSTNAME
+        hostname: getEnv().TRAILS_API_HOSTNAME
       });
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1653,12 +1652,12 @@ export const withdrawCommand: CommandModule = {
 
         const { TrailsApi } = await import('@0xtrails/api');
         const trailsApiKey =
-          process.env.TRAILS_API_KEY ||
-          process.env.SEQUENCE_PROJECT_ACCESS_KEY ||
+          getEnv().TRAILS_API_KEY ||
+          resolveProjectAccessKey() ||
           (await loadBuilderConfig())?.accessKey ||
           '';
         const trails = new TrailsApi(trailsApiKey, {
-          hostname: process.env.TRAILS_API_HOSTNAME
+          hostname: getEnv().TRAILS_API_HOSTNAME
         });
 
         const earnRes = await trails.getEarnPools({ chainIds: [chainId] });
@@ -2161,7 +2160,7 @@ export const x402PayCommand: CommandModule = {
             // Wait for the transaction to be confirmed before presenting to the server
             process.stderr.write('Waiting for confirmation...\n');
             const rpcUrl =
-              process.env.SEQUENCE_NODES_URL?.replace('{network}', payChain) ||
+              getEnv().SEQUENCE_NODES_URL?.replace('{network}', payChain) ||
               getReadRpcUrl(resolveNetwork(String(payChainId)));
             for (let attempt = 0; attempt < 30; attempt++) {
               await new Promise((r) => setTimeout(r, 3000));

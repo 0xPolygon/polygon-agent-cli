@@ -4,10 +4,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { ensureStorageDir, STORAGE_ROOT } from './storage.ts';
+import { ensureStorageDir, storageRoot } from './storage.ts';
 
 function configPath(): string {
-  return path.join(STORAGE_ROOT, 'config.json');
+  return path.join(storageRoot(), 'config.json');
 }
 
 export function readConfig(): Record<string, unknown> {

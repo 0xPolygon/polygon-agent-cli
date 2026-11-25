@@ -40,9 +40,10 @@ vi.mock('../storage.ts', async (importOriginal) => {
   const os = await import('node:os');
   const path = await import('node:path');
 
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-trade-'));
   return {
     ...(await importOriginal<typeof Storage>()),
-    STORAGE_ROOT: fs.mkdtempSync(path.join(os.tmpdir(), 'pa-trade-')),
+    storageRoot: () => root,
     loadOmsWalletPointer: vi.fn(async () => fake.pointer)
   };
 });

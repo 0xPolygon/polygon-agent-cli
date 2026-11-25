@@ -9,8 +9,8 @@ import {
   getMarkets,
   getPositions,
   parseMarket,
-  DATA_URL,
-  GAMMA_URL
+  dataUrl,
+  gammaUrl
 } from './gamma.ts';
 
 const V1_MARKET = {
@@ -109,7 +109,7 @@ describe('getMarket', () => {
     const m = await getMarket(V1_MARKET.conditionId);
     expect(m.conditionId).toBe(V1_MARKET.conditionId);
     const url = calledUrl(fetch);
-    expect(url.origin + url.pathname).toBe(`${GAMMA_URL}/markets`);
+    expect(url.origin + url.pathname).toBe(`${gammaUrl()}/markets`);
     expect(url.searchParams.get('condition_ids')).toBe(V1_MARKET.conditionId);
     expect(fetch).toHaveBeenCalledTimes(1);
   });
@@ -179,7 +179,7 @@ describe('getPositions', () => {
     });
     const page = await getPositions('0xabc');
     const url = calledUrl(fetch);
-    expect(url.origin + url.pathname).toBe(`${DATA_URL}/v2/positions`);
+    expect(url.origin + url.pathname).toBe(`${dataUrl()}/v2/positions`);
     expect(url.searchParams.get('user')).toBe('0xabc');
     expect(url.searchParams.get('limit')).toBe('20');
     expect(url.searchParams.has('status')).toBe(false);

@@ -16,7 +16,7 @@ import type { EmailAttempt } from './email-attempt.ts';
 import { withLock } from '../lock.ts';
 import { PlanSchema, planToJson } from '../session/plan.ts';
 import { readJsonFile, writeJsonFile } from '../session/state.ts';
-import { decrypt, encrypt, STORAGE_ROOT, walletName } from '../storage.ts';
+import { decrypt, encrypt, storageRoot, walletName } from '../storage.ts';
 import { EmailAttemptSchema } from './email-attempt.ts';
 
 export type OwnerAction =
@@ -131,11 +131,11 @@ function actionToJson(action: OwnerAction): unknown {
 }
 
 function pendingPath(wallet: string): string {
-  return path.join(STORAGE_ROOT, 'pending', `${walletName(wallet)}.json`);
+  return path.join(storageRoot(), 'pending', `${walletName(wallet)}.json`);
 }
 
 function pendingFile(wallet: string): string {
-  fs.mkdirSync(path.join(STORAGE_ROOT, 'pending'), { recursive: true, mode: 0o700 });
+  fs.mkdirSync(path.join(storageRoot(), 'pending'), { recursive: true, mode: 0o700 });
   return pendingPath(wallet);
 }
 
@@ -144,7 +144,7 @@ const PENDING_LOCK_WAIT_MS = 10_000;
 
 function withPendingLock<T>(params: { wallet: string; fn: () => T }): Promise<T> {
   return withLock({
-    dir: path.join(STORAGE_ROOT, 'pending', `${walletName(params.wallet)}.lock`),
+    dir: path.join(storageRoot(), 'pending', `${walletName(params.wallet)}.lock`),
     fn: params.fn,
     waitMs: PENDING_LOCK_WAIT_MS
   });

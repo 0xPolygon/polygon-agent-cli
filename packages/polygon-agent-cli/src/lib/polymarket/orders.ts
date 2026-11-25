@@ -1,6 +1,7 @@
 // Buying and selling outcome shares on the trading account, with a worst-price
 // guard checked before anything is posted.
 
+import { getEnv } from '../env.ts';
 import { CliError } from '../errors.ts';
 import { getTradingClient, pusdBalance } from './account.ts';
 import { formatUnits6, parseShares, parseUsd } from './amounts.ts';
@@ -33,7 +34,7 @@ export type SellRequest = {
 };
 
 const builder = () =>
-  process.env.POLYMARKET_BUILDER_CODE ? { builderCode: process.env.POLYMARKET_BUILDER_CODE } : {};
+  getEnv().POLYMARKET_BUILDER_CODE ? { builderCode: getEnv().POLYMARKET_BUILDER_CODE } : {};
 
 function expiration(minutes?: number): { expiration?: number } {
   if (minutes === undefined) return {};

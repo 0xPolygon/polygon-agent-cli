@@ -144,10 +144,9 @@ async function handleLogin(argv: LoginArgs): Promise<void> {
     );
   }
   // The session browser path uses the relay too: the request registers its
-  // page there, and the waiter (which inherits the environment) polls it.
-  if (argv.relayUrl) process.env.POLYGON_AGENT_OIDC_RELAY = argv.relayUrl.replace(/\/+$/, '');
+  // page there, and the waiter polls it, so it gets the URL explicitly.
   if (argv.wait) return handleLoginWait(argv);
-  return handleSessionLogin(argv);
+  return handleSessionLogin({ ...argv, relayUrl: argv.relayUrl?.replace(/\/+$/, '') });
 }
 
 // --owner: sign in from the browser and keep the owner session on disk.

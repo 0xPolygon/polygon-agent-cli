@@ -3,10 +3,11 @@ import os from 'node:os';
 import path from 'node:path';
 
 import type { ChainId, NetworkMetadata } from '@0xsequence/network';
-// eslint-disable-next-line perfectionist/sort-imports -- type + value import from same module
+
 import { networks } from '@0xsequence/network';
 
-import { STORAGE_ROOT } from './storage.ts';
+import { getEnv } from './env.ts';
+import { resolveProjectAccessKey, storageRoot } from './storage.ts';
 
 // The folders holding wallet keys: this install's state, and a global
 // install's. Their files are never read into an argument (an injected
@@ -23,7 +24,7 @@ function inStateFolder(file: string): boolean {
     }
   };
   const stateIds = new Set(
-    [STORAGE_ROOT, path.join(os.homedir(), '.polygon-agent')].map(id).filter((v) => v !== null)
+    [storageRoot(), path.join(os.homedir(), '.polygon-agent')].map(id).filter((v) => v !== null)
   );
   let target: string;
   try {
@@ -110,15 +111,12 @@ export function parseUnits(value: string, decimals = 18): bigint {
 
 /** Get indexer URL for chain (learned from upstream fix) */
 export function getIndexerUrl(): string {
-  return (
-    process.env.SEQUENCE_INDEXER_URL ||
-    'https://indexer.sequence.app/rpc/IndexerGateway/GetTokenBalancesSummary'
-  );
+  return getEnv().SEQUENCE_INDEXER_URL;
 }
 
 /** Get RPC URL for a network via OMS nodes */
 export function getRpcUrl(network: NetworkMetadata): string {
-  const accessKey = process.env.SEQUENCE_PROJECT_ACCESS_KEY || '';
+  const accessKey = resolveProjectAccessKey() || '';
   return `https://nodes.sequence.app/${network.name}/${accessKey}`;
 }
 
@@ -140,7 +138,7 @@ const PUBLIC_RPC_BY_CHAIN_ID: Record<number, string> = {
  * Throws for a chain with no fallback rather than reading a different chain.
  */
 export function getReadRpcUrl(network: NetworkMetadata): string {
-  const accessKey = process.env.SEQUENCE_PROJECT_ACCESS_KEY;
+  const accessKey = resolveProjectAccessKey();
   if (accessKey) return `https://nodes.sequence.app/${network.name}/${accessKey}`;
   const fallback = PUBLIC_RPC_BY_CHAIN_ID[network.chainId];
   if (!fallback) {

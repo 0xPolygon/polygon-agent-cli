@@ -12,7 +12,7 @@ import {
   saveBuilderConfig,
   loadBuilderConfig,
   saveOmsConfig,
-  STORAGE_ROOT
+  storageRoot
 } from '../lib/storage.ts';
 import { generateAgentName } from '../lib/utils.ts';
 import { isTTY, inkRender } from '../ui/render.js';
@@ -63,7 +63,7 @@ export const setupCommand: CommandModule<object, SetupArgs> = {
           JSON.stringify(
             {
               ok: true,
-              message: `OMS credentials saved to ${path.join(STORAGE_ROOT, 'builder.json')}`
+              message: `OMS credentials saved to ${path.join(storageRoot(), 'builder.json')}`
             },
             null,
             2
@@ -119,7 +119,7 @@ export const setupCommand: CommandModule<object, SetupArgs> = {
               accessKey,
               projectId: project.id,
               projectName: project.name,
-              message: `Builder configured successfully. Credentials saved to ${path.join(STORAGE_ROOT, 'builder.json')} (encrypted)`
+              message: `Builder configured successfully. Credentials saved to ${path.join(storageRoot(), 'builder.json')} (encrypted)`
             },
             null,
             2

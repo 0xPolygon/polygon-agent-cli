@@ -3,6 +3,7 @@
 // says whether it may only close positions. Blocked regions can't trade at all;
 // close-only regions can sell, cancel, redeem and withdraw but not buy.
 
+import { getEnv } from '../env.ts';
 import { CliError } from '../errors.ts';
 import { PolymarketError } from './gamma.ts';
 
@@ -13,14 +14,12 @@ export type Region = {
   region: string | null;
 };
 
-const GEOBLOCK_URL = process.env.POLYMARKET_GEOBLOCK_URL || 'https://polymarket.com/api/geoblock';
-
 export async function checkRegion(client?: {
   fetchClosedOnlyMode(): Promise<boolean>;
 }): Promise<Region> {
   let body: { blocked?: boolean; country?: string; region?: string };
   try {
-    const res = await fetch(GEOBLOCK_URL);
+    const res = await fetch(getEnv().POLYMARKET_GEOBLOCK_URL);
     if (!res.ok) throw new Error(`geoblock ${res.status}`);
     body = (await res.json()) as typeof body;
   } catch (err) {

@@ -23,7 +23,7 @@ describe('POLYGON_AGENT_HOME', () => {
 
     const storage = await import('./storage.ts');
     const mode = await import('./mode.ts');
-    expect(storage.STORAGE_ROOT).toBe(state);
+    expect(storage.storageRoot()).toBe(state);
 
     mode.saveTxMode('auto');
     storage.getEncryptionKey();
@@ -39,7 +39,7 @@ describe('POLYGON_AGENT_HOME', () => {
     vi.stubEnv('POLYGON_AGENT_HOME', 'some/state');
     vi.resetModules();
     const storage = await import('./storage.ts');
-    expect(storage.STORAGE_ROOT).toBe(path.resolve('some/state'));
+    expect(storage.storageRoot()).toBe(path.resolve('some/state'));
   });
 
   it('defaults to ~/.polygon-agent when unset or empty', async () => {
@@ -48,6 +48,6 @@ describe('POLYGON_AGENT_HOME', () => {
     vi.stubEnv('POLYGON_AGENT_HOME', '');
     vi.resetModules();
     const storage = await import('./storage.ts');
-    expect(storage.STORAGE_ROOT).toBe(path.join(home, '.polygon-agent'));
+    expect(storage.storageRoot()).toBe(path.join(home, '.polygon-agent'));
   });
 });

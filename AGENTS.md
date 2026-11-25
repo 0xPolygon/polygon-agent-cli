@@ -74,7 +74,7 @@ Vitest, per package. Tiers, layout and conventions are in `TESTING.md`.
   method used. Don't assume one owner means one wallet.
 - The CLI needs no setup step: it ships a default publishable key and provisions a project and
   access key on first login. Overrides exist for developers on their own project; the flags and
-  environment variables are defined in `src/commands/` and `src/lib/config.ts`.
+  flags are defined in `src/commands/` and `src/lib/config.ts`. The CLI reads and validates its environment variables in `src/lib/env.ts` (`getEnv()`); read env through it, not `process.env`.
 
 ## The agentconnect Worker
 

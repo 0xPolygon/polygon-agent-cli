@@ -3,6 +3,7 @@
 
 import { EthereumPrivateKeyCredentialSigner, OMSWallet } from '@polygonlabs/oms-wallet';
 
+import { getEnv } from './env.ts';
 import { FileStorageManager, loadOrCreateCredentialKey } from './oms-storage.ts';
 import { loadOmsConfig } from './storage.ts';
 
@@ -41,12 +42,7 @@ export function getOmsClient(walletName: string): OMSWallet {
   return oms;
 }
 
-// Baked-in defaults for the browser-login flow so `wallet login` needs no env
-// vars. Production domains, provisioned by the oidc-relay and agentconnect-ui
-// deploys on merge to main. Override per environment (or to test against
-// staging) with POLYGON_AGENT_OIDC_RELAY / POLYGON_AGENT_LOGIN_UI.
-const DEFAULT_OIDC_RELAY = 'https://oidc-relay.polygon.technology';
-const DEFAULT_LOGIN_UI = 'https://agentconnect.polygon.technology';
+// The browser-login defaults (production relay and login page) live in env.ts.
 
 /**
  * Base URL of our login pairing relay (packages/oidc-relay). Read from
@@ -54,14 +50,12 @@ const DEFAULT_LOGIN_UI = 'https://agentconnect.polygon.technology';
  * per-run. Trailing slash trimmed so callers can append `/api/...` cleanly.
  */
 export function oidcRelayBaseUrl(): string {
-  const v = process.env.POLYGON_AGENT_OIDC_RELAY;
-  return v ? v.replace(/\/+$/, '') : DEFAULT_OIDC_RELAY;
+  return getEnv().POLYGON_AGENT_OIDC_RELAY.replace(/\/+$/, '');
 }
 
 /** Base URL of the agentconnect login page. POLYGON_AGENT_LOGIN_UI overrides. */
 export function loginUiBaseUrl(): string {
-  const v = process.env.POLYGON_AGENT_LOGIN_UI;
-  return v ? v.replace(/\/+$/, '') : DEFAULT_LOGIN_UI;
+  return getEnv().POLYGON_AGENT_LOGIN_UI.replace(/\/+$/, '');
 }
 
 /**
@@ -70,6 +64,6 @@ export function loginUiBaseUrl(): string {
  * sign-in and the dashboard can run on different deployments.
  */
 export function credentialsBaseUrl(): string {
-  const v = process.env.POLYGON_AGENT_CREDENTIALS_URL;
+  const v = getEnv().POLYGON_AGENT_CREDENTIALS_URL;
   return v ? v.replace(/\/+$/, '') : loginUiBaseUrl();
 }

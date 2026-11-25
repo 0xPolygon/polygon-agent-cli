@@ -7,6 +7,8 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type * as WalletSession from './wallet-session.ts';
+
 process.env.POLYGON_AGENT_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-login-'));
 
 const MAIN = '0xd384ea24ca0B3a5e4BB35935C611E3dCB68Fd08e';
@@ -36,6 +38,16 @@ vi.mock('open', () => ({
     funds.opened.push(url);
   }
 }));
+// Lets one test see what login hands to the session path; every other test runs the real one.
+const session = vi.hoisted(() => ({ spy: undefined as undefined | ((argv: unknown) => unknown) }));
+vi.mock('./wallet-session.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof WalletSession>();
+  return {
+    ...actual,
+    handleSessionLogin: (argv: Parameters<typeof actual.handleSessionLogin>[0]) =>
+      session.spy ? session.spy(argv) : actual.handleSessionLogin(argv)
+  };
+});
 vi.mock('../lib/polymarket/owner-step.ts', () => ({ polymarketOwnerStep: step.fn }));
 vi.mock('../lib/oms-client.ts', () => ({
   getOmsClient: () => ({
@@ -148,19 +160,18 @@ describe('wallet login options', () => {
     expect(fake.calls).toEqual([]);
   });
 
-  it('--relay-url also sets the relay for the session-mode browser path (and its waiter)', async () => {
-    const saved = process.env.POLYGON_AGENT_OIDC_RELAY;
+  it('--relay-url is handed to the session-mode browser path (and its waiter), not written to the environment', async () => {
+    const before = process.env.POLYGON_AGENT_OIDC_RELAY;
+    const spy = vi.fn();
+    session.spy = spy;
     try {
-      await saveOmsWalletPointer(name, {
-        walletAddress: MAIN,
-        loginMethod: 'google',
-        createdAt: ''
-      });
-      await login('--relay-url', 'https://relay.example/').catch(() => undefined);
-      expect(process.env.POLYGON_AGENT_OIDC_RELAY).toBe('https://relay.example');
+      await login('--relay-url', 'https://relay.example/');
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({ relayUrl: 'https://relay.example' })
+      );
+      expect(process.env.POLYGON_AGENT_OIDC_RELAY).toBe(before);
     } finally {
-      if (saved === undefined) delete process.env.POLYGON_AGENT_OIDC_RELAY;
-      else process.env.POLYGON_AGENT_OIDC_RELAY = saved;
+      session.spy = undefined;
     }
   });
 });
