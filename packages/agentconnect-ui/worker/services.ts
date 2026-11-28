@@ -9,6 +9,7 @@ import type { PaymentLock } from './wallet-lock.ts';
 import { AgentCard, AgentCardError } from './agentcard.ts';
 import { ValidationError } from './shipping.ts';
 import { CredentialStore } from './store.ts';
+import { Vgs } from './vgs.ts';
 
 export function store(env: Env): CredentialStore | null {
   if (!env.CREDENTIALS || !env.CREDENTIALS_KEY) return null;
@@ -21,6 +22,16 @@ export function agentCard(env: Env): AgentCard | null {
     clientId: env.AGENTCARD_CLIENT_ID,
     clientSecret: env.AGENTCARD_CLIENT_SECRET,
     autoApproval: env.AGENTCARD_AUTO_APPROVAL === 'on'
+  });
+}
+
+export function vgs(env: Env): Vgs | null {
+  if (!env.VGS_VAULT_ID || !env.VGS_CLIENT_ID || !env.VGS_CLIENT_SECRET) return null;
+  return new Vgs({
+    vaultId: env.VGS_VAULT_ID,
+    clientId: env.VGS_CLIENT_ID,
+    clientSecret: env.VGS_CLIENT_SECRET,
+    environment: env.VGS_ENVIRONMENT === 'live' ? 'live' : 'sandbox'
   });
 }
 
