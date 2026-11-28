@@ -96,6 +96,13 @@ export interface Env {
   // name of this deployment's AgentCard configuration registered with Kernel.
   KERNEL_API_KEY?: string;
   KERNEL_AGENTCARD_CONFIG?: string;
+  // VGS Agent Web Gateway, the second card provider for browser checkouts
+  // (worker/vgs.ts): the tenant and a service account with reveal-sessions
+  // read and write. "live" uses VGS's live API; otherwise the sandbox.
+  VGS_VAULT_ID?: string;
+  VGS_CLIENT_ID?: string;
+  VGS_CLIENT_SECRET?: string;
+  VGS_ENVIRONMENT?: string;
   // The token OpenAI's plugin portal asks this domain to serve, to prove we own it.
   OPENAI_APPS_CHALLENGE?: string;
   // Caps MCP client registrations per address (wrangler.toml ratelimits).

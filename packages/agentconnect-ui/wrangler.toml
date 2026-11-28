@@ -31,6 +31,8 @@ run_worker_first = [
 #   AGENTCARD_CLIENT_ID / AGENTCARD_CLIENT_SECRET  AgentCard client credentials (cards)
 #   INDEXER_ACCESS_KEY the dashboard's indexer key; balances for the MCP server
 #   TRAILS_API_KEY     the dashboard's Trails key; prices, swaps and bridges
+#   VGS_VAULT_ID / VGS_CLIENT_ID / VGS_CLIENT_SECRET  VGS tenant and service
+#                      account for Agent Web Gateway checkouts (staging only)
 # Saved details live in the CREDENTIALS KV namespace. Without it, or without
 # CREDENTIALS_KEY, the address endpoints answer 503. The MCP server needs the
 # OAUTH_KV namespace; without it /mcp is not served.
